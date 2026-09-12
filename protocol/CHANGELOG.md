@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Feedback on the hosted surface** (AIR-1960, T30, 5-F / D63): `POST
+  /v1/agents/{agentId}/targets/{target}/feedback` on the run URL — the bare
+  HTTP form of `ap.feedback(runRef, signals)` for hosted runs, under the
+  run key; the `runRef` must verify and name the key's agent and target;
+  signals go through `feedback-signals.schema.json` and land as
+  `outcomes[signal] += {n, sum}` on the run's arm window in the minute they
+  are filed (late arrival allowed). `ManagedAgent.feedback()` in both SDKs.
+  Hosted runs now write their own `measured` windows on the serving side,
+  so a hosted arm reads exactly like a client arm.
+
 - **Declared output checks** (AIR-1959, T29, 5-E / D63): checks.md. A slot
   may carry `outputChecks` — `json_schema` (a documented JSON Schema
   subset), `enum` (a string at a dotted path), `length` (an output-token

@@ -163,3 +163,27 @@ def test_sse_parsing_survives_chunk_boundaries():
     for size in (1, 3, 5, 64):
         frames = list(parse_sse(text[i : i + size] for i in range(0, len(text), size)))
         assert frames == [SseFrame("delta", '{"delta":"a\\nb"}'), SseFrame("done", '{"x":1}')], f"chunk {size}"
+
+
+def test_feedback_posts_to_the_run_surface_and_returns_what_landed():
+    """T30: feedback against a hosted run's run_ref, from any process holding the run key; a bad ref is a typed refusal."""
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.url.path.endswith("/slots"):
+            return httpx.Response(200, json=CATALOGUE, headers={"x-agent-generation": "3"})
+        body = json.loads(request.content)
+        if body["runRef"] == "forged":
+            return httpx.Response(400, json={"error": "the runRef does not verify", "code": "invalid_run_ref"})
+        assert body["signals"] == {"accepted": True, "rating": 4, "note": "text"}
+        return httpx.Response(202, json={"accepted": True, "attributedTo": {"tag": "support.triage", "versionId": "rev-5", "arm": "none", "minute": "2026-09-12T10:03:00Z"}, "rejected": {"note": "unknown_signal"}})
+
+    agent = ManagedAgent.start(agent_id="agent-1", target="prod", api_key="apr_run_key", base_url="https://run.example/", transport=httpx.MockTransport(handler))
+    answer = agent.feedback("ref-1", accepted=True, rating=4, note="text")
+    assert answer["accepted"] is True and answer["attributedTo"]["arm"] == "none" and answer["rejected"] == {"note": "unknown_signal"}
+    assert str(calls[1].url) == "https://run.example/v1/agents/agent-1/targets/prod/feedback" and calls[1].method == "POST"
+    assert calls[1].headers["authorization"] == "Bearer apr_run_key"
+    with pytest.raises(ManagedRunError) as raised:
+        agent.feedback("forged", {"accepted": True})
+    assert raised.value.code == "invalid_run_ref" and raised.value.status == 400

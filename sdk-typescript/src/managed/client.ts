@@ -111,6 +111,7 @@ export type ManagedRefusalCode =
   | "rate_limited"
   | "agent_rate_limited"
   | "model_unavailable"
+  | "invalid_run_ref"
   | "internal";
 
 /** The run route said no (or the edge did): the code the route named, its status, and what it told us. */
@@ -237,6 +238,23 @@ export class ManagedAgent {
     if (!experiment) return undefined;
     const value = experiment.subjectKey === "instance" || subject === undefined ? this.instanceId : subject;
     return saltedSubjectHash(experiment.salt, value);
+  }
+
+  /**
+   * T30: quality signals against a run, by the `runRef` it returned — from this process or any other that kept the
+   * ref. Numbers, booleans and the declared enums only; the answer says what landed and what was refused and why.
+   * A ref that does not verify, or one for another agent or environment, is a `ManagedRunError` (`invalid_run_ref`).
+   */
+  async feedback(runRef: string, signals: Record<string, unknown>): Promise<{ accepted: boolean; attributedTo: { tag: string; versionId: string; arm: string; minute: string } | null; rejected: Record<string, string> }> {
+    const url = `${this.options.baseUrl.replace(/\/$/, "")}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/feedback`;
+    const response = await this.fetchImpl(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.options.apiKey}`, "content-type": "application/json", accept: "application/json", "user-agent": this.options.userAgent ?? MANAGED_SDK_USER_AGENT },
+      body: JSON.stringify({ runRef, signals }),
+    });
+    const text = await response.text();
+    if (response.status !== 202) throw refusalFrom(response.status, safeJson(text), response.headers.get("retry-after"));
+    return JSON.parse(text) as { accepted: boolean; attributedTo: { tag: string; versionId: string; arm: string; minute: string } | null; rejected: Record<string, string> };
   }
 
   /** One managed run: streams under the hood, returns the assembled result. */

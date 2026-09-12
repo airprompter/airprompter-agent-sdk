@@ -369,6 +369,69 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /v1/agents/{agentId}/targets/{target}/feedback:
+    post:
+      operationId: postAgentRunFeedback
+      tags: [managed]
+      summary: File feedback against a hosted run's runRef
+      x-airprompter-status: shipped
+      x-airprompter-ticket: AIR-1960
+      x-airprompter-scope: agent.run
+      description: |
+        `ap.feedback(runRef, signals)` as a bare HTTP call, from any process
+        or language that kept the `runRef` a run returned. The ref must
+        verify and name this key's agent and target; the signals go through
+        the catalogue (`feedback-signals.schema.json`) — numbers, booleans and
+        the declared enums only, free text is rejected by name — and what
+        survives joins the run's arm window as `outcomes[signal] += {n, sum}`
+        in the minute it was filed (late arrival allowed; the gate reads arms,
+        not minutes). Same function URL as the run route.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+        - $ref: "#/components/parameters/target"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [runRef, signals]
+              properties:
+                runRef: { type: string, maxLength: 512 }
+                signals:
+                  $ref: "feedback-signals.schema.json"
+      responses:
+        "202":
+          description: What was accepted and what was rejected, and why
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [accepted, attributedTo, rejected]
+                properties:
+                  accepted: { type: boolean }
+                  attributedTo:
+                    type: [object, "null"]
+                    properties:
+                      tag: { type: string }
+                      versionId: { type: string }
+                      arm: { type: string }
+                      minute: { type: string, format: date-time }
+                  rejected:
+                    type: object
+                    additionalProperties:
+                      type: string
+                      enum: [invalid_value, invalid_name, reserved_name, unknown_signal, needs_slot_enum]
+        "400":
+          description: A malformed body, or a runRef that does not verify or names another agent or target (`invalid_run_ref`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
 components:
   securitySchemes:
     agentKey:

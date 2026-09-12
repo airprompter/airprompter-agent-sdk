@@ -142,6 +142,10 @@ without re-encrypting a payload.
 
 ## Managed mode
 
+Feedback works the same way hosted: keep `result.run_ref` beside your own
+record and later call `agent.feedback(run_ref, accepted=True, rating=4)` from
+any process holding the run key.
+
 No store, no models, no keys of your own: `ManagedAgent.start(agent_id=…, target=…, api_key=<run key>, base_url=<run route>)`,
 then `agent.run("support.triage", {"team": "Billing", "ticket": text}, subject="user-42")`
 or `for delta in agent.stream(...)`. The subject is hashed with the

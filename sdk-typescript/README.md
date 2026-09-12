@@ -134,6 +134,13 @@ with; a key past its 500-live-instance cap is refused and reported in
 
 ## Hosted mode (`ManagedAgent`)
 
+Feedback works the same way hosted: keep `result.runRef` beside your own
+record and later call `agent.feedback(runRef, { accepted: true, rating: 4 })`
+from any process holding the run key — the signals join the run's window,
+and the answer names what landed and what was refused. The console's
+Settings › Prompt settings says which signal decides "quality" for a prompt
+and which ones are guardrails that may never rise.
+
 When an environment runs hosted, there is no store, no models and no keys of
 your own: AirPrompter runs the promoted version and meters it. The SDK's
 hosted client is deliberately thin.

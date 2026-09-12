@@ -162,3 +162,23 @@ test("SSE parsing survives arbitrary chunk boundaries and multi-line data", asyn
     assert.deepEqual(frames, [{ event: "delta", data: '{"delta":"a\\nb"}' }, { event: "done", data: '{"x":1}' }], `chunk ${size}`);
   }
 });
+
+// T30: feedback against a hosted run's runRef, from any process holding the run key.
+test("feedback(runRef, signals) posts to the run surface's feedback route and returns what landed; a bad ref is a typed refusal", async () => {
+  const { agent, calls } = await startWith([
+    (call) => {
+      const body = JSON.parse(call.init.body ?? "{}") as { runRef: string; signals: Record<string, unknown> };
+      assert.equal(body.runRef, DONE.runRef);
+      assert.deepEqual(body.signals, { accepted: true, rating: 4, note: "text" });
+      return { status: 202, body: JSON.stringify({ accepted: true, attributedTo: { tag: "support.triage", versionId: "rev-5", arm: "none", minute: "2026-09-12T10:03:00Z" }, rejected: { note: "unknown_signal" } }) };
+    },
+    () => ({ status: 400, body: JSON.stringify({ error: "the runRef does not verify", code: "invalid_run_ref" }) }),
+  ]);
+  const answer = await agent.feedback(DONE.runRef, { accepted: true, rating: 4, note: "text" });
+  assert.deepEqual({ accepted: answer.accepted, arm: answer.attributedTo?.arm, rejected: answer.rejected }, { accepted: true, arm: "none", rejected: { note: "unknown_signal" } });
+  const call = calls[1]!;
+  assert.equal(call.url, "https://run.example/v1/agents/agent-1/targets/prod/feedback");
+  assert.equal(call.init.method, "POST");
+  assert.equal(call.init.headers?.authorization, "Bearer apr_run_key");
+  await assert.rejects(agent.feedback("forged", { accepted: true }), (e: unknown) => e instanceof ManagedRunError && e.code === "invalid_run_ref" && e.status === 400);
+});

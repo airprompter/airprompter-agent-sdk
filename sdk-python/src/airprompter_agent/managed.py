@@ -262,6 +262,18 @@ class ManagedAgent:
         value = self._instance_id if experiment.get("subjectKey") == "instance" or subject is None else subject
         return salted_subject_hash(experiment["salt"], value)
 
+    def feedback(self, run_ref: str, signals: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> dict[str, Any]:
+        """T30: quality signals against a run, by the ``runRef`` it returned — from this process or any other that kept
+        the ref. Numbers, booleans and the declared enums only; the answer says what landed and what was refused and why.
+        A ref that does not verify, or one for another agent or environment, raises ``ManagedRunError`` (``invalid_run_ref``)."""
+        payload = {**(signals or {}), **kwargs}
+        url = f"{self._base_url}/v1/agents/{quote(self._agent_id, safe='')}/targets/{self._target}/feedback"
+        headers = {"authorization": f"Bearer {self._api_key}", "content-type": "application/json", "accept": "application/json", "user-agent": self._user_agent}
+        response = self._client.post(url, headers=headers, content=json.dumps({"runRef": run_ref, "signals": payload}))
+        if response.status_code != 202:
+            raise _refusal_from(response.status_code, _safe_json(response.text), response.headers.get("retry-after"))
+        return json.loads(response.text)
+
     def run(self, tag: str, variables: Mapping[str, str], **options: Any) -> ManagedRunResult:
         """One managed run: streams under the hood, returns the assembled result."""
         stream = self.stream(tag, variables, **options)

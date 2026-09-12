@@ -54,7 +54,7 @@
     },
     "outcomes": {
       "type": "object",
-      "description": "Declared feedback signals only (see feedback-signals.schema.json); each as {n, sum}. Booleans count 1/0.",
+      "description": "Declared feedback signals only (see feedback-signals.schema.json), plus `goldenPass` written by the runtime's golden-set run (golden-sets.md); each as {n, sum}. Booleans count 1/0.",
       "additionalProperties": false,
       "patternProperties": {
         "^[a-z][a-zA-Z0-9]{0,31}$": {

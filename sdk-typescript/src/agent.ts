@@ -29,6 +29,8 @@ import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type
 import { wrapClient, type WrapHooks } from "./wrap/client.js";
 import { aiSdkMiddleware, type AiSdkMiddleware, type AiSdkMiddlewareOptions } from "./wrap/aiSdk.js";
 import { evaluateChecks, outputTextOf, type CheckOutcome } from "./checks/index.js";
+import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "./golden/index.js";
+import { JUDGE_RUBRICS, judgePrompt, judgeSignalsOf, parseJudgeReply, rubricFromPrompt, type JudgeResult, type JudgeRubric } from "./judge/index.js";
 import { postSegment, type GrantDecision, type UploadGrant } from "./telemetry/uploader.js";
 import { parseWindow, windowState, type UpdateWindow } from "./apply/window.js";
 import { SyncClient, type FetchLike } from "./sync/client.js";
@@ -98,6 +100,13 @@ export interface StartOptions {
   logger?: (event: Record<string, unknown>) => void;
   /** T26: who reports on the heartbeat — the SDK by default; the daemon names itself `airprompterd`. */
   sdk?: { name: "agent-sdk-typescript" | "airprompterd" | "airprompter-cli"; version: string };
+  /**
+   * T34: golden sets before activation. With `invoke` set, every slot of a staged release that carries a golden set is
+   * run against the pinned model through this call before the apply decision; a set below its pass-rate floor leaves
+   * the release staged (`golden_set_failed` in the log, `goldenPass` counts on the arm's window) until an operator
+   * unlocks it deliberately. Without it, golden sets ride the release unrun (`ap.golden()` runs them on demand).
+   */
+  golden?: { invoke: GoldenInvoke; concurrency?: number };
 }
 
 export type HeartbeatSdkName = NonNullable<StartOptions["sdk"]>["name"];
@@ -148,6 +157,8 @@ export interface AgentStatus {
   daemon: { attached: boolean; socketPath: string | null } | null;
   /** The last sync pass this process ran (resident / on_invoke), for hosts and daemons that report it. */
   lastSyncAt: string | null;
+  /** T34: the last golden-set run before activation — counts only; null until one ran. */
+  golden: { generation: number; met: boolean; reports: Array<{ tag: string; arm: string; cases: number; passed: number; minPassBps: number }> } | null;
   lastSyncOutcome: string | null;
   consecutiveSyncFailures: number;
   nextSyncAt: string | null;
@@ -200,6 +211,7 @@ export class AirPrompterAgent {
   /** T15: the required models the last `model_unavailable` refusal named; empty once a release activates. */
   private unavailableModels: string[] = [];
   private stagedManifest: Manifest | null = null;
+  private lastGolden: AgentStatus["golden"] = null;
   private lastContactMs: number | null = null;
   private bundleNotAfter: string | null = null;
   /**
@@ -466,6 +478,15 @@ export class AirPrompterAgent {
   private async applyPolicy(manifest: Manifest): Promise<ApplyPolicyDecision> {
     const local = this.options.apply?.policy;
     const policy = local === "unlock_required" || manifest.payload.applyPolicy === "unlock_required" ? "unlock_required" : "auto";
+    // T34: verified before activate — a staged release's golden sets run first; below the floor it stays staged.
+    if (this.options.golden && manifestHasGolden(manifest)) {
+      const reports = await this.runGoldenFor(manifest, this.store!.state.staged ? this.store!.load(this.store!.state.staged, { now: this.nowIso(), root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null }).payloads : new Map(), this.options.golden.invoke, this.options.golden.concurrency);
+      if (!goldenReportsMeet(reports)) {
+        this.stagedManifest = manifest;
+        for (const report of reports.filter((r) => !r.meetsThreshold)) this.log({ event: "golden_set_failed", generation: manifest.payload.generation, tag: report.tag, arm: report.arm, passed: report.passed, cases: report.cases, minPassBps: report.minPassBps });
+        return "staged";
+      }
+    }
     if (policy === "auto") return "activated";
     this.stagedManifest = manifest;
     const window = this.windowInForce(manifest);
@@ -1059,6 +1080,76 @@ export class AirPrompterAgent {
     };
   }
 
+  /**
+   * T34: run the golden sets the active (or, with `staged: true`, the staged) release carries — every slot with one,
+   * on the control arm and on each arm that overrides the slot — through the customer's model call, and record
+   * `goldenPass` per case on the arm's window. Returns the reports (counts and the names of failed expectations; never
+   * an output). `tag` narrows to one slot.
+   */
+  async golden(options: { invoke?: GoldenInvoke; tag?: string; staged?: boolean; concurrency?: number } = {}): Promise<GoldenReport[]> {
+    const invoke = options.invoke ?? this.options.golden?.invoke;
+    if (!invoke) throw new Error("golden(): no model call — pass invoke, or start with golden.invoke");
+    if (options.staged) {
+      const store = this.store;
+      if (!store?.state.staged || !this.stagedManifest) return [];
+      const loaded = store.load(store.state.staged, { now: this.nowIso(), root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null });
+      return this.runGoldenFor(loaded.manifest, loaded.payloads, invoke, options.concurrency ?? this.options.golden?.concurrency, options.tag);
+    }
+    if (!this.active) return [];
+    return this.runGoldenFor(this.active.manifest, this.active.payloads, invoke, options.concurrency ?? this.options.golden?.concurrency, options.tag);
+  }
+
+  private async runGoldenFor(manifest: Manifest, payloads: ReadonlyMap<string, Uint8Array>, invoke: GoldenInvoke, concurrency: number | undefined, onlyTag?: string): Promise<GoldenReport[]> {
+    const payload = manifest.payload;
+    const targets: Array<{ slot: ManifestSlot; arm: string }> = payload.slots.filter((slot) => slot.goldenSet && (!onlyTag || slot.tag === onlyTag)).map((slot) => ({ slot, arm: "none" }));
+    for (const arm of payload.experiment?.arms ?? []) {
+      for (const override of arm.overrides) if (override.goldenSet && (!onlyTag || override.tag === onlyTag)) targets.push({ slot: override, arm: arm.arm });
+    }
+    const reports: GoldenReport[] = [];
+    for (const { slot, arm } of targets) {
+      const setBytes = payloads.get(slot.goldenSet!.contentHash);
+      const text = payloads.get(slot.contentHash);
+      if (!setBytes || !text) {
+        this.log({ event: "golden_set_unavailable", tag: slot.tag, arm, generation: payload.generation });
+        continue;
+      }
+      const set = parseGoldenSet(setBytes, slot.goldenSet!);
+      const report = await runGoldenSet({ slot, arm, text: Buffer.from(text).toString("utf8"), set, invoke, ...(concurrency !== undefined ? { concurrency } : {}), ...(this.options.delimiters ? { delimiters: this.options.delimiters } : {}) });
+      // One `goldenPass` per case on the arm's window: the rollout reads pass counts per arm; nothing else leaves the host.
+      for (const result of report.results) this.spool.outcomes({ tag: slot.tag, versionId: slot.versionId, arm, model: slot.model }, { goldenPass: result.ok }, this.nowMs());
+      this.log({ event: "golden_set_run", generation: payload.generation, tag: slot.tag, arm, setId: set.setId, cases: report.cases, passed: report.passed, minPassBps: report.minPassBps, met: report.meetsThreshold });
+      reports.push(report);
+    }
+    this.lastGolden = { generation: payload.generation, met: goldenReportsMeet(reports), reports: reports.map((r) => ({ tag: r.tag, arm: r.arm, cases: r.cases, passed: r.passed, minPassBps: r.minPassBps })) };
+    return reports;
+  }
+
+  /**
+   * T34: a rubric on the customer's own model, reporting only the score. `rubric` is a criteria list, one of the
+   * templates (`"protection"`, `"helpfulness"`), or `"prompt"` — the `## Success criteria` section of the prompt the
+   * run rendered, read the way the hosted judge reads it. `invoke` receives the judge prompt and returns the reply. The
+   * score (share of resolved task criteria that passed) lands as `judgeScore` on the run's arm window, a failed
+   * protection criterion as `flagged`; the output, the rubric text and the reply never reach the spool.
+   */
+  async judge(runRef: string, output: string, rubric: JudgeRubric | "protection" | "helpfulness" | "prompt", invoke: (prompt: string) => Promise<string>): Promise<JudgeResult> {
+    const resolved: JudgeRubric = typeof rubric !== "string" ? rubric : rubric === "prompt" ? this.promptRubricFor(runRef) : JUDGE_RUBRICS[rubric];
+    const reply = await invoke(judgePrompt(resolved, output));
+    const result = parseJudgeReply(reply, resolved);
+    const filed = this.feedback(runRef, judgeSignalsOf(result));
+    this.log({ event: "judged", rubric: resolved.name, criteria: resolved.criteria.length, score: result.score, flagged: result.flagged, filed });
+    return result;
+  }
+
+  private promptRubricFor(runRef: string): JudgeRubric {
+    const facts = parseRunRef(runRef, this.runRefKey);
+    const payload = this.active?.manifest.payload;
+    const override = facts ? payload?.experiment?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag) : undefined;
+    const slot = override ?? (facts ? payload?.slots.find((entry) => entry.tag === facts.tag) : undefined);
+    const text = slot ? this.active?.payloads.get(slot.contentHash) : undefined;
+    const criteria = text ? rubricFromPrompt(Buffer.from(text).toString("utf8")) : [];
+    return { name: "prompt", criteria, protection: [...JUDGE_RUBRICS.protection.criteria] };
+  }
+
   /** Quality signals against a run: numbers, booleans and declared enums only; anything else is refused. */
   feedback(runRef: string, signals: Record<string, unknown>): boolean {
     const facts = parseRunRef(runRef, this.runRefKey);
@@ -1105,6 +1196,7 @@ export class AirPrompterAgent {
       source: this.source,
       daemon: this.daemonSocket ? { attached: this.daemon !== null, socketPath: this.daemonSocket } : null,
       lastSyncAt: this.lastSyncMs === null ? null : new Date(this.lastSyncMs).toISOString(),
+      golden: this.lastGolden,
       lastSyncOutcome: this.lastSyncOutcome,
       consecutiveSyncFailures: this.consecutiveSyncFailures,
       nextSyncAt: this.nextSyncMs === null || !this.timer ? null : new Date(this.nextSyncMs).toISOString(),
@@ -1175,4 +1267,10 @@ function defaultStateDir(): string {
   if (process.platform === "darwin") return join(home, "Library", "Application Support");
   if (process.platform === "win32") return process.env.LOCALAPPDATA ?? join(home, "AppData", "Local");
   return existsSync(join(home, ".local", "state")) ? join(home, ".local", "state") : join(home, ".local", "state");
+}
+
+/** T34: whether any slot (or arm override) of a manifest carries a golden set. */
+function manifestHasGolden(manifest: Manifest): boolean {
+  const payload = manifest.payload;
+  return payload.slots.some((slot) => !!slot.goldenSet) || (payload.experiment?.arms ?? []).some((arm) => arm.overrides.some((override) => !!override.goldenSet));
 }

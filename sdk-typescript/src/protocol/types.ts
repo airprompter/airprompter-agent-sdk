@@ -42,8 +42,20 @@ export interface ManifestSlot {
   modelRequired?: boolean;
   /** T29: the slot's enabled output checks (checks.md), sorted by name; in the digest input only when present. */
   outputChecks?: OutputCheck[];
+  /** T34: the slot's golden set (golden-sets.md) — a reference to a payload the runtime opens and runs before activation; in the digest input only when present. */
+  goldenSet?: GoldenSetRef;
   variables: SlotVariable[];
   steps?: SlotStep[];
+}
+
+/** T34: what the pin carries — the cases themselves are the payload under `contentHash`. */
+export interface GoldenSetRef {
+  setId: string;
+  cases: number;
+  contentHash: Sha256;
+  byteLength: number;
+  /** Pass-rate floor in basis points; below it a staged release is not activated. */
+  minPassBps: number;
 }
 
 export interface ExperimentArm {

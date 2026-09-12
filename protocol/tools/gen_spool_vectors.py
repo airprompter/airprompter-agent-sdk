@@ -131,7 +131,9 @@ def merge_outcomes(row: dict, outcomes: dict):
 BOOLEAN_SIGNALS = ["flagged", "accepted", "edited", "regenerated", "copied", "followUp", "escalated", "abandoned", "corrected", "resolved", "reopened", "converted", "refunded", "slaMet"]
 UNIT_SIGNALS = ["editDistanceRatio", "judgeScore"]
 COUNT_SIGNALS = ["regenerations", "timeToAcceptMs"]
-CATALOGUE = set(["thumbs", "rating", "correctedValue", "custom"] + BOOLEAN_SIGNALS + UNIT_SIGNALS + COUNT_SIGNALS)
+# T34: written by the runtime on a window (a golden-set run), never accepted from ap.feedback(); reserved so custom cannot shadow it.
+RUNTIME_SIGNALS = ["goldenPass"]
+CATALOGUE = set(["thumbs", "rating", "correctedValue", "custom"] + BOOLEAN_SIGNALS + UNIT_SIGNALS + COUNT_SIGNALS + RUNTIME_SIGNALS)
 
 def is_number(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and v not in (float("inf"), float("-inf"))
@@ -167,6 +169,8 @@ def normalize_feedback(signals: dict):
         elif name == "correctedValue":
             # Needs the slot's declared output enum to aggregate per value; a writer without it does not record it.
             rejected[name] = "needs_slot_enum" if isinstance(value, str) and len(value) <= 64 else "invalid_value"
+        elif name in RUNTIME_SIGNALS:
+            rejected[name] = "reserved_name"
         elif name == "custom":
             if not isinstance(value, dict) or len(value) > 8:
                 rejected[name] = "invalid_value"
@@ -338,6 +342,8 @@ def feedback_vectors():
         case("prompt-like keys are refused", {"prompt": "…", "output": "…", "userId": "u_1"}),
         case("mixed valid and invalid", {"thumbs": "up", "comment": "great", "rating": 9}, "accepted when at least one signal is valid; the rest are named in rejected"),
         case("corrected value needs the slot enum", {"corrected": True, "correctedValue": "refund"}),
+        case("a runtime-only signal is refused from feedback", {"goldenPass": True}, "goldenPass is written by the runtime's golden-set run (T34), never by ap.feedback(); custom cannot shadow it either"),
+        case("custom cannot shadow a runtime-only signal", {"custom": {"goldenPass": True, "handoff": True}}),
         case("custom signals", {"custom": {"stepsTaken": 4, "usedTool": True}}),
         case("custom bad name", {"custom": {"Steps": 1, "steps_taken": 1}}),
         case("custom reserved name", {"custom": {"rating": 1}}),

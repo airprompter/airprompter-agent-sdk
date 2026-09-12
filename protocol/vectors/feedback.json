@@ -295,6 +295,38 @@
       }
     },
     {
+      "name": "a runtime-only signal is refused from feedback",
+      "signals": {
+        "goldenPass": true
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "goldenPass": "reserved_name"
+        }
+      },
+      "note": "goldenPass is written by the runtime's golden-set run (T34), never by ap.feedback(); custom cannot shadow it either"
+    },
+    {
+      "name": "custom cannot shadow a runtime-only signal",
+      "signals": {
+        "custom": {
+          "goldenPass": true,
+          "handoff": true
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "handoff": true
+        },
+        "rejected": {
+          "custom.goldenPass": "reserved_name"
+        }
+      }
+    },
+    {
       "name": "custom signals",
       "signals": {
         "custom": {

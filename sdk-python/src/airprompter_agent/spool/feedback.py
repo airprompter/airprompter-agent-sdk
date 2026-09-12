@@ -14,7 +14,9 @@ from typing import Any, Mapping, Union
 BOOLEAN_SIGNALS = ("flagged", "accepted", "edited", "regenerated", "copied", "followUp", "escalated", "abandoned", "corrected", "resolved", "reopened", "converted", "refunded", "slaMet")
 UNIT_SIGNALS = ("editDistanceRatio", "judgeScore")
 COUNT_SIGNALS = ("regenerations", "timeToAcceptMs")
-CATALOGUE = frozenset({"thumbs", "rating", "correctedValue", "custom", *BOOLEAN_SIGNALS, *UNIT_SIGNALS, *COUNT_SIGNALS})
+#: T34: written by the runtime on a window (a golden-set run), never accepted from ``feedback()``; reserved so ``custom`` cannot shadow it.
+RUNTIME_SIGNALS = ("goldenPass",)
+CATALOGUE = frozenset({"thumbs", "rating", "correctedValue", "custom", *BOOLEAN_SIGNALS, *UNIT_SIGNALS, *COUNT_SIGNALS, *RUNTIME_SIGNALS})
 OUTCOME_NAME = re.compile(r"^[a-z][a-zA-Z0-9]{0,31}$")
 
 FeedbackRejection = str  # "invalid_value" | "invalid_name" | "reserved_name" | "unknown_signal" | "needs_slot_enum"
@@ -68,6 +70,8 @@ def normalize_feedback(signals: Mapping[str, Any]) -> NormalizedFeedback:
         elif name == "correctedValue":
             # Aggregating per enum value needs the slot's declared output check, which this writer does not hold yet.
             rejected[name] = "needs_slot_enum" if isinstance(value, str) and len(value) <= 64 else "invalid_value"
+        elif name in RUNTIME_SIGNALS:
+            rejected[name] = "reserved_name"
         elif name == "custom":
             if not isinstance(value, Mapping) or len(value) > 8:
                 rejected[name] = "invalid_value"

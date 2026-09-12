@@ -148,6 +148,9 @@ def referenced_payloads(payload: Mapping[str, Any]) -> dict[str, int]:
         hashes[slot["contentHash"]] = slot["byteLength"]
         for step in slot.get("steps") or []:
             hashes[step["contentHash"]] = step["byteLength"]
+        golden = slot.get("goldenSet")
+        if golden:
+            hashes[golden["contentHash"]] = golden["byteLength"]
 
     for slot in payload.get("slots", []):
         add(slot)
@@ -249,6 +252,9 @@ def release_digest_input(slots: list[Mapping[str, Any]]) -> list[dict[str, Any]]
             entry["modelRequired"] = True
         if slot.get("outputChecks"):
             entry["outputChecks"] = list(slot["outputChecks"])
+        golden = slot.get("goldenSet")
+        if golden:
+            entry["goldenSet"] = {"setId": golden["setId"], "cases": golden["cases"], "contentHash": golden["contentHash"], "byteLength": golden["byteLength"], "minPassBps": golden["minPassBps"]}
         if slot.get("steps") is not None:
             entry["steps"] = [
                 {"stepId": s["stepId"], "ordinal": s["ordinal"], "promptArtifactId": s["promptArtifactId"], "promptVersionId": s["promptVersionId"], "contentHash": s["contentHash"], "byteLength": s["byteLength"]}

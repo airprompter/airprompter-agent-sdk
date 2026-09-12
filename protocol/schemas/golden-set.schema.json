@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/0.2/golden-set.schema.json",
+  "title": "Golden set payload (v1)",
+  "description": "The payload a manifest slot's `goldenSet.contentHash` names: 1–50 known inputs with the properties a right answer has (golden-sets.md). Canonical JSON (canonical-json.md), so the same cases always hash the same. Example inputs are content: the payload is encrypted at rest like a prompt and never leaves the host.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "setId",
+    "minPassBps",
+    "cases"
+  ],
+  "properties": {
+    "format": {
+      "const": "airprompter-golden-set"
+    },
+    "version": {
+      "const": 1
+    },
+    "setId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "minPassBps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caseId",
+          "variables",
+          "expect"
+        ],
+        "properties": {
+          "caseId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "propertyNames": {
+              "pattern": "^[a-zA-Z0-9_.-]{1,64}$"
+            }
+          },
+          "expect": {
+            "description": "The output-check grammar (checks.md), evaluated on the model's answer to the rendered case; names unique within the case.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "$ref": "manifest.schema.json#/$defs/outputCheck"
+            }
+          }
+        }
+      }
+    }
+  }
+}

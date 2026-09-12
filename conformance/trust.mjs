@@ -103,6 +103,7 @@ function referencedHashes(payload) {
   const add = (slot) => {
     hashes.set(slot.contentHash, slot.byteLength);
     for (const step of slot.steps ?? []) hashes.set(step.contentHash, step.byteLength);
+    if (slot.goldenSet) hashes.set(slot.goldenSet.contentHash, slot.goldenSet.byteLength);
   };
   for (const slot of payload.slots) add(slot);
   for (const arm of payload.experiment?.arms ?? []) for (const override of arm.overrides) add(override);

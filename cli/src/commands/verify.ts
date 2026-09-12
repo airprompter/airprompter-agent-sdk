@@ -13,6 +13,7 @@ import { fileKey } from "../../../sdk-typescript/src/store/keyProvider.js";
 import { join } from "node:path";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { EXPIRY_WARNING_DAYS, openBundleFile, payloadsOf, summarizeManifest, verifyChain, type ChainReport } from "../chain.js";
+import { GOLDEN_OPTIONS, goldenInvokeOf, runGoldenSets } from "../golden.js";
 import { EXIT, Output, refused, usage, type Context } from "../io.js";
 import { loadDistributionPrivateKey } from "../keys.js";
 
@@ -20,8 +21,15 @@ export const VERIFY_OPTIONS: OptionSpec = {
   ...SCOPE_OPTIONS,
   ...ROOT_OPTIONS,
   "distribution-key": { type: "string", help: "Distribution PRIVATE key file (.key.json) for an encrypted bundle" },
+  ...GOLDEN_OPTIONS,
   ...COMMON_OPTIONS,
 };
+
+function goldenConcurrency(parsed: ReturnType<typeof parse>): number {
+  const value = Number(str(parsed, "concurrency") ?? "4");
+  if (!Number.isInteger(value) || value < 1 || value > 64) throw usage("--concurrency must be a whole number from 1 to 64");
+  return value;
+}
 
 function printReport(out: Output, report: ChainReport): void {
   out.field("ok", report.ok);
@@ -66,6 +74,7 @@ export async function verify(argv: string[], ctx: Context): Promise<number> {
     const trusted = root.kind === "pinned" ? root.trusted : root.document;
     const results: Record<string, unknown> = {};
     let allOk = true;
+    const golden = flag(parsed, "golden") ? goldenInvokeOf({ run: str(parsed, "run"), outputs: str(parsed, "outputs") }) : null;
     for (const [label, slot] of [["active", state.active], ["staged", state.staged]] as const) {
       if (!slot || (label === "staged" && slot === state.active)) continue;
       try {
@@ -74,6 +83,11 @@ export async function verify(argv: string[], ctx: Context): Promise<number> {
         results[label] = { slot, ...report, trustedRoot: undefined };
         out.line(`${label} slot ${slot}: ${report.ok ? "verified" : `REFUSED at ${report.step} (${report.reason})`}, generation ${loaded.generation}`);
         if (!report.ok) allOk = false;
+        // T34: the chain first; the cases only on a release that verified (the staged one is what an unlock would activate).
+        else if (golden && (label === "staged" || !state.staged || state.staged === state.active)) {
+          const ran = await runGoldenSets({ manifest: loaded.manifest, payloads: loaded.payloads, invoke: golden, concurrency: goldenConcurrency(parsed), out });
+          if (!ran.met) allOk = false;
+        }
       } catch (error) {
         allOk = false;
         const reason = error instanceof StoreError ? `${error.code}${error.detail ? `/${error.detail}` : ""}` : (error as Error).message;
@@ -113,7 +127,14 @@ export async function verify(argv: string[], ctx: Context): Promise<number> {
   out.set("daysLeft", opened.daysLeft);
   out.set("expiringSoon", !opened.expired && opened.daysLeft < EXPIRY_WARNING_DAYS);
   printReport(out, { ...report, manifest: summarizeManifest(opened.contents.manifest) });
-  out.flush();
+  // T34: with --golden, a verified bundle's cases run here, offline, exactly as a runtime would run them before activation.
+  let goldenMet = true;
+  if (report.ok && flag(parsed, "golden")) {
+    const ran = await runGoldenSets({ manifest: opened.contents.manifest, payloads: payloadsOf(opened.contents), invoke: goldenInvokeOf({ run: str(parsed, "run"), outputs: str(parsed, "outputs") }), concurrency: goldenConcurrency(parsed), out });
+    goldenMet = ran.met;
+  }
+  out.flush({ ok: report.ok && goldenMet });
   if (!report.ok) ctx.stderr(`refused at ${report.step}: ${report.reason}`);
-  return report.ok ? EXIT.ok : EXIT.refused;
+  else if (!goldenMet) ctx.stderr("refused at golden: a golden set fell below its pass-rate floor");
+  return report.ok && goldenMet ? EXIT.ok : EXIT.refused;
 }

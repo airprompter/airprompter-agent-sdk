@@ -112,6 +112,18 @@ are form, not quality; a failing check never raises. Patterns are RE2-class
 only and an output over 64 KiB fails a pattern check closed —
 `protocol/checks.md`.
 
+**Golden sets (T34).** Start with ``golden=GoldenOptions(invoke=…)`` and
+every staged release runs the cases its prompts carry before the apply
+decision: ``invoke(GoldenInvocation)`` receives the rendered text and
+returns your model's answer; the expectations run on it; ``goldenPass``
+lands per case on the arm's window; a release below its floor stays staged
+(``status().golden``, ``golden_set_failed`` in the log) until an operator
+unlocks it. ``ap.golden()`` runs the active release's sets on demand.
+``ap.judge(run_ref, output, "prompt", invoke)`` runs the prompt's own
+``## Success criteria`` (or ``"protection"``, ``"helpfulness"``, a
+``JudgeRubric``) on your model and files only ``judgeScore`` / ``flagged``
+— ``protocol/golden-sets.md``.
+
 `models` is the catalogue the console shows under Settings › Models and the
 gate a release must pass at seal. A release may mark a slot's model
 **required**; a process whose `models` lacks it refuses that release

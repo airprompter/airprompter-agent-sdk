@@ -67,6 +67,17 @@ const payloadsOk = [
   { contentHash: slots[0].contentHash, bytes: reply.toString("base64url") },
   { contentHash: slots[1].contentHash, bytes: triage.toString("base64url") },
 ];
+// T34: a slot with a golden set — the reference is in the digest input, and the cases are a payload the chain
+// verifies like any other (golden-sets.md). Canonical bytes, so every SDK reproduces the hash from the cases.
+const goldenSet = { format: "airprompter-golden-set", version: 1, setId: "gs_20260912", minPassBps: 10000, cases: [
+  { caseId: "billing-refund", variables: { ticket_body: "I was charged twice, please refund one" }, expect: [{ kind: "must_match", name: "names-billing", pattern: "billing", flags: "i" }] },
+  { caseId: "where-is-my-order", variables: { ticket_body: "Order 1234 has not arrived" }, expect: [{ kind: "must_match", name: "mentions-order", pattern: "1234" }] },
+] };
+const goldenBytes = Buffer.from(canonicalJson(goldenSet), "utf8");
+const goldenSlots = [slots[0], { ...slots[1], goldenSet: { setId: goldenSet.setId, cases: goldenSet.cases.length, contentHash: sha256Prefixed(goldenBytes), byteLength: goldenBytes.length, minPassBps: goldenSet.minPassBps } }];
+const goldenDigest = releaseDigest(goldenSlots);
+if (goldenDigest === digest) throw new Error("a golden set must change the release digest");
+const payloadsWithGolden = [...payloadsOk, { contentHash: sha256Prefixed(goldenBytes), bytes: goldenBytes.toString("base64url") }];
 
 function payload(overrides = {}) {
   return {
@@ -150,6 +161,8 @@ const manifestCases = [
   { name: "countersign with corrupted bytes is refused", ...base, root: rootV1, countersignRoot: customerRoot, manifest: manifest(payload({ requireCountersign: true }), ["targets"], [(() => { const c = countersign(digest); return { ...c, sig: (c.sig[0] === "A" ? "B" : "A") + c.sig.slice(1) }; })()]), expected: { ok: false, reason: "countersign_invalid" } },
   { name: "locally required countersign applies even when the manifest says false (the local side can be stricter)", ...base, requireCountersign: true, root: rootV1, countersignRoot: customerRoot, manifest: manifest(payload({ requireCountersign: false })), expected: { ok: false, reason: "countersign_missing" } },
   { name: "a slot whose model is required verifies; the flag is in its release digest (T15)", ...base, root: rootV1, manifest: manifest(payload({ slots: requiredSlots, releaseDigest: requiredDigest })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
+  { name: "a slot with a golden set verifies when the set's payload is fetched; the reference is in its release digest (T34)", ...base, root: rootV1, manifest: manifest(payload({ slots: goldenSlots, releaseDigest: goldenDigest })), payloads: payloadsWithGolden, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
+  { name: "a golden set's payload is referenced like any other: not fetched is refused (T34)", ...base, root: rootV1, manifest: manifest(payload({ slots: goldenSlots, releaseDigest: goldenDigest })), payloads: payloadsOk, expected: { ok: false, reason: "payload_missing" } },
   { name: "experiment on a countersign target: both arms must be countersigned (D58)", ...base, root: rootV1, countersignRoot: customerRoot, manifest: manifest(payload({ requireCountersign: true, experiment: { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 9000, releaseDigest: digest, overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: "sha256:" + "c".repeat(64), overrides: [] }] } }), ["targets"], [countersign(digest)]), expected: { ok: false, reason: "countersign_missing" } },
 ];
 

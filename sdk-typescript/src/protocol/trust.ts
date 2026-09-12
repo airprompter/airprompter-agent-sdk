@@ -103,6 +103,7 @@ export function referencedPayloads(payload: ManifestPayload): Map<string, number
   const add = (slot: ManifestSlot) => {
     hashes.set(slot.contentHash, slot.byteLength);
     for (const step of slot.steps ?? []) hashes.set(step.contentHash, step.byteLength);
+    if (slot.goldenSet) hashes.set(slot.goldenSet.contentHash, slot.goldenSet.byteLength);
   };
   for (const slot of payload.slots) add(slot);
   for (const arm of payload.experiment?.arms ?? []) for (const override of arm.overrides) add(override);
@@ -187,6 +188,7 @@ export function releaseDigestInput(slots: readonly ManifestSlot[]): unknown[] {
       model: slot.model,
       ...(slot.modelRequired === true ? { modelRequired: true } : {}),
       ...(Array.isArray(slot.outputChecks) && slot.outputChecks.length > 0 ? { outputChecks: slot.outputChecks } : {}),
+      ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
       ...(slot.steps
         ? { steps: slot.steps.map((s) => ({ stepId: s.stepId, ordinal: s.ordinal, promptArtifactId: s.promptArtifactId, promptVersionId: s.promptVersionId, contentHash: s.contentHash, byteLength: s.byteLength })) }

@@ -1,3 +1,5 @@
+export { parseGoldenSet, runGoldenSet, goldenReportsMeet, passBpsOf, GoldenSetError, GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, type GoldenSet, type GoldenCase, type GoldenInvoke, type GoldenInvocation, type GoldenReport, type GoldenCaseResult } from "./golden/index.js";
+export { JUDGE_RUBRICS, PROTECTION_CRITERIA, judgePrompt, parseJudgeReply, rubricFromPrompt, judgeSignalsOf, type JudgeRubric, type JudgeResult } from "./judge/index.js";
 export { AirPrompterAgent, AgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION } from "./agent.js";
 export type { AgentStatus, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange } from "./agent.js";
 export { DaemonClient, DaemonError, daemonSocketPath, DAEMON_MAX_LINE_BYTES } from "./sync/daemon.js";

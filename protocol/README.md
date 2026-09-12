@@ -15,10 +15,12 @@ service, and by any self-hosted registry that implements it.
 | `schemas/telemetry-window.schema.json` | One minute of one dimension set — content-free by schema |
 | `schemas/latency-buckets.json` | The 16 fixed histogram edges every writer must use |
 | `schemas/feedback-signals.schema.json` | What `ap.feedback()` accepts |
+| `schemas/golden-set.schema.json` | The golden-set payload a manifest slot's `goldenSet.contentHash` names: 1–50 cases with expectations in the output-check grammar |
 | `canonical-json.md` | Canonical JSON: the encoding under every release digest and every signature, and what the digest covers |
 | `trust-chain.md` | Root metadata acceptance (R1–R5), manifest verification (M1–M12), refusal vocabulary, rotation, and why expiry degrades instead of bricking |
 | `assignment-hash.md` | Sticky assignment: `SHA-256(salt ‖ subject)`, first 8 bytes big-endian mod 10000, cumulative arm weights |
 | `spool-format.md` | The local telemetry spool: file layout, row types, what may never be in it, how third-party instrumentation writes to it |
+| `golden-sets.md` | Golden sets run before activation (5-D): the reference on the slot, the payload, the run, `goldenPass`, the apply decision, and the customer-side judge |
 | `examples/` | One valid document per schema, and `refused/` documents each schema must reject |
 | `vectors/` | Conformance vectors every SDK must pass |
 | `tools/` | The independent Python generators behind `vectors/assignment.json` and `examples/` — CI regenerates and diffs |

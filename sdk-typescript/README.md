@@ -110,6 +110,21 @@ check never throws. Patterns are RE2-class only (no backreferences,
 lookaround or nested quantifiers) and an output over 64 KiB fails a pattern
 check closed — `protocol/checks.md`.
 
+**Golden sets (T34).** A prompt's owner can attach 1–50 known inputs with
+the properties a right answer has (Settings › Prompt settings); they ride
+the release as a payload, encrypted like the prompt. Start with
+`golden: { invoke }` and every staged release runs them first: each case is
+rendered with the release's own text, `invoke({ text, model, caseId, … })`
+asks your model, the expectations (the output-check grammar) run on the
+answer, `goldenPass` lands per case on the arm's window, and a release
+below its floor stays staged — under `auto` too — until you `unlock()` it
+deliberately (`status().golden` has the counts; `golden_set_failed` in the
+log). `ap.golden()` runs the active release's sets on demand and returns the
+reports; no output ever leaves. `ap.judge(runRef, output, "prompt", invoke)`
+runs the prompt's own `## Success criteria` (or `"protection"`,
+`"helpfulness"`, or your criteria) on your model and files only
+`judgeScore` / `flagged` — `protocol/golden-sets.md`.
+
 `models` is the catalogue the console shows under Settings › Models
 ("available on 3 of 5 instances") and the gate a release must pass: a
 version naming a model no instance declared is refused at seal. A release
@@ -239,6 +254,8 @@ writes the same catalogue for build steps.
 | `src/store/` | `SlotStore`: two slots, stage → fsync → activate, AAD `agentId target generation contentHash` per payload, anti-rollback counter outside the slots, DEK wrapped by a `KeyProvider` (file key default; custom / KMS via `customKeyProvider`) |
 | `src/bundle/` | `.apbundle` v1: HPKE X25519 / HKDF-SHA256 / AES-256-GCM (RFC 9180 vectors), AAD `agentId|target` so a bundle cannot be relabelled |
 | `src/render/` | `{{name}}` substitution with trust-aware fencing; `runRef` (HMAC, content-free) |
+| `src/golden/` | Golden sets: the payload's shape, `runGoldenSet` (render → invoke → evaluate → count), the threshold (`protocol/golden-sets.md`) |
+| `src/judge/` | `ap.judge()`: rubric templates, the prompt's `## Success criteria` as a rubric, the judge prompt, the reply folded to a score |
 | `src/spool/` | Minute windows per dimension set, segment naming and rotation (`SegmentPlanner`), `DirectorySink` (0600, `.open` until fsync + rename, crash recovery) and `MemorySink`, the feedback catalogue normaliser |
 | `src/sync/` | `SyncClient` (edge pointer, manifest with ETag, payloads by hash), `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `DaemonClient` (the socket side of `protocol/daemon-socket.md`) |
 

@@ -82,6 +82,7 @@ export function releaseDigestInput(slots) {
       model: slot.model,
       ...(slot.modelRequired === true ? { modelRequired: true } : {}),
       ...(Array.isArray(slot.outputChecks) && slot.outputChecks.length > 0 ? { outputChecks: slot.outputChecks } : {}),
+      ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
       ...(slot.steps
         ? {

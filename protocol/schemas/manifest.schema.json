@@ -96,6 +96,19 @@
         }
       }
     },
+    "goldenSetRef": {
+      "description": "T34: what a slot carries for its golden set (golden-sets.md) — the cases themselves are the payload under `contentHash`, encrypted at rest like a prompt.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["setId", "cases", "contentHash", "byteLength", "minPassBps"],
+      "properties": {
+        "setId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "cases": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "contentHash": { "$ref": "#/$defs/sha256" },
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 65536 },
+        "minPassBps": { "description": "Pass-rate floor in basis points; a run below it leaves the release staged.", "type": "integer", "minimum": 0, "maximum": 10000 }
+      }
+    },
     "step": {
       "type": "object",
       "additionalProperties": false,
@@ -110,7 +123,7 @@
       }
     },
     "slot": {
-      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true, `outputChecks` only when present.",
+      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true, `outputChecks` and `goldenSet` only when present.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model", "variables"],
@@ -134,6 +147,10 @@
           "minItems": 1,
           "maxItems": 8,
           "items": { "$ref": "#/$defs/outputCheck" }
+        },
+        "goldenSet": {
+          "description": "T34: the slot's golden set — 1–50 known inputs with the properties a right answer has, run by the runtime against the pinned model before a staged release activates (golden-sets.md). Omitted when none; in the digest input only when present.",
+          "$ref": "#/$defs/goldenSetRef"
         },
         "steps": {
           "description": "Workflow slots only: ordered steps, 1-based and contiguous, tagged `<tag>#<ordinal>`.",

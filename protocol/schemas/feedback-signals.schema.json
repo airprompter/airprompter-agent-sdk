@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://airprompter.com/protocol/feedback-signals/1",
   "title": "Feedback signal catalogue (draft 1)",
-  "description": "What ap.feedback(runRef, signal) accepts. Numbers, booleans and declared enums only. Free text is rejected by schema.",
+  "description": "What ap.feedback(runRef, signal) accepts. Numbers, booleans and declared enums only. Free text is rejected by schema. `goldenPass` is reserved (T34, golden-sets.md): the runtime writes it on a window itself, one per golden case, and refuses it from feedback and from custom.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -106,6 +106,7 @@
             "escalated",
             "flagged",
             "followUp",
+            "goldenPass",
             "judgeScore",
             "rating",
             "refunded",

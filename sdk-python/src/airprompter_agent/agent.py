@@ -45,6 +45,8 @@ from .sync.client import SyncClient
 from .sync.daemon import DaemonClient, daemon_socket_path
 from .sync.loop import jittered_delay_ms, sync_once
 from .checks import evaluate_checks, output_text_of
+from .golden import GoldenInvoke, GoldenReport, golden_reports_meet, manifest_has_golden, parse_golden_set, run_golden_set
+from .judge import JUDGE_RUBRICS, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
 from .telemetry.observe import PendingObservation, ObserveTarget, observe_call, observe_call_async
 
 SDK_NAME = "agent-sdk-python"
@@ -79,6 +81,17 @@ class StagedRelease:
     manifest: Mapping[str, Any]
     activate: Callable[[], None]
     unlock_request: Optional[Mapping[str, Any]]
+
+
+@dataclass
+class GoldenOptions:
+    """T34: golden sets before activation. With ``invoke`` set, every slot of a staged release that carries a golden set is
+    run against the pinned model through this call before the apply decision; a set below its pass-rate floor leaves the
+    release staged (``golden_set_failed`` in the log, ``goldenPass`` counts on the arm's window) until an operator unlocks
+    it deliberately. Without it, golden sets ride the release unrun (``ap.golden()`` runs them on demand)."""
+
+    invoke: GoldenInvoke
+    concurrency: Optional[int] = None
 
 
 @dataclass
@@ -161,6 +174,8 @@ class AgentStatus:
     last_sync_outcome: Optional[str]
     consecutive_sync_failures: int
     next_sync_at: Optional[str]
+    #: T34: the last golden-set run before activation — counts only; None until one ran.
+    golden: Optional[dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -273,6 +288,7 @@ class AirPrompterAgent:
         # T15: the required models the last model_unavailable refusal named; empty once a release activates.
         self._unavailable_models: list[str] = []
         self._staged_manifest: Optional[Mapping[str, Any]] = None
+        self._last_golden: Optional[dict[str, Any]] = None
         self._last_contact_ms: Optional[float] = None
         self._bundle_not_after: Optional[str] = None
         # T9: directives from the latest manifest whose envelope verified — honoured even when that manifest was left staged,
@@ -316,6 +332,7 @@ class AirPrompterAgent:
         sync: Optional[Union[SyncOptions, Mapping[str, Any]]] = None,
         vendored_bundle: Optional[Union[VendoredBundle, Mapping[str, Any]]] = None,
         apply: Optional[Union[ApplyOptions, Mapping[str, Any]]] = None,
+        golden: Optional[Union[GoldenOptions, Mapping[str, Any]]] = None,
         heartbeat_seconds: Optional[float] = None,
         models: Optional[Union[Mapping[str, Any], Sequence[str]]] = None,
         delimiters: Optional[Delimiters] = None,
@@ -339,6 +356,7 @@ class AirPrompterAgent:
             "sync": sync_options,
             "vendored_bundle": _coerce(VendoredBundle, vendored_bundle) if vendored_bundle is not None else None,
             "apply": _coerce(ApplyOptions, apply),
+            "golden": _coerce(GoldenOptions, golden) if golden is not None else None,
             "heartbeat_seconds": heartbeat_seconds,
             "models": models,
             "delimiters": delimiters,
@@ -587,6 +605,18 @@ class AirPrompterAgent:
         payload = manifest["payload"]
         local = self._apply_options.policy
         policy = "unlock_required" if local == "unlock_required" or payload.get("applyPolicy") == "unlock_required" else "auto"
+        # T34: verified before activate — a staged release's golden sets run first; below the floor it stays staged.
+        golden_options: Optional[GoldenOptions] = self._o.get("golden")
+        if golden_options is not None and manifest_has_golden(manifest) and self._store is not None:
+            staged_slot = self._store.state.get("staged")
+            payloads = self._store.load(staged_slot, **self._verify_options(self._now_iso())).payloads if staged_slot else {}
+            reports = self._run_golden_for(manifest, payloads, golden_options.invoke, golden_options.concurrency)
+            if not golden_reports_meet(reports):
+                self._staged_manifest = manifest
+                for report in reports:
+                    if not report.meets_threshold:
+                        self._log({"event": "golden_set_failed", "generation": payload["generation"], "tag": report.tag, "arm": report.arm, "passed": report.passed, "cases": report.cases, "minPassBps": report.min_pass_bps})
+                return "staged"
         if policy == "auto":
             return "activated"
         self._staged_manifest = manifest
@@ -1120,6 +1150,81 @@ class AirPrompterAgent:
         target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model)
         return PendingObservation(target, lambda o: self.spool.observe(o, self._now_ms()), model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
 
+    def golden(self, *, invoke: Optional[GoldenInvoke] = None, tag: Optional[str] = None, staged: bool = False, concurrency: Optional[int] = None) -> list[GoldenReport]:
+        """T34: run the golden sets the active (or, with ``staged=True``, the staged) release carries — every slot with one,
+        on the control arm and on each arm that overrides the slot — through the customer's model call, and record
+        ``goldenPass`` per case on the arm's window. Returns the reports (counts and the names of failed expectations;
+        never an output). ``tag`` narrows to one slot."""
+        options: Optional[GoldenOptions] = self._o.get("golden")
+        call = invoke or (options.invoke if options else None)
+        if call is None:
+            raise ValueError("golden(): no model call — pass invoke, or start with golden=GoldenOptions(invoke=…)")
+        width = concurrency if concurrency is not None else (options.concurrency if options else None)
+        if staged:
+            if self._store is None or not self._store.state.get("staged") or self._staged_manifest is None:
+                return []
+            loaded = self._store.load(self._store.state["staged"], **self._verify_options(self._now_iso()))
+            return self._run_golden_for(loaded.manifest, loaded.payloads, call, width, tag)
+        if self._active is None:
+            return []
+        return self._run_golden_for(self._active.manifest, self._active.payloads, call, width, tag)
+
+    def _run_golden_for(self, manifest: Mapping[str, Any], payloads: Mapping[str, bytes], invoke: GoldenInvoke, concurrency: Optional[int], only_tag: Optional[str] = None) -> list[GoldenReport]:
+        payload = manifest["payload"]
+        targets: list[tuple[Mapping[str, Any], str]] = [(slot, "none") for slot in payload.get("slots", []) if slot.get("goldenSet") and (not only_tag or slot["tag"] == only_tag)]
+        for arm in (payload.get("experiment") or {}).get("arms", []):
+            for override in arm.get("overrides", []):
+                if override.get("goldenSet") and (not only_tag or override["tag"] == only_tag):
+                    targets.append((override, arm["arm"]))
+        reports: list[GoldenReport] = []
+        for slot, arm in targets:
+            set_bytes = payloads.get(slot["goldenSet"]["contentHash"])
+            text = payloads.get(slot["contentHash"])
+            if set_bytes is None or text is None:
+                self._log({"event": "golden_set_unavailable", "tag": slot["tag"], "arm": arm, "generation": payload["generation"]})
+                continue
+            golden_set = parse_golden_set(set_bytes, slot["goldenSet"])
+            report = run_golden_set(slot=slot, arm=arm, text=text.decode("utf-8"), golden_set=golden_set, invoke=invoke, concurrency=concurrency, delimiters=self._o.get("delimiters"))
+            # One goldenPass per case on the arm's window: the rollout reads pass counts per arm; nothing else leaves the host.
+            for result in report.results:
+                self.spool.outcomes(tag=slot["tag"], version_id=slot["versionId"], arm=arm, model=slot["model"], outcomes={"goldenPass": result.ok}, at_ms=self._now_ms())
+            self._log({"event": "golden_set_run", "generation": payload["generation"], "tag": slot["tag"], "arm": arm, "setId": golden_set["setId"], "cases": report.cases, "passed": report.passed, "minPassBps": report.min_pass_bps, "met": report.meets_threshold})
+            reports.append(report)
+        self._last_golden = {"generation": payload["generation"], "met": golden_reports_meet(reports), "reports": [r.summary() for r in reports]}
+        return reports
+
+    def judge(self, run_ref: str, output: str, rubric: Union[JudgeRubric, str], invoke: Callable[[str], str]) -> JudgeResult:
+        """T34: a rubric on the customer's own model, reporting only the score. ``rubric`` is a ``JudgeRubric``, one of the
+        templates (``"protection"``, ``"helpfulness"``), or ``"prompt"`` — the ``## Success criteria`` section of the prompt
+        the run rendered, read the way the hosted judge reads it. ``invoke`` receives the judge prompt and returns the reply.
+        The score lands as ``judgeScore`` on the run's arm window, a failed protection criterion as ``flagged``; the output,
+        the rubric text and the reply never reach the spool."""
+        if isinstance(rubric, JudgeRubric):
+            resolved = rubric
+        elif rubric == "prompt":
+            resolved = self._prompt_rubric_for(run_ref)
+        else:
+            resolved = JUDGE_RUBRICS[rubric]
+        reply = invoke(judge_prompt(resolved, output))
+        result = parse_judge_reply(reply, resolved)
+        filed = self.feedback(run_ref, judge_signals_of(result))
+        self._log({"event": "judged", "rubric": resolved.name, "criteria": len(resolved.criteria), "score": result.score, "flagged": result.flagged, "filed": filed})
+        return result
+
+    def _prompt_rubric_for(self, run_ref: str) -> JudgeRubric:
+        facts = parse_run_ref(run_ref, self._run_ref_key)
+        payload = self._active.manifest["payload"] if self._active else None
+        slot = None
+        if facts and payload:
+            experiment = payload.get("experiment")
+            if experiment:
+                arm = next((a for a in experiment["arms"] if a["arm"] == facts.arm), None)
+                slot = next((entry for entry in (arm or {}).get("overrides", []) if entry["tag"] == facts.tag), None)
+            slot = slot or next((entry for entry in payload["slots"] if entry["tag"] == facts.tag), None)
+        text = self._active.payloads.get(slot["contentHash"]) if (slot and self._active) else None
+        criteria = rubric_from_prompt(text.decode("utf-8")) if text else []
+        return JudgeRubric(name="prompt", criteria=tuple(criteria), protection=JUDGE_RUBRICS["protection"].criteria)
+
     def feedback(self, run_ref: str, signals: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> bool:
         """Quality signals against a run: numbers, booleans and declared enums only; anything else is refused."""
         facts = parse_run_ref(run_ref, self._run_ref_key)
@@ -1189,6 +1294,7 @@ class AirPrompterAgent:
             last_sync_outcome=self._last_sync_outcome,
             consecutive_sync_failures=self._consecutive_sync_failures,
             next_sync_at=None if self._next_sync_ms is None or not self._timer.armed else iso_ms(self._next_sync_ms),
+            golden=self._last_golden,
         )
 
     @property

@@ -116,7 +116,13 @@ airprompter status --agent … --environment prod
 `apply` runs the identical chain the runtime runs (root → manifest
 signature → payload hashes → generation counter), stages into the
 inactive slot, and activates under `auto`; under `unlock_required` it
-stages and says so. A generation below the stored one is refused unless
+stages and says so. With `--golden` (T34) both `verify` and `apply` run the
+release's golden sets first — `--run "<command>"` runs a program once per
+case (the case as JSON on stdin: `tag`, `caseId`, `text`, `model`, `arm`,
+`variables`; the answer on stdout) or `--outputs answers.json` takes what a
+harness already produced (`{"<tag>/<caseId>": "…"}`); `verify` refuses and
+`apply` stages without activating when a set falls below its floor, and
+only counts are printed (`protocol/golden-sets.md`). A generation below the stored one is refused unless
 `--force`, and then it is a forced downgrade stamped on evidence. The
 state directory defaults to the OS state directory (`$XDG_STATE_HOME`,
 `~/Library/Application Support`, `%LOCALAPPDATA%`); pass `--state-dir`

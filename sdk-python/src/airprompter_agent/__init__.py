@@ -21,6 +21,7 @@ from .agent import (
     AgentStatus,
     AirPrompterAgent,
     ApplyOptions,
+    GoldenOptions,
     PromptHandle,
     ReleaseChange,
     Rendered,
@@ -34,6 +35,8 @@ from .agent import (
     default_state_dir,
 )
 from .apply.window import UpdateWindow, WindowState, is_known_time_zone, parse_window, validate_window, window_state
+from .golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, GoldenCaseResult, GoldenInvocation, GoldenReport, GoldenSetError, golden_reports_meet, parse_golden_set, pass_bps_of, run_golden_set
+from .judge import JUDGE_RUBRICS, PROTECTION_CRITERIA, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
 from .bundle.apbundle import APBUNDLE_INFO, BundleError, DistributionKey, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle
 from .bundle.hpke import X25519KeyPair, generate_x25519_key_pair, x25519_private_key_from_raw, x25519_public_key_from_raw
 from .managed import MANAGED_REFUSAL_CODES, MANAGED_SDK_USER_AGENT, ManagedAgent, ManagedRunError, ManagedRunResult, ManagedRunStream, ManagedWorkflow, parse_sse
@@ -105,6 +108,25 @@ __all__ = [
     "AgentStatus",
     "AirPrompterAgent",
     "ApplyOptions",
+    "GOLDEN_SET_FORMAT",
+    "GOLDEN_SET_VERSION",
+    "GoldenCaseResult",
+    "GoldenInvocation",
+    "GoldenOptions",
+    "GoldenReport",
+    "GoldenSetError",
+    "JUDGE_RUBRICS",
+    "JudgeResult",
+    "JudgeRubric",
+    "PROTECTION_CRITERIA",
+    "golden_reports_meet",
+    "judge_prompt",
+    "judge_signals_of",
+    "parse_golden_set",
+    "parse_judge_reply",
+    "pass_bps_of",
+    "rubric_from_prompt",
+    "run_golden_set",
     "Assignment",
     "AssignmentError",
     "BundleError",

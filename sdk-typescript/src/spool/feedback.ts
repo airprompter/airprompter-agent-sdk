@@ -8,7 +8,9 @@
 export const BOOLEAN_SIGNALS = ["flagged", "accepted", "edited", "regenerated", "copied", "followUp", "escalated", "abandoned", "corrected", "resolved", "reopened", "converted", "refunded", "slaMet"] as const;
 export const UNIT_SIGNALS = ["editDistanceRatio", "judgeScore"] as const;
 export const COUNT_SIGNALS = ["regenerations", "timeToAcceptMs"] as const;
-export const CATALOGUE: ReadonlySet<string> = new Set(["thumbs", "rating", "correctedValue", "custom", ...BOOLEAN_SIGNALS, ...UNIT_SIGNALS, ...COUNT_SIGNALS]);
+/** T34: written by the runtime on a window (a golden-set run), never accepted from `feedback()`; reserved so `custom` cannot shadow it. */
+export const RUNTIME_SIGNALS = ["goldenPass"] as const;
+export const CATALOGUE: ReadonlySet<string> = new Set(["thumbs", "rating", "correctedValue", "custom", ...BOOLEAN_SIGNALS, ...UNIT_SIGNALS, ...COUNT_SIGNALS, ...RUNTIME_SIGNALS]);
 export const OUTCOME_NAME = /^[a-z][a-zA-Z0-9]{0,31}$/;
 
 export type FeedbackRejection = "invalid_value" | "invalid_name" | "reserved_name" | "unknown_signal" | "needs_slot_enum";
@@ -44,6 +46,8 @@ export function normalizeFeedback(signals: Record<string, unknown>): NormalizedF
     } else if (name === "correctedValue") {
       // Aggregating per enum value needs the slot's declared output check, which this writer does not hold yet.
       rejected[name] = typeof value === "string" && value.length <= 64 ? "needs_slot_enum" : "invalid_value";
+    } else if ((RUNTIME_SIGNALS as readonly string[]).includes(name)) {
+      rejected[name] = "reserved_name";
     } else if (name === "custom") {
       if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).length > 8) {
         rejected[name] = "invalid_value";

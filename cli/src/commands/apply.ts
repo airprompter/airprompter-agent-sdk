@@ -12,6 +12,7 @@ import type { Bundle } from "../../../sdk-typescript/src/protocol/types.js";
 import { StoreError } from "../../../sdk-typescript/src/store/slotStore.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { EXPIRY_WARNING_DAYS, openBundleFile, payloadsOf, verifyChain } from "../chain.js";
+import { GOLDEN_OPTIONS, goldenInvokeOf, runGoldenSets } from "../golden.js";
 import { CliError, EXIT, Output, refused, usage, type Context } from "../io.js";
 import { loadDistributionPrivateKey } from "../keys.js";
 
@@ -22,6 +23,7 @@ export const APPLY_OPTIONS: OptionSpec = {
   "distribution-key": { type: "string", help: "Distribution PRIVATE key file (.key.json) for an encrypted bundle" },
   force: { type: "boolean", default: false, help: "Allow a generation below the stored one (forced downgrade, stamped on evidence)" },
   "stage-only": { type: "boolean", default: false, help: "Stage without activating even under an auto policy" },
+  ...GOLDEN_OPTIONS,
   ...COMMON_OPTIONS,
 };
 
@@ -71,7 +73,15 @@ export async function apply(argv: string[], ctx: Context): Promise<number> {
   store.acceptRoot(report.trustedRoot);
   const slot = store.stage({ manifest: opened.contents.manifest, payloads, force });
   const policy = opened.contents.manifest.payload.applyPolicy;
-  const activate = policy === "auto" && !flag(parsed, "stage-only");
+  // T34: verified before activate — with --golden the cases run after staging and before activation, as the runtime does;
+  // below the floor the release stays staged and the exit says so, whatever the policy.
+  let goldenMet = true;
+  if (flag(parsed, "golden")) {
+    const concurrency = Number(str(parsed, "concurrency") ?? "4");
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) throw usage("--concurrency must be a whole number from 1 to 64");
+    goldenMet = (await runGoldenSets({ manifest: opened.contents.manifest, payloads, invoke: goldenInvokeOf({ run: str(parsed, "run"), outputs: str(parsed, "outputs") }), concurrency, out })).met;
+  }
+  const activate = policy === "auto" && !flag(parsed, "stage-only") && goldenMet;
   if (activate) store.activate();
   out.field("store", store.dir);
   out.field("slot", slot);
@@ -85,7 +95,9 @@ export async function apply(argv: string[], ctx: Context): Promise<number> {
   else if (opened.daysLeft < EXPIRY_WARNING_DAYS) out.line(`warning: expires in ${opened.daysLeft} day${opened.daysLeft === 1 ? "" : "s"} — download a fresh update file before then`);
   out.set("daysLeft", opened.daysLeft);
   out.set("expiringSoon", !opened.expired && opened.daysLeft < EXPIRY_WARNING_DAYS);
-  if (!activate) out.line(policy === "unlock_required" ? "staged: this environment requires an unlock (airprompter unlock, or the runtime's apply.onStaged hook) before it serves" : "staged only (--stage-only)");
+  if (!goldenMet) out.line("staged: a golden set fell below its pass-rate floor — not activated (airprompter unlock activates it deliberately)");
+  else if (!activate) out.line(policy === "unlock_required" ? "staged: this environment requires an unlock (airprompter unlock, or the runtime's apply.onStaged hook) before it serves" : "staged only (--stage-only)");
+  out.set("goldenMet", goldenMet);
   out.flush();
-  return EXIT.ok;
+  return goldenMet ? EXIT.ok : EXIT.refused;
 }

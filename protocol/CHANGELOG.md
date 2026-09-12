@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Golden sets before activation and the customer-side judge** (AIR-1964,
+  T34, 5-D / D63): golden-sets.md. A manifest slot (or arm override) may
+  carry `goldenSet: { setId, cases, contentHash, byteLength, minPassBps }`
+  — in the release digest input only when present, like `outputChecks`;
+  `contentHash` names a payload (`schemas/golden-set.schema.json`: 1–50
+  cases, each variables plus 1–8 expectations in the output-check grammar)
+  fetched, verified, stored and bundled like any other. On stage the
+  runtime renders every case, asks the customer's model through the call
+  the application supplied, evaluates the expectations, writes `goldenPass`
+  per case on the arm's window (reserved in the feedback catalogue: refused
+  from `ap.feedback()` and from `custom`) and leaves a release below its
+  floor staged under `auto` as under `unlock_required`. `airprompter verify
+  --golden` / `apply --golden` run the same cases offline from a bundle
+  (`--run <command>` per case or `--outputs <file>`). `ap.judge(runRef,
+  output, rubric, invoke)` runs a criteria rubric (the prompt's `## Success
+  criteria`, the protection lens, `helpfulness`, or the customer's) on the
+  customer's model and files only `judgeScore` / `flagged`. Two new trust
+  vectors; two new feedback vectors; the manifest and telemetry-window
+  schemas describe the new members.
+
 - **Air-gapped update files and the spool over a file** (AIR-1946, T16,
   D33 / §6.3): the platform builds the same `.apbundle` `pull` writes —
   promoted manifest, payloads, the environment's root document — sealed

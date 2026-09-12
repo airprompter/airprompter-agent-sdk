@@ -76,7 +76,7 @@ test("on disk: 0600 files, .open until closed, sent/ and quarantine/ present, a 
   writer.observe(observation, T0 + 60_000); // the minute turned: closes the first window into the first segment
   let names = readdirSync(dir).filter((n) => n.startsWith("seg-"));
   assert.deepEqual(names, [`seg-i-testinstance-${epochMinute(T0 + 60_000)}-0.ndjson`], "the closed minute's windows are written, fsynced and closed at once, in a segment named for the write time");
-  assert.equal(statSync(join(dir, names[0]!)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(statSync(join(dir, names[0]!)).mode & 0o777, 0o600);
   sink.append({ type: "refusal", v: 1, at: new Date(T0 + 61_000).toISOString(), instanceId: "i-testinstance", reason: "disabled", generation: 1, tag: null }, T0 + 61_000);
   assert.ok(readdirSync(dir).some((n) => n.endsWith(".ndjson.open")), "a segment being written carries .open");
   writer.closeWindows(T0 + 120_000);

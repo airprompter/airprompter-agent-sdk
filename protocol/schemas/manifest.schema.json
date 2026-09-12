@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/0.1/manifest.schema.json",
+  "title": "AirPrompter signed release manifest",
+  "description": "What a target is allowed to run, as a signed envelope. The platform signature covers the whole payload; countersignatures cover the releaseDigest of every release the manifest can activate (D58). No prompt text is ever in a manifest: slots name payloads by content hash and the runtime fetches them separately.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "signatures"],
+  "properties": {
+    "payload": { "$ref": "#/$defs/payload" },
+    "signatures": {
+      "description": "Platform signatures over the canonical JSON of `payload` (see canonical-json.md). At least `threshold` of them (from the key-set's `targets` role) must verify.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/signature" }
+    },
+    "countersignatures": {
+      "description": "Customer countersignatures (§6.3). Each signs one releaseDigest with a customer-held key. Present but empty when the target does not require countersign; on a countersign target every arm's releaseDigest must have one or the manifest is refused.",
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/countersignature" }
+    }
+  },
+  "$defs": {
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "identifier": {
+      "description": "A canonical team identifier as minted by the control plane.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "target": { "type": "string", "enum": ["dev", "staging", "prod"] },
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "base64url": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "keyId": {
+      "description": "Opaque key identifier; the recommended value is the RFC 7638 JWK thumbprint of the public key.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:/-]+$"
+    },
+    "slotTag": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+    },
+    "stepTag": {
+      "type": "string",
+      "maxLength": 132,
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*#[1-9][0-9]{0,2}$"
+    },
+    "modelId": {
+      "description": "Provider model identifier, exactly as the target's reported catalog names it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    },
+    "variable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "required", "trust"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-zA-Z0-9_.-]{1,64}$" },
+        "required": { "type": "boolean" },
+        "trust": {
+          "description": "D55: `end_user` values are rendered only inside the delimiters the author declared and never in an instruction-role position without an explicit acknowledgement at seal time.",
+          "type": "string",
+          "enum": ["operator", "end_user"]
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stepId", "ordinal", "promptArtifactId", "promptVersionId", "contentHash", "byteLength"],
+      "properties": {
+        "stepId": { "$ref": "#/$defs/stepTag" },
+        "ordinal": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "promptArtifactId": { "$ref": "#/$defs/identifier" },
+        "promptVersionId": { "$ref": "#/$defs/identifier" },
+        "contentHash": { "$ref": "#/$defs/sha256" },
+        "byteLength": { "type": "integer", "minimum": 0, "maximum": 65536 }
+      }
+    },
+    "slot": {
+      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model", "variables"],
+      "properties": {
+        "tag": { "$ref": "#/$defs/slotTag" },
+        "kind": { "type": "string", "enum": ["prompt", "workflow"] },
+        "artifactId": { "$ref": "#/$defs/identifier" },
+        "versionId": { "$ref": "#/$defs/identifier" },
+        "versionOrdinal": { "type": ["integer", "null"], "minimum": 1 },
+        "contentHash": { "$ref": "#/$defs/sha256" },
+        "byteLength": { "type": "integer", "minimum": 0, "maximum": 65536 },
+        "model": { "$ref": "#/$defs/modelId" },
+        "variables": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/variable" } },
+        "steps": {
+          "description": "Workflow slots only: ordered steps, 1-based and contiguous, tagged `<tag>#<ordinal>`.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      },
+      "if": { "properties": { "kind": { "const": "workflow" } } },
+      "then": { "required": ["steps"] },
+      "else": { "not": { "required": ["steps"] } }
+    },
+    "arm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arm", "weightBps", "releaseDigest", "overrides"],
+      "properties": {
+        "arm": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$" },
+        "weightBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "releaseDigest": {
+          "description": "The release this arm activates. The control arm carries the manifest's own releaseDigest; on a countersign target every arm's digest must be countersigned.",
+          "$ref": "#/$defs/sha256"
+        },
+        "overrides": {
+          "description": "Slots that differ from the top-level `slots` under this arm, by tag. The control arm has none.",
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/slot" }
+        }
+      }
+    },
+    "experiment": {
+      "description": "A/B split or staged rollout (§8). Arms are evaluated in order against the sticky assignment bucket (assignment-hash.md); weights sum to exactly 10000.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["experimentId", "salt", "subjectKey", "arms"],
+      "properties": {
+        "experimentId": { "$ref": "#/$defs/identifier" },
+        "salt": {
+          "description": "Random per-experiment salt, base64url without padding; the decoded bytes prefix the subject in the hash.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22,86}$"
+        },
+        "subjectKey": { "type": "string", "enum": ["request", "instance"] },
+        "arms": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/$defs/arm" } }
+      }
+    },
+    "directive": {
+      "description": "Signed, advisory instructions from the control plane. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "releaseDigest", "requestedBy", "requestedAt", "expiresAt"],
+          "properties": {
+            "kind": { "const": "request_unlock" },
+            "releaseDigest": { "$ref": "#/$defs/sha256" },
+            "requestedBy": { "$ref": "#/$defs/identifier" },
+            "requestedAt": { "$ref": "#/$defs/timestamp" },
+            "expiresAt": { "$ref": "#/$defs/timestamp" },
+            "note": { "type": "string", "maxLength": 500 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "scope", "issuedAt"],
+          "properties": {
+            "kind": { "const": "disable" },
+            "scope": { "type": "string", "enum": ["agent", "slot"] },
+            "tag": { "$ref": "#/$defs/slotTag" },
+            "issuedAt": { "$ref": "#/$defs/timestamp" },
+            "reason": { "type": "string", "maxLength": 500 }
+          },
+          "if": { "properties": { "scope": { "const": "slot" } } },
+          "then": { "required": ["tag"] }
+        }
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "organizationId",
+        "agentId",
+        "target",
+        "generation",
+        "releaseDigest",
+        "issuedAt",
+        "leaseSeconds",
+        "onLeaseExpiry",
+        "applyPolicy",
+        "requireCountersign",
+        "slots",
+        "directives"
+      ],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocolVersion" },
+        "organizationId": { "$ref": "#/$defs/identifier" },
+        "agentId": { "$ref": "#/$defs/identifier" },
+        "target": { "$ref": "#/$defs/target" },
+        "generation": {
+          "description": "Strictly monotonic per target, including on server-side rollback. A runtime refuses a manifest whose generation is lower than the one it stores.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "releaseDigest": {
+          "description": "sha256 over the canonical JSON of the digest input built from `slots` (canonical-json.md). Together with `target` it identifies the release.",
+          "$ref": "#/$defs/sha256"
+        },
+        "previousReleaseDigest": { "$ref": "#/$defs/sha256" },
+        "issuedAt": { "$ref": "#/$defs/timestamp" },
+        "leaseSeconds": {
+          "description": "Staleness accounting, not a kill switch (§6.4). Advisory on countersign targets.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 2592000
+        },
+        "onLeaseExpiry": {
+          "description": "`degrade` keeps serving the last verified release and reports it; `halt` stops rendering. Advisory on countersign targets, where local configuration decides.",
+          "type": "string",
+          "enum": ["degrade", "halt"]
+        },
+        "applyPolicy": { "type": "string", "enum": ["auto", "unlock_required"] },
+        "requireCountersign": { "type": "boolean" },
+        "slots": {
+          "description": "Every live slot of the release. Sorted by tag; tags are unique.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/slot" }
+        },
+        "experiment": { "$ref": "#/$defs/experiment" },
+        "directives": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/directive" } }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyId", "alg", "sig"],
+      "properties": {
+        "keyId": { "$ref": "#/$defs/keyId" },
+        "alg": { "const": "ES256" },
+        "sig": {
+          "description": "ECDSA P-256 over SHA-256 of the canonical payload bytes, IEEE P1363 (r ‖ s, 64 bytes), base64url without padding.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$"
+        }
+      }
+    },
+    "countersignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyId", "alg", "releaseDigest", "sig", "signedAt"],
+      "properties": {
+        "keyId": { "$ref": "#/$defs/keyId" },
+        "alg": { "const": "ES256" },
+        "releaseDigest": { "$ref": "#/$defs/sha256" },
+        "sig": {
+          "description": "ECDSA P-256 over SHA-256 of the UTF-8 bytes of `releaseDigest` (the `sha256:…` string), P1363, base64url without padding.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$"
+        },
+        "signedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    }
+  }
+}

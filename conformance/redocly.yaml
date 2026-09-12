@@ -1,0 +1,4 @@
+# Shared $defs live in the JSON Schema files and are used by other schemas,
+# not only by the OpenAPI document; the unused-component rule cannot see that.
+rules:
+  no-unused-components: off

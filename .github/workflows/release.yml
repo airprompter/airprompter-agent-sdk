@@ -1,0 +1,183 @@
+# Releases. Each package has its own tag prefix and its own job; every job
+# produces a signed artifact and an SBOM, and nothing publishes from a
+# developer machine:
+#
+#   protocol/vX.Y.Z        protocol tag — CI conformance only (ci.yml); the
+#                          protocol is consumed by pinning the tag, not by a
+#                          package.
+#   sdk-typescript/vX.Y.Z  npm publish with provenance (OIDC; no npm token in
+#                          the repository — trusted publishing on npmjs.com
+#                          must be configured for @airprompter/agent-sdk).
+#   sdk-python/vX.Y.Z      PyPI trusted publishing (OIDC; no API token).
+#   cli/vX.Y.Z             single-file executables for linux/macos/windows,
+#                          cosign keyless signatures, SBOM, GitHub release.
+#
+# `workflow_dispatch` runs a dry run: it builds the protocol SBOM, signs it
+# keyless with cosign, and uploads the signed artifacts — the release path
+# is exercised end to end without publishing anything.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "sdk-typescript/v*"
+      - "sdk-python/v*"
+      - "cli/v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Dry run — signed protocol SBOM
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sigstore/cosign-installer@v3
+      - name: SBOM of the protocol directory
+        uses: anchore/sbom-action@v0
+        with:
+          path: protocol
+          format: spdx-json
+          output-file: protocol.spdx.json
+          upload-artifact: false
+      - name: Sign the SBOM (keyless, Sigstore)
+        run: |
+          cosign sign-blob --yes --bundle protocol.spdx.json.sigstore protocol.spdx.json
+          cosign verify-blob --bundle protocol.spdx.json.sigstore \
+            --certificate-identity-regexp '^https://github.com/airprompter/airprompter-agent-sdk/' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            protocol.spdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: protocol-sbom-signed
+          path: |
+            protocol.spdx.json
+            protocol.spdx.json.sigstore
+
+  npm:
+    name: Publish @airprompter/agent-sdk
+    if: startsWith(github.ref, 'refs/tags/sdk-typescript/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: sdk-typescript
+      - run: npm test
+        working-directory: sdk-typescript
+      - name: Tag matches package.json
+        run: |
+          v="${GITHUB_REF_NAME#sdk-typescript/v}"
+          test "$(node -p "require('./package.json').version")" = "$v"
+        working-directory: sdk-typescript
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: sdk-typescript
+          format: spdx-json
+          output-file: agent-sdk.spdx.json
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
+        working-directory: sdk-typescript
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: agent-sdk.spdx.json
+          generate_release_notes: true
+
+  pypi:
+    name: Publish airprompter-agent
+    if: startsWith(github.ref, 'refs/tags/sdk-python/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: python -m build
+        working-directory: sdk-python
+      - name: Tag matches pyproject version
+        run: |
+          v="${GITHUB_REF_NAME#sdk-python/v}"
+          python -c "import tomllib,sys; d=tomllib.load(open('pyproject.toml','rb')); sys.exit(0 if d['project']['version']=='$v' else 1)"
+        working-directory: sdk-python
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: sdk-python
+          format: spdx-json
+          output-file: airprompter-agent.spdx.json
+      - name: Publish (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk-python/dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: airprompter-agent.spdx.json
+          generate_release_notes: true
+
+  cli:
+    name: Build and sign the CLI
+    if: startsWith(github.ref, 'refs/tags/cli/v')
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: airprompter-linux-x64
+          - os: ubuntu-24.04-arm
+            artifact: airprompter-linux-arm64
+          - os: macos-latest
+            artifact: airprompter-darwin-arm64
+          - os: windows-latest
+            artifact: airprompter-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: sigstore/cosign-installer@v3
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: cli
+      - name: Single executable
+        run: npm run build:sea -- --out "../dist/${{ matrix.artifact }}"
+        working-directory: cli
+      - name: Sign (keyless)
+        shell: bash
+        run: |
+          cosign sign-blob --yes --bundle "dist/${{ matrix.artifact }}.sigstore" "dist/${{ matrix.artifact }}"
+          sha256sum "dist/${{ matrix.artifact }}" > "dist/${{ matrix.artifact }}.sha256" 2>/dev/null || shasum -a 256 "dist/${{ matrix.artifact }}" > "dist/${{ matrix.artifact }}.sha256"
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: cli
+          format: spdx-json
+          output-file: dist/${{ matrix.artifact }}.spdx.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

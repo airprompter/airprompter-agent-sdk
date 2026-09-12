@@ -13,9 +13,8 @@ release goes live, calls the model, and reports content-free measurements.
 Nothing in AirPrompter can open a connection to you, read your end-user
 content, or make bytes live on a locked runtime.
 
-> Status: **pre-release scaffold.** The layout below is the plan of record;
-> packages are not yet published. Follow the repository for the first tagged
-> release.
+> Status: **protocol 0.1.0 pinned** (`protocol/v0.1.0`); packages are not
+> yet published. Follow the repository for the first SDK release.
 
 ## Layout
 
@@ -45,6 +44,24 @@ your application ──(render / wrap)──▶ SDK ──▶ encrypted slot sto
 - **Verified before staged.** Offline root of trust → signing key → signed manifest → content-addressed payloads → monotonic generation.
 - **You decide when it goes live.** `unlock_required` targets stage a release and activate only on your operator's command, in your update window, or through your change-control hook.
 - **Content-free telemetry.** Minute windows of counts, latency histograms and token sums. No prompt text, no outputs, no end-user identifiers — by schema, not by policy.
+
+## Protocol compatibility
+
+| Protocol | Hosted service | `@airprompter/agent-sdk` | `airprompter-agent` | `airprompter` CLI |
+|---|---|---|---|---|
+| 0.1 | vendors `protocol/v0.1.0`; routes land per `openapi.yaml` status | — | — | — |
+
+Generated from the conformance run once SDK packages exist; until then this
+table is maintained by hand with each protocol tag.
+
+## Supply chain
+
+Every release is built on GitHub Actions from a tag: npm packages publish
+with provenance, PyPI packages through trusted publishing, binaries are
+signed keyless with cosign, and every artifact ships an SPDX SBOM
+(`.github/workflows/release.yml`). No token that can publish lives in this
+repository. The platform root public keys are pinned in SDK source, so a
+key change is a visible commit.
 
 ## Licence
 

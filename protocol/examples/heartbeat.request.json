@@ -1,0 +1,46 @@
+{
+  "protocol": "0.1.0",
+  "instanceId": "inst_5f3c9a2b7e1d4c08",
+  "sdk": {
+    "name": "airprompterd",
+    "version": "0.1.0",
+    "protocolRange": ">=0.1.0 <1.0.0"
+  },
+  "host": {
+    "os": "linux",
+    "arch": "arm64",
+    "runtime": "node/22.11.0"
+  },
+  "syncMode": "resident",
+  "generation": {
+    "active": 41,
+    "staged": 42
+  },
+  "activeReleaseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "stagedReleaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+  "applyState": "awaiting_unlock",
+  "signingKeyId": "sha256-9f2c1e7a4b0d5c3e8a1f6b2d7c4e9a0b",
+  "storageProtection": "kms",
+  "catalog": {
+    "models": [
+      "claude-sonnet-5",
+      "gpt-5"
+    ],
+    "reportedAt": "2026-09-12T10:04:00Z"
+  },
+  "lease": {
+    "expiresAt": "2026-09-12T11:00:00Z",
+    "expired": false
+  },
+  "localRollback": {
+    "active": false,
+    "forced": false
+  },
+  "spool": {
+    "depthSegments": 3,
+    "depthBytes": 41210,
+    "droppedSegments": 0,
+    "quarantinedSegments": 0,
+    "lastUploadAt": "2026-09-12T10:03:30Z"
+  }
+}

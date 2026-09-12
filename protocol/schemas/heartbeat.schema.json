@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/0.1/heartbeat.schema.json",
+  "title": "AirPrompter heartbeat",
+  "description": "One route, one Lambda (D41): an instance reports its state and receives the presigned S3 upload grant for its spool (§9.1). Telemetry bytes never pass through this route. Everything here is content-free by schema: no prompt text, no outputs, no end-user identifiers.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"],
+      "properties": {
+        "protocol": { "$ref": "manifest.schema.json#/$defs/protocolVersion" },
+        "instanceId": {
+          "description": "Stable per store, random at first boot; never a hostname or user identifier.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,64}$"
+        },
+        "sdk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string", "enum": ["agent-sdk-typescript", "agent-sdk-python", "airprompter-cli", "airprompterd"] },
+            "version": { "type": "string", "maxLength": 64 },
+            "protocolRange": { "type": "string", "maxLength": 64 }
+          }
+        },
+        "host": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "os": { "type": "string", "enum": ["linux", "darwin", "windows", "other"] },
+            "arch": { "type": "string", "maxLength": 16 },
+            "runtime": { "type": "string", "maxLength": 64 }
+          }
+        },
+        "syncMode": { "type": "string", "enum": ["resident", "on_invoke", "offline"] },
+        "generation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["active"],
+          "properties": {
+            "active": { "type": "integer", "minimum": 0 },
+            "staged": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "activeReleaseDigest": { "$ref": "manifest.schema.json#/$defs/sha256" },
+        "stagedReleaseDigest": { "$ref": "manifest.schema.json#/$defs/sha256" },
+        "applyState": {
+          "description": "What the runtime did with the latest manifest it verified. The fleet view is built from this, not from what the control plane hoped.",
+          "type": "string",
+          "enum": ["active", "staged", "awaiting_unlock", "awaiting_countersign", "refused", "vendored_fallback"]
+        },
+        "refusal": {
+          "description": "Why the latest manifest was refused, when applyState is `refused`.",
+          "type": "string",
+          "enum": ["root_expired", "unknown_signing_key", "signature_invalid", "scope_mismatch", "generation_rollback", "payload_hash_mismatch", "countersign_missing", "schema_invalid", "protocol_unsupported"]
+        },
+        "signingKeyId": {
+          "description": "keyId that signed the active manifest, so rotation progress is visible per fleet.",
+          "$ref": "manifest.schema.json#/$defs/keyId"
+        },
+        "storageProtection": {
+          "description": "How the store's KEK is held (§10). `file_key` is reported and shown as a finding, never blocked (D15).",
+          "type": "string",
+          "enum": ["os_keystore", "kms", "vault", "custom", "file_key"]
+        },
+        "catalog": {
+          "description": "Models this instance can actually call, as the provider names them. Promotion refuses a slot whose model is absent (§7).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["models"],
+          "properties": {
+            "models": { "type": "array", "maxItems": 256, "uniqueItems": true, "items": { "$ref": "manifest.schema.json#/$defs/modelId" } },
+            "reportedAt": { "$ref": "manifest.schema.json#/$defs/timestamp" }
+          }
+        },
+        "lease": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["expired"],
+          "properties": {
+            "expiresAt": { "$ref": "manifest.schema.json#/$defs/timestamp" },
+            "expired": { "type": "boolean" }
+          }
+        },
+        "localRollback": {
+          "description": "Set while the instance serves the other slot after `airprompter rollback`; `forced` when a downgrade below the stored generation was forced.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["active", "forced"],
+          "properties": { "active": { "type": "boolean" }, "forced": { "type": "boolean" } }
+        },
+        "spool": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["depthSegments", "depthBytes", "droppedSegments", "quarantinedSegments"],
+          "properties": {
+            "depthSegments": { "type": "integer", "minimum": 0 },
+            "depthBytes": { "type": "integer", "minimum": 0 },
+            "droppedSegments": { "type": "integer", "minimum": 0 },
+            "quarantinedSegments": { "type": "integer", "minimum": 0 },
+            "lastUploadAt": { "$ref": "manifest.schema.json#/$defs/timestamp" },
+            "backoffUntil": { "$ref": "manifest.schema.json#/$defs/timestamp" }
+          }
+        }
+      }
+    },
+    "uploadGrant": {
+      "description": "A presigned S3 POST policy minted by the grant issuer (§9.1). The policy pins the key prefix, the content-length range, the content type, server-side encryption and the grant id; it expires within 15 minutes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grantId", "url", "fields", "keyPrefix", "expiresAt", "maxObjectBytes"],
+      "properties": {
+        "grantId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,64}$" },
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "fields": {
+          "description": "Form fields to send verbatim with each PUT/POST (policy, signature, key template, metadata). Opaque to the daemon.",
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 4096 },
+          "maxProperties": 32
+        },
+        "keyPrefix": { "type": "string", "maxLength": 512 },
+        "expiresAt": { "$ref": "manifest.schema.json#/$defs/timestamp" },
+        "maxObjectBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "contentType": { "const": "application/x-ndjson" }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pollSeconds", "uploadIntervalSeconds"],
+      "properties": {
+        "uploadGrant": { "$ref": "#/$defs/uploadGrant" },
+        "uploadIntervalSeconds": {
+          "description": "How often the daemon may upload. Rides on the grant so AirPrompter can slow a whole fleet without touching a host.",
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 86400
+        },
+        "pollSeconds": {
+          "description": "Suggested edge-pointer poll interval (jittered by the runtime).",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 86400
+        },
+        "retryAfterSeconds": {
+          "description": "Present when no grant was issued (quota, revoked key, incident): the spool holds and the daemon backs off.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "edgePointerUrl": {
+          "description": "The per-target generation.json URL (D21). Carries an unguessable target token, so it is handed out here rather than derived.",
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        }
+      }
+    }
+  }
+}

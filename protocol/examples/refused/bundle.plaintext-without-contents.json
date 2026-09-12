@@ -1,0 +1,12 @@
+{
+  "schema": "bundle",
+  "reason": "a plaintext bundle carries its contents",
+  "document": {
+    "format": "apbundle",
+    "version": 1,
+    "protocol": "0.1.0",
+    "encryption": {
+      "scheme": "none"
+    }
+  }
+}

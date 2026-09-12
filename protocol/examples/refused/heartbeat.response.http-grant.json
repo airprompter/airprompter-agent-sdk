@@ -1,0 +1,24 @@
+{
+  "schema": "heartbeat-response",
+  "reason": "grants are https only",
+  "document": {
+    "uploadGrant": {
+      "grantId": "grt_0c1d2e3f4a5b6c7d",
+      "url": "http://telemetry-ingest.example/",
+      "fields": {
+        "key": "org/org_7d3f9a2b/agent/agt_4e8c1b6d/prod/inst_5f3c9a2b7e1d4c08/${filename}",
+        "policy": "eyJleHBpcmF0aW9uIjoi...",
+        "x-amz-signature": "3f1e...",
+        "x-amz-meta-grant-id": "grt_0c1d2e3f4a5b6c7d",
+        "x-amz-server-side-encryption": "aws:kms"
+      },
+      "keyPrefix": "org/org_7d3f9a2b/agent/agt_4e8c1b6d/prod/inst_5f3c9a2b7e1d4c08/",
+      "expiresAt": "2026-09-12T10:19:00Z",
+      "maxObjectBytes": 1048576,
+      "contentType": "application/x-ndjson"
+    },
+    "uploadIntervalSeconds": 60,
+    "pollSeconds": 30,
+    "edgePointerUrl": "https://edge.airprompter.com/g/BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU/generation.json"
+  }
+}

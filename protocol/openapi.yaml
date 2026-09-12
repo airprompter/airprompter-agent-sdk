@@ -1,0 +1,418 @@
+openapi: 3.1.0
+info:
+  title: AirPrompter Agent routes (customer-v1)
+  version: 0.1.0
+  summary: The routes an agent runtime calls. Pull only; the control plane never opens a connection to you.
+  description: |
+    Every route is called by the customer's runtime over outbound HTTPS with an
+    **Agent key** bound to one agent and one target. A key bound to `staging`
+    cannot read `prod`; a key with `agent.bundle.read` cannot spend the
+    organization's allowance (`agent.run` is a separate key kind). No Agent
+    key can seal, promote, unlock or countersign anything.
+
+    Each operation carries `x-airprompter-status`: `shipped` (served by the
+    hosted service today), `planned` (the contract is fixed, the route lands
+    with the named ticket). SDKs may implement planned routes behind a
+    protocol-range check; the server answers `404` until it ships.
+
+    Error bodies are `{ "error": string, "details"?: object }` with the HTTP
+    status carrying the class; `429` carries `Retry-After`.
+  license:
+    name: BSD-3-Clause
+    identifier: BSD-3-Clause
+servers:
+  - url: https://api.airprompter.com
+    description: Hosted service
+  - url: https://{host}
+    description: A self-hosted registry implementing this protocol (Hangar)
+    variables:
+      host:
+        default: registry.example.com
+security:
+  - agentKey: []
+tags:
+  - name: distribution
+    description: Manifest, payloads and the edge pointer (§4)
+  - name: telemetry
+    description: Heartbeat and the upload grant (§9.1)
+  - name: countersign
+    description: Customer countersignatures (§6.3)
+  - name: managed
+    description: Managed execution — AirPrompter holds the key and calls the model (§18)
+
+paths:
+  /v1/agents/{agentId}/targets/{target}/manifest:
+    get:
+      operationId: getAgentManifest
+      tags: [distribution]
+      summary: Signed manifest for the target
+      x-airprompter-status: planned
+      x-airprompter-ticket: AIR-1936
+      x-airprompter-scope: agent.bundle.read
+      description: |
+        Returns the current signed manifest. `ETag` is the manifest's
+        `releaseDigest`; send it back as `If-None-Match` for a `304`.
+        `?wait=<seconds>` opts into a long poll of up to 25 s, held only until
+        the generation changes; it is bounded by a per-organization concurrency
+        cap and refused with `429` above it. Idle runtimes should poll the edge
+        pointer (`edgePointerUrl` from the heartbeat) and call this only when
+        the generation moved.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+        - $ref: "#/components/parameters/target"
+        - name: If-None-Match
+          in: header
+          schema:
+            $ref: "schemas/manifest.schema.json#/$defs/sha256"
+        - name: wait
+          in: query
+          description: Long-poll seconds, 1–25. Omit for an immediate answer.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 25
+      responses:
+        "200":
+          description: The current manifest
+          headers:
+            ETag:
+              schema:
+                $ref: "schemas/manifest.schema.json#/$defs/sha256"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "schemas/manifest.schema.json"
+        "304":
+          description: Unchanged since the digest in `If-None-Match`
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No release has been promoted to this target yet, or the key's binding does not cover it (indistinguishable by design)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/agents/{agentId}/payloads/{contentHash}:
+    get:
+      operationId: getAgentPayload
+      tags: [distribution]
+      summary: Content-addressed, immutable payload bytes
+      x-airprompter-status: planned
+      x-airprompter-ticket: AIR-1936
+      x-airprompter-scope: agent.bundle.read
+      description: |
+        Bytes for one content hash referenced by a manifest the key may read.
+        The route checks that the key's binding covers a release referencing
+        this hash — hashes are unguessable, but that is not the authorization.
+        Bodies up to 16 KiB are returned inline; larger ones `302` to a
+        short-lived presigned URL. The runtime verifies `sha256` of the bytes
+        against `contentHash` after download and again after decrypt-on-load.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+        - name: contentHash
+          in: path
+          required: true
+          schema:
+            $ref: "schemas/manifest.schema.json#/$defs/sha256"
+      responses:
+        "200":
+          description: Payload bytes
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: "private, max-age=31536000, immutable"
+            Content-Length:
+              schema:
+                type: integer
+                maximum: 16384
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "302":
+          description: Bytes above 16 KiB — follow `Location` (presigned, expires within minutes; verify the hash exactly as for an inline body)
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Not referenced by any release this key may read
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/agents/{agentId}/targets/{target}/heartbeat:
+    post:
+      operationId: postAgentHeartbeat
+      tags: [telemetry]
+      summary: Report instance state; receive the upload grant
+      x-airprompter-status: planned
+      x-airprompter-ticket: AIR-1942
+      x-airprompter-scope: agent.telemetry.write
+      description: |
+        The daemon (or an SDK without a daemon) reports what the instance is
+        running and how, and receives a presigned S3 POST grant for its spool,
+        `uploadIntervalSeconds`, the suggested poll interval and the edge
+        pointer URL. Telemetry bytes never pass through this route; they are
+        PUT straight to S3 under the grant. Refusing a grant *is* the throttle:
+        an over-quota organization, a revoked key or an incident answers with
+        `retryAfterSeconds` and the spool holds.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+        - $ref: "#/components/parameters/target"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/heartbeat.schema.json#/$defs/request"
+      responses:
+        "200":
+          description: Accepted; a grant is present unless throttled
+          content:
+            application/json:
+              schema:
+                $ref: "schemas/heartbeat.schema.json#/$defs/response"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /v1/agents/{agentId}/targets/{target}/releases/{releaseDigest}/countersign:
+    post:
+      operationId: postReleaseCountersign
+      tags: [countersign]
+      summary: Upload a customer countersignature for a release
+      x-airprompter-status: planned
+      x-airprompter-ticket: AIR-1940
+      x-airprompter-scope: agent.countersign.write
+      description: |
+        A customer release engineer signs the `releaseDigest` with a key from
+        the customer's countersign key-set (§6.3) and posts it here; the
+        signature is attached to the release and carried in every manifest that
+        can activate it (D58). The server verifies the signature against the
+        countersign public keys registered on the target before accepting it.
+        A release is identified by `(target, releaseDigest)`: identical pins
+        sealed for two targets are two releases, each countersigned on its own.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+        - $ref: "#/components/parameters/target"
+        - name: releaseDigest
+          in: path
+          required: true
+          schema:
+            $ref: "schemas/manifest.schema.json#/$defs/sha256"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/manifest.schema.json#/$defs/countersignature"
+      responses:
+        "201":
+          description: Countersignature recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [releaseDigest, countersignatures]
+                properties:
+                  releaseDigest:
+                    $ref: "schemas/manifest.schema.json#/$defs/sha256"
+                  countersignatures:
+                    type: array
+                    items:
+                      $ref: "schemas/manifest.schema.json#/$defs/countersignature"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such release on this target for a key that may see it
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Signature does not verify against a registered countersign key, or the digest in the body differs from the path
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/agents/{agentId}/targets/{target}/run:
+    post:
+      operationId: postAgentRun
+      tags: [managed]
+      summary: Run a slot on a managed target
+      x-airprompter-status: planned
+      x-airprompter-ticket: AIR-1949
+      x-airprompter-scope: agent.run
+      description: |
+        Managed execution (§18): AirPrompter renders the active version of the
+        slot, calls the model with a platform-held key, meters the run against
+        the organization's allowance, and returns the output. The customer
+        passes `subjectHash` (never the subject) so experiment assignment
+        matches client mode exactly (assignment-hash.md). Output checks
+        declared on the slot run server-side; `runRef` lets `ap.feedback()`
+        attach quality signals later. This is a separate key kind from
+        distribution keys and is never co-granted by default.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+        - $ref: "#/components/parameters/target"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunRequest"
+      responses:
+        "200":
+          description: The run completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402":
+          description: The organization's allowance is exhausted and auto-charge is off
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such slot on the active release
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: A declared output check failed and the slot is configured to refuse
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+components:
+  securitySchemes:
+    agentKey:
+      type: http
+      scheme: bearer
+      description: An Agent key minted in the Agent's Keys tab, bound to one agent and one target, with scopes granted per key.
+  parameters:
+    agentId:
+      name: agentId
+      in: path
+      required: true
+      schema:
+        $ref: "schemas/manifest.schema.json#/$defs/identifier"
+    target:
+      name: target
+      in: path
+      required: true
+      schema:
+        $ref: "schemas/manifest.schema.json#/$defs/target"
+  responses:
+    BadRequest:
+      description: The request did not validate against the schema
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing, malformed or revoked key
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: The key is not bound to this agent and target, or lacks the scope
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: Throttled; honour `Retry-After`
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    RunRequest:
+      type: object
+      additionalProperties: false
+      required: [tag, variables]
+      properties:
+        tag:
+          $ref: "schemas/manifest.schema.json#/$defs/slotTag"
+        variables:
+          description: Values for the slot's declared variables. `end_user` values are rendered only inside their declared delimiters.
+          type: object
+          maxProperties: 64
+          propertyNames:
+            pattern: "^[a-zA-Z0-9_.-]{1,64}$"
+          additionalProperties:
+            type: string
+            maxLength: 65536
+        subjectHash:
+          description: hex(SHA-256(salt ‖ subject)) computed locally; never the subject.
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        idempotencyKey:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{16,64}$"
+    RunResponse:
+      type: object
+      additionalProperties: false
+      required: [runRef, output, model, versionId, usage, latencyMs]
+      properties:
+        runRef:
+          description: Opaque reference for `ap.feedback()`; carries no content.
+          type: string
+          pattern: "^[A-Za-z0-9_-]{16,128}$"
+        output:
+          type: string
+        model:
+          $ref: "schemas/manifest.schema.json#/$defs/modelId"
+        versionId:
+          $ref: "schemas/manifest.schema.json#/$defs/identifier"
+        arm:
+          type: string
+        usage:
+          type: object
+          additionalProperties: false
+          required: [inputTokens, outputTokens]
+          properties:
+            inputTokens: { type: integer, minimum: 0 }
+            outputTokens: { type: integer, minimum: 0 }
+            cacheReadTokens: { type: integer, minimum: 0 }
+        latencyMs:
+          type: integer
+          minimum: 0
+        outputChecks:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [check, passed]
+            properties:
+              check: { type: string, maxLength: 64 }
+              passed: { type: boolean }

@@ -1,0 +1,5 @@
+{
+  "pollSeconds": 120,
+  "uploadIntervalSeconds": 600,
+  "retryAfterSeconds": 300
+}

@@ -8,6 +8,8 @@ import json
 import os
 import sys
 
+PROTOCOL = "0.2.0"
+
 def canonical(v) -> str:
     return json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -95,7 +97,7 @@ candidate_slots = [candidate_triage if s["tag"] == "support.triage" else s for s
 candidate_digest = release_digest(candidate_slots)
 
 manifest_payload = {
-    "protocol": "0.1.0",
+    "protocol": PROTOCOL,
     "organizationId": "org_7d3f9a2b",
     "agentId": "agt_4e8c1b6d",
     "target": "prod",
@@ -134,7 +136,7 @@ jwk = {"kty": "EC", "crv": "P-256", "x": b64url(bytes([1] * 32)), "y": b64url(by
 key_set = {
     "signed": {
         "type": "root",
-        "protocol": "0.1.0",
+        "protocol": PROTOCOL,
         "purpose": "platform",
         "environment": "prod",
         "version": 3,
@@ -162,7 +164,7 @@ payload_bytes[candidate_triage["contentHash"]] = triage_text + b"Be concise.\n"
 bundle_plain = {
     "format": "apbundle",
     "version": 1,
-    "protocol": "0.1.0",
+    "protocol": PROTOCOL,
     "encryption": {
         "scheme": "none",
         "contents": {
@@ -177,7 +179,7 @@ bundle_plain = {
 bundle_encrypted = {
     "format": "apbundle",
     "version": 1,
-    "protocol": "0.1.0",
+    "protocol": PROTOCOL,
     "encryption": {
         "scheme": "hpke-x25519-hkdf-sha256-aes-256-gcm",
         "recipientKeyId": "dist-acme-prod-2026",
@@ -188,7 +190,7 @@ bundle_encrypted = {
 }
 
 heartbeat_request = {
-    "protocol": "0.1.0",
+    "protocol": PROTOCOL,
     "instanceId": "inst_5f3c9a2b7e1d4c08",
     "sdk": {"name": "airprompterd", "version": "0.1.0", "protocolRange": ">=0.1.0 <1.0.0"},
     "host": {"os": "linux", "arch": "arm64", "runtime": "node/22.11.0"},

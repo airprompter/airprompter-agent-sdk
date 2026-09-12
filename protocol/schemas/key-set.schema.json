@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.1/key-set.schema.json",
+  "$id": "https://airprompter.com/protocol/0.2/key-set.schema.json",
   "title": "AirPrompter root metadata (key-set)",
   "description": "TUF-shaped root of trust (D53). `signed` lists the online `targets` keys that may sign manifests, with a threshold and an expiry, and is itself signed by the offline `root` keys. The root public key is pinned in SDK source; rotating a signing key is a new root document signed by root, so a compromised signing key can never authorize its successor. Customer countersign key-sets use the same shape with `purpose: countersign`.",
   "type": "object",

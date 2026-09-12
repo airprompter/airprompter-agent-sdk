@@ -16,6 +16,7 @@ service, and by any self-hosted registry that implements it.
 | `schemas/latency-buckets.json` | The 16 fixed histogram edges every writer must use |
 | `schemas/feedback-signals.schema.json` | What `ap.feedback()` accepts |
 | `canonical-json.md` | Canonical JSON: the encoding under every release digest and every signature, and what the digest covers |
+| `trust-chain.md` | Root metadata acceptance (R1–R5), manifest verification (M1–M12), refusal vocabulary, rotation, and why expiry degrades instead of bricking |
 | `assignment-hash.md` | Sticky assignment: `SHA-256(salt ‖ subject)`, first 8 bytes big-endian mod 10000, cumulative arm weights |
 | `spool-format.md` | The local telemetry spool: file layout, row types, what may never be in it, how third-party instrumentation writes to it |
 | `examples/` | One valid document per schema, and `refused/` documents each schema must reject |
@@ -33,8 +34,7 @@ the root public key is pinned in SDK source — and that root document must
 not be expired. A countersignature signs the UTF-8 bytes of a
 `releaseDigest` string with a customer-held key from a customer root
 document of the same shape. The verification order and the refusal codes
-are in `schemas/heartbeat.schema.json` (`refusal`) and in the trust-chain
-vectors when they land.
+are `trust-chain.md`; `vectors/manifest-verify.json` has a case per refusal.
 
 ## Scopes named here
 

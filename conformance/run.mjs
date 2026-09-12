@@ -21,6 +21,7 @@ import {
   validateArms,
   decodeBase64Url,
 } from "./reference.mjs";
+import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./trust.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const protocolDir = join(here, "..", "protocol");
@@ -251,6 +252,39 @@ for (const r of as.refused) {
     if (error instanceof AssignmentError && error.reason === r.reason) ok(`refused: ${r.name} → ${r.reason}`);
     else fail(`refused: ${r.name}`, `expected ${r.reason}, got ${error.reason ?? error.message}`);
   }
+}
+
+section("vectors: trust chain (root metadata)");
+const trustPath = process.env.TRUST_VECTORS ?? join(protocolDir, "vectors", "manifest-verify.json");
+const tv = readJson(trustPath);
+const verdictMatches = (result, expected) => result.ok === expected.ok && (expected.ok ? (expected.signingKeyId === undefined || result.signingKeyId === expected.signingKeyId) && (expected.generation === undefined || result.generation === expected.generation) : result.reason === expected.reason);
+for (const c of tv.rootMetadata) {
+  const trusted = c.trustedRoot ?? trustedRootFromPinnedKey({ purpose: c.purpose, environment: c.environment, pinnedRootJwk: c.pinnedRoot });
+  const result = verifyRootMetadata({ candidate: c.candidate, trusted, now: c.now });
+  if (verdictMatches(result, c.expected)) ok(c.name);
+  else fail(c.name, `got ${JSON.stringify(result)}, expected ${JSON.stringify(c.expected)}`);
+}
+
+section("vectors: trust chain (manifests)");
+for (const c of tv.manifests) {
+  const payloads = c.payloads ? new Map(c.payloads.map((p) => [p.contentHash, Buffer.from(p.bytes, "base64url")])) : null;
+  const result = verifyManifest({
+    manifest: c.manifest,
+    root: c.root,
+    now: c.now,
+    scope: c.scope,
+    storedGeneration: c.storedGeneration,
+    payloads,
+    countersignRoot: c.countersignRoot ?? null,
+    requireCountersign: c.requireCountersign ?? false,
+  });
+  if (verdictMatches(result, c.expected)) ok(c.name);
+  else fail(c.name, `got ${JSON.stringify(result)}, expected ${JSON.stringify(c.expected)}`);
+}
+const refusalEnum = readJson(join(schemaDir, "heartbeat.schema.json")).$defs.request.properties.refusal.enum;
+for (const reason of new Set([...tv.rootMetadata, ...tv.manifests].filter((c) => !c.expected.ok).map((c) => c.expected.reason))) {
+  if (refusalEnum.includes(reason)) ok(`refusal ${reason} is reportable on heartbeat`);
+  else fail(`refusal ${reason} is reportable on heartbeat`, "missing from heartbeat.schema.json refusal enum");
 }
 
 // ---------------------------------------------------------------------------

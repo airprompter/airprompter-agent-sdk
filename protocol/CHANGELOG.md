@@ -1,5 +1,27 @@
 # Protocol changelog
 
+## 0.2.0 — 2026-09-12 (tag `protocol/v0.2.0`)
+
+Breaking for readers of `heartbeat.refusal` (new enum values); additive
+otherwise. Schema `$id`s move to `/protocol/0.2/`.
+
+- **Trust chain** (`trust-chain.md`): the verification order a runtime
+  follows — root metadata R1–R5 (scope, key-id = thumbprint, rollback,
+  root-role signatures against the *trusted* document, expiry) and
+  manifest M1–M12 (root expiry, protocol major, listed signing key, key
+  validity window, signature, threshold, scope, generation, payload
+  presence, payload hash + length, countersign presence, countersign
+  validity). `keyId` is now defined as the RFC 7638 thumbprint, not merely
+  recommended. Expiry degrades: refusals apply to new manifests and the
+  active release keeps serving.
+- **Vectors** `vectors/manifest-verify.json`: 10 root cases + 30 manifest
+  cases with real ES256 signatures (`tools/gen_trust_vectors.mjs`).
+- **Heartbeat** `refusal` enum is now the full trust-chain vocabulary
+  (17 values, was 9). The conformance runner checks every vector refusal
+  is reportable.
+- **Conformance**: `trust.mjs` reference verifier; CI verifies a freshly
+  generated vector file as well as the committed one.
+
 ## 0.1.0 — 2026-09-12 (tag `protocol/v0.1.0`)
 
 First pinned protocol. Pre-1.0: a minor bump may still change a schema

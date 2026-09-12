@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.1/bundle.schema.json",
+  "$id": "https://airprompter.com/protocol/0.2/bundle.schema.json",
   "title": "AirPrompter offline bundle (.apbundle)",
   "description": "An offline update is the OTA release, serialized (D37): the signed manifest, every payload it references, and the current key-set, with a signed `notAfter`. The file travels by USB stick, artifact repository or email, so it is encrypted to the target's distribution public key (HPKE, D56). A plaintext bundle is a `dev`-target opt-in and never the default. `apply` runs the identical verification path as OTA.",
   "type": "object",

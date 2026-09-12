@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.1/manifest.schema.json",
+  "$id": "https://airprompter.com/protocol/0.2/manifest.schema.json",
   "title": "AirPrompter signed release manifest",
   "description": "What a target is allowed to run, as a signed envelope. The platform signature covers the whole payload; countersignatures cover the releaseDigest of every release the manifest can activate (D58). No prompt text is ever in a manifest: slots name payloads by content hash and the runtime fetches them separately.",
   "type": "object",
@@ -39,7 +39,7 @@
     "timestamp": { "type": "string", "format": "date-time" },
     "base64url": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
     "keyId": {
-      "description": "Opaque key identifier; the recommended value is the RFC 7638 JWK thumbprint of the public key.",
+      "description": "The RFC 7638 JWK thumbprint of the public key, hex (trust-chain.md). Root metadata listing a key under any other id is refused.",
       "type": "string",
       "minLength": 1,
       "maxLength": 128,

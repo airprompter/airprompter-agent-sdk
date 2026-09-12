@@ -4,7 +4,7 @@
   "document": {
     "format": "apbundle",
     "version": 1,
-    "protocol": "0.1.0",
+    "protocol": "0.2.0",
     "encryption": {
       "scheme": "aes-128-cbc",
       "recipientKeyId": "dist-acme-prod-2026",

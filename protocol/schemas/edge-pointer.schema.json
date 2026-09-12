@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.1/edge-pointer.schema.json",
+  "$id": "https://airprompter.com/protocol/0.2/edge-pointer.schema.json",
   "title": "AirPrompter edge generation pointer",
   "description": "`generation.json` served from S3 behind CloudFront at an unguessable per-target path (D21, D59). A few hundred bytes, no prompt text; idle instances poll it and fetch the authorized manifest only when `generation` moved. Written with `Cache-Control: max-age=30` and invalidated on every promotion, so propagation is bounded by 30 s plus the poll interval.",
   "type": "object",

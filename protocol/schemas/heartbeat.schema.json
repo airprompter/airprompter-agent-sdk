@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.1/heartbeat.schema.json",
+  "$id": "https://airprompter.com/protocol/0.2/heartbeat.schema.json",
   "title": "AirPrompter heartbeat",
   "description": "One route, one Lambda (D41): an instance reports its state and receives the presigned S3 upload grant for its spool (§9.1). Telemetry bytes never pass through this route. Everything here is content-free by schema: no prompt text, no outputs, no end-user identifiers.",
   "$defs": {
@@ -52,9 +52,27 @@
           "enum": ["active", "staged", "awaiting_unlock", "awaiting_countersign", "refused", "vendored_fallback"]
         },
         "refusal": {
-          "description": "Why the latest manifest was refused, when applyState is `refused`.",
+          "description": "Why the latest manifest (or root document) was refused, when applyState is `refused`. The vocabulary and order are trust-chain.md.",
           "type": "string",
-          "enum": ["root_expired", "unknown_signing_key", "signature_invalid", "scope_mismatch", "generation_rollback", "payload_hash_mismatch", "countersign_missing", "schema_invalid", "protocol_unsupported"]
+          "enum": [
+            "root_scope_mismatch",
+            "key_id_mismatch",
+            "root_rollback",
+            "root_signature_invalid",
+            "root_expired",
+            "protocol_unsupported",
+            "unknown_signing_key",
+            "signing_key_expired",
+            "signature_invalid",
+            "signature_threshold",
+            "scope_mismatch",
+            "generation_rollback",
+            "payload_missing",
+            "payload_hash_mismatch",
+            "countersign_missing",
+            "countersign_invalid",
+            "schema_invalid"
+          ]
         },
         "signingKeyId": {
           "description": "keyId that signed the active manifest, so rotation progress is visible per fleet.",

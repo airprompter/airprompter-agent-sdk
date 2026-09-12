@@ -1,7 +1,7 @@
 {
   "signed": {
     "type": "root",
-    "protocol": "0.1.0",
+    "protocol": "0.2.0",
     "purpose": "platform",
     "environment": "prod",
     "version": 3,

@@ -44,6 +44,13 @@ jobs:
           diff -u protocol/vectors/assignment.json /tmp/assignment.json
           python3 protocol/tools/gen_examples.py /tmp/examples >/dev/null
           diff -ru protocol/examples /tmp/examples
+      - name: Trust-chain vectors verify with fresh signatures too
+        # ECDSA signatures are randomised, so this file is not byte-diffed;
+        # a fresh generation must still verify, which proves the chain logic
+        # rather than one committed nonce.
+        run: |
+          node protocol/tools/gen_trust_vectors.mjs /tmp/manifest-verify.json
+          TRUST_VECTORS=/tmp/manifest-verify.json npm test --prefix conformance
       - name: Every protocol change carries a CHANGELOG entry
         if: github.event_name == 'pull_request'
         env:

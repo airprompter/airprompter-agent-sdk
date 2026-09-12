@@ -37,7 +37,7 @@ export const PULL_OPTIONS: OptionSpec = {
   "distribution-key": { type: "string", help: "The target's distribution PUBLIC key (.pub.json or base64url) to encrypt the bundle to" },
   out: { type: "string", help: "Output path, e.g. airprompter.bundle.apbundle" },
   plaintext: { type: "boolean", default: false, help: "Write an unencrypted bundle (dev environment only)" },
-  "not-after-days": { type: "string", default: "30", help: "Days until the bundle's notAfter" },
+  "not-after-days": { type: "string", default: "90", help: "Days until the bundle's notAfter (the platform's update-file default; 365 at most)" },
   check: { type: "boolean", default: false, help: "Do not pull: compare the vendored bundle's sidecar with the current generation" },
   "tags-only": { type: "boolean", default: false, help: "Hosted environments: write the catalogue (tags, variables, step ids, experiment arms) with a RUN key; --base-url is the hosted run URL; no payloads, no root" },
   "max-behind": { type: "string", default: "0", help: "With --check: generations the vendored bundle may be behind before exit 3" },
@@ -156,8 +156,8 @@ export async function pull(argv: string[], ctx: Context): Promise<number> {
   const report = verifyChain({ manifest, keySet, payloads, root, scope, now, storedGeneration: 0 });
   if (!report.ok) throw new CliError(EXIT.refused, `refused at ${report.step}: ${report.reason}`, { step: report.step, reason: report.reason, root: report.root });
 
-  const days = Number(str(parsed, "not-after-days") ?? "30");
-  if (!Number.isFinite(days) || days <= 0) throw usage("--not-after-days must be a positive number");
+  const days = Number(str(parsed, "not-after-days") ?? "90");
+  if (!Number.isFinite(days) || days <= 0 || days > 365) throw usage("--not-after-days must be a positive number of days, 365 at most");
   const notAfter = new Date(ctx.now() + days * 86_400_000).toISOString();
   const contents: BundleContents = {
     createdAt: now,

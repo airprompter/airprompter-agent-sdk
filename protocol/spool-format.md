@@ -152,6 +152,34 @@ Serverless runtimes (no daemon, memory buffer) POST their own rows at
 invocation end as one segment under their own grant; rows that cannot go
 (a hold, a refused POST) stay buffered for the next invocation.
 
+## The spool over a file (T16)
+
+A host that never calls home carries its telemetry out as one document,
+`airprompter export-telemetry`'s output (`.aptelemetry` by convention):
+
+```json
+{
+  "kind": "airprompter-telemetry-export", "v": 1, "protocol": "0.2.5",
+  "organizationId": "org_…", "agentId": "agt_…", "target": "prod",
+  "exportedAt": "2026-09-12T14:08:10.000Z", "generation": 12, "cli": "0.1.0",
+  "segments": [
+    { "name": "seg-i-offlineAAAAAAA-29817383-0.ndjson", "instanceId": "i-offlineAAAAAAA", "bytes": "<base64url of the segment, verbatim>" }
+  ]
+}
+```
+
+Only closed segments with at least one valid row travel; the bytes are
+the segment file's own, so the ingest processor sees exactly what the
+daemon would have posted. `import-telemetry` on a connected host
+heartbeats once per `instanceId` the file names (as that instance,
+`syncMode: "offline"`, `generation.active` = the exported generation,
+`spool.depthSegments` = that instance's segments in the file), takes the
+grant to that instance's prefix and PUTs each segment under its own name.
+S3 PUT is idempotent by key, so importing a file twice leaves the same
+objects. The exporting host moves packed segments to
+`spool/telemetry/exported/` (swept a week after export); a hold on import is
+reported with the platform's `retryAfterSeconds` and nothing is uploaded.
+
 ## Writing to the spool without our SDK
 
 1. After each model call, take `usage` and elapsed time from the provider

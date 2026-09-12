@@ -216,6 +216,12 @@ test("offline: with no key the store serves what it last verified; with the stor
   await fromBundle.invoke(async () => fromBundle.report({ tag: "support.reply", versionId: "v", arm: "none", model: "gpt-5", status: "ok", latencyMs: 3 }));
   assert.equal(fromBundle.drainMemorySink().length, 1);
   await fromBundle.stop();
+  // T16: a vendored bundle inside the platform's 30-day warning logs how long it has left; past it, the existing event.
+  const soon = createPlaintextBundle({ createdAt: new Date().toISOString(), notAfter: new Date(Date.now() + 10 * 86_400_000 + 3_600_000).toISOString(), manifest: plane.manifest!, keySet: plane.root, payloads: [...plane.payloads].map(([contentHash, bytes]) => ({ contentHash: contentHash as `sha256:${string}`, byteLength: bytes.length, bytes: bytes.toString("base64url") })) });
+  const expiry: Record<string, unknown>[] = [];
+  const expiring = await AirPrompterAgent.start({ ...scope, stateDir: tempDir(), root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "on_invoke" }, vendoredBundle: { bundle: soon }, logger: (e) => (/^vendored_bundle_(expiring_soon|past_not_after)$/.test(String(e.event)) ? expiry.push(e) : undefined) });
+  assert.deepEqual(expiry.map((e) => [e.event, e.daysLeft]), [["vendored_bundle_expiring_soon", 10]]);
+  await expiring.stop();
   // A plaintext bundle for another target is refused; nothing at all refuses to start.
   const other = createPlaintextBundle({ createdAt: new Date().toISOString(), notAfter: "2027-01-01T00:00:00Z", manifest: plane.manifest!, keySet: plane.root, payloads: [] });
   await assert.rejects(AirPrompterAgent.start({ ...scope, target: "staging", stateDir: tempDir(), root: { pinned: publicJwkOf(plane.rootKey) }, vendoredBundle: { bundle: other } }), (e: unknown) => e instanceof AgentStartError && e.code === "no_verified_release");

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Air-gapped update files and the spool over a file** (AIR-1946, T16,
+  D33 / §6.3): the platform builds the same `.apbundle` `pull` writes —
+  promoted manifest, payloads, the environment's root document — sealed
+  to the environment's registered distribution key, with a `notAfter` 90
+  days out by default (365 at most); `verify` and `apply` print
+  `daysLeft` / `expiringSoon` and warn inside the last 30 days, and a
+  runtime starting from a vendored bundle that close logs
+  `vendored_bundle_expiring_soon`. `pull --not-after-days` now defaults
+  to 90 to match. `airprompter export-telemetry` packs the spool's closed
+  segments into an `airprompter-telemetry-export` document (spool-format.md
+  › The spool over a file) and `import-telemetry` uploads it through the
+  ordinary heartbeat + grant path, one grant per instance, idempotent by
+  key. No wire change on the control plane.
+
 - **Provider-compatible endpoints** (AIR-1962, T32, D64 / §11.2):
   compatible-endpoints.md. The OpenAI Chat Completions and Responses shapes
   under `/v1/agents/{agentId}/openai/…` and the Anthropic Messages shape

@@ -78,6 +78,7 @@ test("keygen → pull (encrypted) → verify → apply on a clean host → statu
   assert.equal(await run(["pull", ...scopeArgs, "--root", rootPath, "--root-url", "https://edge.test/roots/prod/root.json", "--distribution-key", join(work, "keys", "prod.pub.json"), "--out", bundlePath, "--json"], h.ctx), EXIT.ok);
   const pulled = h.json();
   assert.equal(pulled.generation, 1);
+  assert.equal(Math.round((Date.parse(String(pulled.notAfter)) - h.ctx.now()) / 86_400_000), 90, "the platform's update-file default");
   assert.equal(pulled.encryption, "hpke");
   assert.equal(pulled.recipientKeyId, keygen.keyId);
   assert.equal(pulled.slots, 1);
@@ -95,6 +96,21 @@ test("keygen → pull (encrypted) → verify → apply on a clean host → statu
   const verified = h.json();
   assert.equal(verified.ok, true);
   assert.equal(verified.step, "complete");
+  assert.ok(verified.daysLeft === 89 || verified.daysLeft === 90, `daysLeft ${verified.daysLeft}`);
+  assert.equal(verified.expiringSoon, false, "90 days out: no warning");
+  h.reset();
+  // T16: a bundle inside the platform's 30-day warning says how long it has left; more than a year is refused.
+  const shortLived = join(work, "short.apbundle");
+  assert.equal(await run(["pull", ...scopeArgs, "--root", rootDocPath, "--distribution-key", join(work, "keys", "prod.pub.json"), "--out", shortLived, "--not-after-days", "7", "--json"], h.ctx), EXIT.ok);
+  h.reset();
+  assert.equal(await run(["verify", shortLived, ...scopeArgs, "--root", rootDocPath, "--distribution-key", join(work, "keys", "prod.key.json"), "--json"], h.ctx), EXIT.ok);
+  assert.ok(h.json().daysLeft === 6 || h.json().daysLeft === 7, `daysLeft ${h.json().daysLeft}`);
+  assert.equal(h.json().expiringSoon, true);
+  h.reset();
+  assert.equal(await run(["verify", shortLived, ...scopeArgs, "--root", rootDocPath, "--distribution-key", join(work, "keys", "prod.key.json")], h.ctx), EXIT.ok);
+  assert.ok(h.stdout.some((l) => /^warning: expires in [67] days — download a fresh update file before then$/.test(l)), h.stdout.join("\n"));
+  h.reset();
+  assert.equal(await run(["pull", ...scopeArgs, "--root", rootDocPath, "--distribution-key", join(work, "keys", "prod.pub.json"), "--out", shortLived, "--not-after-days", "400", "--json"], h.ctx), EXIT.usage);
   assert.equal((verified.manifest as { payloads: number }).payloads, 1);
   h.reset();
   assert.equal(await run(["verify", bundlePath, ...scopeArgs, "--root", rootDocPath, "--json"], h.ctx), EXIT.refused);

@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { Bundle } from "../../../sdk-typescript/src/protocol/types.js";
 import { StoreError } from "../../../sdk-typescript/src/store/slotStore.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
-import { openBundleFile, payloadsOf, verifyChain } from "../chain.js";
+import { EXPIRY_WARNING_DAYS, openBundleFile, payloadsOf, verifyChain } from "../chain.js";
 import { CliError, EXIT, Output, refused, usage, type Context } from "../io.js";
 import { loadDistributionPrivateKey } from "../keys.js";
 
@@ -82,6 +82,9 @@ export async function apply(argv: string[], ctx: Context): Promise<number> {
   out.field("forcedDowngrade", generation < stored, "forced downgrade");
   out.field("expired", opened.expired);
   if (opened.expired) out.line("warning: past notAfter — the runtime starts lease-expired on this release");
+  else if (opened.daysLeft < EXPIRY_WARNING_DAYS) out.line(`warning: expires in ${opened.daysLeft} day${opened.daysLeft === 1 ? "" : "s"} — download a fresh update file before then`);
+  out.set("daysLeft", opened.daysLeft);
+  out.set("expiringSoon", !opened.expired && opened.daysLeft < EXPIRY_WARNING_DAYS);
   if (!activate) out.line(policy === "unlock_required" ? "staged: this environment requires an unlock (airprompter unlock, or the runtime's apply.onStaged hook) before it serves" : "staged only (--stage-only)");
   out.flush();
   return EXIT.ok;

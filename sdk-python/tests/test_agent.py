@@ -15,7 +15,7 @@ import tempfile
 
 import pytest
 
-from airprompter_agent._util import instant, iso_ms
+from airprompter_agent._util import instant, iso_ms, now_ms
 from airprompter_agent.agent import AgentStartError, AirPrompterAgent, RenderRefusedError, SyncOptions, VendoredBundle
 from airprompter_agent.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle
 from airprompter_agent.bundle.hpke import generate_x25519_key_pair
@@ -203,6 +203,12 @@ def test_offline_store_then_vendored_bundle_then_refuse(state_dir):
         from_bundle.invoke(lambda: from_bundle.report(tag="support.reply", version_id="v", arm="none", model="gpt-5", status="ok", latency_ms=3))
         assert len(from_bundle.drain_memory_sink()) == 1
         from_bundle.stop()
+        # T16: a vendored bundle inside the platform's 30-day warning logs how long it has left.
+        soon = create_plaintext_bundle({**contents, "notAfter": iso_ms(now_ms() + 10 * 86_400_000 + 3_600_000)})
+        expiry: list[dict] = []
+        expiring = AirPrompterAgent.start(**KW, state_dir=tempfile.mkdtemp(), root={"pinned": public_jwk_of(plane.root_key)}, sync={"mode": "on_invoke"}, vendored_bundle={"bundle": soon}, logger=lambda e: expiry.append(e) if e.get("event") in ("vendored_bundle_expiring_soon", "vendored_bundle_past_not_after") else None)
+        assert [(e["event"], e["daysLeft"]) for e in expiry] == [("vendored_bundle_expiring_soon", 10)]
+        expiring.stop()
         other = create_plaintext_bundle({**contents, "payloads": []})
         with pytest.raises(AgentStartError) as wrong_target:
             AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target="staging", state_dir=tempfile.mkdtemp(), root={"pinned": public_jwk_of(plane.root_key)}, vendored_bundle={"bundle": other})

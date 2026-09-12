@@ -39,6 +39,8 @@ export const SDK_NAME = "agent-sdk-ts";
 export const SDK_VERSION = "0.1.0";
 /** The protocol this SDK speaks; the heartbeat names it (the manifest carries its own). */
 export const PROTOCOL_VERSION = "0.2.5";
+/** A vendored bundle this close to its notAfter logs `vendored_bundle_expiring_soon` at start (the platform warns at the same distance). */
+export const VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30;
 
 export type SyncMode = "resident" | "on_invoke" | "daemon" | "offline";
 
@@ -386,7 +388,9 @@ export class AirPrompterAgent {
         const bundle = typeof this.options.vendoredBundle.bundle === "string" ? (JSON.parse(readFileSync(this.options.vendoredBundle.bundle, "utf8")) as Bundle) : this.options.vendoredBundle.bundle;
         const contents = openBundle(bundle, { agentId: this.options.agentId, target: this.options.target }, this.options.vendoredBundle.distributionKey);
         this.bundleNotAfter = contents.notAfter;
-        if (instant(contents.notAfter) <= instant(now)) this.log({ event: "vendored_bundle_past_not_after", notAfter: contents.notAfter });
+        const daysLeft = Math.floor((instant(contents.notAfter) - instant(now)) / 86_400_000);
+        if (daysLeft < 0) this.log({ event: "vendored_bundle_past_not_after", notAfter: contents.notAfter });
+        else if (daysLeft < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS) this.log({ event: "vendored_bundle_expiring_soon", notAfter: contents.notAfter, daysLeft });
         const rootVerdict = verifyRootMetadata({ candidate: contents.keySet, trusted: this.trustedRoot, now });
         if (rootVerdict.ok) {
           this.trustedRoot = contents.keySet;

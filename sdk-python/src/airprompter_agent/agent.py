@@ -51,6 +51,8 @@ SDK_NAME = "agent-sdk-python"
 SDK_VERSION = "0.1.0"
 #: The protocol this SDK speaks; the heartbeat names it (the manifest carries its own).
 PROTOCOL_VERSION = "0.2.5"
+# A vendored bundle this close to its notAfter logs vendored_bundle_expiring_soon at start (the platform warns at the same distance).
+VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30
 _USER_AGENT = f"{SDK_NAME}/{SDK_VERSION}"
 _REFUSAL_WORD = re.compile(r"^[a-z_]+$")
 
@@ -488,8 +490,11 @@ class AirPrompterAgent:
                     bundle = vendored.bundle
                 contents = open_bundle(bundle, {"agentId": self._o["agent_id"], "target": self._o["target"]}, vendored.distribution_key)
                 self._bundle_not_after = contents["notAfter"]
-                if instant(contents["notAfter"]) <= instant(now):
+                days_left = (instant(contents["notAfter"]) - instant(now)) // 86_400_000
+                if days_left < 0:
                     self._log({"event": "vendored_bundle_past_not_after", "notAfter": contents["notAfter"]})
+                elif days_left < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS:
+                    self._log({"event": "vendored_bundle_expiring_soon", "notAfter": contents["notAfter"], "daysLeft": days_left})
                 verdict = verify_root_metadata(candidate=contents["keySet"], trusted=self._trusted_root, now=now)
                 if verdict.ok:
                     self._trusted_root = contents["keySet"]

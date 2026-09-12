@@ -12,10 +12,11 @@ airprompter status   Active and staged generation, lease, storage protection, sp
 airprompter diff     What a bundle would change against the active release on this host
 airprompter keygen   Generate a distribution or countersign keypair
 airprompter daemon   airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket
+airprompter export-telemetry   Pack the spool's unsent segments into one file for a host that never calls home
+airprompter import-telemetry   Upload an exported telemetry file through the grant path on a connected host (idempotent)
 ```
 
-Coming with later tickets: `countersign` (T10), `export-telemetry` /
-`import-telemetry` (T16).
+Coming with a later ticket: `countersign` (T10).
 
 ## The daemon
 
@@ -124,6 +125,58 @@ to match what the runtime was started with.
 `keygen` refuses to write a private key inside a git worktree unless
 `--allow-worktree`: the one way a key ends up in a repository is by
 being written next to the code.
+
+## A host that never calls home
+
+An environment whose hosts have no route to AirPrompter is served by a
+file. In Agent › Settings › Environments the console offers **Download
+update file** on an environment whose sync mode is offline and whose
+distribution key is registered: the promoted release, its payloads and
+the environment's root document, sealed to that key — the same
+`.apbundle` `pull` writes, built by the platform. The file is good for
+90 days by default (`notAfter`; a year at most) and the console, `verify`
+and `apply` all warn inside the last 30.
+
+```bash
+# on the connected side: download the update file from the console, carry it across
+# on the host:
+airprompter verify agt_…-prod-g12.apbundle --org … --agent … --environment prod \
+  --root ./airprompter-root.jwk.json --distribution-key ~/.config/airprompter/prod.key.json
+airprompter apply  agt_…-prod-g12.apbundle --org … --agent … --environment prod --root … --distribution-key …
+
+# telemetry back: pack what the SDKs on this host spooled
+airprompter export-telemetry --org … --agent … --environment prod --out 2026-09-12.aptelemetry
+# carry the file to a host that can reach AirPrompter, then:
+AIRPROMPTER_AGENT_KEY=… airprompter import-telemetry --org … --agent … --environment prod --in 2026-09-12.aptelemetry
+```
+
+`export-telemetry` packs every closed segment in `spool/telemetry/` that
+has at least one valid row (a segment with none is left in place and
+named on stderr), verbatim, and moves the packed ones to
+`spool/telemetry/exported/` so the next export packs only what is new
+(`--keep` leaves them; what sits in `exported/` for more than a week is
+swept by the next export). The file carries the scope, the store's active
+generation and the segments; no prompt text, no responses — the spool
+never holds any. `import-telemetry` heartbeats once per instance the
+file names (as that instance, `syncMode: offline`, with the exported
+generation), takes the grant to that instance's prefix and posts each
+segment under its own name: the same path the daemon uploads by, so
+importing the same file twice re-puts the same keys and counts nothing
+twice. A hold is reported with the platform's retry and exits `1`; a
+file for another agent or environment is a usage error before any
+network.
+
+### Custody of the distribution key
+
+The private half of the distribution key opens every update file sealed
+to it — it is, in effect, the environment's data-encryption key. Keep it
+where the runtime reads it and nowhere else (`keygen` writes it `0600`
+and refuses a git worktree); never copy it beside the update file.
+Re-key at least every 90 days: `keygen` a new pair, register the new
+public key on the environment, download a fresh update file, then retire
+the old private key once the hosts have applied it. Nothing about a
+downloaded file needs to be secret beyond that key — the file is
+ciphertext, its name carries only the agent, environment and generation.
 
 ## Building
 

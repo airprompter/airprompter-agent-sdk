@@ -12,7 +12,7 @@ import { SlotStore, StoreError } from "../../../sdk-typescript/src/store/slotSto
 import { fileKey } from "../../../sdk-typescript/src/store/keyProvider.js";
 import { join } from "node:path";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
-import { openBundleFile, payloadsOf, summarizeManifest, verifyChain, type ChainReport } from "../chain.js";
+import { EXPIRY_WARNING_DAYS, openBundleFile, payloadsOf, summarizeManifest, verifyChain, type ChainReport } from "../chain.js";
 import { EXIT, Output, refused, usage, type Context } from "../io.js";
 import { loadDistributionPrivateKey } from "../keys.js";
 
@@ -108,7 +108,10 @@ export async function verify(argv: string[], ctx: Context): Promise<number> {
   out.field("recipientKeyId", opened.recipientKeyId, "recipient key");
   out.field("notAfter", opened.contents.notAfter, "not after");
   if (opened.expired) out.line("warning: past notAfter — a runtime applying this bundle starts lease-expired");
+  else if (opened.daysLeft < EXPIRY_WARNING_DAYS) out.line(`warning: expires in ${opened.daysLeft} day${opened.daysLeft === 1 ? "" : "s"} — download a fresh update file before then`);
   out.set("expired", opened.expired);
+  out.set("daysLeft", opened.daysLeft);
+  out.set("expiringSoon", !opened.expired && opened.daysLeft < EXPIRY_WARNING_DAYS);
   printReport(out, { ...report, manifest: summarizeManifest(opened.contents.manifest) });
   out.flush();
   if (!report.ok) ctx.stderr(`refused at ${report.step}: ${report.reason}`);

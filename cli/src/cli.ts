@@ -11,6 +11,7 @@ import { diff } from "./commands/diff.js";
 import { keygen } from "./commands/keygen.js";
 import { pull } from "./commands/pull.js";
 import { status } from "./commands/status.js";
+import { exportTelemetry, importTelemetry } from "./commands/telemetry.js";
 import { unlock } from "./commands/unlock.js";
 import { verify } from "./commands/verify.js";
 import { CliError, EXIT, type Context } from "./io.js";
@@ -25,6 +26,8 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   diff: { run: diff, summary: "What a bundle would change against the active release on this host" },
   keygen: { run: keygen, summary: "Generate a distribution or countersign keypair" },
   daemon: { run: daemon, summary: "airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket" },
+  "export-telemetry": { run: exportTelemetry, summary: "Pack the spool's unsent segments into one file for a host that never calls home" },
+  "import-telemetry": { run: importTelemetry, summary: "Upload an exported telemetry file through the grant path on a connected host (idempotent)" },
 };
 
 export function help(): string {

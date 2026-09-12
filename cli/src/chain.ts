@@ -113,7 +113,12 @@ export interface OpenedBundle {
   encryption: "none" | "hpke";
   recipientKeyId: string | null;
   expired: boolean;
+  /** Whole days until `notAfter` (negative once past it). */
+  daysLeft: number;
 }
+
+/** The platform warns this many days before an update file's `notAfter`; `verify` / `apply` say the same thing. */
+export const EXPIRY_WARNING_DAYS = 30;
 
 export function openBundleFile(bundle: Bundle, scope: { agentId: string; target: string }, key: DistributionKey | undefined, now: string): OpenedBundle {
   const contents = openBundle(bundle, scope, key);
@@ -122,6 +127,7 @@ export function openBundleFile(bundle: Bundle, scope: { agentId: string; target:
     encryption: bundle.encryption.scheme === "none" ? "none" : "hpke",
     recipientKeyId: bundle.encryption.scheme === "none" ? null : bundle.encryption.recipientKeyId,
     expired: instant(contents.notAfter) <= instant(now),
+    daysLeft: Math.floor((instant(contents.notAfter) - instant(now)) / 86_400_000),
   };
 }
 

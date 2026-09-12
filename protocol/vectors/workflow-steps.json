@@ -1,0 +1,44 @@
+{
+  "$comment": "Workflow slot conformance (AIR-1933). An SDK's workflow() iterator must yield steps in `ordinal` order, tag each `<slot tag>#<ordinal>`, and refuse a slot tag containing '#'. Every step's contentHash is a payload the runtime fetches by hash and verifies before rendering.",
+  "stepTag": {
+    "separator": "#",
+    "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*#[1-9][0-9]{0,2}$",
+    "reserved": "A slot tag never contains '#'; the grammar is ^[a-z0-9]+(?:[._-][a-z0-9]+)*$ so a step tag can never collide with a slot tag.",
+    "bounds": { "maxStepsPerWorkflow": 64, "maxClosureBytes": 8388608 }
+  },
+  "vectors": [
+    {
+      "name": "steps yield in ordinal order regardless of manifest array order",
+      "slotTag": "onboarding.flow",
+      "steps": [
+        { "stepId": "onboarding.flow#2", "ordinal": 2, "promptArtifactId": "prompt-plan", "promptVersionId": "rev-7", "contentHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "byteLength": 700 },
+        { "stepId": "onboarding.flow#1", "ordinal": 1, "promptArtifactId": "prompt-welcome", "promptVersionId": "rev-2", "contentHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "byteLength": 300 }
+      ],
+      "expectedOrder": ["onboarding.flow#1", "onboarding.flow#2"],
+      "expectedTelemetryTags": ["onboarding.flow#1", "onboarding.flow#2"]
+    },
+    {
+      "name": "a step whose tag does not match <slot tag>#<ordinal> is refused",
+      "slotTag": "onboarding.flow",
+      "steps": [
+        { "stepId": "other.flow#1", "ordinal": 1, "promptArtifactId": "prompt-welcome", "promptVersionId": "rev-2", "contentHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "byteLength": 300 }
+      ],
+      "refuse": "step_tag_mismatch"
+    },
+    {
+      "name": "a gap in ordinals is refused",
+      "slotTag": "onboarding.flow",
+      "steps": [
+        { "stepId": "onboarding.flow#1", "ordinal": 1, "promptArtifactId": "p1", "promptVersionId": "rev-1", "contentHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "byteLength": 1 },
+        { "stepId": "onboarding.flow#3", "ordinal": 3, "promptArtifactId": "p3", "promptVersionId": "rev-1", "contentHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "byteLength": 1 }
+      ],
+      "refuse": "step_ordinal_gap"
+    },
+    {
+      "name": "a slot tag containing '#' is refused before any step is read",
+      "slotTag": "onboarding#flow",
+      "steps": [],
+      "refuse": "slot_tag_grammar"
+    }
+  ]
+}

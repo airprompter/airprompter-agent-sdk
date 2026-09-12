@@ -94,6 +94,48 @@
       ],
       "canonical": "[{\"artifactId\":\"prompt-reply\",\"byteLength\":2048,\"contentHash\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"kind\":\"prompt\",\"model\":\"anthropic.claude-sonnet-5\",\"tag\":\"support.reply\",\"variables\":[],\"versionId\":\"rev-10\",\"versionOrdinal\":10},{\"artifactId\":\"prompt-triage\",\"byteLength\":1024,\"contentHash\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"kind\":\"prompt\",\"model\":\"anthropic.claude-sonnet-5\",\"tag\":\"support.triage\",\"variables\":[{\"name\":\"customer_name\",\"required\":true,\"trust\":\"operator\"},{\"name\":\"ticket_body\",\"required\":true,\"trust\":\"end_user\"}],\"versionId\":\"rev-5\",\"versionOrdinal\":5}]",
       "sha256": "sha256:e4e56658a83491f962627fd88b54c97064e40be207b90d138a9d304126e0e6f8"
+    },
+    {
+      "name": "release pins: a workflow pin carries its steps, tagged <tag>#<n>",
+      "input": [
+        {
+          "tag": "onboarding.flow",
+          "kind": "workflow",
+          "artifactId": "workflow-onboarding",
+          "versionId": "rev-3",
+          "versionOrdinal": 3,
+          "contentHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "byteLength": 512,
+          "model": "gpt-5.6",
+          "variables": [
+            {
+              "name": "company",
+              "required": true,
+              "trust": "operator"
+            }
+          ],
+          "steps": [
+            {
+              "stepId": "onboarding.flow#1",
+              "ordinal": 1,
+              "promptArtifactId": "prompt-welcome",
+              "promptVersionId": "rev-2",
+              "contentHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "byteLength": 300
+            },
+            {
+              "stepId": "onboarding.flow#2",
+              "ordinal": 2,
+              "promptArtifactId": "prompt-plan",
+              "promptVersionId": "rev-7",
+              "contentHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "byteLength": 700
+            }
+          ]
+        }
+      ],
+      "canonical": "[{\"artifactId\":\"workflow-onboarding\",\"byteLength\":512,\"contentHash\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"kind\":\"workflow\",\"model\":\"gpt-5.6\",\"steps\":[{\"byteLength\":300,\"contentHash\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"ordinal\":1,\"promptArtifactId\":\"prompt-welcome\",\"promptVersionId\":\"rev-2\",\"stepId\":\"onboarding.flow#1\"},{\"byteLength\":700,\"contentHash\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"ordinal\":2,\"promptArtifactId\":\"prompt-plan\",\"promptVersionId\":\"rev-7\",\"stepId\":\"onboarding.flow#2\"}],\"tag\":\"onboarding.flow\",\"variables\":[{\"name\":\"company\",\"required\":true,\"trust\":\"operator\"}],\"versionId\":\"rev-3\",\"versionOrdinal\":3}]",
+      "sha256": "sha256:55c8102c22c9054c865a50cb69b0ce53942ef5055346f022a028c657a77240c6"
     }
   ],
   "refused": [

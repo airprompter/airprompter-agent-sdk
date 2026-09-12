@@ -2,7 +2,8 @@
 
 Machine-readable cases every SDK must pass.
 
-- `canonical-json.json` — canonical text and SHA-256 for representative values and a two-pin release; plus the inputs an encoder must refuse (see `../canonical-json.md`)
+- `canonical-json.json` — canonical text and SHA-256 for representative values, a two-pin release and a workflow pin with steps; plus the inputs an encoder must refuse (see `../canonical-json.md`)
+- `workflow-steps.json` — the `<slot tag>#<ordinal>` step-tag scheme, ordinal ordering the `workflow()` iterator must honour, and the refusals (tag mismatch, ordinal gap, `#` in a slot tag)
 
 Planned files:
 

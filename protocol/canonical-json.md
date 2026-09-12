@@ -30,8 +30,13 @@ Only the pins, sorted by `tag`, each projected to exactly these members:
 
 ```
 tag, kind, artifactId, versionId, versionOrdinal (integer or null),
-contentHash, byteLength, model, variables[{ name, required, trust }]
+contentHash, byteLength, model, variables[{ name, required, trust }],
+steps[{ stepId, ordinal, promptArtifactId, promptVersionId, contentHash, byteLength }]   (workflow pins only)
 ```
+
+A workflow pin's `steps` are ordered by `ordinal` and tagged
+`<tag>#<ordinal>`; reordering steps changes the digest, because the step
+order is the governed thing (see `vectors/workflow-steps.json`).
 
 Nothing else in a release — who sealed it, when, warnings, acks,
 countersignatures — is covered by the digest. Anything that must be

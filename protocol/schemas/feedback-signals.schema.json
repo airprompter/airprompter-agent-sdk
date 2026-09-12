@@ -6,31 +6,120 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "thumbs": { "enum": ["up", "down"] },
-    "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
-    "flagged": { "type": "boolean" },
-    "accepted": { "type": "boolean" },
-    "edited": { "type": "boolean" },
-    "regenerated": { "type": "boolean" },
-    "editDistanceRatio": { "type": "number", "minimum": 0, "maximum": 1 },
-    "regenerations": { "type": "integer", "minimum": 0 },
-    "timeToAcceptMs": { "type": "integer", "minimum": 0 },
-    "copied": { "type": "boolean" },
-    "followUp": { "type": "boolean" },
-    "escalated": { "type": "boolean" },
-    "abandoned": { "type": "boolean" },
-    "corrected": { "type": "boolean" },
-    "correctedValue": { "type": "string", "maxLength": 64, "description": "Only when the slot's output check declares an enum; must be one of its values" },
-    "resolved": { "type": "boolean" },
-    "reopened": { "type": "boolean" },
-    "converted": { "type": "boolean" },
-    "refunded": { "type": "boolean" },
-    "slaMet": { "type": "boolean" },
-    "judgeScore": { "type": "number", "minimum": 0, "maximum": 1, "description": "From ap.judge() run on the customer's own key; only the score is reported" },
+    "thumbs": {
+      "enum": [
+        "up",
+        "down"
+      ]
+    },
+    "rating": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "flagged": {
+      "type": "boolean"
+    },
+    "accepted": {
+      "type": "boolean"
+    },
+    "edited": {
+      "type": "boolean"
+    },
+    "regenerated": {
+      "type": "boolean"
+    },
+    "editDistanceRatio": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "regenerations": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timeToAcceptMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "copied": {
+      "type": "boolean"
+    },
+    "followUp": {
+      "type": "boolean"
+    },
+    "escalated": {
+      "type": "boolean"
+    },
+    "abandoned": {
+      "type": "boolean"
+    },
+    "corrected": {
+      "type": "boolean"
+    },
+    "correctedValue": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Only when the slot's output check declares an enum; must be one of its values"
+    },
+    "resolved": {
+      "type": "boolean"
+    },
+    "reopened": {
+      "type": "boolean"
+    },
+    "converted": {
+      "type": "boolean"
+    },
+    "refunded": {
+      "type": "boolean"
+    },
+    "slaMet": {
+      "type": "boolean"
+    },
+    "judgeScore": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "From ap.judge() run on the customer's own key; only the score is reported"
+    },
     "custom": {
       "type": "object",
-      "additionalProperties": { "type": ["number", "boolean"] },
-      "propertyNames": { "pattern": "^[a-z][a-zA-Z0-9]{0,31}$" },
+      "additionalProperties": {
+        "type": [
+          "number",
+          "boolean"
+        ]
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-zA-Z0-9]{0,31}$",
+        "not": {
+          "enum": [
+            "abandoned",
+            "accepted",
+            "converted",
+            "copied",
+            "corrected",
+            "correctedValue",
+            "editDistanceRatio",
+            "edited",
+            "escalated",
+            "flagged",
+            "followUp",
+            "judgeScore",
+            "rating",
+            "refunded",
+            "regenerated",
+            "regenerations",
+            "reopened",
+            "resolved",
+            "slaMet",
+            "thumbs",
+            "timeToAcceptMs"
+          ]
+        },
+        "description": "A custom name may not shadow a catalogue signal."
+      },
       "maxProperties": 8
     }
   }

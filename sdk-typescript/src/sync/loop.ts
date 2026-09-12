@@ -1,0 +1,146 @@
+/**
+ * One sync pass, and the three ways of scheduling it.
+ *
+ *   resident:   every pollSeconds (jittered) — the edge pointer first,
+ *               the manifest only when the generation moved
+ *   on_invoke:  the same pass at invocation start and end (serverless has
+ *               no background timer)
+ *   daemon:     delegate to the host's daemon socket when present (T26);
+ *               until then, in-process
+ *
+ * A pass never blocks a render and never throws past its caller: sync
+ * failures degrade to the last verified release and are reported. Every
+ * manifest goes through the trust chain before a byte is staged; payloads
+ * already held for unchanged hashes are reused, so a pass fetches only what
+ * moved.
+ */
+
+import { referencedPayloads, verifyManifest, verifyRootMetadata } from "../protocol/trust.js";
+import type { Manifest, RefusalCode, RootMetadata } from "../protocol/types.js";
+import type { LoadedSlot, SlotStore } from "../store/slotStore.js";
+import type { SyncClient } from "./client.js";
+
+export type ApplyPolicyDecision = "activated" | "staged";
+
+export interface SyncPassResult {
+  outcome: "unchanged" | "activated" | "staged" | "refused" | "unavailable" | "nothing_promoted";
+  generation?: number;
+  reason?: RefusalCode | "unauthorized" | "forbidden" | "network" | string;
+}
+
+export interface SyncPassInput {
+  store: SlotStore;
+  client: SyncClient;
+  now: () => string;
+  scope: { organizationId: string; agentId: string; target: "dev" | "staging" | "prod" };
+  /** The last accepted root, or the synthetic pinned document. */
+  trustedRoot: RootMetadata;
+  /** A candidate root document fetched beside the manifest, when the runtime polls one. */
+  fetchRoot?: () => Promise<RootMetadata | null>;
+  /** What the active slot holds (its payload bytes are reused for unchanged hashes). */
+  active: LoadedSlot | null;
+  etag: string | null;
+  edgePointerUrl?: string | null;
+  edgeEtag?: string | null;
+  requireCountersign?: boolean;
+  countersignRoot?: RootMetadata | null;
+  /** Local policy: `auto` activates a verified release; `unlock_required` stages it and calls `onStaged`. */
+  applyPolicy: (manifest: Manifest) => ApplyPolicyDecision | Promise<ApplyPolicyDecision>;
+  onRefusal?: (reason: RefusalCode | string, generation: number | null) => void;
+}
+
+export interface SyncPassOutput extends SyncPassResult {
+  etag: string | null;
+  edgeEtag: string | null;
+  trustedRoot: RootMetadata;
+  active: LoadedSlot | null;
+}
+
+export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
+  const now = input.now();
+  let trustedRoot = input.trustedRoot;
+  let edgeEtag = input.edgeEtag ?? null;
+  const done = (result: SyncPassResult, active = input.active, etag = input.etag): SyncPassOutput => ({ ...result, etag, edgeEtag, trustedRoot, active });
+
+  try {
+    // A newer root document is accepted only against the one already trusted (R1–R5).
+    if (input.fetchRoot) {
+      const candidate = await input.fetchRoot();
+      if (candidate) {
+        const verdict = verifyRootMetadata({ candidate, trusted: trustedRoot, now });
+        if (verdict.ok) {
+          trustedRoot = candidate;
+          input.store.acceptRoot(candidate);
+        } else {
+          input.onRefusal?.(verdict.reason, null);
+        }
+      }
+    }
+
+    // Idle path: the edge pointer says whether anything moved, without a Lambda on the other end.
+    if (input.edgePointerUrl) {
+      const edge = await input.client.edgePointer(input.edgePointerUrl, edgeEtag);
+      if (edge.status === "not_modified") return done({ outcome: "unchanged" });
+      if (edge.status === "ok") {
+        edgeEtag = edge.etag;
+        if (input.active && edge.pointer.generation <= input.active.generation) return done({ outcome: "unchanged" });
+      }
+    }
+
+    const fetched = await input.client.manifest({ ifNoneMatch: input.etag });
+    if (fetched.status === "not_modified") return done({ outcome: "unchanged" });
+    if (fetched.status === "not_found") return done({ outcome: "nothing_promoted" });
+    if (fetched.status === "unauthorized" || fetched.status === "forbidden") {
+      input.onRefusal?.(fetched.status, null);
+      return done({ outcome: "unavailable", reason: fetched.status });
+    }
+    if (fetched.status === "error") return done({ outcome: "unavailable", reason: `http_${fetched.httpStatus}` });
+
+    const manifest = fetched.manifest;
+    const stored = input.store.state.generation;
+    const envelope = verifyManifest({ manifest, root: trustedRoot, now, scope: input.scope, storedGeneration: stored, payloads: null, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) });
+    if (!envelope.ok) {
+      input.onRefusal?.(envelope.reason, manifest.payload.generation);
+      return done({ outcome: "refused", reason: envelope.reason, generation: manifest.payload.generation });
+    }
+    if (manifest.payload.generation === stored) return done({ outcome: "unchanged" }, input.active, fetched.etag);
+
+    // Fetch only what moved; the bytes already verified in the active slot are reused for unchanged hashes.
+    const payloads = new Map<string, Uint8Array>();
+    for (const hash of referencedPayloads(manifest.payload).keys()) {
+      const held = input.active?.payloads.get(hash);
+      if (held) {
+        payloads.set(hash, held);
+        continue;
+      }
+      const bytes = await input.client.payload(hash);
+      if (!bytes) {
+        input.onRefusal?.("payload_missing", manifest.payload.generation);
+        return done({ outcome: "refused", reason: "payload_missing", generation: manifest.payload.generation });
+      }
+      payloads.set(hash, bytes);
+    }
+    const full = verifyManifest({ manifest, root: trustedRoot, now, scope: input.scope, storedGeneration: stored, payloads, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) });
+    if (!full.ok) {
+      input.onRefusal?.(full.reason, manifest.payload.generation);
+      return done({ outcome: "refused", reason: full.reason, generation: manifest.payload.generation });
+    }
+
+    // All-or-nothing: the current slot stays whole until the new one is complete and fsynced.
+    input.store.stage({ manifest, payloads });
+    const decision = await input.applyPolicy(manifest);
+    if (decision === "staged") return done({ outcome: "staged", generation: manifest.payload.generation }, input.active, fetched.etag);
+    const slot = input.store.activate();
+    const active = input.store.load(slot, { now, root: trustedRoot, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) });
+    return done({ outcome: "activated", generation: manifest.payload.generation }, active, fetched.etag);
+  } catch (error) {
+    input.onRefusal?.(`network:${(error as Error).message}`, null);
+    return done({ outcome: "unavailable", reason: "network" });
+  }
+}
+
+export function jitteredDelayMs(baseSeconds: number, random: () => number = Math.random): number {
+  // ±20 %: a fleet restarted together must not poll together.
+  const jitter = (random() * 2 - 1) * 0.2;
+  return Math.max(1000, Math.round(baseSeconds * 1000 * (1 + jitter)));
+}

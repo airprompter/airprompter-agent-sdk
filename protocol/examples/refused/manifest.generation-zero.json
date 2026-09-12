@@ -3,7 +3,7 @@
   "reason": "generation starts at 1",
   "document": {
     "payload": {
-      "protocol": "0.2.4",
+      "protocol": "0.2.5",
       "organizationId": "org_7d3f9a2b",
       "agentId": "agt_4e8c1b6d",
       "target": "prod",

@@ -1,0 +1,409 @@
+{
+  "protocol": "0.2.5",
+  "description": "ap.feedback(runRef, signals) normalisation against feedback-signals.schema.json: what becomes a window outcome, what is rejected and why. `accepted` is the call's return value.",
+  "cases": [
+    {
+      "name": "thumbs up",
+      "signals": {
+        "thumbs": "up"
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "thumbs": true
+        },
+        "rejected": {}
+      },
+      "note": "thumbs is stored as a boolean: up = true"
+    },
+    {
+      "name": "thumbs down",
+      "signals": {
+        "thumbs": "down"
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "thumbs": false
+        },
+        "rejected": {}
+      }
+    },
+    {
+      "name": "thumbs sideways",
+      "signals": {
+        "thumbs": "sideways"
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "thumbs": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "rating in range",
+      "signals": {
+        "rating": 5
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "rating": 5
+        },
+        "rejected": {}
+      }
+    },
+    {
+      "name": "rating zero",
+      "signals": {
+        "rating": 0
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "rating": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "rating six",
+      "signals": {
+        "rating": 6
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "rating": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "rating fractional",
+      "signals": {
+        "rating": 4.5
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "rating": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "rating as string",
+      "signals": {
+        "rating": "4"
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "rating": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "every boolean",
+      "signals": {
+        "flagged": true,
+        "accepted": false,
+        "edited": true,
+        "regenerated": false,
+        "copied": true,
+        "followUp": false,
+        "escalated": true,
+        "abandoned": false,
+        "corrected": true,
+        "resolved": false,
+        "reopened": true,
+        "converted": false,
+        "refunded": true,
+        "slaMet": false
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "flagged": true,
+          "accepted": false,
+          "edited": true,
+          "regenerated": false,
+          "copied": true,
+          "followUp": false,
+          "escalated": true,
+          "abandoned": false,
+          "corrected": true,
+          "resolved": false,
+          "reopened": true,
+          "converted": false,
+          "refunded": true,
+          "slaMet": false
+        },
+        "rejected": {}
+      }
+    },
+    {
+      "name": "boolean as number",
+      "signals": {
+        "accepted": 1
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "accepted": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "unit ratios",
+      "signals": {
+        "editDistanceRatio": 0.25,
+        "judgeScore": 1
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "editDistanceRatio": 0.25,
+          "judgeScore": 1
+        },
+        "rejected": {}
+      }
+    },
+    {
+      "name": "unit ratio above one",
+      "signals": {
+        "editDistanceRatio": 1.5
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "editDistanceRatio": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "counts",
+      "signals": {
+        "regenerations": 3,
+        "timeToAcceptMs": 0
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "regenerations": 3,
+          "timeToAcceptMs": 0
+        },
+        "rejected": {}
+      }
+    },
+    {
+      "name": "negative count",
+      "signals": {
+        "timeToAcceptMs": -1
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "timeToAcceptMs": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "fractional count",
+      "signals": {
+        "regenerations": 1.5
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "regenerations": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "free text is refused",
+      "signals": {
+        "freeText": "the answer was wrong"
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "freeText": "unknown_signal"
+        }
+      },
+      "note": "unknown names never reach the spool"
+    },
+    {
+      "name": "prompt-like keys are refused",
+      "signals": {
+        "prompt": "…",
+        "output": "…",
+        "userId": "u_1"
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "prompt": "unknown_signal",
+          "output": "unknown_signal",
+          "userId": "unknown_signal"
+        }
+      }
+    },
+    {
+      "name": "mixed valid and invalid",
+      "signals": {
+        "thumbs": "up",
+        "comment": "great",
+        "rating": 9
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "thumbs": true
+        },
+        "rejected": {
+          "comment": "unknown_signal",
+          "rating": "invalid_value"
+        }
+      },
+      "note": "accepted when at least one signal is valid; the rest are named in rejected"
+    },
+    {
+      "name": "corrected value needs the slot enum",
+      "signals": {
+        "corrected": true,
+        "correctedValue": "refund"
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "corrected": true
+        },
+        "rejected": {
+          "correctedValue": "needs_slot_enum"
+        }
+      }
+    },
+    {
+      "name": "custom signals",
+      "signals": {
+        "custom": {
+          "stepsTaken": 4,
+          "usedTool": true
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "outcomes": {
+          "stepsTaken": 4,
+          "usedTool": true
+        },
+        "rejected": {}
+      }
+    },
+    {
+      "name": "custom bad name",
+      "signals": {
+        "custom": {
+          "Steps": 1,
+          "steps_taken": 1
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "custom.Steps": "invalid_name",
+          "custom.steps_taken": "invalid_name"
+        }
+      }
+    },
+    {
+      "name": "custom reserved name",
+      "signals": {
+        "custom": {
+          "rating": 1
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "custom.rating": "reserved_name"
+        }
+      }
+    },
+    {
+      "name": "custom too many",
+      "signals": {
+        "custom": {
+          "s0": 0,
+          "s1": 1,
+          "s2": 2,
+          "s3": 3,
+          "s4": 4,
+          "s5": 5,
+          "s6": 6,
+          "s7": 7,
+          "s8": 8
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "custom": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "custom non-numeric value",
+      "signals": {
+        "custom": {
+          "note": "text"
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "custom.note": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "custom string number",
+      "signals": {
+        "custom": {
+          "score": "1"
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {
+          "custom.score": "invalid_value"
+        }
+      }
+    },
+    {
+      "name": "empty",
+      "signals": {},
+      "expected": {
+        "accepted": false,
+        "outcomes": {},
+        "rejected": {}
+      }
+    }
+  ]
+}

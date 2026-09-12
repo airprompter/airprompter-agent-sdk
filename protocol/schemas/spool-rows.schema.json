@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/spool-rows/1",
+  "title": "Spool segment rows (draft 1)",
+  "description": "Every line of a spool segment is one of these. `window` is telemetry-window/1; `refusal` and `dropped` are defined here. Unknown row types are quarantined at ingest; unknown fields are dropped. No row has a field that can carry prompt text, model output or an end-user identifier.",
+  "oneOf": [
+    { "$ref": "https://airprompter.com/protocol/telemetry-window/1" },
+    { "$ref": "#/$defs/refusal" },
+    { "$ref": "#/$defs/dropped" }
+  ],
+  "$defs": {
+    "instanceId": { "type": "string", "pattern": "^[A-Za-z0-9._~-]{8,64}$" },
+    "refusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "v", "at", "instanceId", "reason", "generation", "tag"],
+      "properties": {
+        "type": { "const": "refusal" },
+        "v": { "const": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "instanceId": { "$ref": "#/$defs/instanceId" },
+        "reason": { "enum": ["disabled", "lease_expired", "payload_verification_failed", "forced_downgrade", "model_unavailable", "unlock_refused"] },
+        "generation": { "type": "integer", "minimum": 0 },
+        "tag": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$", "maxLength": 128 }] }
+      }
+    },
+    "dropped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "v", "at", "instanceId", "segments", "bytes"],
+      "properties": {
+        "type": { "const": "dropped" },
+        "v": { "const": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "instanceId": { "$ref": "#/$defs/instanceId" },
+        "segments": { "type": "integer", "minimum": 1 },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

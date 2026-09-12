@@ -1,0 +1,1609 @@
+{
+  "protocol": "0.2.5",
+  "description": "Spool writer conformance (spool-format.md): latency bucket index, minute formatting, segment naming, rotation, and minute-window aggregation. Windows compare as sets (order of emission is not significant).",
+  "segmentMaxBytes": 1048576,
+  "latencyBuckets": {
+    "edges": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64,
+      128,
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      65536
+    ],
+    "cases": [
+      {
+        "latencyMs": 0,
+        "bucket": 0
+      },
+      {
+        "latencyMs": 0.4,
+        "bucket": 0
+      },
+      {
+        "latencyMs": 1,
+        "bucket": 0
+      },
+      {
+        "latencyMs": 1.5,
+        "bucket": 1
+      },
+      {
+        "latencyMs": 2,
+        "bucket": 1
+      },
+      {
+        "latencyMs": 3,
+        "bucket": 2
+      },
+      {
+        "latencyMs": 4,
+        "bucket": 2
+      },
+      {
+        "latencyMs": 5,
+        "bucket": 3
+      },
+      {
+        "latencyMs": 8,
+        "bucket": 3
+      },
+      {
+        "latencyMs": 16,
+        "bucket": 4
+      },
+      {
+        "latencyMs": 17,
+        "bucket": 5
+      },
+      {
+        "latencyMs": 32,
+        "bucket": 5
+      },
+      {
+        "latencyMs": 64,
+        "bucket": 6
+      },
+      {
+        "latencyMs": 128,
+        "bucket": 7
+      },
+      {
+        "latencyMs": 129,
+        "bucket": 8
+      },
+      {
+        "latencyMs": 256,
+        "bucket": 8
+      },
+      {
+        "latencyMs": 512,
+        "bucket": 9
+      },
+      {
+        "latencyMs": 513,
+        "bucket": 10
+      },
+      {
+        "latencyMs": 812,
+        "bucket": 10
+      },
+      {
+        "latencyMs": 1024,
+        "bucket": 10
+      },
+      {
+        "latencyMs": 1025,
+        "bucket": 11
+      },
+      {
+        "latencyMs": 1201,
+        "bucket": 11
+      },
+      {
+        "latencyMs": 2048,
+        "bucket": 11
+      },
+      {
+        "latencyMs": 4096,
+        "bucket": 12
+      },
+      {
+        "latencyMs": 8192,
+        "bucket": 13
+      },
+      {
+        "latencyMs": 8193,
+        "bucket": 14
+      },
+      {
+        "latencyMs": 16384,
+        "bucket": 14
+      },
+      {
+        "latencyMs": 16385,
+        "bucket": 15
+      },
+      {
+        "latencyMs": 30000,
+        "bucket": 15
+      },
+      {
+        "latencyMs": 65536,
+        "bucket": 15
+      },
+      {
+        "latencyMs": 65537,
+        "bucket": 15
+      },
+      {
+        "latencyMs": 600000,
+        "bucket": 15
+      }
+    ]
+  },
+  "minutes": [
+    {
+      "name": "ten seconds into the minute",
+      "epochMs": 1789221790000,
+      "minute": "2026-09-12T14:03:00Z",
+      "epochMinute": 29820363
+    },
+    {
+      "name": "exactly on the minute",
+      "epochMs": 1789221780000,
+      "minute": "2026-09-12T14:03:00Z",
+      "epochMinute": 29820363
+    },
+    {
+      "name": "last millisecond of the minute",
+      "epochMs": 1789221839999,
+      "minute": "2026-09-12T14:03:00Z",
+      "epochMinute": 29820363
+    },
+    {
+      "name": "first millisecond of the next minute",
+      "epochMs": 1789221840000,
+      "minute": "2026-09-12T14:04:00Z",
+      "epochMinute": 29820364
+    },
+    {
+      "name": "epoch",
+      "epochMs": 0,
+      "minute": "1970-01-01T00:00:00Z",
+      "epochMinute": 0
+    },
+    {
+      "name": "day boundary",
+      "epochMs": 1789257599999,
+      "minute": "2026-09-12T23:59:00Z",
+      "epochMinute": 29820959
+    }
+  ],
+  "segmentNames": [
+    {
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "epochMs": 1789221790000,
+      "n": 0,
+      "name": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson"
+    },
+    {
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "epochMs": 1789221790000,
+      "n": 7,
+      "name": "seg-i-7f3aQx9kLmN2pQ-29820363-7.ndjson"
+    },
+    {
+      "instanceId": "i-a.b_c~d",
+      "epochMs": 1789221850000,
+      "n": 0,
+      "name": "seg-i-a.b_c~d-29820364-0.ndjson"
+    }
+  ],
+  "rotation": [
+    {
+      "name": "one minute, a few rows",
+      "note": "all rows within one minute share one segment",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "appends": [
+        {
+          "epochMs": 1789221790000,
+          "lineBytes": 200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221795000,
+          "lineBytes": 210,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": false
+        },
+        {
+          "epochMs": 1789221839999,
+          "lineBytes": 190,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": false
+        }
+      ],
+      "segments": [
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rows": 3,
+          "bytes": 600
+        }
+      ]
+    },
+    {
+      "name": "minute boundary",
+      "note": "the first row after the minute turns opens a new segment with n=0",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "appends": [
+        {
+          "epochMs": 1789221790000,
+          "lineBytes": 200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221840000,
+          "lineBytes": 200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820364-0.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221840001,
+          "lineBytes": 200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820364-0.ndjson",
+          "rotated": false
+        }
+      ],
+      "segments": [
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rows": 1,
+          "bytes": 200
+        },
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820364-0.ndjson",
+          "rows": 2,
+          "bytes": 400
+        }
+      ]
+    },
+    {
+      "name": "1 MiB within a minute",
+      "note": "the fourth 300 KiB row would exceed 1 MiB: it opens n=1 in the same minute; the small row follows it",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "appends": [
+        {
+          "epochMs": 1789221790000,
+          "lineBytes": 307200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221790001,
+          "lineBytes": 307200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": false
+        },
+        {
+          "epochMs": 1789221790002,
+          "lineBytes": 307200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": false
+        },
+        {
+          "epochMs": 1789221790003,
+          "lineBytes": 307200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221790004,
+          "lineBytes": 100,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rotated": false
+        }
+      ],
+      "segments": [
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rows": 3,
+          "bytes": 921600
+        },
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rows": 2,
+          "bytes": 307300
+        }
+      ]
+    },
+    {
+      "name": "exactly 1 MiB fits",
+      "note": "a segment may reach exactly 1 MiB; the next byte rotates",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "appends": [
+        {
+          "epochMs": 1789221790000,
+          "lineBytes": 1048575,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221790001,
+          "lineBytes": 1,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": false
+        },
+        {
+          "epochMs": 1789221790002,
+          "lineBytes": 1,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rotated": true
+        }
+      ],
+      "segments": [
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rows": 2,
+          "bytes": 1048576
+        },
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rows": 1,
+          "bytes": 1
+        }
+      ]
+    },
+    {
+      "name": "a line larger than the cap",
+      "note": "an oversize line still lands in a segment of its own; the next line rotates again",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "appends": [
+        {
+          "epochMs": 1789221790000,
+          "lineBytes": 1048577,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221790001,
+          "lineBytes": 10,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rotated": true
+        }
+      ],
+      "segments": [
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rows": 1,
+          "bytes": 1048577
+        },
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rows": 1,
+          "bytes": 10
+        }
+      ]
+    },
+    {
+      "name": "n resets on a new minute",
+      "note": "n counts within a minute only",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "appends": [
+        {
+          "epochMs": 1789221790000,
+          "lineBytes": 307200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221790001,
+          "lineBytes": 307200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": false
+        },
+        {
+          "epochMs": 1789221790002,
+          "lineBytes": 307200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": false
+        },
+        {
+          "epochMs": 1789221790003,
+          "lineBytes": 307200,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789221840000,
+          "lineBytes": 10,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820364-0.ndjson",
+          "rotated": true
+        }
+      ],
+      "segments": [
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rows": 3,
+          "bytes": 921600
+        },
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-1.ndjson",
+          "rows": 1,
+          "bytes": 307200
+        },
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820364-0.ndjson",
+          "rows": 1,
+          "bytes": 10
+        }
+      ]
+    },
+    {
+      "name": "gap of many minutes",
+      "note": "the epochMinute in the name is the append's minute, not a counter",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "appends": [
+        {
+          "epochMs": 1789221790000,
+          "lineBytes": 10,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rotated": true
+        },
+        {
+          "epochMs": 1789225390000,
+          "lineBytes": 10,
+          "segment": "seg-i-7f3aQx9kLmN2pQ-29820423-0.ndjson",
+          "rotated": true
+        }
+      ],
+      "segments": [
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820363-0.ndjson",
+          "rows": 1,
+          "bytes": 10
+        },
+        {
+          "name": "seg-i-7f3aQx9kLmN2pQ-29820423-0.ndjson",
+          "rows": 1,
+          "bytes": 10
+        }
+      ]
+    }
+  ],
+  "windows": [
+    {
+      "name": "two runs and feedback on one window",
+      "note": "feedback merges outcomes into the runs' window (status ok) and never adds to count or latency",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 812,
+            "tokens": {
+              "input": 400,
+              "output": 90,
+              "cachedInput": 100
+            },
+            "checks": {
+              "passed": 1
+            }
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221791000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 1201,
+            "tokens": {
+              "input": 380,
+              "output": 70
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221792000,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "outcomes": {
+              "thumbs": true,
+              "rating": 4,
+              "accepted": true
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221793000
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 2,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 2013
+          },
+          "tokens": {
+            "input": 780,
+            "output": 160,
+            "cachedInput": 100
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "checks": {
+            "passed": 1,
+            "failed": 0
+          },
+          "outcomes": {
+            "thumbs": {
+              "n": 1,
+              "sum": 1
+            },
+            "rating": {
+              "n": 1,
+              "sum": 4
+            },
+            "accepted": {
+              "n": 1,
+              "sum": 1
+            }
+          }
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "dimension sets split windows",
+      "note": "status, errorClass, arm and model each open their own window; ordering of rows is not significant",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 5
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790001,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "error",
+            "errorClass": "provider_timeout",
+            "latencyMs": 30000
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790002,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "candidate",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 6
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790003,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "gpt-5",
+            "status": "ok",
+            "latencyMs": 7
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790004,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_8",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 8
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790005,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "refused",
+            "latencyMs": 0
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790006,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 9,
+            "usageSource": "estimated"
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790010
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 2,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 14
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        },
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "error",
+          "errorClass": "provider_timeout",
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1
+            ],
+            "sum": 30000
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        },
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "candidate",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 6
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        },
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "gpt-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 7
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        },
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_8",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 8
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        },
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "refused",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 0
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "the minute turns",
+      "note": "an observation in a new minute closes every open window first; the new minute's windows close at the explicit close",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 100
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221839999,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 200
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221840000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 300
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221850000
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 2,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 300
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        },
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:04:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 300
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "outcome names are filtered, values coerced",
+      "note": "booleans count 1/0; names outside ^[a-z][a-zA-Z0-9]{0,31}$ and non-finite numbers are dropped silently",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 1,
+            "outcomes": {
+              "accepted": true,
+              "rating": 3,
+              "edited": false
+            }
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790001,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 1,
+            "outcomes": {
+              "accepted": false,
+              "rating": 5,
+              "Bad-Name": 1,
+              "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": 1,
+              "9lead": 1
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790002,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "outcomes": {
+              "accepted": true,
+              "editDistanceRatio": 0.25
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790003
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 2,
+          "latencyMs": {
+            "buckets": [
+              2,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 2
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "outcomes": {
+            "accepted": {
+              "n": 3,
+              "sum": 2
+            },
+            "rating": {
+              "n": 2,
+              "sum": 8
+            },
+            "edited": {
+              "n": 1,
+              "sum": 0
+            },
+            "editDistanceRatio": {
+              "n": 1,
+              "sum": 0.25
+            }
+          }
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "feedback before any run opens the window",
+      "note": "feedback alone yields a window with count 0 (it is not a run); usageSource defaults to reported",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "feedback",
+          "at": 1789221790000,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "outcomes": {
+              "thumbs": false
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790001
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 0,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 0
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "outcomes": {
+            "thumbs": {
+              "n": 1,
+              "sum": 0
+            }
+          }
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "latency edges and the sum",
+      "note": "each bucket counts ≤ its edge; sum is the rounded, non-negative total",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 1
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 1024
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 1025
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 65537
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 2.4
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 2.5
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790001
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 6,
+          "latencyMs": {
+            "buckets": [
+              1,
+              0,
+              2,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              0,
+              0,
+              0,
+              1
+            ],
+            "sum": 67592
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "refusals are rows of their own",
+      "note": "a refusal is appended as it happens, never windowed; close emits nothing when nothing was observed",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "refusal",
+          "at": 1789221790000,
+          "reason": "forced_downgrade",
+          "generation": 41,
+          "tag": null
+        },
+        {
+          "kind": "refusal",
+          "at": 1789221790500,
+          "reason": "lease_expired",
+          "generation": 42,
+          "tag": "support.triage"
+        },
+        {
+          "kind": "close",
+          "at": 1789221791000
+        }
+      ],
+      "expectedWindows": [],
+      "expectedRefusals": [
+        {
+          "type": "refusal",
+          "v": 1,
+          "at": "2026-09-12T14:03:10.000Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "reason": "forced_downgrade",
+          "generation": 41,
+          "tag": null
+        },
+        {
+          "type": "refusal",
+          "v": 1,
+          "at": "2026-09-12T14:03:10.500Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "reason": "lease_expired",
+          "generation": 42,
+          "tag": "support.triage"
+        }
+      ]
+    },
+    {
+      "name": "ephemeral instance closes at invocation end",
+      "note": "serverless hosts flush at the end of every invocation; a window can hold one run",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "ephemeral",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 50,
+            "tokens": {
+              "input": 10,
+              "output": 5
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790060
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790070,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 60,
+            "tokens": {
+              "input": 10,
+              "output": 5
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790130
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "ephemeral",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 50
+          },
+          "tokens": {
+            "input": 10,
+            "output": 5
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        },
+        {
+          "type": "window",
+          "v": 1,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "ephemeral",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 60
+          },
+          "tokens": {
+            "input": 10,
+            "output": 5
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        }
+      ],
+      "expectedRefusals": []
+    }
+  ]
+}

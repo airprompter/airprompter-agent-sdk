@@ -65,7 +65,15 @@ dropped at ingest; unknown row types are quarantined.
 
 - `latencyMs.buckets` are counts against the **fixed edges** in
   `schemas/latency-buckets.json` (16 log-spaced edges, 1 ms → 65 s) so
-  percentiles merge across instances.
+  percentiles merge across instances: a value lands in the first bucket
+  whose edge is `>=` it; anything above the last edge lands in the last
+  bucket. `latencyMs.sum` is the total of the observed values, each
+  rounded half up and floored at 0.
+- `count` is the number of runs observed in the minute. Feedback
+  (`outcomes`) filed against a run rides on that run's `status: ok` window
+  for the minute it arrives in and **never** adds to `count` or
+  `latencyMs`; a window can therefore have `count: 0` when the feedback
+  arrives in a later minute than the run.
 - `errorClass` is the closed enum in `schemas/telemetry-window.schema.json`:
   `render_missing_variable, context_length_exceeded, output_schema_invalid,
   truncated, content_filter, provider_error, provider_timeout,
@@ -84,7 +92,8 @@ dropped at ingest; unknown row types are quarantined.
 ```
 
 Reasons: `disabled`, `lease_expired`, `payload_verification_failed`,
-`forced_downgrade`, `model_unavailable`, `unlock_refused`.
+`forced_downgrade`, `model_unavailable`, `unlock_refused`. Row shape in
+`schemas/spool-rows.schema.json` (with `dropped` below).
 
 ### `dropped` — segments evicted by the disk budget
 
@@ -120,5 +129,8 @@ grant is the throttle. Nothing AirPrompter runs is in the write path.
 3. At minute end write the row to the open segment, `fsync`, close per the
    rules above.
 
-A reference writer in ~80 lines is in `examples/spool-writer/` for
-TypeScript and Python.
+`vectors/spool.json` pins the bucket index, minute formatting, segment
+naming, rotation and window aggregation; `vectors/feedback.json` pins the
+feedback catalogue. A writer that passes both interoperates with the
+daemon. The TypeScript SDK's `src/spool/writer.ts` is the reference
+implementation; `conformance/spool.mjs` is the independent one CI runs.

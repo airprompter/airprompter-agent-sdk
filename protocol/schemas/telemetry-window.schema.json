@@ -24,7 +24,7 @@
       ]
     },
     "usageSource": { "enum": ["reported", "measured", "estimated", "unavailable"] },
-    "count": { "type": "integer", "minimum": 1 },
+    "count": { "type": "integer", "minimum": 0, "description": "Runs observed in this minute. 0 when the window carries only feedback filed against runs from an earlier minute." },
     "latencyMs": {
       "type": "object",
       "additionalProperties": false,

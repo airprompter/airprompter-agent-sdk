@@ -13,8 +13,9 @@ release goes live, calls the model, and reports content-free measurements.
 Nothing in AirPrompter can open a connection to you, read your end-user
 content, or make bytes live on a locked runtime.
 
-> Status: **protocol 0.1.0 pinned** (`protocol/v0.1.0`); packages are not
-> yet published. Follow the repository for the first SDK release.
+> Status: **protocol 0.2.5** (`protocol/v0.2.5`); `sdk-typescript/` builds
+> and passes every vector but is not yet published to npm. Follow the
+> repository for the first SDK release.
 
 ## Layout
 
@@ -49,7 +50,7 @@ your application ──(render / wrap)──▶ SDK ──▶ encrypted slot sto
 
 | Protocol | Hosted service | `@airprompter/agent-sdk` | `airprompter-agent` | `airprompter` CLI |
 |---|---|---|---|---|
-| 0.1 | vendors `protocol/v0.1.0`; routes land per `openapi.yaml` status | — | — | — |
+| 0.2 | vendors `protocol/v0.2.5`; manifest, payload and key routes shipped | `sdk-typescript` main (unpublished) | — | — |
 
 Generated from the conformance run once SDK packages exist; until then this
 table is maintained by hand with each protocol tag.

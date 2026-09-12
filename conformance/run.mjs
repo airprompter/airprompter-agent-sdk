@@ -22,6 +22,7 @@ import {
   decodeBase64Url,
 } from "./reference.mjs";
 import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./trust.mjs";
+import { LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "./spool.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const protocolDir = join(here, "..", "protocol");
@@ -285,6 +286,83 @@ const refusalEnum = readJson(join(schemaDir, "heartbeat.schema.json")).$defs.req
 for (const reason of new Set([...tv.rootMetadata, ...tv.manifests].filter((c) => !c.expected.ok).map((c) => c.expected.reason))) {
   if (refusalEnum.includes(reason)) ok(`refusal ${reason} is reportable on heartbeat`);
   else fail(`refusal ${reason} is reportable on heartbeat`, "missing from heartbeat.schema.json refusal enum");
+}
+
+section("vectors: spool (buckets, minutes, names, rotation, windows)");
+const sp = readJson(join(protocolDir, "vectors", "spool.json"));
+if (sp.latencyBuckets.edges.join() === LATENCY_BUCKET_EDGES_MS.join() && sp.segmentMaxBytes === SEGMENT_MAX_BYTES) ok("edges and the segment cap match the schema and the format");
+else fail("edges and the segment cap", "vector disagrees with latency-buckets.json / spool-format.md");
+{
+  const wrong = sp.latencyBuckets.cases.filter((c) => latencyBucketIndex(c.latencyMs) !== c.bucket);
+  if (wrong.length === 0) ok(`${sp.latencyBuckets.cases.length} latency values bucket as expected`);
+  else fail("latency buckets", wrong.map((c) => `${c.latencyMs} ms → ${latencyBucketIndex(c.latencyMs)}, expected ${c.bucket}`).join("; "));
+}
+for (const c of sp.minutes) {
+  if (minuteOf(c.epochMs) === c.minute && epochMinute(c.epochMs) === c.epochMinute) ok(`minute: ${c.name}`);
+  else fail(`minute: ${c.name}`, `${minuteOf(c.epochMs)} / ${epochMinute(c.epochMs)}`);
+}
+for (const c of sp.segmentNames) {
+  const name = segmentName(c.instanceId, epochMinute(c.epochMs), c.n);
+  if (name === c.name) ok(`segment name ${c.name}`);
+  else fail(`segment name ${c.name}`, name);
+}
+for (const c of sp.rotation) {
+  const planner = new SegmentPlanner(c.instanceId);
+  const got = c.appends.map((a) => planner.append(a.epochMs, a.lineBytes));
+  const mismatch = got.findIndex((g, i) => g.segment !== c.appends[i].segment || g.rotated !== c.appends[i].rotated);
+  if (mismatch === -1) ok(`rotation: ${c.name}`);
+  else fail(`rotation: ${c.name}`, `append ${mismatch}: got ${JSON.stringify(got[mismatch])}, expected ${JSON.stringify({ segment: c.appends[mismatch].segment, rotated: c.appends[mismatch].rotated })}`);
+}
+const windowValidate = validatorFor("telemetry-window");
+const spoolRowValidate = validatorFor("spool-rows");
+const windowKey = (row) => JSON.stringify([row.minute, row.tag, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null]);
+const sortRows = (rows) => [...rows].sort((a, b) => (windowKey(a) < windowKey(b) ? -1 : 1));
+// Key-order-insensitive equality (rows carry non-integer sums, so not the protocol's canonical form).
+const stable = (value) => (Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value);
+const sameJson = (a, b) => JSON.stringify(stable(a)) === JSON.stringify(stable(b));
+for (const c of sp.windows) {
+  const aggregator = new WindowAggregator({ instanceId: c.instanceId, instanceClass: c.instanceClass, sdk: c.sdk });
+  const refusals = [];
+  for (const event of c.events) {
+    if (event.kind === "observe") aggregator.observe(event.at, event.observation);
+    else if (event.kind === "feedback") aggregator.outcomes(event.at, event.feedback);
+    else if (event.kind === "refusal") refusals.push({ type: "refusal", v: 1, at: new Date(event.at).toISOString(), instanceId: c.instanceId, reason: event.reason, generation: event.generation, tag: event.tag ?? null });
+    else if (event.kind === "close") aggregator.close(event.at);
+  }
+  const got = sortRows(aggregator.emitted);
+  const expected = sortRows(c.expectedWindows);
+  if (got.length === expected.length && got.every((row, i) => sameJson(row, expected[i])) && sameJson(refusals, c.expectedRefusals)) ok(`windows: ${c.name}`);
+  else fail(`windows: ${c.name}`, `got ${JSON.stringify(got)} / ${JSON.stringify(refusals)}\n       expected ${JSON.stringify(expected)} / ${JSON.stringify(c.expectedRefusals)}`);
+  for (const row of c.expectedWindows) {
+    if (!windowValidate(row)) fail(`windows: ${c.name} row validates against telemetry-window`, ajv.errorsText(windowValidate.errors));
+    if (!spoolRowValidate(row)) fail(`windows: ${c.name} row validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
+  }
+  for (const row of c.expectedRefusals) {
+    if (!spoolRowValidate(row)) fail(`windows: ${c.name} refusal validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
+  }
+}
+{
+  // Content never has a field in a window: the whole vector file, serialised, carries none of the strings a leak would.
+  const text = JSON.stringify(sp.windows.map((c) => [c.expectedWindows, c.expectedRefusals]));
+  const forbiddenKeys = ["prompt", "text", "userId", "subject", "runRef", "message", "stack", "freeText"];
+  const leaked = forbiddenKeys.filter((key) => text.includes(`"${key}"`));
+  if (leaked.length === 0) ok("no window or refusal row carries a content-bearing field");
+  else fail("content-bearing field in a row", leaked.join(", "));
+}
+
+section("vectors: feedback catalogue");
+const fb = readJson(join(protocolDir, "vectors", "feedback.json"));
+const feedbackSchema = validatorFor("feedback-signals");
+for (const c of fb.cases) {
+  const got = normalizeFeedback(c.signals);
+  if (sameJson(got, c.expected)) ok(`feedback: ${c.name}`);
+  else fail(`feedback: ${c.name}`, `got ${JSON.stringify(got)}, expected ${JSON.stringify(c.expected)}`);
+  // The schema and the normaliser agree on what is entirely valid: a payload the schema accepts is never wholly rejected, and vice versa.
+  const schemaAccepts = feedbackSchema(c.signals);
+  const wholly = Object.keys(c.expected.rejected).length === 0 && Object.keys(c.signals).length > 0;
+  const partiallyValidCorrected = Object.values(c.expected.rejected).every((r) => r === "needs_slot_enum") && Object.keys(c.expected.rejected).length > 0;
+  if (schemaAccepts === (wholly || partiallyValidCorrected) || Object.keys(c.signals).length === 0) ok(`feedback: ${c.name} — schema and normaliser agree`);
+  else fail(`feedback: ${c.name} — schema and normaliser agree`, `schema ${schemaAccepts ? "accepts" : "refuses"}, normaliser rejects ${JSON.stringify(c.expected.rejected)}`);
 }
 
 // ---------------------------------------------------------------------------

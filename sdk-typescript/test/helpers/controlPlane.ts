@@ -102,6 +102,81 @@ export class FakeControlPlane {
   readonly heartbeats: Array<Record<string, unknown>> = [];
   heartbeatIntervalSeconds = 300;
   heartbeatRefusal: { status: number; code: string } | null = null;
+  /**
+   * T26: the grant issuer and a fake S3 behind it. With `grantBaseUrl` set, every accepted heartbeat answers an
+   * `uploadGrant` for the body's instance prefix (or `retryAfterSeconds` while `grantHold` is set); the POST endpoint at
+   * `<grantBaseUrl>/s3/agent-telemetry` checks the policy the way the bucket would and keeps the objects by key.
+   */
+  grantBaseUrl: string | null = null;
+  grantTtlMs = 15 * 60 * 1000;
+  grantHold: { retryAfterSeconds: number } | null = null;
+  uploadIntervalSeconds = 300;
+  readonly grants: Array<{ grantId: string; instanceId: string; keyPrefix: string; expiresAt: string }> = [];
+  readonly objects = new Map<string, Buffer>();
+  readonly uploads: string[] = [];
+  /** A test may fail the next N POSTs (a 500) to exercise backoff. */
+  failNextUploads = 0;
+  /** The issuer's and the bucket's clock (grant expiry, policy expiry); a test drives it beside the uploader's. */
+  now: () => number = () => Date.now();
+  private grantSeq = 0;
+
+  private issueGrant(instanceId: string, now: number): Record<string, unknown> {
+    const grantId = `grant_${String(++this.grantSeq).padStart(4, "0")}_${instanceId.slice(0, 8)}`.replace(/[^A-Za-z0-9_-]/g, "_").padEnd(16, "0");
+    const keyPrefix = `org/${this.scope.organizationId}/agent/${this.scope.agentId}/${this.scope.target}/${instanceId}/`;
+    const expiresAt = new Date(now + this.grantTtlMs).toISOString();
+    const policy = Buffer.from(JSON.stringify({ expiration: expiresAt, conditions: [["starts-with", "$key", keyPrefix], ["content-length-range", 0, 1048576], { "Content-Type": "application/x-ndjson" }, { "x-amz-meta-grant-id": grantId }] })).toString("base64");
+    this.grants.push({ grantId, instanceId, keyPrefix, expiresAt });
+    return {
+      grantId,
+      url: `${this.grantBaseUrl}/s3/agent-telemetry`,
+      fields: { policy, "x-amz-algorithm": "AWS4-HMAC-SHA256", "x-amz-credential": "AKIAFAKE/20260912/eu-west-1/s3/aws4_request", "x-amz-date": "20260912T000000Z", "x-amz-signature": "fake", "x-amz-server-side-encryption": "aws:kms", "x-amz-server-side-encryption-aws-kms-key-id": "arn:aws:kms:eu-west-1:000000000000:key/fake", "x-amz-meta-grant-id": grantId },
+      keyPrefix,
+      expiresAt,
+      maxObjectBytes: 1048576,
+      contentType: "application/x-ndjson",
+    };
+  }
+
+  /** The bucket's side of a presigned POST: the policy's conditions, the expiry, the size cap; nothing else is looked at. */
+  private acceptUpload(init: { headers?: Record<string, string>; body?: string | Uint8Array } | undefined, now: number): { status: number; body: string } {
+    const contentType = init?.headers?.["content-type"] ?? "";
+    const boundary = /boundary=(.+)$/.exec(contentType)?.[1];
+    if (!boundary || !init?.body) return { status: 400, body: "<Error><Code>MalformedPOSTRequest</Code></Error>" };
+    const raw = typeof init.body === "string" ? Buffer.from(init.body, "utf8") : Buffer.from(init.body);
+    const fields = new Map<string, Buffer>();
+    const marker = Buffer.from(`--${boundary}`);
+    let offset = raw.indexOf(marker);
+    while (offset !== -1) {
+      const next = raw.indexOf(marker, offset + marker.length);
+      if (next === -1) break;
+      const part = raw.subarray(offset + marker.length + 2, next - 2); // skip CRLF after the marker; drop CRLF before the next
+      const headerEnd = part.indexOf("\r\n\r\n");
+      const headers = part.subarray(0, headerEnd).toString("utf8");
+      const name = /name="([^"]+)"/.exec(headers)?.[1];
+      if (name) fields.set(name, part.subarray(headerEnd + 4));
+      offset = next;
+    }
+    if (this.failNextUploads > 0) {
+      this.failNextUploads -= 1;
+      return { status: 500, body: "<Error><Code>InternalError</Code></Error>" };
+    }
+    const policyText = fields.get("policy")?.toString("utf8");
+    const policy = policyText ? (JSON.parse(Buffer.from(policyText, "base64").toString("utf8")) as { expiration: string; conditions: unknown[] }) : null;
+    if (!policy) return { status: 403, body: "<Error><Code>AccessDenied</Code><Message>Invalid according to Policy: Policy missing</Message></Error>" };
+    if (Date.parse(policy.expiration) <= now) return { status: 403, body: "<Error><Code>AccessDenied</Code><Message>Invalid according to Policy: Policy expired.</Message></Error>" };
+    const key = fields.get("key")?.toString("utf8") ?? "";
+    const grantId = fields.get("x-amz-meta-grant-id")?.toString("utf8");
+    const grant = this.grants.find((g) => g.grantId === grantId);
+    if (!grant || !key.startsWith(grant.keyPrefix)) return { status: 403, body: "<Error><Code>AccessDenied</Code><Message>Invalid according to Policy: Policy Condition failed: [\"starts-with\", \"$key\", ...]</Message></Error>" };
+    if (fields.get("Content-Type")?.toString("utf8") !== "application/x-ndjson") return { status: 403, body: "<Error><Code>AccessDenied</Code><Message>Invalid according to Policy: Content-Type</Message></Error>" };
+    if (fields.get("x-amz-server-side-encryption")?.toString("utf8") !== "aws:kms") return { status: 403, body: "<Error><Code>AccessDenied</Code><Message>Invalid according to Policy: SSE</Message></Error>" };
+    const file = fields.get("file");
+    if (!file) return { status: 400, body: "<Error><Code>InvalidArgument</Code><Message>POST requires exactly one file upload per request.</Message></Error>" };
+    if (file.length > 1048576) return { status: 400, body: "<Error><Code>EntityTooLarge</Code></Error>" };
+    this.objects.set(key, Buffer.from(file));
+    this.uploads.push(key);
+    return { status: 204, body: "" };
+  }
 
   promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "directives" | "onLeaseExpiry" | "unlockWindow">> & { signWith?: P256PrivateJwk; generation?: number } = {}): Manifest {
     const sorted = [...slots].sort((a, b) => (a.tag < b.tag ? -1 : 1));
@@ -158,6 +233,10 @@ export class FakeControlPlane {
         return respond(200, JSON.stringify({ generation: this.current.manifest.payload.generation, releaseDigest: this.current.manifest.payload.releaseDigest, leaseSeconds: this.current.manifest.payload.leaseSeconds }), { etag });
       }
       if (parsed.pathname.endsWith("/root.json")) return respond(200, JSON.stringify(this.root));
+      if (parsed.pathname === "/s3/agent-telemetry") {
+        const reply = this.acceptUpload(init, this.now());
+        return respond(reply.status, reply.body, { "content-type": "application/xml" });
+      }
       if (auth !== `Bearer ${this.apiKey}`) return respond(401, JSON.stringify({ error: "Unauthorized" }));
       // T23: the hosted catalogue — the manifest's tags, variables, step ids and experiment, no payloads.
       const slotsMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/slots$/.exec(parsed.pathname);
@@ -172,7 +251,7 @@ export class FakeControlPlane {
       if (heartbeatMatch) {
         if (heartbeatMatch[1] !== this.scope.agentId || heartbeatMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "x", details: { code: heartbeatMatch[1] !== this.scope.agentId ? "agent_mismatch" : "target_mismatch" } }));
         if (this.heartbeatRefusal) return respond(this.heartbeatRefusal.status, JSON.stringify({ error: "x", details: { code: this.heartbeatRefusal.code } }));
-        const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+        const body = JSON.parse(typeof init?.body === "string" ? init.body : init?.body ? Buffer.from(init.body).toString("utf8") : "{}") as Record<string, unknown>;
         for (const key of ["protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"]) {
           if (!(key in body)) return respond(400, JSON.stringify({ error: `heartbeat: missing ${key}` }));
         }
@@ -180,7 +259,12 @@ export class FakeControlPlane {
           if (!["protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
         }
         this.heartbeats.push(body);
-        return respond(200, JSON.stringify({ pollSeconds: 30, uploadIntervalSeconds: 300, heartbeatIntervalSeconds: this.heartbeatIntervalSeconds, expiresAt: new Date(Date.now() + this.heartbeatIntervalSeconds * 3000).toISOString() }), { "content-type": "application/json" });
+        const answer: Record<string, unknown> = { pollSeconds: 30, uploadIntervalSeconds: this.uploadIntervalSeconds, heartbeatIntervalSeconds: this.heartbeatIntervalSeconds, expiresAt: new Date(Date.now() + this.heartbeatIntervalSeconds * 3000).toISOString() };
+        if (this.grantBaseUrl) {
+          if (this.grantHold) answer.retryAfterSeconds = this.grantHold.retryAfterSeconds;
+          else answer.uploadGrant = this.issueGrant(String(body.instanceId), this.now());
+        }
+        return respond(200, JSON.stringify(answer), { "content-type": "application/json" });
       }
       const manifestMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/manifest$/.exec(parsed.pathname);
       if (manifestMatch) {
@@ -209,10 +293,14 @@ export async function serveOverHttp(plane: FakeControlPlane): Promise<{ baseUrl:
       const headers: Record<string, string> = {};
       for (const [name, value] of Object.entries(request.headers)) if (typeof value === "string") headers[name.toLowerCase()] = value;
       const url = `http://${request.headers.host ?? "127.0.0.1"}${request.url ?? "/"}`;
-      const result = (await fetchImpl(url, { headers })) as Awaited<ReturnType<FetchLike>> & { headerEntries?: Array<[string, string]> };
-      const body = Buffer.from(await result.arrayBuffer());
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const raw = Buffer.concat(chunks);
+      const body = raw.length === 0 ? undefined : headers["content-type"]?.startsWith("multipart/") ? raw : raw.toString("utf8");
+      const result = (await fetchImpl(url, { method: request.method ?? "GET", headers, ...(body !== undefined ? { body } : {}) })) as Awaited<ReturnType<FetchLike>> & { headerEntries?: Array<[string, string]> };
+      const answer = Buffer.from(await result.arrayBuffer());
       response.writeHead(result.status, Object.fromEntries(result.headerEntries ?? []));
-      response.end(body);
+      response.end(answer);
     })();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

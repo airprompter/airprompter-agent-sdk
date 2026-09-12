@@ -11,6 +11,7 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 
 import type { AirPrompterAgent } from "../../../sdk-typescript/src/agent.js";
 import { DAEMON_MAX_LINE_BYTES } from "../../../sdk-typescript/src/sync/daemon.js";
+import type { SpoolUploader, UploaderStatus } from "../../../sdk-typescript/src/telemetry/uploader.js";
 
 export interface DaemonStatus {
   daemon: string;
@@ -38,6 +39,8 @@ export interface DaemonStatus {
   consecutiveFailures: number;
   nextSyncAt: string | null;
   spool: { depthSegments: number; depthBytes: number };
+  /** T26 P4: the uploader — null when the daemon has no key (offline: the spool is the export). */
+  upload: UploaderStatus | null;
 }
 
 export interface DaemonServerOptions {
@@ -48,6 +51,7 @@ export interface DaemonServerOptions {
   target: string;
   now?: () => number;
   logger?: (event: Record<string, unknown>) => void;
+  uploader?: SpoolUploader | null;
 }
 
 export class DaemonServer {
@@ -139,7 +143,8 @@ export class DaemonServer {
   private answerHealthz(socket: Socket): void {
     const status = this.agent.status();
     const healthy = status.generation > 0;
-    const body = JSON.stringify({ ok: healthy, generation: status.generation, stagedGeneration: status.stagedGeneration, leaseExpired: status.leaseExpired, lastSyncAt: status.lastSyncAt, lastSyncOutcome: status.lastSyncOutcome });
+    const upload = this.options.uploader?.status() ?? null;
+    const body = JSON.stringify({ ok: healthy, generation: status.generation, stagedGeneration: status.stagedGeneration, leaseExpired: status.leaseExpired, lastSyncAt: status.lastSyncAt, lastSyncOutcome: status.lastSyncOutcome, spoolDepth: upload?.depth.segments ?? status.spool.depthSegments, lastUploadAt: upload?.lastUploadAt ?? null, backoffUntil: upload?.backoffUntil ?? null });
     socket.end(`HTTP/1.1 ${healthy ? "200 OK" : "503 Service Unavailable"}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
   }
 
@@ -197,8 +202,17 @@ export class DaemonServer {
         this.log({ event: "rollback", generation: result.generation, forced: result.forced });
         return { generation: result.generation, forced: result.forced };
       }
-      case "healthz":
-        return { ok: status.generation > 0, generation: status.generation, leaseExpired: status.leaseExpired, lastSyncAt: status.lastSyncAt };
+      case "healthz": {
+        const upload = this.options.uploader?.status() ?? null;
+        return { ok: status.generation > 0, generation: status.generation, leaseExpired: status.leaseExpired, lastSyncAt: status.lastSyncAt, spoolDepth: upload?.depth.segments ?? status.spool.depthSegments, lastUploadAt: upload?.lastUploadAt ?? null, backoffUntil: upload?.backoffUntil ?? null };
+      }
+      case "upload": {
+        // An operator's `airprompter upload`: one pass now, whatever the cadence says.
+        const uploader = this.options.uploader;
+        if (!uploader) throw new Error("offline");
+        const result = await uploader.runOnce();
+        return { uploaded: result.uploaded.length, quarantined: result.quarantined.length, dropped: result.dropped, held: result.held, ...uploader.status() };
+      }
       default:
         throw new Error("unknown_op");
     }
@@ -232,6 +246,7 @@ export class DaemonServer {
       consecutiveFailures: status.consecutiveSyncFailures,
       nextSyncAt: status.nextSyncAt,
       spool: status.spool,
+      upload: this.options.uploader?.status() ?? null,
     };
   }
 

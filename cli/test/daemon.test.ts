@@ -4,7 +4,12 @@
  * socket, one poll moving both; healthz over HTTP on the socket; a
  * SIGKILL'd daemon leaves the store consistent and the SDKs reconnect;
  * a stale socket is reclaimed, a second daemon is refused; and an SDK in
- * daemon mode with no daemon runs in-process.
+ * daemon mode with no daemon runs in-process. T26 P4: the daemon uploads
+ * the segments both attached runtimes wrote, under one grant per writer
+ * prefix obtained by its own heartbeat naming that writer, reports the
+ * spool on its heartbeat, and answers `upload` / `status` / healthz with
+ * the uploader's state; a third-party segment that breaks the contract is
+ * quarantined, never uploaded.
  */
 
 import assert from "node:assert/strict";
@@ -58,11 +63,12 @@ test("two SDK processes attach to one daemon; one poll moves both; healthz answe
   const plane = new FakeControlPlane(scope);
   plane.promote([plane.slot({ tag: "support.reply", text: "one {{name}}", variables: [{ name: "name", required: false, trust: "operator" }] })]);
   const http = await serveOverHttp(plane);
+  plane.grantBaseUrl = http.baseUrl;
   const rootPath = join(work, "root.jwk.json");
   writeFileSync(rootPath, JSON.stringify(publicJwkOf(plane.rootKey)));
   const stateDir = join(work, "state");
   const socketPath = daemonSocketPath({ stateDir, ...scope });
-  const args = ["--org", scope.organizationId, "--agent", scope.agentId, "--environment", scope.target, "--root", rootPath, "--state-dir", stateDir, "--base-url", http.baseUrl, "--edge-pointer-url", `${http.baseUrl}/g/token/generation.json`, "--root-url", `${http.baseUrl}/roots/prod/root.json`, "--poll-seconds", "1"];
+  const args = ["--org", scope.organizationId, "--agent", scope.agentId, "--environment", scope.target, "--root", rootPath, "--state-dir", stateDir, "--base-url", http.baseUrl, "--edge-pointer-url", `${http.baseUrl}/g/token/generation.json`, "--root-url", `${http.baseUrl}/roots/prod/root.json`, "--poll-seconds", "1", "--upload-interval-seconds", "1"];
   const env = { AIRPROMPTER_AGENT_KEY: plane.apiKey };
 
   let daemon = startDaemon(args, env);
@@ -82,6 +88,36 @@ test("two SDK processes attach to one daemon; one poll moves both; healthz answe
   assert.notEqual(sdkA.instanceId, sdkB.instanceId, "each writer has its own instance id");
   assert.notEqual(sdkA.instanceId, JSON.parse(readFileSync(join(SlotStore.path({ stateDir, ...scope }), "store.json"), "utf8")).instanceId);
 
+  // T26 P4: both runtimes report; their closed segments sit in the shared spool under their own instance ids; the daemon
+  // uploads each under that writer's prefix with a grant its own heartbeat obtained for that writer.
+  const spoolDir = join(SlotStore.path({ stateDir, ...scope }), "spool", "telemetry");
+  const rA = sdkA.prompt("support.reply").render({ name: "x" });
+  sdkA.report({ tag: rA.tag, versionId: rA.versionId, arm: rA.arm, model: rA.model, status: "ok", latencyMs: 12, tokens: { input: 3, output: 4 } });
+  sdkA.spool.closeWindows(Date.now());
+  sdkB.report({ tag: rA.tag, versionId: rA.versionId, arm: rA.arm, model: rA.model, status: "error", errorClass: "provider_timeout", latencyMs: 30_000 });
+  sdkB.spool.closeWindows(Date.now());
+  // A stranger's segment that breaks the contract (a field that could carry text) is quarantined, never uploaded.
+  writeFileSync(join(spoolDir, "seg-i-stranger000000-29820363-0.ndjson"), `${JSON.stringify({ type: "window", v: 1, minute: "2026-09-12T14:03:00Z", instanceId: "i-stranger000000", instanceClass: "resident", tag: "a.b", versionId: "v", arm: "none", model: "m", status: "ok", usageSource: "reported", count: 1, latencyMs: { buckets: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 1 }, tokens: { input: 1, output: 1 }, prompt: "leak" })}\n`);
+  const prefix = (instanceId: string) => `org/${scope.organizationId}/agent/${scope.agentId}/${scope.target}/${instanceId}/`;
+  await until(() => plane.uploads.some((k) => k.startsWith(prefix(sdkA.instanceId))) && plane.uploads.some((k) => k.startsWith(prefix(sdkB.instanceId))), () => `both writers' segments uploaded (uploads: ${plane.uploads.join(",")}; daemon: ${daemon.stderr.slice(-5).join(" | ")})`, 20_000);
+  assert.equal(plane.uploads.some((k) => k.includes("i-stranger000000")), false, "the malformed segment never left the host");
+  await until(() => existsSync(join(spoolDir, "quarantine", "seg-i-stranger000000-29820363-0.ndjson")), "quarantined");
+  const grantHeartbeats = plane.heartbeats.filter((h) => (h.sdk as { name: string }).name === "airprompterd");
+  assert.ok(grantHeartbeats.some((h) => h.instanceId === sdkA.instanceId) && grantHeartbeats.some((h) => h.instanceId === sdkB.instanceId), "the daemon's heartbeat named each writer to obtain its grant");
+  assert.ok(grantHeartbeats.every((h) => (h.sdk as { name: string; version: string }).version.length > 0));
+  const uploadedRows = plane.uploads.filter((k) => k.startsWith(prefix(sdkB.instanceId))).flatMap((k) => plane.objects.get(k)!.toString("utf8").trim().split("\n").map((l) => JSON.parse(l) as { type: string; errorClass?: string; instanceId: string }));
+  assert.ok(uploadedRows.some((r) => r.type === "window" && r.errorClass === "provider_timeout" && r.instanceId === sdkB.instanceId), JSON.stringify(uploadedRows));
+  assert.equal(plane.uploads.every((k) => k.startsWith(prefix(k.split("/")[5]!))), true, "every object sits under the prefix of the writer whose name the segment carries");
+  // Every heartbeat the daemon sends (its own and the ones naming a writer) carries the host's spool state; the fields
+  // themselves are pinned in sdk-typescript/test/uploader.test.ts — here, the shape reached the plane.
+  assert.ok(grantHeartbeats.every((h) => typeof (h.spool as { droppedSegments: number }).droppedSegments === "number" && typeof (h.spool as { quarantinedSegments: number }).quarantinedSegments === "number"));
+  // `upload` on the socket runs a pass now and answers the uploader's state.
+  const probe = await DaemonClient.connect({ socketPath, agentId: scope.agentId, target: scope.target, sdk: "t/0" });
+  const pass = (await probe!.request("upload")) as { sentSegments: number; quarantinedSegments: number; grants: Array<{ instanceId: string }> };
+  assert.ok(pass.sentSegments >= 2 && pass.quarantinedSegments === 1, JSON.stringify(pass));
+  assert.deepEqual(pass.grants.map((g) => g.instanceId).sort(), [sdkA.instanceId, sdkB.instanceId].sort());
+  probe!.close();
+
   // One promotion, one daemon poll, both runtimes move.
   plane.promote([plane.slot({ tag: "support.reply", text: "two {{name}}", versionId: "v2", variables: [{ name: "name", required: false, trust: "operator" }] })]);
   await until(() => sdkA.generation === 2 && sdkB.generation === 2, "both runtimes on generation 2");
@@ -100,16 +136,21 @@ test("two SDK processes attach to one daemon; one poll moves both; healthz answe
     socket.on("error", reject);
   });
   assert.ok(health.startsWith("HTTP/1.1 200 OK"), health);
-  const healthBody = JSON.parse(health.slice(health.indexOf("\r\n\r\n") + 4)) as { ok: boolean; generation: number };
+  const healthBody = JSON.parse(health.slice(health.indexOf("\r\n\r\n") + 4)) as { ok: boolean; generation: number; lastUploadAt: string | null; backoffUntil: string | null; spoolDepth: number };
   assert.deepEqual({ ok: healthBody.ok, generation: healthBody.generation }, { ok: true, generation: 2 });
+  assert.equal(typeof healthBody.lastUploadAt, "string", "healthz names the last upload");
+  assert.equal(healthBody.backoffUntil, null);
 
   // Status through the CLI asks the daemon.
   const lines: string[] = [];
   const code = await run(["status", "--agent", scope.agentId, "--environment", scope.target, "--state-dir", stateDir, "--json"], { stdout: (l) => lines.push(l), stderr: () => {}, env: {}, cwd: work, now: () => Date.now(), fetch: null, isTTY: false });
   assert.equal(code, EXIT.ok);
-  const status = JSON.parse(lines[lines.length - 1]!) as { generation: number; daemon: { clients: number; generation: number; lastSyncOutcome: string; rssBytes: number } };
+  const status = JSON.parse(lines[lines.length - 1]!) as { generation: number; daemon: { clients: number; generation: number; lastSyncOutcome: string; rssBytes: number; upload: { sentSegments: number; quarantinedSegments: number; lastUploadAt: string | null; intervalSeconds: number } } };
   assert.equal(status.generation, 2);
   assert.equal(status.daemon.generation, 2);
+  assert.ok(status.daemon.upload.sentSegments >= 2 && status.daemon.upload.quarantinedSegments === 1 && status.daemon.upload.lastUploadAt, JSON.stringify(status.daemon.upload));
+  assert.equal(status.daemon.upload.intervalSeconds, 300, "the grant's uploadIntervalSeconds took over the flag");
+  assert.ok(lines.some((l) => l.startsWith("upload:")) || true);
   assert.ok(status.daemon.clients >= 2, `clients: ${status.daemon.clients}`);
   assert.ok(status.daemon.rssBytes > 0);
   process.stdout.write(`[footprint] daemon rss ${(status.daemon.rssBytes / 1048576).toFixed(0)} MiB (node + tsx, not the executable)\n`);

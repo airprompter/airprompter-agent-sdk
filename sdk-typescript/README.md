@@ -51,8 +51,10 @@ variable the slot did not declare throws.
 
 Sync modes: `resident` (timer + jitter, edge pointer first so idle
 instances never wake a Lambda), `on_invoke` (serverless: `ap.invoke(fn)`
-syncs before and after the handler; telemetry goes to a memory sink
-flushed at invocation end), `daemon` (attach to the host's `airprompterd`
+syncs before and after the handler; telemetry goes to a memory sink that
+`invoke` POSTs at invocation end as one segment under the runtime's own
+upload grant — `ap.flushTelemetry()` does the same by hand, and rows a
+hold or a refused POST leaves behind wait for the next invocation), `daemon` (attach to the host's `airprompterd`
 over its socket: no key, no store of its own, `generation` events push
 new releases; with no daemon on the host the runtime syncs in-process
 exactly as `resident`), `offline` (no `apiKey`: serve the store or the

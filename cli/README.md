@@ -14,8 +14,8 @@ airprompter keygen   Generate a distribution or countersign keypair
 airprompter daemon   airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket
 ```
 
-Coming with later tickets: `unlock`, `rollback` (T9), `countersign`
-(T10), `export-telemetry` (T16); the daemon's spool uploader (T26, P4).
+Coming with later tickets: `countersign` (T10), `export-telemetry` /
+`import-telemetry` (T16).
 
 ## The daemon
 
@@ -35,7 +35,23 @@ verified release, `generation` events, and host-wide `unlock` /
 store; a daemon that cannot obtain the store's key does not listen. Logs
 are one JSON object per line on stderr and never carry prompt text.
 `GET /healthz` on the socket answers `200` with a verified release active
-and `503` without; `airprompter status` asks the daemon when it is there.
+and `503` without (with `spoolDepth`, `lastUploadAt`, `backoffUntil`);
+`airprompter status` asks the daemon when it is there.
+
+With an Agent key the daemon also **uploads the spool**: every closed
+segment under the store's `spool/telemetry/` — its own, the attached SDK
+processes', and any third-party writer's — is checked line by line
+against the spool contract (a failing segment is quarantined whole, never
+sent), then POSTed straight to S3 under a presigned grant the daemon's
+heartbeat obtains **per writer** (a grant covers one instance prefix; the
+heartbeat names the writer). Acknowledged segments move to `sent/`,
+swept after a day; failures back off with full jitter (1 s → 5 min); a
+hold from the grant issuer is honoured for exactly `retryAfterSeconds`;
+over the host budget (`--spool-budget-bytes`, 100 MiB) the oldest unsent
+segments go and the loss is reported as a `dropped` row. Passes run every
+`--upload-interval-seconds` (300) until a grant says otherwise; `--no-upload`
+leaves the spool on disk. `status` shows the uploader's state; the
+socket's `upload` op runs a pass now.
 Service manifests for systemd, launchd, Windows (WinSW), Docker and
 Kubernetes are in [`../deploy/`](../deploy/); the wire format is
 [`../protocol/daemon-socket.md`](../protocol/daemon-socket.md).

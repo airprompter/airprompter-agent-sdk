@@ -7,7 +7,7 @@
 
 import type { EdgePointer, Manifest } from "../protocol/types.js";
 
-export type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; redirect?: "follow"; body?: string }) => Promise<{
+export type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; redirect?: "follow"; body?: string | Uint8Array }) => Promise<{
   status: number;
   headers: { get(name: string): string | null };
   arrayBuffer(): Promise<ArrayBuffer>;

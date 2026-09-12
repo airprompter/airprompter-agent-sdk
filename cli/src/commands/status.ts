@@ -110,6 +110,12 @@ export async function status(argv: string[], ctx: Context): Promise<number> {
         const daemon = await client.request("status");
         out.set("daemon", daemon);
         out.line(`daemon: ${daemon.daemon} pid ${daemon.pid}, up ${daemon.uptimeSeconds}s, ${daemon.clients} client${daemon.clients === 1 ? "" : "s"}, last sync ${daemon.lastSyncAt ?? "never"} (${daemon.lastSyncOutcome ?? "—"}), ${daemon.consecutiveFailures} consecutive failure${daemon.consecutiveFailures === 1 ? "" : "s"}, next ${daemon.nextSyncAt ?? "—"}, rss ${Math.round(Number(daemon.rssBytes) / 1048576)} MiB`);
+        const upload = daemon.upload as { lastUploadAt: string | null; lastError: string | null; backoffUntil: string | null; intervalSeconds: number; nextPassAt: string | null; sentSegments: number; quarantinedSegments: number; droppedSegments: number; grants: Array<{ instanceId: string; expiresAt: string }>; depth: { segments: number; bytes: number } } | null;
+        out.line(
+          upload
+            ? `upload: ${upload.depth.segments} unsent (${upload.depth.bytes} B), last ${upload.lastUploadAt ?? "never"}, next pass ${upload.nextPassAt ?? "—"} every ${upload.intervalSeconds}s, sent ${upload.sentSegments}, quarantined ${upload.quarantinedSegments}, dropped ${upload.droppedSegments}${upload.backoffUntil ? `, backing off until ${upload.backoffUntil} (${upload.lastError ?? "—"})` : ""}, grants ${upload.grants.length}${upload.grants.length ? ` (earliest lapse ${upload.grants.map((g) => g.expiresAt).sort()[0]})` : ""}`
+            : "upload: off (no key: the spool is the export)",
+        );
       } finally {
         client.close();
       }

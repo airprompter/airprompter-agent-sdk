@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- daemon-socket.md draft 2 (AIR-1956, T26 P4): the uploader. New op
+  `upload` (one pass now); `status` gains an `upload` block and `healthz`
+  gains `spoolDepth`, `lastUploadAt`, `backoffUntil`; the rule that a
+  grant is per instance prefix and a daemon holds one per writer, obtained
+  by a heartbeat naming that writer (`sdk.name: airprompterd`); rows
+  validated against `spool-rows.schema.json` and the file name's
+  `instanceId` before upload, a failing segment quarantined whole; the
+  host budget enforced across writers with the daemon's own `dropped`
+  row. spool-format.md says the same from the writer's side and names the
+  serverless flush. No schema change.
+
 - `vectors/canonical-json.json` (AIR-1947): four cases an encoder in a
   second language can get wrong — astral keys sort by UTF-16 code units
   (U+1F600 before U+FF5E), U+2028 / U+2029 / DEL / C1 controls emitted

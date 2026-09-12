@@ -21,10 +21,11 @@ import type { Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMeta
 import { mintRunRef, parseRunRef, type RunRefFacts } from "./render/runRef.js";
 import { renderTemplate, type Delimiters } from "./render/template.js";
 import { normalizeFeedback } from "./spool/feedback.js";
-import { DirectorySink, MemorySink, SpoolWriter, type Observation, type RefusalRow, type SpoolSink } from "./spool/writer.js";
+import { DirectorySink, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "./spool/writer.js";
 import { fileKey, type KeyProvider, type StorageProtection } from "./store/keyProvider.js";
 import { SlotStore, StoreError, type LoadedSlot } from "./store/slotStore.js";
 import { observeCall, type ObserveOptions } from "./telemetry/observe.js";
+import { postSegment, type GrantDecision, type UploadGrant } from "./telemetry/uploader.js";
 import { parseWindow, windowState, type UpdateWindow } from "./apply/window.js";
 import { SyncClient, type FetchLike } from "./sync/client.js";
 import { DaemonClient, DaemonError, daemonSocketPath } from "./sync/daemon.js";
@@ -89,6 +90,18 @@ export interface StartOptions {
   fetch?: FetchLike;
   random?: () => number;
   logger?: (event: Record<string, unknown>) => void;
+  /** T26: who reports on the heartbeat — the SDK by default; the daemon names itself `airprompterd`. */
+  sdk?: { name: "agent-sdk-typescript" | "airprompterd" | "airprompter-cli"; version: string };
+}
+
+export type HeartbeatSdkName = NonNullable<StartOptions["sdk"]>["name"];
+
+/** T26: what the uploader knows about the spool, folded into the heartbeat's `spool` block. */
+export interface SpoolReport {
+  droppedSegments: number;
+  quarantinedSegments: number;
+  lastUploadAt: string | null;
+  backoffUntil: string | null;
 }
 
 export interface Rendered {
@@ -196,6 +209,13 @@ export class AirPrompterAgent {
   private haltWithoutContactWarned = false;
   private readonly localWindow: UpdateWindow | null;
   private readonly stampedRefusals = new Set<string>();
+  /** T26: the runtime's own upload grant (serverless flushes under it) and the cadence the last heartbeat asked for. */
+  private uploadGrant: UploadGrant | null = null;
+  private uploadIntervalSeconds = 300;
+  private uploadRetryAfterMs: number | null = null;
+  private spoolReporter: (() => SpoolReport) | null = null;
+  private flushSegmentN = 0;
+  private lastFlushMinute: number | null = null;
   private trustedRoot: RootMetadata;
   private readonly runRefKey: Buffer;
   readonly spool: SpoolWriter;
@@ -597,11 +617,12 @@ export class AirPrompterAgent {
     const activeDigest = this.active?.manifest.payload.releaseDigest;
     const stagedDigest = this.stagedManifest?.payload.releaseDigest;
     const applyState = status.applyState === "awaiting_unlock" && this.stagedManifest ? (this.options.requireCountersign && !this.stagedManifest.countersignatures?.length ? "awaiting_countersign" : "awaiting_unlock") : status.applyState;
+    const report = this.spoolReporter?.() ?? null;
     return {
       protocol: PROTOCOL_VERSION,
       instanceId: this.ownInstanceId,
       instanceClass: this.options.telemetry?.instanceClass ?? ((this.options.sync?.mode ?? "resident") === "on_invoke" ? "ephemeral" : "resident"),
-      sdk: { name: "agent-sdk-typescript", version: SDK_VERSION },
+      sdk: this.options.sdk ?? { name: "agent-sdk-typescript", version: SDK_VERSION },
       host: { os: process.platform === "linux" || process.platform === "darwin" || process.platform === "win32" ? (process.platform === "win32" ? "windows" : process.platform) : "other", arch: process.arch.slice(0, 16), runtime: `node ${process.versions.node}`.slice(0, 64) },
       syncMode: (this.options.sync?.mode ?? "resident") === "on_invoke" ? "on_invoke" : this.client ? "resident" : "offline",
       heartbeatIntervalSeconds: this.heartbeatIntervalSeconds,
@@ -615,7 +636,14 @@ export class AirPrompterAgent {
       catalog: { models: [...new Set(models)].slice(0, 256), reportedAt: this.nowIso() },
       lease: { ...(status.leaseExpiresAt ? { expiresAt: status.leaseExpiresAt } : {}), expired: status.leaseExpired },
       ...(store ? { localRollback: { active: store.heldBackBelow !== undefined, forced: store.forcedDowngrade === true } } : {}),
-      spool: { depthSegments: status.spool.depthSegments, depthBytes: status.spool.depthBytes, droppedSegments: 0, quarantinedSegments: 0 },
+      spool: {
+        depthSegments: status.spool.depthSegments,
+        depthBytes: status.spool.depthBytes,
+        droppedSegments: report?.droppedSegments ?? 0,
+        quarantinedSegments: report?.quarantinedSegments ?? 0,
+        ...(report?.lastUploadAt ? { lastUploadAt: report.lastUploadAt } : {}),
+        ...(report?.backoffUntil ? { backoffUntil: report.backoffUntil } : {}),
+      },
       unlockRequestsSeen: status.unlockRequests.map((r) => r.releaseDigest).slice(0, 8),
       disabled: status.disabled,
     };
@@ -634,7 +662,8 @@ export class AirPrompterAgent {
           this.lastContactMs = this.nowMs();
           const interval = Number(result.response.heartbeatIntervalSeconds);
           if (Number.isFinite(interval) && interval >= 30 && interval <= 3600) this.heartbeatIntervalSeconds = interval;
-          this.log({ event: "heartbeat", intervalSeconds: this.heartbeatIntervalSeconds, expiresAt: result.response.expiresAt ?? null });
+          this.takeGrant(result.response);
+          this.log({ event: "heartbeat", intervalSeconds: this.heartbeatIntervalSeconds, expiresAt: result.response.expiresAt ?? null, grant: this.uploadGrant ? this.uploadGrant.grantId : null });
         } else if (result.status === "refused") {
           this.lastHeartbeatRefusal = result.code ?? `http_${result.httpStatus}`;
           this.log({ event: "heartbeat_refused", httpStatus: result.httpStatus, code: result.code });
@@ -661,6 +690,96 @@ export class AirPrompterAgent {
     this.heartbeatTimer.unref?.();
   }
 
+  /** T26: the heartbeat's answer carries the grant (or a hold) and the upload cadence. */
+  private takeGrant(response: Record<string, unknown>): void {
+    const interval = Number(response.uploadIntervalSeconds);
+    if (Number.isFinite(interval) && interval >= 1) this.uploadIntervalSeconds = interval;
+    const grant = response.uploadGrant as UploadGrant | undefined;
+    if (grant && typeof grant.url === "string" && typeof grant.keyPrefix === "string") {
+      this.uploadGrant = grant;
+      this.uploadRetryAfterMs = null;
+    } else {
+      this.uploadGrant = null;
+      const retryAfter = Number(response.retryAfterSeconds);
+      this.uploadRetryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? this.nowMs() + retryAfter * 1000 : null;
+    }
+  }
+
+  /** T26: the daemon's uploader tells the heartbeat what it knows about the spool (drops, quarantine, last upload, backoff). */
+  setSpoolReporter(reporter: (() => SpoolReport) | null): void {
+    this.spoolReporter = reporter;
+  }
+
+  /**
+   * T26: an upload grant for one writer's prefix — a heartbeat carrying that writer's instance id (this runtime's own
+   * by default). A daemon uploading for the processes attached to it calls this once per writer; the answer is cached by
+   * the uploader until a minute before it lapses. Never throws.
+   */
+  async requestUploadGrant(input: { instanceId?: string; instanceClass?: "resident" | "ephemeral" } = {}): Promise<GrantDecision> {
+    if (!this.client) return { kind: "unavailable", reason: "offline" };
+    const own = input.instanceId === undefined || input.instanceId === this.ownInstanceId;
+    if (own) {
+      await this.heartbeatNow();
+      if (this.uploadGrant) return { kind: "grant", grant: this.uploadGrant, uploadIntervalSeconds: this.uploadIntervalSeconds };
+      if (this.uploadRetryAfterMs !== null) return { kind: "hold", retryAfterSeconds: Math.max(1, Math.ceil((this.uploadRetryAfterMs - this.nowMs()) / 1000)), reason: "retry_after" };
+      return { kind: "unavailable", reason: this.lastHeartbeatRefusal ?? "heartbeat_failed" };
+    }
+    try {
+      const body = { ...this.heartbeatBody(), instanceId: input.instanceId, ...(input.instanceClass ? { instanceClass: input.instanceClass } : {}) };
+      const result = await this.client.heartbeat(body);
+      if (result.status === "ok") {
+        const interval = Number(result.response.uploadIntervalSeconds);
+        if (Number.isFinite(interval) && interval >= 1) this.uploadIntervalSeconds = interval;
+        const grant = result.response.uploadGrant as UploadGrant | undefined;
+        if (grant && typeof grant.url === "string") return { kind: "grant", grant, uploadIntervalSeconds: this.uploadIntervalSeconds };
+        const retryAfter = Number(result.response.retryAfterSeconds);
+        return { kind: "hold", retryAfterSeconds: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 900, reason: "retry_after" };
+      }
+      return { kind: "unavailable", reason: result.status === "refused" ? (result.code ?? `http_${result.httpStatus}`) : `http_${result.httpStatus}` };
+    } catch (error) {
+      return { kind: "unavailable", reason: `network:${(error as Error).message}` };
+    }
+  }
+
+  /** T26: the runtime's own grant as the last heartbeat left it, for hosts that upload themselves. */
+  get grant(): { grant: UploadGrant | null; uploadIntervalSeconds: number; retryAfterUntil: string | null } {
+    return { grant: this.uploadGrant, uploadIntervalSeconds: this.uploadIntervalSeconds, retryAfterUntil: this.uploadRetryAfterMs === null ? null : new Date(this.uploadRetryAfterMs).toISOString() };
+  }
+
+  /**
+   * T26 (D25 survives on serverless): the memory sink's rows, closed as one segment and POSTed under this runtime's own
+   * grant. Rows that cannot go (no grant, a hold, a refused POST) are put back so the next flush carries them; past the
+   * buffer the sink's own eviction reports the loss. Never throws; returns what happened.
+   */
+  async flushTelemetry(): Promise<{ status: "uploaded"; segment: string; rows: number } | { status: "nothing" } | { status: "held"; reason: string; rows: number }> {
+    if (!(this.sink instanceof MemorySink)) return { status: "nothing" };
+    const rows = this.sink.drain(this.nowMs());
+    if (rows.length === 0) return { status: "nothing" };
+    const requeue = () => {
+      for (const row of rows) this.sink.append(row as SpoolRow, this.nowMs());
+    };
+    const decision = this.uploadGrant && Date.parse(this.uploadGrant.expiresAt) - 60_000 > this.nowMs() ? { kind: "grant" as const, grant: this.uploadGrant } : await this.requestUploadGrant();
+    if (decision.kind !== "grant") {
+      requeue();
+      return { status: "held", reason: decision.kind === "hold" ? `retry_after:${decision.retryAfterSeconds}` : decision.reason, rows: rows.length };
+    }
+    const minute = epochMinute(this.nowMs());
+    this.flushSegmentN = this.lastFlushMinute === minute ? this.flushSegmentN + 1 : 0;
+    this.lastFlushMinute = minute;
+    const segment = segmentName(this.ownInstanceId, minute, this.flushSegmentN);
+    const bytes = Buffer.from(rows.map((row) => JSON.stringify(row)).join("\n") + "\n", "utf8");
+    const outcome = await postSegment({ grant: decision.grant, segment, bytes, fetch: this.options.fetch ?? (globalThis.fetch as unknown as FetchLike), now: () => this.nowMs() });
+    if (outcome.status === "ok") {
+      this.log({ event: "telemetry_flushed", segment, rows: rows.length });
+      return { status: "uploaded", segment, rows: rows.length };
+    }
+    requeue();
+    if (outcome.status === "refused" && outcome.expired) this.uploadGrant = null;
+    const reason = outcome.status === "refused" ? `http_${outcome.httpStatus}` : outcome.status === "too_large" ? "too_large" : `network:${outcome.reason}`;
+    this.log({ event: "telemetry_flush_failed", reason, rows: rows.length });
+    return { status: "held", reason, rows: rows.length };
+  }
+
   private async fetchRoot(url: string): Promise<RootMetadata | null> {
     try {
       const response = await (this.options.fetch ?? (globalThis.fetch as unknown as FetchLike))(url, { headers: { "user-agent": `${SDK_NAME}/${SDK_VERSION}` } });
@@ -680,6 +799,8 @@ export class AirPrompterAgent {
     } finally {
       this.spool.closeWindows(this.nowMs());
       void this.syncNow();
+      // D25 on serverless: the invocation's rows go out under the runtime's own grant; a failure keeps them for the next one.
+      if (this.client && this.sink instanceof MemorySink) void this.flushTelemetry();
     }
   }
 

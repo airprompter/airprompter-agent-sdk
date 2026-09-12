@@ -161,4 +161,5 @@ a `run_ref` minted there).
 | `observe()`: OpenAI / Anthropic / Bedrock usage, error classes | ✓ | ✓ + SDK objects, async variant |
 | Managed mode (catalogue, run, stream, typed refusals, 429 retry) | ✓ | ✓ |
 | Provider wrappers | — | openai, anthropic, LiteLLM callback |
-| Spool upload to the ingest bucket | daemon (T26) | daemon (T26) — the SDK writes, the daemon uploads |
+| Spool upload on hosts | `airprompterd` uploads every writer's segments (T26) | same daemon — the SDK writes, the daemon uploads |
+| Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓ | next phase (drain the memory sink with `drain_memory_sink()` and POST it yourself until then) |

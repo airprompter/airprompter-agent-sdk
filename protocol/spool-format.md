@@ -134,10 +134,23 @@ enters a window.
 
 Heartbeat with the Agent key returns a presigned S3 POST grant (≤ 15 min,
 prefix `org/{org}/agent/{agent}/{target}/{instance}/`, ≤ 1 MiB, NDJSON,
-SSE-KMS, grant id) plus `uploadIntervalSeconds`. Closed segments are PUT to
-S3 under the grant with exponential backoff and full jitter (1 s → 5 min),
+SSE-KMS, grant id) plus `uploadIntervalSeconds`. Closed segments are POSTed
+to S3 under the grant with exponential backoff and full jitter (1 s → 5 min),
 one in flight per host; acknowledged segments move to `sent/`. A refused
 grant is the throttle. Nothing AirPrompter runs is in the write path.
+
+A grant is per **instance prefix**, and the ingest processor quarantines a
+row whose `instanceId` is not the prefix's. A daemon uploading for several
+writers therefore holds one grant per writer, obtained by a heartbeat that
+names that writer's `instanceId` (see `daemon-socket.md` › The uploader);
+a third-party writer's segment goes under the writer's own prefix, named
+by the segment file. Before any bytes leave the host every line is
+checked against `spool-rows.schema.json` and against the file name's
+`instanceId`; a segment that fails moves to `quarantine/` whole.
+
+Serverless runtimes (no daemon, memory buffer) POST their own rows at
+invocation end as one segment under their own grant; rows that cannot go
+(a hold, a refused POST) stay buffered for the next invocation.
 
 ## Writing to the spool without our SDK
 

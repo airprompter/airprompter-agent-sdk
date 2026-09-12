@@ -49,6 +49,14 @@ export interface SyncPassInput {
   applyPolicy: (manifest: Manifest) => ApplyPolicyDecision | Promise<ApplyPolicyDecision>;
   onRefusal?: (reason: RefusalCode | string, generation: number | null) => void;
   /**
+   * T15: the models this application declared it can call (`models` at start). A manifest whose slot (or arm
+   * override) requires a model outside it is refused locally — `model_unavailable`, the release stays unactivated,
+   * nothing is fetched — and `onModelUnavailable` names the missing models for the heartbeat. Null when the
+   * application declared nothing: then no slot can be refused over its model.
+   */
+  catalog?: readonly string[] | null;
+  onModelUnavailable?: (models: readonly string[], generation: number) => void;
+  /**
    * T9: called with every manifest whose envelope verifies (signature, scope,
    * generation not below the stored one) BEFORE the pass decides whether to
    * stage, hold back or ignore it — so a `disable` (Freeze) or a
@@ -63,6 +71,16 @@ export interface SyncPassOutput extends SyncPassResult {
   edgeEtag: string | null;
   trustedRoot: RootMetadata;
   active: LoadedSlot | null;
+}
+
+/** The required models of a payload (its slots and every arm override) that the declared catalog lacks; empty when nothing was declared. */
+export function requiredModelsMissing(payload: Manifest["payload"], catalog: readonly string[] | null): string[] {
+  if (catalog === null) return [];
+  const declared = new Set(catalog);
+  const missing = new Set<string>();
+  const slots = [...payload.slots, ...(payload.experiment?.arms ?? []).flatMap((arm) => arm.overrides)];
+  for (const slot of slots) if (slot.modelRequired === true && !declared.has(slot.model)) missing.add(slot.model);
+  return [...missing].sort();
 }
 
 export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
@@ -119,6 +137,13 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
     if (heldBackBelow !== undefined && manifest.payload.generation <= heldBackBelow) {
       // A local rollback stepped down from this generation on purpose; only a newer one ends the hold.
       return done({ outcome: "held_back", generation: manifest.payload.generation }, input.active, fetched.etag);
+    }
+    // T15: a required model this runtime cannot call refuses the release here — verified, never fetched, never staged.
+    const missingModels = requiredModelsMissing(manifest.payload, input.catalog ?? null);
+    if (missingModels.length > 0) {
+      input.onModelUnavailable?.(missingModels, manifest.payload.generation);
+      input.onRefusal?.("model_unavailable", manifest.payload.generation);
+      return done({ outcome: "refused", reason: "model_unavailable", generation: manifest.payload.generation }, input.active, fetched.etag);
     }
 
     // Fetch only what moved; the bytes already verified in the active slot are reused for unchanged hashes.

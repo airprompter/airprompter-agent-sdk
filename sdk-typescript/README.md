@@ -90,10 +90,20 @@ const ap = await AirPrompterAgent.start({
     },
   },
   heartbeatSeconds: 300,          // how often this instance reports to the fleet view (30–3600)
-  models: { "gpt-5": { provider: "openai" } },   // the catalogue the fleet view shows
+  models: { "gpt-5": { provider: "openai" } },   // what this process can call: reported on every heartbeat, never verified
 });
 // (a) an operator: `airprompter unlock --agent … --environment prod --generation 42`
 ```
+
+`models` is the catalogue the console shows under Settings › Models
+("available on 3 of 5 instances") and the gate a release must pass: a
+version naming a model no instance declared is refused at seal. A release
+may mark a slot's model **required**; a process whose `models` lacks it
+refuses that release (`status().lastRefusal === "model_unavailable"`, the
+heartbeat names the model) and keeps serving what it has — a partially
+upgraded fleet degrades honestly instead of running the prompt on another
+model. Declare nothing and no release is refused over a model; `render()`
+still returns the pinned `model` for you to map.
 
 The console can **request** an unlock (a signed, expiring
 `request_unlock` directive rides the next manifest); `status().unlockRequests`

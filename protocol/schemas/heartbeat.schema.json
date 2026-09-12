@@ -82,8 +82,15 @@
             "payload_hash_mismatch",
             "countersign_missing",
             "countersign_invalid",
-            "schema_invalid"
+            "schema_invalid",
+            "model_unavailable"
           ]
+        },
+        "unavailableModels": {
+          "description": "With `refusal: model_unavailable` — the one local refusal after the chain verified — the required models this runtime cannot call (one per refusing slot at most).",
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "manifest.schema.json#/$defs/modelId" }
         },
         "signingKeyId": {
           "description": "keyId that signed the active manifest, so rotation progress is visible per fleet.",

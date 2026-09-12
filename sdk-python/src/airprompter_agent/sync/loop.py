@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 from ..protocol.trust import referenced_payloads, verify_manifest, verify_root_metadata
 from ..store.slot_store import LoadedSlot, SlotStore
@@ -41,6 +41,17 @@ class SyncPassOutput:
     reason: Optional[str] = None
 
 
+def required_models_missing(payload: Mapping[str, Any], catalog: Optional[Sequence[str]]) -> list[str]:
+    """The required models of a payload (its slots and every arm override) the declared catalog lacks; empty when nothing was declared."""
+    if catalog is None:
+        return []
+    declared = set(catalog)
+    slots = list(payload.get("slots", []))
+    for arm in (payload.get("experiment") or {}).get("arms", []):
+        slots.extend(arm.get("overrides", []))
+    return sorted({slot["model"] for slot in slots if slot.get("modelRequired") is True and slot["model"] not in declared})
+
+
 def sync_once(
     *,
     store: SlotStore,
@@ -58,6 +69,8 @@ def sync_once(
     countersign_root: Optional[Mapping[str, Any]] = None,
     on_refusal: Optional[Callable[[str, Optional[int]], None]] = None,
     on_directives: Optional[Callable[[Mapping[str, Any]], None]] = None,
+    catalog: Optional[Sequence[str]] = None,
+    on_model_unavailable: Optional[Callable[[list[str], int], None]] = None,
 ) -> SyncPassOutput:
     """``on_directives`` (T9) is called with every manifest whose envelope verifies BEFORE the pass decides whether to stage,
     hold back or ignore it — so a ``disable`` (Freeze) or a ``request_unlock`` rides a manifest the runtime would otherwise
@@ -122,6 +135,13 @@ def sync_once(
         if held_back_below is not None and generation <= held_back_below:
             # A local rollback stepped down from this generation on purpose; only a newer one ends the hold.
             return done("held_back", next_etag=fetched.etag, generation=generation)
+        # T15: a required model this runtime cannot call refuses the release here — verified, never fetched, never staged.
+        missing_models = required_models_missing(manifest["payload"], catalog)
+        if missing_models:
+            if on_model_unavailable:
+                on_model_unavailable(missing_models, generation)
+            refuse("model_unavailable", generation)
+            return done("refused", reason="model_unavailable", next_etag=fetched.etag, generation=generation)
 
         # Fetch only what moved; the bytes already verified in the active slot are reused for unchanged hashes.
         payloads: dict[str, bytes] = {}

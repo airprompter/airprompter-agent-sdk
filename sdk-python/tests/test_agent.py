@@ -22,6 +22,7 @@ from airprompter_agent.bundle.hpke import generate_x25519_key_pair
 from airprompter_agent.protocol.trust import key_thumbprint, public_jwk_of, release_digest
 from airprompter_agent.render.run_ref import parse_run_ref
 from airprompter_agent.render.template import MissingVariableError, UnknownVariableError
+from airprompter_agent.sync.loop import required_models_missing
 from airprompter_agent._util import b64url_encode
 
 from .control_plane import FakeControlPlane, new_key
@@ -351,3 +352,37 @@ def test_context_manager_stops(state_dir):
     with start(plane, state_dir) as ap:
         assert ap.generation == 1
     assert ap._stopped is True
+
+
+def test_required_model_outside_the_declared_catalog_is_refused_locally(state_dir):
+    """T15: the chain verified, but a slot's required model is not one this process declared — refused, nothing fetched,
+    the heartbeat names the model; the same model without the requirement activates; nothing declared, nothing refused."""
+    plane = FakeControlPlane(SCOPE)
+    triage, reply = triage_slots(plane)
+    assert release_digest([{**triage, "modelRequired": False}]) == release_digest([triage]), "false is the absence of the flag"
+    assert release_digest([{**triage, "modelRequired": True}]) != release_digest([triage]), "a required model is a different release"
+    required = plane.promote([{**triage, "model": "claude-haiku-4-5", "modelRequired": True}, reply])
+    assert required_models_missing(required["payload"], ["gpt-5"]) == ["claude-haiku-4-5"]
+    assert required_models_missing(required["payload"], None) == []
+
+    plane2 = FakeControlPlane(SCOPE)
+    t2, r2 = triage_slots(plane2)
+    plane2.promote([t2, r2])
+    refusals = []
+    ap = start(plane2, state_dir, models={"gpt-5": {"provider": "openai"}, "claude-sonnet-5": {"provider": "anthropic"}}, logger=lambda e: refusals.append(e["reason"]) if e.get("event") == "sync_refused" else None)
+    assert ap.generation == 1
+    plane2.promote([{**t2, "model": "claude-haiku-4-5", "modelRequired": True}, r2])
+    ap.sync_now()
+    assert ap.generation == 1, "the release stays unactivated"
+    assert refusals == ["model_unavailable"]
+    status = ap.status()
+    assert status.apply_state == "refused" and status.last_refusal == "model_unavailable"
+    body = ap.heartbeat_body()
+    assert body["applyState"] == "refused" and body["refusal"] == "model_unavailable"
+    assert body["unavailableModels"] == ["claude-haiku-4-5"]
+    plane2.promote([{**t2, "model": "claude-haiku-4-5"}, r2])
+    ap.sync_now()
+    assert ap.generation == 3
+    assert "unavailableModels" not in ap.heartbeat_body(), "cleared once a release activates"
+    assert ap.prompt("support.triage").render(team="a", ticket="b").model == "claude-haiku-4-5"
+    ap.stop()

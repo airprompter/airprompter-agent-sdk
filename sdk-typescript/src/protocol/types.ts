@@ -31,6 +31,8 @@ export interface ManifestSlot {
   contentHash: Sha256;
   byteLength: number;
   model: string;
+  /** The model is required: a runtime whose declared catalog lacks it refuses the release (`model_unavailable`). In the digest input only when true. */
+  modelRequired?: boolean;
   variables: SlotVariable[];
   steps?: SlotStep[];
 }
@@ -173,4 +175,6 @@ export type RefusalCode =
   | "payload_hash_mismatch"
   | "countersign_missing"
   | "countersign_invalid"
-  | "schema_invalid";
+  | "schema_invalid"
+  /** The chain verified; a slot's required model is not in this runtime's declared catalog (T15). */
+  | "model_unavailable";

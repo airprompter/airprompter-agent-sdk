@@ -88,7 +88,7 @@
       }
     },
     "slot": {
-      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md).",
+      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model", "variables"],
@@ -101,6 +101,10 @@
         "contentHash": { "$ref": "#/$defs/sha256" },
         "byteLength": { "type": "integer", "minimum": 0, "maximum": 65536 },
         "model": { "$ref": "#/$defs/modelId" },
+        "modelRequired": {
+          "description": "The model is required: a runtime whose declared catalog lacks it refuses to activate the release (heartbeat refusal `model_unavailable`) instead of rendering the slot on another model. Omitted when false; in the digest input only when true.",
+          "type": "boolean"
+        },
         "variables": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/variable" } },
         "steps": {
           "description": "Workflow slots only: ordered steps, 1-based and contiguous, tagged `<tag>#<ordinal>`.",

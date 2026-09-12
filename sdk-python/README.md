@@ -29,6 +29,7 @@ ap = AirPrompterAgent.start(
     api_key=os.environ["AIRPROMPTER_AGENT_KEY"],   # an Agent key (distribution kind); omit to run fully offline
     root={"pinned": {"kty": "EC", "crv": "P-256", "x": "…", "y": "…"}},  # the environment's root key, from your Agent's Settings tab
     sync={"mode": "resident", "poll_seconds": 30, "edge_pointer_url": "https://…/g/<token>/generation.json"},
+    models={"gpt-5": {"provider": "openai"}},   # what this process can call: reported on every heartbeat, never verified
 )
 
 r = ap.prompt("support.triage").render(team="Billing", ticket=user_message)
@@ -98,6 +99,13 @@ ap = AirPrompterAgent.start(
     },
 )
 ```
+
+`models` is the catalogue the console shows under Settings › Models and the
+gate a release must pass at seal. A release may mark a slot's model
+**required**; a process whose `models` lacks it refuses that release
+(`status().last_refusal == "model_unavailable"`, the heartbeat names the
+model) and keeps serving what it has. Declare nothing and no release is
+refused over a model.
 
 A `disable` directive (a Freeze from the console) is honoured from any
 manifest whose signature verifies — even one left staged — and

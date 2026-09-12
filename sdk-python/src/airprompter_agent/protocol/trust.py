@@ -245,6 +245,8 @@ def release_digest_input(slots: list[Mapping[str, Any]]) -> list[dict[str, Any]]
             "model": slot["model"],
             "variables": [{"name": v["name"], "required": v["required"], "trust": v["trust"]} for v in slot.get("variables", [])],
         }
+        if slot.get("modelRequired") is True:
+            entry["modelRequired"] = True
         if slot.get("steps") is not None:
             entry["steps"] = [
                 {"stepId": s["stepId"], "ordinal": s["ordinal"], "promptArtifactId": s["promptArtifactId"], "promptVersionId": s["promptVersionId"], "contentHash": s["contentHash"], "byteLength": s["byteLength"]}

@@ -17,7 +17,8 @@ import test from "node:test";
 
 import { AirPrompterAgent, RenderRefusedError } from "../src/agent.js";
 import { parseWindow, windowState } from "../src/apply/window.js";
-import { publicJwkOf } from "../src/protocol/trust.js";
+import { publicJwkOf, releaseDigest } from "../src/protocol/trust.js";
+import { requiredModelsMissing } from "../src/sync/loop.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
@@ -232,4 +233,42 @@ test("the heartbeat: the protocol's body, content-free; the cadence is adopted f
   await offline.stop();
   assert.equal(plane2.heartbeats.length, 1, "only the online start heart-beat");
   rmSync(dir2, { recursive: true, force: true });
+});
+
+// T15: a required model this runtime cannot call is a local refusal after the chain verified — the release stays
+// unactivated, nothing is fetched, the heartbeat says which model; a runtime that declared nothing is never refused over one.
+test("a required model outside the declared catalog refuses the release locally (model_unavailable) and the heartbeat names it; the flag rides the digest only when true", async () => {
+  const plane = new FakeControlPlane(scope);
+  const [triage, reply] = slots(plane);
+  assert.equal(releaseDigest([{ ...triage!, modelRequired: false }]), releaseDigest([triage!]), "false is the absence of the flag");
+  assert.notEqual(releaseDigest([{ ...triage!, modelRequired: true }]), releaseDigest([triage!]), "a required model is a different release");
+  assert.deepEqual(requiredModelsMissing(plane.promote([{ ...triage!, model: "claude-haiku-4-5", modelRequired: true }, reply!]).payload, ["gpt-5"]), ["claude-haiku-4-5"]);
+  assert.deepEqual(requiredModelsMissing(plane.promote([{ ...triage!, model: "claude-haiku-4-5", modelRequired: true }, reply!]).payload, null), [], "nothing declared, nothing refused");
+
+  const stateDir = tempDir();
+  const plane2 = new FakeControlPlane(scope);
+  const [t2, r2] = slots(plane2);
+  plane2.promote([t2!, r2!]);
+  const events: Array<Record<string, unknown>> = [];
+  const ap = await start(plane2, stateDir, { models: { "gpt-5": { provider: "openai" }, "claude-sonnet-5": { provider: "anthropic" } }, logger: (e) => void events.push(e) });
+  assert.equal(ap.generation, 1);
+  // Generation 2 requires a model this process cannot call: refused, generation 1 keeps serving.
+  plane2.promote([{ ...t2!, model: "claude-haiku-4-5", modelRequired: true }, r2!]);
+  await ap.syncNow();
+  assert.equal(ap.generation, 1, "the release stays unactivated");
+  assert.equal(ap.status().lastSyncOutcome, "refused");
+  assert.equal(ap.status().lastRefusal, "model_unavailable");
+  const body = ap.heartbeatBody();
+  assert.equal(body.applyState, "refused");
+  assert.equal(body.refusal, "model_unavailable");
+  assert.deepEqual(body.unavailableModels, ["claude-haiku-4-5"]);
+  assert.equal(events.some((e) => e.event === "sync_refused" && e.reason === "model_unavailable"), true);
+  // The same model without the requirement activates: the app decides what to do with a model it did not declare.
+  plane2.promote([{ ...t2!, model: "claude-haiku-4-5" }, r2!]);
+  await ap.syncNow();
+  assert.equal(ap.generation, 3);
+  assert.equal(ap.heartbeatBody().unavailableModels, undefined, "cleared once a release activates");
+  assert.equal(ap.prompt("support.triage").render({ ticket: "x" }).model, "claude-haiku-4-5");
+  await ap.stop();
+  rmSync(stateDir, { recursive: true, force: true });
 });

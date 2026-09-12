@@ -191,6 +191,8 @@ export class AirPrompterAgent {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private syncing: Promise<void> | null = null;
   private lastRefusal: string | null = null;
+  /** T15: the required models the last `model_unavailable` refusal named; empty once a release activates. */
+  private unavailableModels: string[] = [];
   private stagedManifest: Manifest | null = null;
   private lastContactMs: number | null = null;
   private bundleNotAfter: string | null = null;
@@ -556,6 +558,11 @@ export class AirPrompterAgent {
         ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}),
         countersignRoot: this.options.countersignRoot ?? null,
         applyPolicy: (manifest) => this.applyPolicy(manifest),
+        catalog: this.declaredModels(),
+        onModelUnavailable: (models, generation) => {
+          this.unavailableModels = [...models];
+          this.spool.refusal({ at: this.nowIso(), reason: "model_unavailable", generation, tag: null }, this.nowMs());
+        },
         onRefusal: (reason, generation) => {
           this.lastRefusal = reason;
           this.log({ event: "sync_refused", reason, generation });
@@ -575,6 +582,7 @@ export class AirPrompterAgent {
         this.source = "store";
         this.stagedManifest = null;
         this.lastRefusal = null;
+        this.unavailableModels = [];
         this.emitChange();
       }
       if (result.outcome === "staged") {
@@ -609,11 +617,17 @@ export class AirPrompterAgent {
   // T9: the heartbeat
   // ---------------------------------------------------------------------------
 
+  /** T15: the models this application declared it can call; null when it declared nothing (then no release is refused over a model). */
+  private declaredModels(): string[] | null {
+    if (this.options.models === undefined) return null;
+    return Array.isArray(this.options.models) ? [...this.options.models] : Object.keys(this.options.models);
+  }
+
   /** The protocol's heartbeat body, built from what this process knows about itself. Content-free by construction. */
   heartbeatBody(): Record<string, unknown> {
     const status = this.status();
     const store = this.store?.state ?? null;
-    const models = Array.isArray(this.options.models) ? this.options.models : Object.keys(this.options.models ?? {});
+    const models = this.declaredModels() ?? [];
     const activeDigest = this.active?.manifest.payload.releaseDigest;
     const stagedDigest = this.stagedManifest?.payload.releaseDigest;
     const applyState = status.applyState === "awaiting_unlock" && this.stagedManifest ? (this.options.requireCountersign && !this.stagedManifest.countersignatures?.length ? "awaiting_countersign" : "awaiting_unlock") : status.applyState;
@@ -631,6 +645,7 @@ export class AirPrompterAgent {
       ...(stagedDigest ? { stagedReleaseDigest: stagedDigest } : {}),
       applyState,
       ...(status.applyState === "refused" && status.lastRefusal && /^[a-z_]+$/.test(status.lastRefusal) ? { refusal: status.lastRefusal } : {}),
+      ...(status.applyState === "refused" && status.lastRefusal === "model_unavailable" && this.unavailableModels.length > 0 ? { unavailableModels: this.unavailableModels.slice(0, 16) } : {}),
       ...(status.signingKeyId ? { signingKeyId: status.signingKeyId } : {}),
       storageProtection: status.storageProtection === "daemon" ? "custom" : status.storageProtection,
       catalog: { models: [...new Set(models)].slice(0, 256), reportedAt: this.nowIso() },

@@ -80,6 +80,7 @@ export function releaseDigestInput(slots) {
       contentHash: slot.contentHash,
       byteLength: slot.byteLength,
       model: slot.model,
+      ...(slot.modelRequired === true ? { modelRequired: true } : {}),
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
       ...(slot.steps
         ? {

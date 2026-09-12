@@ -265,6 +265,8 @@ class AirPrompterAgent:
         self._window_timer = _Timer()
         self._heartbeat_timer = _Timer()
         self._last_refusal: Optional[str] = None
+        # T15: the required models the last model_unavailable refusal named; empty once a release activates.
+        self._unavailable_models: list[str] = []
         self._staged_manifest: Optional[Mapping[str, Any]] = None
         self._last_contact_ms: Optional[float] = None
         self._bundle_not_after: Optional[str] = None
@@ -670,6 +672,10 @@ class AirPrompterAgent:
                 self._last_refusal = reason
                 self._log({"event": "sync_refused", "reason": reason, "generation": generation})
 
+            def on_model_unavailable(models: list[str], generation: int) -> None:
+                self._unavailable_models = list(models)
+                self.spool.refusal(at=self._now_iso(), reason="model_unavailable", generation=generation, tag=None, at_ms=self._now_ms())
+
             result = sync_once(
                 store=self._store,
                 client=self._client,
@@ -686,6 +692,8 @@ class AirPrompterAgent:
                 apply_policy=self._apply_policy,
                 on_refusal=on_refusal,
                 on_directives=self._take_directives,
+                catalog=self._declared_models(),
+                on_model_unavailable=on_model_unavailable,
             )
             with self._lock:
                 self._etag = result.etag
@@ -703,11 +711,19 @@ class AirPrompterAgent:
                     self._source = "store"
                     self._staged_manifest = None
                     self._last_refusal = None
+                    self._unavailable_models = []
             if activated:
                 self._emit_change()
             if result.outcome == "staged":
                 self._log({"event": "release_staged", "generation": result.generation})
                 self._emit_change()
+
+    def _declared_models(self) -> Optional[list[str]]:
+        """T15: the models this application declared it can call; None when it declared nothing (then no release is refused over a model)."""
+        models_option = self._o.get("models")
+        if models_option is None:
+            return None
+        return list(models_option) if isinstance(models_option, (list, tuple)) else list(models_option.keys())
 
     def _take_directives(self, payload: Mapping[str, Any]) -> None:
         """T9: a verified manifest's directives stand from the moment its envelope verifies; a Freeze is honoured before anything else."""
@@ -746,8 +762,7 @@ class AirPrompterAgent:
         """The protocol's heartbeat body, built from what this process knows about itself. Content-free by construction."""
         status = self.status()
         store_state = self._store.state if self._store else None
-        models_option = self._o.get("models")
-        models = list(models_option) if isinstance(models_option, (list, tuple)) else list((models_option or {}).keys())
+        models = self._declared_models() or []
         active_digest = self._active.manifest["payload"].get("releaseDigest") if self._active else None
         staged_digest = self._staged_manifest["payload"].get("releaseDigest") if self._staged_manifest else None
         apply_state = status.apply_state
@@ -777,6 +792,8 @@ class AirPrompterAgent:
             body["stagedReleaseDigest"] = staged_digest
         if status.apply_state == "refused" and status.last_refusal and _REFUSAL_WORD.match(status.last_refusal):
             body["refusal"] = status.last_refusal
+            if status.last_refusal == "model_unavailable" and self._unavailable_models:
+                body["unavailableModels"] = list(self._unavailable_models)[:16]
         if status.signing_key_id:
             body["signingKeyId"] = status.signing_key_id
         if store_state is not None:

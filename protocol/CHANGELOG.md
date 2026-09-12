@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Model catalog** (AIR-1945, T15, design §7): a slot may carry
+  `modelRequired: true` — part of the release digest input only when true
+  (canonical-json.md; every earlier digest unchanged; new manifest-verify
+  vector "a slot whose model is required", regenerated with real
+  signatures). A runtime whose declared catalog (`models` at start) lacks a
+  required model refuses the release locally: heartbeat `refusal:
+  model_unavailable` (the one refusal after the chain verified,
+  trust-chain.md) with the additive `unavailableModels` list; the active
+  release keeps serving. Both SDKs implement it; a runtime that declared no
+  models is never refused over one.
+
 - daemon-socket.md draft 2 (AIR-1956, T26 P4): the uploader. New op
   `upload` (one pass now); `status` gains an `upload` block and `healthz`
   gains `spoolDepth`, `lastUploadAt`, `backoffUntil`; the rule that a

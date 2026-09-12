@@ -91,6 +91,12 @@ Notes:
   reports them in this vocabulary.
 * A local downgrade is never a manifest check: `airprompter rollback
   --force` writes `control_plane_refusal: forced_downgrade` on evidence.
+* `model_unavailable` is the one refusal *after* the chain verified: a slot
+  (or an arm override) with `modelRequired: true` names a model the runtime
+  did not declare at start. The release stays unactivated, nothing is
+  fetched, the active release keeps serving, and the heartbeat reports the
+  refusal with `unavailableModels`. A runtime that declared no models is
+  never refused over one — the check needs a catalog to check against.
 * Countersign targets take `leaseSeconds`, `onLeaseExpiry` and every
   directive except `disable` from local configuration (D58); the manifest's
   values are advisory there.

@@ -57,6 +57,12 @@ const slots = [
   { tag: "support.triage", kind: "prompt", artifactId: "prm_8b2f3c1d9e4a", versionId: "ver_01j9x4k2m7q8", versionOrdinal: 7, contentHash: sha256Prefixed(triage), byteLength: triage.length, model: "claude-sonnet-5", variables: [{ name: "ticket_body", required: true, trust: "end_user" }] },
 ];
 const digest = releaseDigest(slots);
+// T15: a slot whose model is required — the flag is part of the digest input only when true, so this release has a
+// different digest from the plain one and every SDK must reproduce it from the pins.
+const requiredSlots = [slots[0], { ...slots[1], modelRequired: true }];
+const requiredDigest = releaseDigest(requiredSlots);
+if (requiredDigest === digest) throw new Error("modelRequired: true must change the release digest");
+if (releaseDigest([slots[0], { ...slots[1], modelRequired: false }]) !== digest) throw new Error("modelRequired: false must not change the release digest");
 const payloadsOk = [
   { contentHash: slots[0].contentHash, bytes: reply.toString("base64url") },
   { contentHash: slots[1].contentHash, bytes: triage.toString("base64url") },
@@ -143,6 +149,7 @@ const manifestCases = [
   { name: "countersign over a different digest is refused", ...base, root: rootV1, countersignRoot: customerRoot, manifest: manifest(payload({ requireCountersign: true }), ["targets"], [countersign("sha256:" + "b".repeat(64))]), expected: { ok: false, reason: "countersign_missing" } },
   { name: "countersign with corrupted bytes is refused", ...base, root: rootV1, countersignRoot: customerRoot, manifest: manifest(payload({ requireCountersign: true }), ["targets"], [(() => { const c = countersign(digest); return { ...c, sig: (c.sig[0] === "A" ? "B" : "A") + c.sig.slice(1) }; })()]), expected: { ok: false, reason: "countersign_invalid" } },
   { name: "locally required countersign applies even when the manifest says false (the local side can be stricter)", ...base, requireCountersign: true, root: rootV1, countersignRoot: customerRoot, manifest: manifest(payload({ requireCountersign: false })), expected: { ok: false, reason: "countersign_missing" } },
+  { name: "a slot whose model is required verifies; the flag is in its release digest (T15)", ...base, root: rootV1, manifest: manifest(payload({ slots: requiredSlots, releaseDigest: requiredDigest })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   { name: "experiment on a countersign target: both arms must be countersigned (D58)", ...base, root: rootV1, countersignRoot: customerRoot, manifest: manifest(payload({ requireCountersign: true, experiment: { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 9000, releaseDigest: digest, overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: "sha256:" + "c".repeat(64), overrides: [] }] } }), ["targets"], [countersign(digest)]), expected: { ok: false, reason: "countersign_missing" } },
 ];
 

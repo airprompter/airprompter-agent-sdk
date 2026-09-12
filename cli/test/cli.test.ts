@@ -328,3 +328,26 @@ test("usage errors exit 2 with the option named; --json carries the error; the A
   assert.ok(h.stdout[0]!.startsWith("Usage: airprompter status"));
   rmSync(work, { recursive: true, force: true });
 });
+
+test("pull --tags-only writes the hosted catalogue with a run key: tags, variables, step ids, arms — no payload bytes, no root needed; refusals keep their exit codes", async () => {
+  const { work, plane } = setup();
+  const h = harness(plane, work);
+  const out = join(work, "airprompter.slots.json");
+  assert.equal(await run(["pull", ...scopeArgs, "--tags-only", "--base-url", "https://run.test", "--out", out, "--json"], h.ctx), EXIT.refused, "nothing promoted yet");
+  assert.equal(h.json().reason, "nothing_promoted");
+  h.reset();
+  plane.promote([plane.slot({ tag: "support.triage", text: PROMPT_TEXT, variables: [{ name: "team", required: true, trust: "operator" }, { name: "ticket", required: true, trust: "end_user" }] })]);
+  assert.equal(await run(["pull", ...scopeArgs, "--tags-only", "--base-url", "https://run.test", "--out", out, "--json"], h.ctx), EXIT.ok, h.all());
+  const printed = h.json();
+  assert.equal(printed.generation, 1);
+  assert.deepEqual(printed.slots, ["support.triage (prompt, 2 vars)"]);
+  const written = JSON.parse(readFileSync(out, "utf8")) as { kind: string; slots: Array<{ tag: string; variables: unknown[] }>; experiment: unknown };
+  assert.equal(written.kind, "airprompter-hosted-catalogue");
+  assert.deepEqual(written.slots.map((s) => s.tag), ["support.triage"]);
+  assert.equal(readFileSync(out, "utf8").includes("triage assistant"), false, "no payload text in the catalogue");
+  assert.ok(plane.requests.every((u) => u.includes("/slots")), "only the catalogue was asked for");
+  h.reset();
+  const bad = harness(plane, work, { AIRPROMPTER_AGENT_KEY: "apr_wrong" });
+  assert.equal(await run(["pull", ...scopeArgs, "--tags-only", "--base-url", "https://run.test", "--out", out, "--json"], bad.ctx), EXIT.refused);
+  assert.equal(bad.json().reason, "unauthorized");
+});

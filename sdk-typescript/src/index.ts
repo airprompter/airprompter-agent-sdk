@@ -32,3 +32,6 @@ export type { FetchLike, ManifestFetch, SyncClientOptions } from "./sync/client.
 export { syncOnce, jitteredDelayMs } from "./sync/loop.js";
 export type { SyncPassInput, SyncPassOutput, SyncPassResult, ApplyPolicyDecision } from "./sync/loop.js";
 export { normalizeFeedback, type NormalizedFeedback, type FeedbackRejection } from "./spool/feedback.js";
+
+export { ManagedAgent, ManagedRunError, parseSse, MANAGED_SDK_USER_AGENT } from "./managed/client.js";
+export type { ManagedStartOptions, ManagedRunOptions, ManagedRunResult, ManagedRunStream, ManagedCatalogue, ManagedSlot, ManagedRefusalCode, ManagedFetchLike, ManagedTarget } from "./managed/client.js";

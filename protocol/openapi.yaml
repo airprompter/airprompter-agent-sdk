@@ -262,18 +262,29 @@ paths:
       operationId: postAgentRun
       tags: [managed]
       summary: Run a slot on a managed target
-      x-airprompter-status: planned
+      x-airprompter-status: shipped
       x-airprompter-ticket: AIR-1949
       x-airprompter-scope: agent.run
+      x-airprompter-transport: |
+        Served from the execution stack's function URL behind CloudFront, not
+        the API host; the base URL is the environment's run URL. Pass
+        `stream: true` (or `Accept: text/event-stream`) for SSE: zero or more
+        `delta` frames (`{"delta": "…"}`), then exactly one `done` frame (the
+        RunResponse) or one `error` frame (the Error body) on the 200. The
+        edge closes a connection silent for 60 s; a JSON (non-streaming) run
+        is silent until the model finishes, so SDKs stream under the hood.
       description: |
         Managed execution (§18): AirPrompter renders the active version of the
         slot, calls the model with a platform-held key, meters the run against
         the organization's allowance, and returns the output. The customer
         passes `subjectHash` (never the subject) so experiment assignment
-        matches client mode exactly (assignment-hash.md). Output checks
-        declared on the slot run server-side; `runRef` lets `ap.feedback()`
-        attach quality signals later. This is a separate key kind from
-        distribution keys and is never co-granted by default.
+        matches client mode exactly (assignment-hash.md): the salt comes from
+        `GET …/slots`. Output checks declared on the slot run server-side;
+        `runRef` lets `ap.feedback()` attach quality signals later. This is a
+        separate key kind from distribution keys and is never co-granted by
+        default. `Idempotency-Key` (header or body) makes a retry answer from
+        a 10-minute encrypted cache; an organization may keep only the fact of
+        execution instead, in which case a retry is `409 already_executed`.
       parameters:
         - $ref: "#/components/parameters/agentId"
         - $ref: "#/components/parameters/target"
@@ -309,6 +320,47 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503":
+          description: The model was unavailable on both the global and the regional profile; retry after `Retry-After`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/agents/{agentId}/targets/{target}/slots:
+    get:
+      operationId: getAgentRunSlots
+      tags: [managed]
+      summary: The hosted catalogue for a managed target
+      x-airprompter-status: shipped
+      x-airprompter-ticket: AIR-1953
+      x-airprompter-scope: agent.run
+      description: |
+        What a run key may ask for: the promoted release's slot tags, kinds,
+        models, declared variables, workflow step ids, and the experiment's
+        salt, subject key and arm names — so `subjectHash` can be computed
+        locally exactly as client mode computes it. No payload references,
+        no bytes, no directives. Same function URL as the run route; hosted
+        environments only (`403 target_not_hosted` otherwise).
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+        - $ref: "#/components/parameters/target"
+      responses:
+        "200":
+          description: The catalogue
+          headers:
+            x-agent-generation:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunSlots"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Nothing is promoted to this environment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
 components:
   securitySchemes:
@@ -365,6 +417,68 @@ components:
         details:
           type: object
           additionalProperties: true
+    RunSlots:
+      type: object
+      additionalProperties: false
+      required: [agentId, target, generation, releaseDigest, slots, experiment]
+      properties:
+        agentId:
+          $ref: "schemas/manifest.schema.json#/$defs/identifier"
+        target:
+          type: string
+          enum: [dev, staging, prod]
+        generation:
+          type: integer
+          minimum: 1
+        releaseDigest:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        slots:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [tag, kind, model, variables, steps]
+            properties:
+              tag:
+                $ref: "schemas/manifest.schema.json#/$defs/slotTag"
+              kind:
+                type: string
+                enum: [prompt, workflow]
+              model:
+                $ref: "schemas/manifest.schema.json#/$defs/modelId"
+              variables:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [name, required, trust]
+                  properties:
+                    name: { type: string, pattern: "^[a-zA-Z0-9_.-]{1,64}$" }
+                    required: { type: boolean }
+                    trust: { type: string }
+              steps:
+                description: Workflow slots list their step ids in order; prompt slots carry null.
+                type: array
+                nullable: true
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [stepId]
+                  properties:
+                    stepId: { type: string }
+        experiment:
+          description: The running experiment, or null; the salt is what `subjectHash` is computed with.
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [salt, subjectKey, arms]
+          properties:
+            salt: { type: string, pattern: "^[A-Za-z0-9_-]{22,86}$" }
+            subjectKey: { type: string, enum: [request, instance] }
+            arms:
+              type: array
+              items: { type: string }
     RunRequest:
       type: object
       additionalProperties: false
@@ -388,11 +502,34 @@ components:
         idempotencyKey:
           type: string
           pattern: "^[A-Za-z0-9_-]{16,64}$"
+        stream:
+          description: "Answer as SSE (`delta`* then `done` | `error`); `Accept: text/event-stream` does the same."
+          type: boolean
+        stepId:
+          description: A workflow slot's step to run; the customer executes its tools between steps.
+          type: string
+          pattern: "^[a-z0-9]+(?:[._-][a-z0-9]+)*#[1-9][0-9]{0,2}$"
+        maxOutputTokens:
+          description: The run's output ceiling (default 1024, at most 8192); the reserve is sized from it.
+          type: integer
+          minimum: 1
+          maximum: 8192
+        metadata:
+          description: Content-free correlation the customer keeps; echoed on the response, never stored.
+          type: object
+          maxProperties: 16
+          propertyNames:
+            pattern: "^[a-zA-Z0-9_.-]{1,32}$"
+          additionalProperties:
+            type: string
+            maxLength: 128
     RunResponse:
       type: object
       additionalProperties: false
-      required: [runRef, output, model, versionId, usage, latencyMs]
+      required: [runId, runRef, output, model, versionId, arm, generation, usage, latencyMs, priceMicros, priceBookRevision, stopReason, source]
       properties:
+        runId:
+          type: string
         runRef:
           description: Opaque reference for `ap.feedback()`; carries no content.
           type: string
@@ -405,17 +542,37 @@ components:
           $ref: "schemas/manifest.schema.json#/$defs/identifier"
         arm:
           type: string
+        generation:
+          type: integer
+          minimum: 1
         usage:
           type: object
           additionalProperties: false
-          required: [inputTokens, outputTokens]
+          required: [inputTokens, cachedInputTokens, outputTokens]
           properties:
             inputTokens: { type: integer, minimum: 0 }
+            cachedInputTokens: { type: integer, minimum: 0 }
             outputTokens: { type: integer, minimum: 0 }
-            cacheReadTokens: { type: integer, minimum: 0 }
         latencyMs:
           type: integer
           minimum: 0
+        priceMicros:
+          description: What the run cost the organization, in USD micros on the stamped price-book revision.
+          type: integer
+          minimum: 0
+        priceBookRevision:
+          type: string
+        stopReason:
+          type: string
+          enum: [end_turn, max_tokens, stop_sequence, cancelled, unknown]
+        source:
+          description: "`replayed` when the idempotency cache answered."
+          type: string
+          enum: [executed, replayed]
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
         outputChecks:
           type: array
           items:

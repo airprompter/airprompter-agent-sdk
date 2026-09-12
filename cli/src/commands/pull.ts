@@ -5,6 +5,12 @@
  * (`<out>.meta.json`) records what was vendored so `pull --check` can say
  * how far behind a build is without opening the bundle.
  *
+ * `pull --tags-only` is the hosted counterpart (T23): with a RUN key and the
+ * hosted run URL as `--base-url`, it writes the environment's catalogue —
+ * slot tags, declared variables, workflow step ids, the experiment's salt and
+ * arms — with no payloads and no trust chain to verify, for build steps that
+ * want to know what a hosted app may call before it runs.
+ *
  * Nothing this command prints is payload text, at any verbosity.
  */
 
@@ -14,6 +20,7 @@ import { dirname } from "node:path";
 import { createEncryptedBundle, createPlaintextBundle, distributionKeyId } from "../../../sdk-typescript/src/bundle/apbundle.js";
 import { referencedPayloads } from "../../../sdk-typescript/src/protocol/trust.js";
 import type { BundleContents, RootMetadata } from "../../../sdk-typescript/src/protocol/types.js";
+import { ManagedAgent, ManagedRunError } from "../../../sdk-typescript/src/managed/client.js";
 import { SyncClient } from "../../../sdk-typescript/src/sync/client.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { summarizeManifest, verifyChain } from "../chain.js";
@@ -32,6 +39,7 @@ export const PULL_OPTIONS: OptionSpec = {
   plaintext: { type: "boolean", default: false, help: "Write an unencrypted bundle (dev environment only)" },
   "not-after-days": { type: "string", default: "30", help: "Days until the bundle's notAfter" },
   check: { type: "boolean", default: false, help: "Do not pull: compare the vendored bundle's sidecar with the current generation" },
+  "tags-only": { type: "boolean", default: false, help: "Hosted environments: write the catalogue (tags, variables, step ids, experiment arms) with a RUN key; --base-url is the hosted run URL; no payloads, no root" },
   "max-behind": { type: "string", default: "0", help: "With --check: generations the vendored bundle may be behind before exit 3" },
   ...COMMON_OPTIONS,
 };
@@ -65,6 +73,28 @@ export async function pull(argv: string[], ctx: Context): Promise<number> {
   const apiKey = ctx.env[apiKeyEnv];
   if (!apiKey) throw usage(`${apiKeyEnv} is not set (the Agent key is read from the environment, never from argv)`);
   if (!ctx.fetch) throw usage("no fetch available: Node 20+ is required");
+
+  if (flag(parsed, "tags-only")) {
+    const target = requireOption(str(parsed, "out"), "out");
+    let agent: ManagedAgent;
+    try {
+      agent = await ManagedAgent.start({ agentId: scope.agentId, target: scope.target, apiKey, baseUrl: str(parsed, "base-url") ?? "https://api.airprompter.com", fetch: ctx.fetch as never, userAgent: `airprompter-cli/${CLI_VERSION}` });
+    } catch (error) {
+      if (error instanceof ManagedRunError) throw refused(`the run key was not accepted for the catalogue (${error.code}${error.detail ? `: ${error.detail}` : ""})`, { reason: error.code });
+      throw error;
+    }
+    const catalogue = agent.slots;
+    mkdirSync(dirname(target) || ".", { recursive: true });
+    writeFileSync(target, `${JSON.stringify({ kind: "airprompter-hosted-catalogue", v: 1, pulledAt: new Date(ctx.now()).toISOString(), cli: CLI_VERSION, ...catalogue }, null, 2)}\n`);
+    out.field("generation", catalogue.generation);
+    out.field("releaseDigest", catalogue.releaseDigest, "release");
+    out.field("slots", catalogue.slots.map((s) => `${s.tag} (${s.kind}${s.steps ? `, ${s.steps.length} steps` : ""}, ${s.variables.length} vars)`));
+    out.field("experiment", catalogue.experiment ? `${catalogue.experiment.arms.join(" / ")} by ${catalogue.experiment.subjectKey}` : "none");
+    out.field("out", target);
+    out.flush();
+    return EXIT.ok;
+  }
+
   const client = new SyncClient({ baseUrl: str(parsed, "base-url") ?? "https://api.airprompter.com", agentId: scope.agentId, target: scope.target, apiKey, fetch: ctx.fetch, userAgent: `airprompter-cli/${CLI_VERSION}` });
 
   const fetched = await client.manifest({});

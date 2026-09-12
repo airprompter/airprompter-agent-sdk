@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `openapi.yaml`: the run route is **shipped** (AIR-1949) with its final
+  shape — `RunRequest` gains `stream`, `stepId`, `maxOutputTokens`,
+  `metadata`; `RunResponse` gains `runId`, `generation`, `priceMicros`,
+  `priceBookRevision`, `stopReason`, `source`, `metadata`, and usage names
+  its cache-read field `cachedInputTokens`; the SSE framing and the edge's
+  60 s silence bound are stated on the route; `503` added. New
+  `GET /v1/agents/{agentId}/targets/{target}/slots` (AIR-1953): the hosted
+  catalogue a run key reads — tags, variables, step ids, the experiment's
+  salt and arms — so `subjectHash` is computed exactly as client mode does.
+
 - `daemon-socket.md` (draft 1): the local socket between `airprompterd`
   and SDK processes — path and mode, newline-JSON framing, `hello` /
   `slot` / `status` / `sync` / `unlock` / `rollback` / `healthz`,

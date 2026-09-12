@@ -69,6 +69,47 @@ The local side can be stricter than the manifest
 (`apply.policy: "unlock_required"`), never looser. In `daemon` mode both
 calls act for the whole host.
 
+## Hosted mode (`ManagedAgent`)
+
+When an environment runs hosted, there is no store, no models and no keys of
+your own: AirPrompter runs the promoted version and meters it. The SDK's
+hosted client is deliberately thin.
+
+```ts
+import { ManagedAgent, ManagedRunError } from "@airprompter/agent-sdk";
+
+const ap = await ManagedAgent.start({
+  agentId: "agt_…",
+  target: "prod",
+  apiKey: process.env.AIRPROMPTER_RUN_KEY!, // a run key (Settings › Keys, "Run key")
+  baseUrl: "https://d123.cloudfront.net",  // the environment's hosted run URL
+});
+
+// The catalogue: tags, declared variables, workflow step ids, experiment arms.
+ap.slots.slots.map((s) => s.tag);
+
+// One run. The subject is hashed with the experiment's salt and never sent.
+const result = await ap.run("support.triage", { team: "Billing", ticket }, { subject: userId });
+result.output; result.arm; result.usage; result.priceMicros; result.runRef;
+
+// Streaming: deltas as they arrive, then the assembled result.
+const stream = await ap.stream("support.reply", { name }, { subject: userId });
+for await (const delta of stream) process.stdout.write(delta);
+const done = await stream.result;
+
+// Workflow slots: the customer executes tools between steps.
+const flow = ap.workflow("onboarding.flow", { subject: userId });
+for (const { stepId } of flow.steps) await flow.step(stepId, vars);
+
+try { await ap.run(…); } catch (e) { if (e instanceof ManagedRunError) e.code; /* typed refusal, e.status, e.retryAfterSeconds */ }
+```
+
+Every run streams under the hood (the edge closes a silent connection at
+60 s; a JSON run is silent until the model finishes) and `run()` assembles
+the final frame. The only retry is a `429`, honouring `Retry-After`. The
+CLI's `airprompter pull --tags-only --base-url <run url> --out slots.json`
+writes the same catalogue for build steps.
+
 ## Module map
 
 | Module | What it holds |

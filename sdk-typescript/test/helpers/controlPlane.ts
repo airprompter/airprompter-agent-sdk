@@ -153,6 +153,14 @@ export class FakeControlPlane {
       }
       if (parsed.pathname.endsWith("/root.json")) return respond(200, JSON.stringify(this.root));
       if (auth !== `Bearer ${this.apiKey}`) return respond(401, JSON.stringify({ error: "Unauthorized" }));
+      // T23: the hosted catalogue — the manifest's tags, variables, step ids and experiment, no payloads.
+      const slotsMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/slots$/.exec(parsed.pathname);
+      if (slotsMatch) {
+        if (slotsMatch[1] !== this.scope.agentId || slotsMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "Forbidden", code: "forbidden", detail: slotsMatch[1] !== this.scope.agentId ? "agent_mismatch" : "target_mismatch" }));
+        if (!this.current) return respond(404, JSON.stringify({ error: "nothing is promoted to this environment", code: "nothing_promoted" }));
+        const payload = this.current.manifest.payload;
+        return respond(200, JSON.stringify({ agentId: payload.agentId, target: payload.target, generation: payload.generation, releaseDigest: payload.releaseDigest, slots: payload.slots.map((pin) => ({ tag: pin.tag, kind: pin.kind, model: pin.model, variables: pin.variables, steps: pin.steps ? pin.steps.map((s) => ({ stepId: s.stepId })) : null })), experiment: payload.experiment ? { salt: payload.experiment.salt, subjectKey: payload.experiment.subjectKey, arms: payload.experiment.arms.map((a) => a.arm) } : null }), { "x-agent-generation": String(payload.generation) });
+      }
       const manifestMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/manifest$/.exec(parsed.pathname);
       if (manifestMatch) {
         if (manifestMatch[1] !== this.scope.agentId) return respond(403, JSON.stringify({ error: "x", details: { code: "agent_mismatch" } }));

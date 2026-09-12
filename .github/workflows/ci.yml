@@ -55,9 +55,26 @@ jobs:
             echo "protocol/ changed without a CHANGELOG entry:"; echo "$changed"; exit 1
           fi
 
+  packages:
+    # hashFiles() is not available in a job-level `if`, so a tiny job decides
+    # which package suites exist yet.
+    name: Which packages exist
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      typescript: ${{ steps.detect.outputs.typescript }}
+      python: ${{ steps.detect.outputs.python }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        run: |
+          echo "typescript=$([ -f sdk-typescript/package.json ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "python=$([ -f sdk-python/pyproject.toml ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
   sdk-typescript:
     name: SDK (TypeScript)
-    if: hashFiles('sdk-typescript/package.json') != ''
+    needs: packages
+    if: needs.packages.outputs.typescript == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -72,7 +89,8 @@ jobs:
 
   sdk-python:
     name: SDK (Python)
-    if: hashFiles('sdk-python/pyproject.toml') != ''
+    needs: packages
+    if: needs.packages.outputs.python == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

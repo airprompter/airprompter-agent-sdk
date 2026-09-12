@@ -15,6 +15,7 @@ service, and by any self-hosted registry that implements it.
 | `schemas/bundle.schema.json` | *(next)* the `.apbundle` offline format |
 | `assignment-hash.md` | *(next)* `SHA-256(salt ‖ subject)`, first 8 bytes big-endian mod 10000 |
 | `openapi.yaml` | *(next)* customer routes: manifest, payloads, heartbeat, countersign, run |
+| `canonical-json.md` | Canonical JSON: the encoding under every release digest, and what the digest covers |
 | `vectors/` | Conformance vectors every SDK must pass |
 
 Versioning: this directory has its own semver. A manifest carries the

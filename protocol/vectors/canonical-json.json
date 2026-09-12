@@ -136,6 +136,49 @@
       ],
       "canonical": "[{\"artifactId\":\"workflow-onboarding\",\"byteLength\":512,\"contentHash\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"kind\":\"workflow\",\"model\":\"gpt-5.6\",\"steps\":[{\"byteLength\":300,\"contentHash\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"ordinal\":1,\"promptArtifactId\":\"prompt-welcome\",\"promptVersionId\":\"rev-2\",\"stepId\":\"onboarding.flow#1\"},{\"byteLength\":700,\"contentHash\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"ordinal\":2,\"promptArtifactId\":\"prompt-plan\",\"promptVersionId\":\"rev-7\",\"stepId\":\"onboarding.flow#2\"}],\"tag\":\"onboarding.flow\",\"variables\":[{\"name\":\"company\",\"required\":true,\"trust\":\"operator\"}],\"versionId\":\"rev-3\",\"versionOrdinal\":3}]",
       "sha256": "sha256:55c8102c22c9054c865a50cb69b0ce53942ef5055346f022a028c657a77240c6"
+    },
+    {
+      "name": "astral keys sort by UTF-16 code units, not code points",
+      "input": {
+        "～": 1,
+        "😀": 2,
+        "z": 3,
+        "": 4,
+        "𐀀": 5
+      },
+      "canonical": "{\"\":4,\"z\":3,\"𐀀\":5,\"😀\":2,\"～\":1}",
+      "sha256": "sha256:cae9f252b80ff9e12c02841e0080bb54d2dcd01e26623a4dfca5253e719b9e7d",
+      "note": "code-point order would put both astral keys last; UTF-16 order puts them between z and U+FF5E"
+    },
+    {
+      "name": "U+2028, U+2029, DEL and C1 controls are emitted raw; only C0 controls and the two JSON specials are escaped",
+      "input": {
+        "s": "line sep par  del  nel \u001f unit \u0001 soh"
+      },
+      "canonical": "{\"s\":\"line sep par  del  nel \\u001f unit \\u0001 soh\"}",
+      "sha256": "sha256:4ea3c85bf277a78c2bfa36f98bf8165734f2970a290dd30af36ff02ad614f911"
+    },
+    {
+      "name": "keys with escapes sort by their code units, not their escaped text",
+      "input": {
+        "a\nb": 1,
+        "a b": 2,
+        "a\"b": 3,
+        "a\\b": 4
+      },
+      "canonical": "{\"a\\nb\":1,\"a b\":2,\"a\\\"b\":3,\"a\\\\b\":4}",
+      "sha256": "sha256:85000b68668b55403fe96a2c11dbc58a28b18174e0e770343389fd04a1f5828b",
+      "note": "the escaped forms would sort \\\" before \\\\ before \\n; the raw code units sort \\n (0x0A) < space < \\\" < \\\\"
+    },
+    {
+      "name": "integers at the safe boundary",
+      "input": {
+        "max": 9007199254740991,
+        "min": -9007199254740991,
+        "zero": 0
+      },
+      "canonical": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"zero\":0}",
+      "sha256": "sha256:b7b2401ddca2165824e98c61890c0aaec470258d3119dd265d02be9438bf47e6"
     }
   ],
   "refused": [
@@ -165,6 +208,13 @@
     {
       "name": "cycle",
       "reason": "cycle"
+    },
+    {
+      "name": "unsafe integer, negative",
+      "input": {
+        "n": -9007199254740993
+      },
+      "reason": "unsafe_integer"
     }
   ]
 }

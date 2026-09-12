@@ -299,7 +299,7 @@ export class SpoolWriter {
     if (this.openMinute !== null && this.openMinute !== minute) this.closeWindows(nowMs);
     this.openMinute = minute;
     const errorClass = dimensions.errorClass ?? null;
-    const key = [dimensions.tag, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass ?? ""].join(" ");
+    const key = [dimensions.tag, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass ?? ""].join("\u0000");
     let row = this.open.get(key);
     if (!row) {
       row = {

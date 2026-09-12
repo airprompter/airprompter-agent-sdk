@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `vectors/canonical-json.json` (AIR-1947): four cases an encoder in a
+  second language can get wrong — astral keys sort by UTF-16 code units
+  (U+1F600 before U+FF5E), U+2028 / U+2029 / DEL / C1 controls emitted
+  raw, keys with escapes sorted by their code units rather than their
+  escaped text, integers at the safe boundary — and a negative unsafe
+  integer in `refused`. The Python SDK (`sdk-python/`) passes every vector
+  the TypeScript SDK passes; a store one SDK writes opens in the other.
+
 - spool-format.md (AIR-1941): the serverless 256 KiB memory buffer and its
   `dropped` row; the host budget's `dropped` row is written at once as its
   own closed segment; the OpenTelemetry GenAI field mapping (D24) and the

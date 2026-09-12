@@ -1,7 +1,164 @@
 # airprompter-agent (Python)
 
-Python 3.10+, `cryptography` and `httpx`. Same protocol and the same
-conformance vectors as the TypeScript SDK; parity tracks one phase behind.
+Run the prompts and workflows your team approved in AirPrompter on your
+own systems. The SDK pulls signed releases, keeps them in an encrypted
+restart-safe store, renders with trust-aware variables, and writes
+content-free telemetry to a local spool. Nothing AirPrompter runs is on
+your request path; with the network gone, the last verified release keeps
+serving.
 
-Planned: the same module set as `sdk-typescript/`, plus wrappers for the
-`openai` and `anthropic` clients and a LiteLLM callback.
+Python 3.10+, `cryptography` and `httpx`. The same protocol, the same
+conformance vectors and the same on-disk store as the TypeScript SDK — a
+store one SDK wrote is a store the other (and the host daemon) opens.
+
+```bash
+pip install airprompter-agent            # + [openai] [anthropic] [litellm] [kms] [vault] [keyring]
+```
+
+## Quick start
+
+```python
+import os
+from airprompter_agent import AirPrompterAgent
+from airprompter_agent.integrations.openai import chat_completion
+
+ap = AirPrompterAgent.start(
+    organization_id="org_…",
+    agent_id="agt_…",
+    target="prod",
+    api_key=os.environ["AIRPROMPTER_AGENT_KEY"],   # an Agent key (distribution kind); omit to run fully offline
+    root={"pinned": {"kty": "EC", "crv": "P-256", "x": "…", "y": "…"}},  # the environment's root key, from your Agent's Settings tab
+    sync={"mode": "resident", "poll_seconds": 30, "edge_pointer_url": "https://…/g/<token>/generation.json"},
+)
+
+r = ap.prompt("support.triage").render(team="Billing", ticket=user_message)
+# observe() times the call, reads `usage` off the provider's response (OpenAI, Anthropic, Bedrock — dicts or SDK
+# objects), classifies a failure into the closed error set, and returns the result unchanged.
+reply = ap.observe(r, lambda: openai.chat.completions.create(model=r.model, messages=[{"role": "system", "content": r.text}, {"role": "user", "content": user_message}]))
+# …or the wrapper, which places the rendered text for you:
+reply = chat_completion(ap, r, openai, messages=[{"role": "user", "content": user_message}])
+# …or report by hand:
+ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90})
+ap.feedback(r.run_ref, thumbs="up")
+```
+
+`render()` never touches the network. A variable declared `end_user` is
+fenced (`<ticket>…</ticket>`) so the model sees where untrusted input
+starts and stops; a missing required variable raises
+`MissingVariableError`; a value for a variable the slot did not declare
+raises `UnknownVariableError`.
+
+Async applications use `await ap.observe_async(r, lambda: client.messages.create(...))`
+(and `chat_completion_async` / `messages_create_async`). Everything else
+is synchronous and thread-safe; resident mode runs its sync, heartbeat and
+update-window timers on daemon threads.
+
+## What happens at start
+
+1. The store is read before any network call. The active slot is
+   verified (signatures, hashes, generation counter, expiry); if it does
+   not verify, the other slot is tried.
+2. With nothing verified in the store, a vendored `.apbundle`
+   (`vendored_bundle=`) is opened, verified the same way, and staged
+   through the store.
+3. With still nothing, one synchronous sync runs — the only time the SDK
+   waits on the network. If that fails too, `start()` raises
+   `AgentStartError("no_verified_release")`. Serving an unverified release
+   is never an option.
+
+Sync modes: `resident` (timer + jitter, edge pointer first so idle
+instances never wake a Lambda), `on_invoke` (serverless: `ap.invoke(fn)`
+syncs before and after the handler; telemetry goes to a memory sink you
+drain with `ap.drain_memory_sink()` at invocation end), `daemon` (attach
+to the host's `airprompterd` over its Unix socket: no key, no store of its
+own, `generation` events push new releases; with no daemon on the host
+the runtime syncs in-process exactly as `resident`), `offline` (no
+`api_key`: serve the store or the bundle, never call home).
+
+## Apply policy
+
+The manifest carries `applyPolicy`. Under `unlock_required` a new
+generation is staged, not activated; `apply.on_staged` is called, and
+`ap.unlock()` makes it live. `ap.rollback()` flips to the other slot
+instantly; going below the stored generation is a forced downgrade,
+stamped in the store and in the spool, and the control plane's current
+generation is held back until it moves past the one you left. The local
+side can be stricter than the manifest (`apply={"policy": "unlock_required"}`),
+never looser. In `daemon` mode both calls act for the whole host.
+
+```python
+ap = AirPrompterAgent.start(
+    …,
+    apply={
+        # an update window: staged releases go live on their own inside it ("HH:MM-HH:MM <IANA zone> [days]");
+        # a local window wins over the one the console put on the manifest.
+        "window": "02:00-04:00 Europe/Berlin mon,tue,wed,thu,fri",
+        # a change-control hook: call staged.activate() to go live; return (or raise) without it to leave it staged.
+        "on_staged": lambda staged: staged.activate() if change_control.approved(staged.generation) else None,
+    },
+)
+```
+
+A `disable` directive (a Freeze from the console) is honoured from any
+manifest whose signature verifies — even one left staged — and
+`render()` raises `RenderRefusedError("disabled")` until the next
+verified manifest lifts it. A lapsed lease degrades (keeps serving,
+reports it) or halts (`RenderRefusedError("lease_expired")`) per the
+manifest's `onLeaseExpiry`.
+
+## Key providers
+
+What protects the store's key-encryption key is reported on every
+heartbeat as `storageProtection`, so a fleet view can show a `file_key`
+host as a finding instead of hiding it.
+
+| Provider | `storageProtection` | Extra |
+|---|---|---|
+| `file_key(path)` (default: `store.key` beside the store, 0600) | `file_key` | — |
+| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install airprompter-agent[kms]` |
+| `vault(transit_key)` — HashiCorp Vault transit | `vault` | `[vault]` |
+| `os_keystore()` — Keychain / Credential Locker / Secret Service | `os_keystore` | `[keyring]` |
+| `custom_key_provider(wrap=…, unwrap=…)` | `custom` | — |
+
+`SlotStore.rotate_key(provider)` re-wraps the DEK under a new provider
+without re-encrypting a payload.
+
+## Managed mode
+
+No store, no models, no keys of your own: `ManagedAgent.start(agent_id=…, target=…, api_key=<run key>, base_url=<run route>)`,
+then `agent.run("support.triage", {"team": "Billing", "ticket": text}, subject="user-42")`
+or `for delta in agent.stream(...)`. The subject is hashed with the
+experiment's salt here and never sent.
+
+## Provider wrappers
+
+`airprompter_agent.integrations.openai` (`chat_completion`, `responses_create`, async twins),
+`airprompter_agent.integrations.anthropic` (`messages_create`, async twin), and
+`airprompter_agent.integrations.litellm` (`AirPrompterLiteLLMCallback(ap)` registered on
+`litellm.callbacks`, with `metadata=litellm_metadata(rendered)` on each call). Each imports its
+library lazily; none is required to install the SDK.
+
+## Parity with the TypeScript SDK
+
+Same protocol version (`0.2.5`), same vectors, same store layout. The
+conformance suite (`tests/test_protocol_vectors.py`, `tests/test_spool.py`)
+runs every vector the TypeScript SDK runs, and `tests/test_interop.py`
+opens a store the TypeScript SDK wrote (encrypted A slot, spool segment,
+a `run_ref` minted there).
+
+| Area | TypeScript | Python |
+|---|---|---|
+| Canonical JSON, release digest, sticky assignment, workflow steps | ✓ | ✓ (same vectors, incl. UTF-16 key order for astral characters) |
+| Trust chain R1–R5 / M1–M12, ES256 P1363 | ✓ | ✓ (`cryptography`) |
+| A/B slot store, AAD binding, anti-rollback, KEK rotation | ✓ | ✓ (byte-compatible; interop test) |
+| Key providers | file, custom (+ optional packages) | file, custom, kms (boto3), vault (hvac), os_keystore (keyring) |
+| `.apbundle` (HPKE X25519 / AES-256-GCM, RFC 9180 A.1 vector) | ✓ | ✓ |
+| Render, trust-aware fencing, `run_ref`, feedback catalogue | ✓ | ✓ |
+| Spool writer: minute windows, segments, both budgets, `dropped` rows | ✓ | ✓ (same vectors) |
+| Sync: resident / on_invoke / offline, edge pointer, root rotation, held-back generations | ✓ | ✓ |
+| Daemon attach (`daemon-socket.md`) | Unix socket + Windows named pipe | Unix socket (Windows named pipe: next phase — falls back to in-process) |
+| Apply control: update window (DST-safe), `on_staged` hook, Freeze precedence, heartbeat | ✓ | ✓ (`zoneinfo`) |
+| `observe()`: OpenAI / Anthropic / Bedrock usage, error classes | ✓ | ✓ + SDK objects, async variant |
+| Managed mode (catalogue, run, stream, typed refusals, 429 retry) | ✓ | ✓ |
+| Provider wrappers | — | openai, anthropic, LiteLLM callback |
+| Spool upload to the ingest bucket | daemon (T26) | daemon (T26) — the SDK writes, the daemon uploads |

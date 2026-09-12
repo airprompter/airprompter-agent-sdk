@@ -432,6 +432,124 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /v1/agents/{agentId}/openai/chat/completions:
+    post:
+      operationId: postAgentCompatOpenAiChatCompletions
+      tags: [managed]
+      summary: OpenAI Chat Completions shape over a hosted target
+      x-airprompter-status: shipped
+      x-airprompter-ticket: AIR-1962
+      x-airprompter-scope: agent.run
+      description: |
+        The OpenAI SDK pointed at `baseURL …/v1/agents/{agentId}/openai` with a
+        run key. `model` must be `slot:<tag>`; the release's template is the
+        system prompt; the one user turn goes into the prompt's end-user
+        variable; other variables through `airprompter.variables`. The run,
+        the meter, the record and the judge sample are `/run`'s own; the
+        answer is a chat completion (or `chat.completion.chunk` events then
+        `[DONE]`) with `X-AirPrompter-RunRef`. The mapping and every refusal:
+        `compatible-endpoints.md`. The target is the key's own.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompatOpenAiChatRequest"
+      responses:
+        "200":
+          description: An OpenAI chat completion (JSON), or `text/event-stream` chunks
+          headers:
+            X-AirPrompter-RunRef: { schema: { type: string }, description: The run reference (JSON answers; streams carry it on the usage chunk) }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompatProviderObject" }
+        "400":
+          description: A mapping refusal (`model_not_a_slot`, `system_message_not_allowed`, `unsupported_messages`, `unsupported_parameter`, `no_end_user_variable`) or a `/run` refusal, in OpenAI's error shape
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompatOpenAiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/agents/{agentId}/openai/responses:
+    post:
+      operationId: postAgentCompatOpenAiResponses
+      tags: [managed]
+      summary: OpenAI Responses shape over a hosted target
+      x-airprompter-status: shipped
+      x-airprompter-ticket: AIR-1962
+      x-airprompter-scope: agent.run
+      description: |
+        As the Chat Completions shape, for `responses.create` (and the SDK's
+        `responses.stream()` helper): `input` is the one user turn;
+        `instructions` is refused. `compatible-endpoints.md`.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompatOpenAiResponsesRequest"
+      responses:
+        "200":
+          description: An OpenAI response object (JSON), or the Responses stream events
+          headers:
+            X-AirPrompter-RunRef: { schema: { type: string }, description: The run reference (JSON answers; streams carry it on `response.completed`) }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompatProviderObject" }
+        "400":
+          description: A mapping or `/run` refusal in OpenAI's error shape
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompatOpenAiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/agents/{agentId}/anthropic/v1/messages:
+    post:
+      operationId: postAgentCompatAnthropicMessages
+      tags: [managed]
+      summary: Anthropic Messages shape over a hosted target
+      x-airprompter-status: shipped
+      x-airprompter-ticket: AIR-1962
+      x-airprompter-scope: agent.run
+      description: |
+        The Anthropic SDK pointed at `baseURL …/v1/agents/{agentId}/anthropic`
+        with a run key (`x-api-key`). `model` must be `slot:<tag>`;
+        `max_tokens` is required; `system` is refused (the release's template
+        is the system prompt); the one user turn goes into the prompt's
+        end-user variable; `metadata.user_id` is the sticky subject. The
+        answer is a message (JSON) or the Messages stream events, with
+        `X-AirPrompter-RunRef`. `compatible-endpoints.md`.
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompatAnthropicMessagesRequest"
+      responses:
+        "200":
+          description: An Anthropic message (JSON), or the Messages stream events
+          headers:
+            X-AirPrompter-RunRef: { schema: { type: string }, description: The run reference (JSON answers; streams carry it on `message_stop`) }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompatProviderObject" }
+        "400":
+          description: A mapping refusal (incl. `max_tokens_required`) or a `/run` refusal, in Anthropic's error shape
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompatAnthropicError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
 components:
   securitySchemes:
     agentKey:
@@ -478,6 +596,107 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    CompatExtension:
+      type: object
+      description: The `airprompter` extension a compatible body may carry — everything the provider shape has no field for.
+      additionalProperties: false
+      properties:
+        variables:
+          type: object
+          additionalProperties: { type: string, maxLength: 65536 }
+        subjectHash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        stepId: { type: string }
+        idempotencyKey: { type: string, pattern: "^[A-Za-z0-9_-]{16,64}$" }
+        metadata:
+          type: object
+          additionalProperties: { type: string, maxLength: 128 }
+    CompatOpenAiChatRequest:
+      type: object
+      description: An OpenAI Chat Completions request; `model` is `slot:<tag>`; one user turn; the rest per compatible-endpoints.md.
+      required: [model, messages]
+      properties:
+        model: { type: string, pattern: "^slot:" }
+        messages: { type: array, items: { type: object } }
+        stream: { type: boolean }
+        max_completion_tokens: { type: integer, minimum: 1 }
+        max_tokens: { type: integer, minimum: 1 }
+        user: { type: string }
+        airprompter: { $ref: "#/components/schemas/CompatExtension" }
+      additionalProperties: true
+    CompatOpenAiResponsesRequest:
+      type: object
+      description: An OpenAI Responses request; `model` is `slot:<tag>`; `input` is the one user turn (a string, or one user message of `input_text` parts).
+      required: [model, input]
+      properties:
+        model: { type: string, pattern: "^slot:" }
+        input: {}
+        stream: { type: boolean }
+        max_output_tokens: { type: integer, minimum: 1 }
+        user: { type: string }
+        airprompter: { $ref: "#/components/schemas/CompatExtension" }
+      additionalProperties: true
+    CompatAnthropicMessagesRequest:
+      type: object
+      description: An Anthropic Messages request; `model` is `slot:<tag>`; `max_tokens` required; one user turn; `system` refused.
+      required: [model, max_tokens, messages]
+      properties:
+        model: { type: string, pattern: "^slot:" }
+        max_tokens: { type: integer, minimum: 1 }
+        messages: { type: array, items: { type: object } }
+        stream: { type: boolean }
+        metadata:
+          type: object
+          properties:
+            user_id: { type: string }
+        airprompter: { $ref: "#/components/schemas/CompatExtension" }
+      additionalProperties: true
+    CompatProviderObject:
+      type: object
+      description: The provider's own response object (a chat completion, a response, a message) with an `airprompter` field beside the standard ones.
+      required: [airprompter]
+      properties:
+        airprompter:
+          type: object
+          required: [runId, runRef]
+          properties:
+            runId: { type: string }
+            runRef: { type: string }
+      additionalProperties: true
+    CompatOpenAiError:
+      type: object
+      required: [error, airprompter]
+      properties:
+        error:
+          type: object
+          required: [message, type, code]
+          properties:
+            message: { type: string }
+            type: { type: string }
+            param: { type: [string, "null"] }
+            code: { type: string }
+        airprompter:
+          type: object
+          required: [code]
+          properties:
+            code: { type: string }
+            detail: { type: string }
+    CompatAnthropicError:
+      type: object
+      required: [type, error, airprompter]
+      properties:
+        type: { type: string, enum: [error] }
+        error:
+          type: object
+          required: [type, message]
+          properties:
+            type: { type: string }
+            message: { type: string }
+        airprompter:
+          type: object
+          required: [code]
+          properties:
+            code: { type: string }
+            detail: { type: string }
     Error:
       type: object
       required: [error]

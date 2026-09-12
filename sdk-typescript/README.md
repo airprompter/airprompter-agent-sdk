@@ -135,6 +135,17 @@ the requests it has surfaced) and adopts the cadence the server answers
 with; a key past its 500-live-instance cap is refused and reported in
 `status().heartbeat.lastRefusal`.
 
+## Hosted mode without this SDK (D64)
+
+A hosted environment answers the OpenAI and Anthropic SDKs directly: point
+`baseURL` at `https://<run>/v1/agents/{agentId}/openai` (or `…/anthropic`),
+use a run key, and name the prompt as the model — `model: "slot:support.triage"`.
+The release's template is the system prompt, the one user turn goes into
+the prompt's end-user variable, the other variables ride on an
+`airprompter` extension, and the answer is the provider's own shape with
+the `runRef` in `X-AirPrompter-RunRef`. The mapping and every refusal:
+[`protocol/compatible-endpoints.md`](../protocol/compatible-endpoints.md).
+
 ## Wrapped clients (`ap.wrap`, D65)
 
 `ap.wrap(client)` returns the same client with its public model-call

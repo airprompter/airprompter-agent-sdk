@@ -145,6 +145,11 @@ without re-encrypting a payload.
 
 ## Managed mode
 
+Or no SDK of ours at all: the `openai` / `anthropic` clients pointed at
+`https://<run>/v1/agents/{agentId}/openai` (or `…/anthropic`) with a run key
+and `model="slot:support.triage"` — the mapping in
+[`protocol/compatible-endpoints.md`](../protocol/compatible-endpoints.md).
+
 Feedback works the same way hosted: keep `result.run_ref` beside your own
 record and later call `agent.feedback(run_ref, accepted=True, rating=4)` from
 any process holding the run key.

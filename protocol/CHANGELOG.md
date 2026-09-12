@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Provider-compatible endpoints** (AIR-1962, T32, D64 / §11.2):
+  compatible-endpoints.md. The OpenAI Chat Completions and Responses shapes
+  under `/v1/agents/{agentId}/openai/…` and the Anthropic Messages shape
+  under `/v1/agents/{agentId}/anthropic/v1/messages`, on the run URL, with
+  the run key (the target is the key's own) and `model: "slot:<tag>"`. The
+  release's template is the system prompt; the one user turn goes into the
+  prompt's end-user variable; the other declared variables, the sticky
+  subject, the idempotency key and the step ride on an `airprompter`
+  extension. Metering, records, retention and judge sampling are `/run`'s
+  own; the answer is the provider's shape (JSON or its own stream events)
+  with `X-AirPrompter-RunRef` and an `airprompter: { runId, runRef }` field;
+  every refusal is the provider's error shape with the AirPrompter code
+  beside it. Three OpenAPI paths and their schemas.
+
 - **Reference spool writers** (AIR-1963, T33, D66): `examples/spool-writer/`
   — a dependency-free writer in TypeScript and in Python that a team
   instrumenting a provider SDK themselves can start from; both pass

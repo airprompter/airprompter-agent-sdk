@@ -24,9 +24,10 @@ const ap = await AirPrompterAgent.start({
 });
 
 const r = ap.prompt("support.triage").render({ team: "Billing", ticket: userMessage });
-const started = Date.now();
-const reply = await yourModelClient.complete({ model: r.model, prompt: r.text });
-ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: Date.now() - started, tokens: { input: reply.usage.input, output: reply.usage.output } });
+// observe() times the call, reads `usage` off the provider's response (OpenAI, Anthropic, Bedrock),
+// classifies a failure into the closed error set, and returns the result unchanged.
+const reply = await ap.observe(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }));
+// …or report by hand: ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs, tokens: { input, output } });
 ap.feedback(r.runRef, { thumbs: "up" });
 ```
 

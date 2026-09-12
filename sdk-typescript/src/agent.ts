@@ -24,6 +24,7 @@ import { normalizeFeedback } from "./spool/feedback.js";
 import { DirectorySink, MemorySink, SpoolWriter, type Observation, type RefusalRow, type SpoolSink } from "./spool/writer.js";
 import { fileKey, type KeyProvider, type StorageProtection } from "./store/keyProvider.js";
 import { SlotStore, StoreError, type LoadedSlot } from "./store/slotStore.js";
+import { observeCall, type ObserveOptions } from "./telemetry/observe.js";
 import { parseWindow, windowState, type UpdateWindow } from "./apply/window.js";
 import { SyncClient, type FetchLike } from "./sync/client.js";
 import { DaemonClient, DaemonError, daemonSocketPath } from "./sync/daemon.js";
@@ -76,7 +77,14 @@ export interface StartOptions {
   /** The models this application can actually call, as the provider names them (reported on heartbeat; promotion refuses a slot whose model is absent). */
   models?: Record<string, unknown> | string[];
   delimiters?: Delimiters;
-  telemetry?: { sink?: "directory" | "memory"; instanceClass?: "resident" | "ephemeral" };
+  telemetry?: {
+    sink?: "directory" | "memory";
+    instanceClass?: "resident" | "ephemeral";
+    /** Serverless: the in-memory buffer (default 256 KiB); the oldest rows go past it and a `dropped` row says so. */
+    bufferBytes?: number;
+    /** Hosts: the closed-segment budget (default 100 MiB); the oldest unsent segments go past it and a `dropped` row says so. */
+    spoolBudgetBytes?: number;
+  };
   now?: () => number;
   fetch?: FetchLike;
   random?: () => number;
@@ -208,7 +216,7 @@ export class AirPrompterAgent {
     this.localWindow = options.apply?.window ? parseWindow(options.apply.window) : null;
     this.heartbeatIntervalSeconds = Math.min(3600, Math.max(30, Math.round(options.heartbeatSeconds ?? 300)));
     const serverless = (options.sync?.mode ?? "resident") === "on_invoke";
-    this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink() : new DirectorySink(spoolDir, ownInstanceId);
+    this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink({ instanceId: ownInstanceId }, options.telemetry?.bufferBytes) : new DirectorySink(spoolDir, ownInstanceId, options.telemetry?.spoolBudgetBytes);
     this.spool = new SpoolWriter(this.sink, { instanceId: ownInstanceId, instanceClass: options.telemetry?.instanceClass ?? (serverless ? "ephemeral" : "resident"), sdk: `${SDK_NAME}/${SDK_VERSION}` });
     this.client =
       options.apiKey && options.sync?.mode !== "offline" && options.sync?.mode !== "daemon"
@@ -820,6 +828,18 @@ export class AirPrompterAgent {
     this.spool.observe(observation, this.nowMs());
   }
 
+  /**
+   * Time a model call against a rendered prompt (or a workflow step) and
+   * report it: latency, `usage` read off the provider's response (OpenAI,
+   * Anthropic, Bedrock shapes), a thrown failure classified into the closed
+   * error set. The result comes back unchanged; an error is re-thrown after
+   * it is counted. Nothing of the response but its usage and finish reason
+   * is read; nothing of an error but its code and status.
+   */
+  async observe<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model">, call: () => Promise<T> | T, options: ObserveOptions = {}): Promise<T> {
+    return observeCall(rendered, call, (observation) => this.spool.observe(observation, this.nowMs()), { ...options, now: () => this.nowMs() });
+  }
+
   /** Quality signals against a run: numbers, booleans and declared enums only; anything else is refused. */
   feedback(runRef: string, signals: Record<string, unknown>): boolean {
     const facts = parseRunRef(runRef, this.runRefKey);
@@ -913,9 +933,9 @@ export class AirPrompterAgent {
     return keyThumbprint(jwk);
   }
 
-  /** Test seam: the memory sink's rows on serverless hosts. */
+  /** The memory sink's rows on serverless hosts (the host's uploader takes them at invocation end); a `dropped` row closes an over-budget invocation. */
   drainMemorySink(): unknown[] {
-    return this.sink instanceof MemorySink ? this.sink.drain() : [];
+    return this.sink instanceof MemorySink ? this.sink.drain(this.nowMs()) : [];
   }
 
   static newInstanceId(): string {

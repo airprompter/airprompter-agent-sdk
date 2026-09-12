@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- spool-format.md (AIR-1941): the serverless 256 KiB memory buffer and its
+  `dropped` row; the host budget's `dropped` row is written at once as its
+  own closed segment; the OpenTelemetry GenAI field mapping (D24) and the
+  `sdk` writer tag as an ingest dimension (D66). No schema change: the
+  `dropped` row was already `spool-rows.schema.json`.
+
 - **Heartbeat is shipped** (AIR-1939): `POST /v1/agents/{agentId}/targets/{target}/heartbeat`
   on the Agent key with `agent.telemetry.write`. `heartbeat.schema.json`
   gains additive request fields — `instanceClass` (resident | ephemeral,

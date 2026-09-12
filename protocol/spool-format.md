@@ -37,9 +37,13 @@ Status: **draft 1** — matches design decision D52/D66. Breaking changes bump
 - Rotate when the minute changes or the file reaches **1 MiB**.
 - Names are unique per `(instanceId, epochMinute, n)`; the object key in S3
   is derived from the file name, which is what makes retries idempotent.
-- Disk budget per host: 100 MiB by default. When exceeded, the daemon
-  evicts the **oldest unsent** segments and records the count in a
-  `dropped` row so the loss is reported, never silent.
+- Disk budget per host: 100 MiB by default. When exceeded, the writer (or
+  the daemon, on a shared host) evicts the **oldest unsent** segments and
+  writes the count and bytes as a `dropped` row — its own small closed
+  segment, at once — so the loss is reported, never silent.
+- Serverless hosts keep a **256 KiB** memory buffer instead of a directory
+  and flush at invocation end; past the buffer the oldest rows are evicted
+  and one `dropped` row (rows counted as `segments`) closes the flush.
 
 ## Row types
 
@@ -100,6 +104,23 @@ Reasons: `disabled`, `lease_expired`, `payload_verification_failed`,
 ```json
 {"type":"dropped","v":1,"at":"2026-09-11T14:05:00Z","instanceId":"i-7f3a…","segments":3,"bytes":2871040}
 ```
+
+## Field names and OpenTelemetry
+
+Window fields follow the OpenTelemetry GenAI semantic conventions where one
+exists, so an OTLP exporter is a renaming, not a redesign:
+
+| window field | OTel GenAI |
+| --- | --- |
+| `model` | `gen_ai.request.model` |
+| `tokens.input` | `gen_ai.usage.input_tokens` (uncached; OpenAI's `cached_tokens` are split out) |
+| `tokens.cachedInput` | `gen_ai.usage.cache_read.input_tokens` (proposed) |
+| `tokens.output` | `gen_ai.usage.output_tokens` |
+| `latencyMs` | `gen_ai.client.operation.duration` (histogram; OTel's unit is seconds) |
+| `errorClass` | `error.type` |
+| `status` | derived: `error.type` present |
+| `tag`, `versionId`, `arm` | `airprompter.prompt.tag`, `.version`, `.arm` (custom attributes) |
+| `sdk` | `telemetry.sdk.name` / `.version` — a **dimension at ingest**, so a misreporting writer is isolated |
 
 ## What must never be in the spool
 

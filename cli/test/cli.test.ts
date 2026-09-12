@@ -66,7 +66,7 @@ test("keygen → pull (encrypted) → verify → apply on a clean host → statu
 
   assert.equal(await run(["keygen", "--purpose", "distribution", "--out", join(work, "keys", "prod"), "--json"], h.ctx), EXIT.ok);
   const keygen = h.json();
-  assert.equal(statSync(join(work, "keys", "prod.key.json")).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(statSync(join(work, "keys", "prod.key.json")).mode & 0o777, 0o600);
   h.reset();
 
   const bundlePath = join(work, "airprompter.bundle.apbundle");
@@ -236,7 +236,7 @@ test("refusals: a tampered payload, a foreign signing key, another target, plain
   const devArgs = ["--org", scope.organizationId, "--agent", scope.agentId, "--environment", "dev"];
   assert.equal(await run(["pull", ...devArgs, "--root", devRootDoc, "--plaintext", "--out", plain, "--json"], dev.ctx), EXIT.ok);
   assert.equal(dev.json().encryption, "none");
-  assert.equal(statSync(plain).mode & 0o777, 0o600, "a plaintext bundle is at least private to the user");
+  if (process.platform !== "win32") assert.equal(statSync(plain).mode & 0o777, 0o600, "a plaintext bundle is at least private to the user");
   assert.equal(dev.all().includes("triage assistant"), false, "even the plaintext pull prints no text");
   dev.reset();
 

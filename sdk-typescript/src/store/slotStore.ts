@@ -72,7 +72,8 @@ export class StoreError extends Error {
 const otherSlot = (slot: SlotName): SlotName => (slot === "A" ? "B" : "A");
 
 function fsyncFile(path: string): void {
-  const fd = openSync(path, "r");
+  // Write access: on Windows an fsync on a read-only descriptor is refused (FlushFileBuffers needs it).
+  const fd = openSync(path, "r+");
   try {
     fsyncSync(fd);
   } finally {
@@ -92,9 +93,14 @@ function replaceFileAtomically(path: string, bytes: Uint8Array, hooks?: StoreHoo
   hooks?.beforeRename?.(path);
   renameSync(temp, path);
   try {
-    fsyncFile(join(path, ".."));
+    const dir = openSync(join(path, ".."), "r");
+    try {
+      fsyncSync(dir);
+    } finally {
+      closeSync(dir);
+    }
   } catch {
-    // Directory fsync is best effort on platforms that refuse it.
+    // Directory fsync is best effort on platforms that refuse it (Windows refuses to open a directory this way).
   }
 }
 

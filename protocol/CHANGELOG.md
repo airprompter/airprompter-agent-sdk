@@ -1,5 +1,10 @@
 # Protocol changelog
 
+## 0.2.2 — 2026-09-12 (tag `protocol/v0.2.2`)
+
+- trust-chain.md: timestamps compare as instants, never as strings; the
+  reference verifier does the same. No schema change.
+
 ## 0.2.1 — 2026-09-12 (tag `protocol/v0.2.1`)
 
 - `keyId` (manifest signatures, root metadata keys and roles, bundle

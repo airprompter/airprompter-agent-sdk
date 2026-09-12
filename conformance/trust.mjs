@@ -35,6 +35,12 @@ export function publicJwkOf(jwk) {
 }
 
 const bytesOf = (value) => Buffer.from(canonicalJson(value), "utf8");
+/** Timestamps compare as instants (RFC 3339), never as strings: "…Z" and "….000Z" are the same moment. */
+const instant = (text) => {
+  const ms = Date.parse(text);
+  if (!Number.isFinite(ms)) throw new Error(`not an RFC 3339 timestamp: ${text}`);
+  return ms;
+};
 
 /** The synthetic trusted document a runtime starts from: the pinned root key alone, in the root role. */
 export function trustedRootFromPinnedKey({ purpose, environment, pinnedRootJwk }) {
@@ -86,7 +92,7 @@ export function verifyRootMetadata({ candidate, trusted, now }) {
   if (countValidSignatures(bytesOf(signed), candidate.signatures, role.keyIds, trusted.signed.keys) < role.threshold) {
     return { ok: false, reason: "root_signature_invalid" };
   }
-  if (!(signed.expires > now)) return { ok: false, reason: "root_expired" };
+  if (!(instant(signed.expires) > instant(now))) return { ok: false, reason: "root_expired" };
   return { ok: true };
 }
 
@@ -104,8 +110,9 @@ function referencedHashes(payload) {
 }
 
 function keyUsableAt(key, now) {
-  if (key.notBefore && !(key.notBefore <= now)) return false;
-  if (key.notAfter && !(now < key.notAfter)) return false;
+  const at = instant(now);
+  if (key.notBefore && !(instant(key.notBefore) <= at)) return false;
+  if (key.notAfter && !(at < instant(key.notAfter))) return false;
   return true;
 }
 
@@ -126,7 +133,7 @@ export function verifyManifest({
   requireCountersign = false,
 }) {
   const payload = manifest.payload;
-  if (!(root.signed.expires > now)) return { ok: false, reason: "root_expired" };
+  if (!(instant(root.signed.expires) > instant(now))) return { ok: false, reason: "root_expired" };
   const major = Number(payload.protocol.split(".")[0]);
   if (!SUPPORTED_PROTOCOL_MAJORS.has(major)) return { ok: false, reason: "protocol_unsupported" };
 

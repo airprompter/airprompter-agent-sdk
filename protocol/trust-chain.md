@@ -16,6 +16,10 @@ the same verdicts.
   key cannot be smuggled in under a trusted id.
 * The **pinned root** is one public JWK per hosted environment, shipped in
   SDK source. Changing it is a visible commit in a public repository.
+* Timestamps (`expires`, `notBefore`, `notAfter`, `issuedAt`, `now`) are
+  RFC 3339 and compare as **instants**, never as strings: `…T00:00:00Z`
+  and `…T00:00:00.000Z` are the same moment. The hosted service writes
+  canonical millisecond UTC (`YYYY-MM-DDTHH:MM:SS.sssZ`).
 
 ## Signed bytes
 

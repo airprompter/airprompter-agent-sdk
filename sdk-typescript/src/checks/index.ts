@@ -361,5 +361,10 @@ export function outputTextOf(result: unknown): string | null {
   const outMessage = output && typeof output.message === "object" && output.message !== null ? (output.message as Record<string, unknown>) : null;
   if (outMessage) return partsText(outMessage.content);
   if (typeof root.output_text === "string") return root.output_text;
+  // Responses API: output items (messages) whose content parts carry `text`.
+  if (Array.isArray(root.output)) {
+    const texts = root.output.map((item) => partsText((item as Record<string, unknown> | null)?.content)).filter((t): t is string => t !== null);
+    return texts.length ? texts.join("") : null;
+  }
   return null;
 }

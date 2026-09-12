@@ -33,6 +33,8 @@ from .apply.window import UpdateWindow, parse_window, window_state
 from .bundle.apbundle import DistributionKey, bundle_payload_bytes, open_bundle
 from .protocol.assignment import assign_arm, ordered_steps
 from .protocol.trust import key_thumbprint, trusted_root_from_pinned_key, verify_root_metadata
+from .telemetry.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
+from .telemetry.wrap import WrapHooks, wrap_client
 from .render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
 from .render.template import Delimiters, render_template
 from .spool.feedback import normalize_feedback
@@ -43,7 +45,7 @@ from .sync.client import SyncClient
 from .sync.daemon import DaemonClient, daemon_socket_path
 from .sync.loop import jittered_delay_ms, sync_once
 from .checks import evaluate_checks, output_text_of
-from .telemetry.observe import ObserveTarget, observe_call, observe_call_async
+from .telemetry.observe import PendingObservation, ObserveTarget, observe_call, observe_call_async
 
 SDK_NAME = "agent-sdk-python"
 SDK_VERSION = "0.1.0"
@@ -283,6 +285,8 @@ class AirPrompterAgent:
         self._stamped_refusals: set[str] = set()
         self._stopped = False
         self._run_ref_key = hmac.new(own_instance_id.encode("utf-8"), b"runRef", hashlib.sha256).digest()
+        # T33: the last renders by text hash, so a wrapped client can tell which slot a call is.
+        self._renders = RenderRegistry()
         serverless = self._sync_options.mode == "on_invoke"
         sink_kind = self._telemetry.sink or ("memory" if serverless else "directory")
         self._sink: SpoolSink = MemorySink({"instanceId": own_instance_id}, self._telemetry.buffer_bytes or 256 * 1024) if sink_kind == "memory" else DirectorySink(spool_dir, own_instance_id, self._telemetry.spool_budget_bytes or 100 * 1024 * 1024)
@@ -991,6 +995,7 @@ class AirPrompterAgent:
             text = render_template(tag=tag, text=self._text_of(slot), variables=slot.get("variables", []), values=values, delimiters=self._o.get("delimiters"))
             generation = self._active.generation if self._active else 0
         facts = RunRefFacts(self._o["agent_id"], self._o["target"], tag, slot["versionId"], arm, generation, bucket)
+        self._renders.register(text, Attribution(tag, slot["versionId"], arm, slot["model"]))
         return Rendered(text=text, model=slot["model"], version_id=slot["versionId"], arm=arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=tag)
 
     def workflow(self, tag: str, *, subject: Optional[str] = None) -> Workflow:
@@ -1011,6 +1016,8 @@ class AirPrompterAgent:
                 )
                 for step in ordered_steps(tag, slot["steps"])
             ]
+            for step in steps:
+                self._renders.register(step.text, Attribution(step.step_id, step.version_id, arm, slot["model"]))
             return Workflow(model=slot["model"], arm=arm, steps=steps, variables=list(slot.get("variables", [])))
 
     # ------------------------------------------------------------------ telemetry
@@ -1080,6 +1087,33 @@ class AirPrompterAgent:
             facts = parse_run_ref(rendered.run_ref, self._run_ref_key)
             return ObserveTarget(rendered.step_id, rendered.version_id, facts.arm if facts else "none", model or "unknown")
         return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model)
+
+    # ------------------------------------------------------------------ T33: wrapped clients
+
+    def wrap(self, client: T) -> T:
+        """The ``openai`` or ``anthropic`` client (sync or async), observed without a change at the call site:
+        ``chat.completions.create``, ``responses.create``, ``messages.create`` (``stream=True`` or not) and the
+        ``.stream()`` helpers are timed, their usage and finish reason read, the slot's checks run on the text, and one
+        content-free observation filed — attributed to the render whose text the request carries (or to an enclosing
+        ``attribute()`` block). A call that names no render passes through untouched; nothing the wrapper does can fail
+        the call. Everything else on the client is its own."""
+        return wrap_client(client, self._wrap_hooks())  # type: ignore[return-value]
+
+    def attribute(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget]):
+        """``with ap.attribute(rendered):`` — every wrapped call inside the block is that render's, whatever text it carries."""
+        target = self._target_of(rendered, None)
+        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model))
+
+    def attribution_for(self, params: Any) -> Optional[Attribution]:
+        """The render a request's parameters name: an explicit scope first, else a message whose text is a recent render."""
+        return current_attribution() or self._renders.match(request_texts(params))
+
+    def _wrap_hooks(self) -> WrapHooks:
+        return WrapHooks(attribute=self.attribution_for, begin=self._begin_observation, log=self._log)
+
+    def _begin_observation(self, attribution: Attribution, model: str) -> PendingObservation:
+        target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model)
+        return PendingObservation(target, lambda o: self.spool.observe(o, self._now_ms()), model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
 
     def feedback(self, run_ref: str, signals: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> bool:
         """Quality signals against a run: numbers, booleans and declared enums only; anything else is refused."""

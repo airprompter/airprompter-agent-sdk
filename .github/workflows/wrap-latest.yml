@@ -1,0 +1,62 @@
+name: Wrappers against the latest provider SDKs
+
+# T33 (D65): `ap.wrap()`, the AI SDK middleware and the LiteLLM callback are
+# built on the provider SDKs' public surfaces, which move. Every week the
+# wrapper suites run against the LATEST releases of `openai`,
+# `@anthropic-ai/sdk`, `ai`, `openai` (Python), `anthropic` and `litellm`
+# with recorded responses served through each client's own transport option
+# — nothing reaches a provider. A red run here is the early warning that a
+# supported range must move; CI proper pins nothing and never installs them.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typescript:
+    name: TypeScript wrappers (latest openai, @anthropic-ai/sdk, ai)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: sdk-typescript
+      - name: Install the latest provider releases (not saved)
+        run: npm i --no-save --no-audit --no-fund openai@latest @anthropic-ai/sdk@latest ai@latest
+        working-directory: sdk-typescript
+      - name: Report what was tested
+        run: |
+          for p in openai @anthropic-ai/sdk ai @ai-sdk/provider; do
+            printf '%s %s\n' "$p" "$(node -p "JSON.parse(require('fs').readFileSync('node_modules/$p/package.json','utf8')).version")"
+          done
+        working-directory: sdk-typescript
+      - name: Wrapper suites against the real clients
+        run: WRAP_LIVE=1 node --import tsx --test test/wrapLive.test.ts test/wrap.test.ts
+        working-directory: sdk-typescript
+
+  python:
+    name: Python wrappers (latest openai, anthropic, litellm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[test]" pyflakes
+        working-directory: sdk-python
+      - name: Install the latest provider releases
+        run: python -m pip install --upgrade openai anthropic litellm
+        working-directory: sdk-python
+      - name: Report what was tested
+        run: python -m pip show openai anthropic litellm httpx httpx2 2>/dev/null | grep -E '^(Name|Version)'
+      - name: Wrapper suites against the real clients
+        run: WRAP_LIVE=1 python -m pytest -rs tests/test_wrap_live.py tests/test_wrap.py
+        working-directory: sdk-python

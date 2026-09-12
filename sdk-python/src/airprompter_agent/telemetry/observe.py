@@ -8,11 +8,14 @@ text, no ids, no error message.
 Usage shapes recognised (all optional, first match wins per field)::
 
     OpenAI       usage.prompt_tokens / completion_tokens / prompt_tokens_details.cached_tokens
+    Responses    usage.input_tokens / output_tokens / input_tokens_details.cached_tokens (cached inside input, as OpenAI)
     Anthropic    usage.input_tokens / output_tokens / cache_read_input_tokens
     Bedrock      usage.inputTokens / outputTokens / cacheReadInputTokens (Converse);
                  InvokeModel with an Anthropic body reads as Anthropic
     Truncation   choices[0].finish_reason == "length" | stop_reason == "max_tokens" | stopReason == "max_tokens"
+                 | status == "incomplete" and incomplete_details.reason == "max_output_tokens" (Responses)
     Content filter choices[0].finish_reason == "content_filter" | stopReason == "content_filtered"
+                 | status == "incomplete" and incomplete_details.reason == "content_filter" (Responses)
 
 A result with no usage is reported as ``usageSource: "unavailable"`` with
 zero tokens — the window still counts the run and its latency.
@@ -23,6 +26,7 @@ from __future__ import annotations
 import inspect
 import math
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Optional, TypeVar, Union
 
@@ -77,6 +81,8 @@ def normalize_usage(result: Any) -> UsageNormalized:
     if usage is None:
         return unavailable
     openai_cached = _int(_get(_get(usage, "prompt_tokens_details"), "cached_tokens"))
+    if openai_cached is None:
+        openai_cached = _int(_get(_get(usage, "input_tokens_details"), "cached_tokens"))
     input_tokens = next((v for v in (_int(_get(usage, "prompt_tokens")), _int(_get(usage, "input_tokens")), _int(_get(usage, "inputTokens"))) if v is not None), None)
     output_tokens = next((v for v in (_int(_get(usage, "completion_tokens")), _int(_get(usage, "output_tokens")), _int(_get(usage, "outputTokens"))) if v is not None), None)
     cached = openai_cached if openai_cached is not None else next((v for v in (_int(_get(usage, "cache_read_input_tokens")), _int(_get(usage, "cacheReadInputTokens"))) if v is not None), 0)
@@ -95,9 +101,10 @@ def classify_result(result: Any) -> Optional[str]:
     choice = _first(_get(result, "choices"))
     finish = _get(choice, "finish_reason") or _get(result, "stop_reason") or _get(result, "stopReason") or ""
     finish = str(finish)
-    if finish in ("length", "max_tokens"):
+    incomplete = str(_get(_get(result, "incomplete_details"), "reason") or "") if _get(result, "status") == "incomplete" else ""
+    if finish in ("length", "max_tokens") or incomplete == "max_output_tokens":
         return "truncated"
-    if finish in ("content_filter", "content_filtered", "guardrail_intervened"):
+    if finish in ("content_filter", "content_filtered", "guardrail_intervened") or incomplete == "content_filter":
         return "content_filter"
     return None
 
@@ -170,6 +177,42 @@ def _observation(target: ObserveTarget, model: str, started: float, now: Callabl
         usage_source=usage.source,
         checks=checks,
     )
+
+
+class PendingObservation:
+    """T33: an observation whose clock started when a wrapped client was called and that settles later — when the
+    response arrives, when a stream has gone by, or when a stream helper's context closes. Settles once; never raises."""
+
+    def __init__(self, target: ObserveTarget, record: Callable[[Observation], None], *, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None):
+        self._target = target
+        self._record = record
+        self._model = model or target.model
+        self._now = now or now_ms
+        self._evaluate = evaluate
+        self._started = self._now()
+        self._settled = False
+        self._lock = threading.Lock()
+
+    @property
+    def settled(self) -> bool:
+        return self._settled
+
+    def settle(self, result: Any) -> None:
+        """The provider-shaped result (usage, finish reason, output text) — or None when nothing could be read."""
+        self._finish(result, None)
+
+    def fail(self, error: BaseException) -> None:
+        self._finish(None, error)
+
+    def _finish(self, result: Any, error: Optional[BaseException]) -> None:
+        with self._lock:
+            if self._settled:
+                return
+            self._settled = True
+        try:
+            self._record(_observation(self._target, self._model, self._started, self._now, result, error, None, self._evaluate))
+        except Exception:  # noqa: BLE001 — a wrapper never fails the customer's call
+            pass
 
 
 def observe_call(target: ObserveTarget, call: Callable[[], T], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> T:

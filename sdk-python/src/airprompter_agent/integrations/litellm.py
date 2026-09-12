@@ -1,8 +1,9 @@
-"""A LiteLLM callback (T17, with T33's router work): every ``litellm.completion``
-that carries ``metadata=litellm_metadata(rendered)`` is reported against
-that rendered prompt — latency from LiteLLM's own start/end times, usage
-off the response, a failure classified into the closed set. Calls without
-the metadata are ignored: the callback never guesses which slot a call was.
+"""A LiteLLM callback (T17, T33): every ``litellm.completion`` that carries
+``metadata=litellm_metadata(rendered)`` — or whose messages carry a recent
+render's text (the same rule as ``ap.wrap()``) — is reported against that
+rendered prompt: latency from LiteLLM's own start/end times, usage off the
+response, a failure classified into the closed set. A call that names no
+render is ignored: the callback never guesses which slot a call was.
 
 ::
 
@@ -69,7 +70,11 @@ class AirPrompterLiteLLMCallback(_Base):
     def _observe(self, kwargs: Mapping[str, Any], response_obj: Any, start_time: Any, end_time: Any, error: Any) -> None:
         attribution = _attribution(kwargs)
         if attribution is None:
-            return
+            # T33: no metadata — the messages may still carry a render's text (or an `ap.attribute()` block is open).
+            matched = self._ap.attribution_for({"messages": kwargs.get("messages")})
+            if matched is None:
+                return
+            attribution = {"tag": matched.tag, "versionId": matched.version_id, "arm": matched.arm, "model": matched.model}
         model = str(kwargs.get("model") or attribution.get("model") or "unknown")
         latency = _latency_ms(start_time, end_time)
         if error is not None:

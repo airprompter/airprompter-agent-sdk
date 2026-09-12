@@ -439,13 +439,18 @@ def output_text_of(result: Any) -> Optional[str]:
     if content is not None:
         return parts_text(content)
     output = get(result, "output")
-    if output is not None:
+    if output is not None and not isinstance(output, (list, tuple)):
         message = get(output, "message")
         if message is not None:
             return parts_text(get(message, "content"))
     output_text = get(result, "output_text")
     if isinstance(output_text, str):
         return output_text
+    # Responses API: output items (messages) whose content parts carry `text`.
+    if isinstance(output, (list, tuple)):
+        texts = [parts_text(get(item, "content")) for item in output]
+        texts = [t for t in texts if isinstance(t, str)]
+        return "".join(texts) if texts else None
     return None
 
 

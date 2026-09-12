@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Reference spool writers** (AIR-1963, T33, D66): `examples/spool-writer/`
+  — a dependency-free writer in TypeScript and in Python that a team
+  instrumenting a provider SDK themselves can start from; both pass
+  `vectors/spool.json` under the conformance runner, filesystem rules
+  included. spool-format.md points at them. No wire change.
+
 - **Feedback on the hosted surface** (AIR-1960, T30, 5-F / D63): `POST
   /v1/agents/{agentId}/targets/{target}/feedback` on the run URL — the bare
   HTTP form of `ap.feedback(runRef, signals)` for hosted runs, under the

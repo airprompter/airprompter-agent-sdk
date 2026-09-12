@@ -27,6 +27,9 @@ const r = ap.prompt("support.triage").render({ team: "Billing", ticket: userMess
 // observe() times the call, reads `usage` off the provider's response (OpenAI, Anthropic, Bedrock),
 // classifies a failure into the closed error set, and returns the result unchanged.
 const reply = await ap.observe(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }));
+// …or wrap the client once and change nothing at the call site: the call is attributed to the render whose text it carries.
+const openai = ap.wrap(new OpenAI());
+const reply2 = await openai.chat.completions.create({ model: r.model, messages: [{ role: "system", content: r.text }, { role: "user", content: userMessage }] });
 // …or report by hand: ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs, tokens: { input, output } });
 ap.feedback(r.runRef, { thumbs: "up" });
 ```
@@ -132,6 +135,41 @@ the requests it has surfaced) and adopts the cadence the server answers
 with; a key past its 500-live-instance cap is refused and reported in
 `status().heartbeat.lastRefusal`.
 
+## Wrapped clients (`ap.wrap`, D65)
+
+`ap.wrap(client)` returns the same client with its public model-call
+methods observed — a proxy, never a patched internal, never a vendored
+copy of a provider SDK, and no import of one (the packages are optional
+peers). Each call is timed, its `usage` and finish reason read off the
+response or the stream as it goes by, the slot's declared checks run on
+the text here, and one content-free observation filed. Nothing the wrapper
+does can fail the call: attribution and tapping are guarded, an
+unattributed call passes straight through (logged `wrap_unattributed`),
+and a stream a consumer abandons reports what was seen.
+
+| Client | Observed methods | Streams |
+| --- | --- | --- |
+| `openai` (`OpenAI`) | `chat.completions.create` / `.parse` / `.stream()`, `responses.create` / `.parse` / `.stream()`, `beta.chat.completions.parse` | `stream: true` (usage from the last chunk — send `stream_options: { include_usage: true }`), the `.stream()` helpers through `finalChatCompletion()` / `finalResponse()` |
+| `@anthropic-ai/sdk` (`Anthropic`) | `messages.create`, `messages.stream()`, `beta.messages.*` | `stream: true` (usage from `message_start` + `message_delta`), `messages.stream()` through `finalMessage()` |
+| Vercel AI SDK (`ai`) | `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })` — every provider the AI SDK drives | `wrapStream` taps the parts; the `finish` part's usage and reason count |
+
+Not observed (the client's own): `withResponse()` is (its `data` is
+observed); `.tee()`'d streams, `with_raw_response`-style surfaces, and any
+method not in the table are forwarded untouched.
+
+**Which render a call belongs to.** In order: an enclosing
+`ap.attribute(rendered, () => …)` scope (`AsyncLocalStorage`, so it
+follows `await`s); else a request text — `system`, `instructions`, then
+each message's string or `text` parts — that is exactly one of the last
+256 renders (matched by SHA-256; the registry keeps hashes and dimension
+names, never a prompt); else the call is unattributed and passed through.
+The request's `model` names the window (a router that chose another model
+than the slot's is reported as such). Tested against clients shaped like
+the real ones in CI, and against the latest `openai`, `@anthropic-ai/sdk`
+and `ai` releases weekly (`.github/workflows/wrap-latest.yml`,
+`npm run test:wrap-live`); the supported ranges are the package's
+`peerDependencies`.
+
 ## Hosted mode (`ManagedAgent`)
 
 Feedback works the same way hosted: keep `result.runRef` beside your own
@@ -186,6 +224,7 @@ writes the same catalogue for build steps.
 | --- | --- |
 | `src/agent.ts` | `AirPrompterAgent`: start/boot fallback chain, `prompt().render()`, `workflow()`, `report()`, `feedback()`, `unlock()`, `rollback()`, `status()`, `invoke()` |
 | `src/protocol/` | Wire types, canonical JSON + SHA-256, the trust chain (RFC 7638 thumbprints, ES256/P1363, root metadata R1–R5, manifest M1–M12), sticky assignment, workflow step order |
+| `src/wrap/` | `ap.wrap()`: the client proxy and stream taps (`client.ts`), attribution by scope or rendered text (`attribution.ts`), the AI SDK middleware (`aiSdk.ts`) |
 | `src/store/` | `SlotStore`: two slots, stage → fsync → activate, AAD `agentId target generation contentHash` per payload, anti-rollback counter outside the slots, DEK wrapped by a `KeyProvider` (file key default; custom / KMS via `customKeyProvider`) |
 | `src/bundle/` | `.apbundle` v1: HPKE X25519 / HKDF-SHA256 / AES-256-GCM (RFC 9180 vectors), AAD `agentId|target` so a bundle cannot be relabelled |
 | `src/render/` | `{{name}}` substitution with trust-aware fencing; `runRef` (HMAC, content-free) |
@@ -214,6 +253,7 @@ npm run build     # dist/esm + dist/cjs
 ```
 
 Optional key providers ship as separate packages:
-`@airprompter/keyprovider-aws-kms`, `-vault`, `-os-keystore`. Provider
-middleware (`ap.wrap()` for the OpenAI, Anthropic and Vercel AI SDK
-clients) and declared output checks are on the roadmap (T8, T9).
+`@airprompter/keyprovider-aws-kms`, `-vault`, `-os-keystore`. The provider
+packages `ap.wrap()` observes are optional peers: nothing here imports
+them; `npm run test:wrap-live` runs the wrapper suites against whichever
+are installed.

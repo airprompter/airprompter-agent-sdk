@@ -25,6 +25,9 @@ import { DirectorySink, MemorySink, SpoolWriter, epochMinute, segmentName, type 
 import { fileKey, type KeyProvider, type StorageProtection } from "./store/keyProvider.js";
 import { SlotStore, StoreError, type LoadedSlot } from "./store/slotStore.js";
 import { observeCall, type ObserveOptions } from "./telemetry/observe.js";
+import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "./wrap/attribution.js";
+import { wrapClient, type WrapHooks } from "./wrap/client.js";
+import { aiSdkMiddleware, type AiSdkMiddleware, type AiSdkMiddlewareOptions } from "./wrap/aiSdk.js";
 import { evaluateChecks, outputTextOf, type CheckOutcome } from "./checks/index.js";
 import { postSegment, type GrantDecision, type UploadGrant } from "./telemetry/uploader.js";
 import { parseWindow, windowState, type UpdateWindow } from "./apply/window.js";
@@ -221,6 +224,8 @@ export class AirPrompterAgent {
   private lastFlushMinute: number | null = null;
   private trustedRoot: RootMetadata;
   private readonly runRefKey: Buffer;
+  /** T33: the last renders by text hash, so a wrapped client can tell which slot a call is. */
+  private readonly renders = new RenderRegistry();
   readonly spool: SpoolWriter;
   private readonly sink: SpoolSink;
   private readonly client: SyncClient | null;
@@ -941,6 +946,7 @@ export class AirPrompterAgent {
       const text = renderTemplate({ tag, text: this.textOf(slot), variables: slot.variables, values, ...(this.options.delimiters ? { delimiters: this.options.delimiters } : {}) });
       const generation = this.active!.generation;
       const facts: RunRefFacts = { agentId: this.options.agentId, target: this.options.target, tag, versionId: slot.versionId, arm, generation, bucket };
+      this.renders.register(text, { tag, versionId: slot.versionId, arm, model: slot.model });
       return { text, model: slot.model, versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, this.runRefKey), tag };
     };
     return { render, variables: () => this.resolveSlot(tag, options.subject).slot.variables };
@@ -957,6 +963,7 @@ export class AirPrompterAgent {
       text: this.active!.payloads.get(step.contentHash)?.toString("utf8") ?? "",
       runRef: mintRunRef({ agentId: this.options.agentId, target: this.options.target, tag: step.stepId, versionId: step.promptVersionId, arm, generation: this.active!.generation, bucket }, this.runRefKey),
     }));
+    for (const step of steps) this.renders.register(step.text, { tag: step.stepId, versionId: step.versionId, arm, model: slot.model });
     return { model: slot.model, arm, steps, variables: slot.variables };
   }
 
@@ -1010,6 +1017,42 @@ export class AirPrompterAgent {
     const override = payload.experiment?.arms.find((entry) => entry.arm === arm)?.overrides.find((entry) => entry.tag === tag);
     const slot = override ?? payload.slots.find((entry) => entry.tag === tag);
     return slot?.outputChecks ?? [];
+  }
+
+  // ------------------------------------------------------------------ T33: wrapped clients
+
+  /**
+   * The OpenAI or Anthropic client, observed without a change at the call site: `chat.completions.create`,
+   * `responses.create`, `messages.create` (streaming or not) and the `.stream()` helpers are timed, their usage and
+   * finish reason read, the slot's checks run on the text, and one content-free observation filed — attributed to
+   * the render whose text the request carries (or to an enclosing `attribute()` scope). A call that names no render
+   * passes through untouched; nothing the wrapper does can fail the call. Everything else on the client is its own.
+   */
+  wrap<T extends object>(client: T): T {
+    return wrapClient(client, this.wrapHooks());
+  }
+
+  /** Run `fn` with every wrapped call inside it (across awaits) attributed to `rendered`, whatever text it carries. */
+  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model">, fn: () => T): T {
+    return withAttribution({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model }, fn);
+  }
+
+  /** A Vercel AI SDK middleware for `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })`. */
+  aiSdkMiddleware(options: AiSdkMiddlewareOptions = {}): AiSdkMiddleware {
+    return aiSdkMiddleware(this.wrapHooks(), options);
+  }
+
+  /** The render a request's parameters name: an explicit scope first, else a message whose text is a recent render. */
+  attributionFor(params: unknown): Attribution | undefined {
+    return currentAttribution() ?? this.renders.match(requestTexts(params));
+  }
+
+  private wrapHooks(): WrapHooks {
+    return {
+      attribute: (params) => this.attributionFor(params),
+      observe: (target, call, options) => this.observe(target, call, options),
+      log: (event) => this.log(event),
+    };
   }
 
   /** Quality signals against a run: numbers, booleans and declared enums only; anything else is refused. */
@@ -1093,6 +1136,9 @@ export class AirPrompterAgent {
     const daemon = this.daemon;
     this.daemon = null;
     daemon?.close();
+    // T33: an observation settled by a wrapped client's stream helper lands a few microtasks after the customer's own
+    // await; one turn of the event loop lets everything in flight reach the spool before the windows close.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     this.spool.closeWindows(this.nowMs());
   }
 

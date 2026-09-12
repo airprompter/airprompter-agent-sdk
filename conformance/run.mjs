@@ -396,5 +396,56 @@ for (const c of ck.declarations) {
 }
 
 // ---------------------------------------------------------------------------
+section("examples/spool-writer: the reference writers without the SDK (D66) pass the spool vectors");
+{
+  // TypeScript: in-process through the same vectors as the reference, then one case through a real directory.
+  const example = await import("../examples/spool-writer/typescript/spool-writer.mjs");
+  const drive = (writer, c) => {
+    for (const event of c.events) {
+      if (event.kind === "observe") writer.observe(event.observation, event.at);
+      else if (event.kind === "feedback") writer.feedback(event.feedback, event.at);
+      else if (event.kind === "close") writer.close(event.at);
+    }
+  };
+  const wrongBuckets = sp.latencyBuckets.cases.filter((c) => example.latencyBucketIndex(c.latencyMs) !== c.bucket);
+  if (wrongBuckets.length === 0 && sp.minutes.every((c) => example.minuteOf(c.epochMs) === c.minute) && sp.segmentNames.every((c) => example.segmentName(c.instanceId, example.epochMinute(c.epochMs), c.n) === c.name)) ok("spool-writer.mjs: buckets, minutes, segment names");
+  else fail("spool-writer.mjs: buckets, minutes, segment names");
+  for (const c of sp.rotation) {
+    const writer = new example.SpoolWriter({ instanceId: c.instanceId });
+    const got = c.appends.map((a) => writer.planSegment(a.epochMs, a.lineBytes));
+    const mismatch = got.findIndex((g, i) => g.segment !== c.appends[i].segment || g.rotated !== c.appends[i].rotated);
+    if (mismatch === -1) ok(`spool-writer.mjs rotation: ${c.name}`);
+    else fail(`spool-writer.mjs rotation: ${c.name}`, `append ${mismatch}: got ${JSON.stringify(got[mismatch])}`);
+  }
+  for (const c of sp.windows) {
+    const writer = new example.SpoolWriter({ instanceId: c.instanceId, instanceClass: c.instanceClass, sdk: c.sdk });
+    drive(writer, c);
+    const got = sortRows(writer.emitted);
+    const expected = sortRows(c.expectedWindows);
+    if (got.length === expected.length && got.every((row, i) => sameJson(row, expected[i]))) ok(`spool-writer.mjs windows: ${c.name}`);
+    else fail(`spool-writer.mjs windows: ${c.name}`, `got ${JSON.stringify(got)}\n       expected ${JSON.stringify(expected)}`);
+    for (const row of writer.emitted) if (!spoolRowValidate(row)) fail(`spool-writer.mjs windows: ${c.name} row validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
+  }
+  const { mkdtempSync, readdirSync: listDir, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "ap-spool-example-"));
+  try {
+    const c = sp.windows[0];
+    drive(new example.SpoolWriter({ dir, instanceId: c.instanceId, instanceClass: c.instanceClass, sdk: c.sdk }), c);
+    const files = listDir(dir).sort();
+    const rows = files.flatMap((f) => readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)));
+    if (files.length > 0 && files.every((f) => f.endsWith(".ndjson")) && sameJson(sortRows(rows), sortRows(c.expectedWindows))) ok(`spool-writer.mjs: a sealed segment (${files[0]}) reads back as the expected rows`);
+    else fail("spool-writer.mjs: sealed segment", `files ${files.join(", ")}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // Python: its own checker, standard library only.
+  const { spawnSync } = await import("node:child_process");
+  const py = spawnSync("python3", [join(here, "..", "examples", "spool-writer", "python", "check_vectors.py"), join(protocolDir, "vectors", "spool.json")], { encoding: "utf8" });
+  if (py.status === 0) ok(`spool_writer.py: ${py.stdout.trim()}`);
+  else fail("spool_writer.py", (py.stderr || py.stdout || `exit ${py.status}`).trim().split("\n").slice(-3).join(" | "));
+}
+
+// ---------------------------------------------------------------------------
 console.log(failures === 0 ? "\nconformance: all checks passed" : `\nconformance: ${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

@@ -42,3 +42,9 @@ export { HOST_SPOOL_BUDGET_BYTES, SERVERLESS_BUFFER_BYTES, type DroppedRow } fro
 export { SpoolUploader, validateSpoolRow, inspectSegment, postSegment, multipartBody, backoffDelayMs, UPLOAD_BACKOFF_BASE_MS, UPLOAD_BACKOFF_CAP_MS, GRANT_REFRESH_MARGIN_MS } from "./telemetry/uploader.js";
 export type { UploadGrant, GrantDecision, UploaderOptions, UploaderStatus, PassResult, PostOutcome, RowVerdict, SegmentInspection } from "./telemetry/uploader.js";
 export type { SpoolReport, HeartbeatSdkName } from "./agent.js";
+export { wrapClient, accumulatorFor, WRAPPED_METHODS } from "./wrap/client.js";
+export type { WrapHooks, StreamKind } from "./wrap/client.js";
+export { RenderRegistry, requestTexts, hashText, withAttribution, currentAttribution } from "./wrap/attribution.js";
+export type { Attribution } from "./wrap/attribution.js";
+export { aiSdkMiddleware, generateResultShape } from "./wrap/aiSdk.js";
+export type { AiSdkMiddleware, AiSdkMiddlewareOptions, AiSdkMiddlewareHooks } from "./wrap/aiSdk.js";

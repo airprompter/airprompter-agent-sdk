@@ -167,4 +167,8 @@ invocation end as one segment under their own grant; rows that cannot go
 naming, rotation and window aggregation; `vectors/feedback.json` pins the
 feedback catalogue. A writer that passes both interoperates with the
 daemon. The TypeScript SDK's `src/spool/writer.ts` is the reference
-implementation; `conformance/spool.mjs` is the independent one CI runs.
+implementation; `conformance/spool.mjs` is the independent one CI runs;
+`examples/spool-writer/` carries a dependency-free writer in TypeScript
+and in Python (~100 lines each, the filesystem rules included) that the
+conformance runner drives through the same vectors — start from one of
+those.

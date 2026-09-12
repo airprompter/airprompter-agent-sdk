@@ -7,11 +7,14 @@
  *
  * Usage shapes recognised (all optional, first match wins per field):
  *   OpenAI       usage.prompt_tokens / completion_tokens / prompt_tokens_details.cached_tokens
+ *   Responses    usage.input_tokens / output_tokens / input_tokens_details.cached_tokens (cached inside input, as OpenAI)
  *   Anthropic    usage.input_tokens / output_tokens / cache_read_input_tokens
  *   Bedrock      usage.inputTokens / outputTokens / cacheReadInputTokens (Converse);
  *                InvokeModel with an Anthropic body reads as Anthropic
  * Truncation     choices[0].finish_reason === "length" | stop_reason === "max_tokens" | stopReason === "max_tokens"
+ *                | status === "incomplete" && incomplete_details.reason === "max_output_tokens" (Responses)
  * Content filter choices[0].finish_reason === "content_filter" | stopReason === "content_filtered"
+ *                | status === "incomplete" && incomplete_details.reason === "content_filter" (Responses)
  *
  * A result with no usage is reported as `usageSource: "unavailable"` with
  * zero tokens — the window still counts the run and its latency.
@@ -29,7 +32,7 @@ export function normalizeUsage(result: unknown): UsageNormalized {
   const root = obj(result);
   const usage = obj(root?.usage) ?? obj(obj(root?.response)?.usage) ?? obj(obj(root?.output)?.usage);
   if (!usage) return { input: 0, cachedInput: 0, output: 0, source: "unavailable" };
-  const openaiCached = int(obj(usage.prompt_tokens_details)?.cached_tokens);
+  const openaiCached = int(obj(usage.prompt_tokens_details)?.cached_tokens) ?? int(obj(usage.input_tokens_details)?.cached_tokens);
   const input = int(usage.prompt_tokens) ?? int(usage.input_tokens) ?? int(usage.inputTokens);
   const output = int(usage.completion_tokens) ?? int(usage.output_tokens) ?? int(usage.outputTokens);
   const cachedInput = openaiCached ?? int(usage.cache_read_input_tokens) ?? int(usage.cacheReadInputTokens) ?? 0;
@@ -45,9 +48,10 @@ export function classifyResult(result: unknown): ErrorClass | null {
   const root = obj(result);
   if (!root) return null;
   const choice = obj(Array.isArray(root.choices) ? root.choices[0] : null);
+  const incomplete = root.status === "incomplete" ? String(obj(root.incomplete_details)?.reason ?? "") : "";
   const finish = String(choice?.finish_reason ?? root.stop_reason ?? root.stopReason ?? "");
-  if (finish === "length" || finish === "max_tokens") return "truncated";
-  if (finish === "content_filter" || finish === "content_filtered" || finish === "guardrail_intervened") return "content_filter";
+  if (finish === "length" || finish === "max_tokens" || incomplete === "max_output_tokens") return "truncated";
+  if (finish === "content_filter" || finish === "content_filtered" || finish === "guardrail_intervened" || incomplete === "content_filter") return "content_filter";
   return null;
 }
 

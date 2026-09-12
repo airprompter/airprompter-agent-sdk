@@ -27,7 +27,7 @@ content, or make bytes live on a locked runtime.
 | [`cli/`](cli/) | `airprompter` — `pull`, `verify`, `apply`, `status`, `diff`, `unlock`, `rollback`, `keygen`, `export-telemetry`, and `airprompter daemon` (`airprompterd`). Shipped as signed single-file executables for macOS, Linux and Windows. |
 | [`conformance/`](conformance/) | Runner that executes `protocol/vectors` against every SDK. The hosted service runs the same vectors. |
 | [`deploy/`](deploy/) | systemd unit, launchd plist, Windows service wrapper, Docker sidecar and Kubernetes DaemonSet manifests for the daemon. |
-| [`examples/`](examples/) | A Node service, a Python worker, a serverless handler, and an air-gapped host. |
+| [`examples/`](examples/) | A Python worker, and [`spool-writer/`](examples/spool-writer/) — telemetry windows written to the spool **without** the SDK, in TypeScript and Python, for teams instrumenting the provider SDKs themselves (checked by the conformance runner). |
 
 ## How the pieces fit
 

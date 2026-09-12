@@ -36,7 +36,10 @@ r = ap.prompt("support.triage").render(team="Billing", ticket=user_message)
 # observe() times the call, reads `usage` off the provider's response (OpenAI, Anthropic, Bedrock — dicts or SDK
 # objects), classifies a failure into the closed error set, and returns the result unchanged.
 reply = ap.observe(r, lambda: openai.chat.completions.create(model=r.model, messages=[{"role": "system", "content": r.text}, {"role": "user", "content": user_message}]))
-# …or the wrapper, which places the rendered text for you:
+# …or wrap the client once and change nothing at the call site: the call is attributed to the render whose text it carries.
+openai = ap.wrap(OpenAI())
+reply = openai.chat.completions.create(model=r.model, messages=[{"role": "system", "content": r.text}, {"role": "user", "content": user_message}])
+# …or the explicit helper, which places the rendered text for you:
 reply = chat_completion(ap, r, openai, messages=[{"role": "user", "content": user_message}])
 # …or report by hand:
 ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90})
@@ -153,11 +156,43 @@ experiment's salt here and never sent.
 
 ## Provider wrappers
 
-`airprompter_agent.integrations.openai` (`chat_completion`, `responses_create`, async twins),
-`airprompter_agent.integrations.anthropic` (`messages_create`, async twin), and
-`airprompter_agent.integrations.litellm` (`AirPrompterLiteLLMCallback(ap)` registered on
-`litellm.callbacks`, with `metadata=litellm_metadata(rendered)` on each call). Each imports its
-library lazily; none is required to install the SDK.
+**`ap.wrap(client)` (D65)** returns the same `openai` / `anthropic` client
+(sync or async) with its public model-call methods observed — a proxy,
+never a patched internal, and no import of the provider package (they are
+optional extras). Each call is timed, its usage and finish reason read off
+the response or the stream as it goes by, the slot's declared checks run
+on the text here, and one content-free observation filed. Nothing the
+wrapper does can fail the call: an unattributed call passes straight
+through (logged `wrap_unattributed`) and a stream a consumer abandons
+reports what was seen.
+
+| Client | Observed methods | Streams |
+| --- | --- | --- |
+| `openai` (`OpenAI` / `AsyncOpenAI`) | `chat.completions.create` / `.parse` / `.stream()`, `responses.create` / `.parse` / `.stream()`, `beta.chat.completions.parse` | `stream=True` (usage from the last chunk — pass `stream_options={"include_usage": True}`); the `.stream()` context managers through `get_final_completion()` / `get_final_response()`, else the helper's `current_completion_snapshot` when the block closes |
+| `anthropic` (`Anthropic` / `AsyncAnthropic`) | `messages.create`, `messages.stream()`, `beta.messages.*` | `stream=True` (usage from `message_start` + `message_delta`); `messages.stream()` through `get_final_message()`, else `current_message_snapshot` when the block closes |
+| LiteLLM | `AirPrompterLiteLLMCallback(ap)` on `litellm.callbacks` | attributed by `metadata=litellm_metadata(rendered)` or by the messages' text |
+
+`with_raw_response` / `with_streaming_response` surfaces and any method
+not in the table are the client's own and are not observed.
+
+**Which render a call belongs to.** In order: an enclosing
+`with ap.attribute(rendered):` block (a `contextvars` variable, so it
+follows `await`s and threads started with a copied context); else a
+request text — `system`, `instructions`, then each message's string or
+`text` parts — that is exactly one of the last 256 renders (matched by
+SHA-256; the registry keeps hashes and dimension names, never a prompt);
+else the call is unattributed and passed through. The request's `model`
+names the window.
+
+The explicit helpers remain: `airprompter_agent.integrations.openai`
+(`chat_completion`, `responses_create`, async twins) and
+`airprompter_agent.integrations.anthropic` (`messages_create`, async twin)
+place the rendered text for you and call `ap.observe` by name. Each imports
+its library lazily; none is required to install the SDK. The wrapper suites
+run against clients shaped like the real ones in CI and against the latest
+`openai`, `anthropic` and `litellm` releases weekly
+(`.github/workflows/wrap-latest.yml`; `WRAP_LIVE=1 python -m pytest
+tests/test_wrap_live.py` locally).
 
 ## Parity with the TypeScript SDK
 
@@ -181,6 +216,6 @@ a `run_ref` minted there).
 | Apply control: update window (DST-safe), `on_staged` hook, Freeze precedence, heartbeat | ✓ | ✓ (`zoneinfo`) |
 | `observe()`: OpenAI / Anthropic / Bedrock usage, error classes | ✓ | ✓ + SDK objects, async variant |
 | Managed mode (catalogue, run, stream, typed refusals, 429 retry) | ✓ | ✓ |
-| Provider wrappers | — | openai, anthropic, LiteLLM callback |
+| Provider wrappers | `ap.wrap()` for openai / Anthropic, AI SDK middleware | `ap.wrap()` for openai / anthropic (sync + async), explicit helpers, LiteLLM callback |
 | Spool upload on hosts | `airprompterd` uploads every writer's segments (T26) | same daemon — the SDK writes, the daemon uploads |
 | Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓ | next phase (drain the memory sink with `drain_memory_sink()` and POST it yourself until then) |

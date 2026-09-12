@@ -50,7 +50,7 @@ your application ──(render / wrap)──▶ SDK ──▶ encrypted slot sto
 
 | Protocol | Hosted service | `@airprompter/agent-sdk` | `airprompter-agent` | `airprompter` CLI |
 |---|---|---|---|---|
-| 0.2 | vendors `protocol/v0.2.5`; manifest, payload and key routes shipped | `sdk-typescript` main (unpublished) | — | — |
+| 0.2 | vendors `protocol/v0.2.5`; manifest, payload and key routes shipped | `sdk-typescript` main (unpublished) | — | `cli` main: pull, verify, apply, status, diff, keygen (built and smoke-tested on three platforms in CI; release tag pending signing identities) |
 
 Generated from the conformance run once SDK packages exist; until then this
 table is maintained by hand with each protocol tag.

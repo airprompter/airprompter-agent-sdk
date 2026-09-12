@@ -163,14 +163,73 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: cli
+      - run: npm test
+        working-directory: cli
+      - name: Tag matches package.json
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#cli/v}"
+          test "$(node -p "require('./package.json').version")" = "$v"
+        working-directory: cli
       - name: Single executable
         run: npm run build:sea -- --out "../dist/${{ matrix.artifact }}"
         working-directory: cli
+      - name: Binary smoke test
+        run: node scripts/smoke.mjs "../dist/${{ matrix.artifact }}"
+        working-directory: cli
+      # macOS: Developer ID signature + notarization. An unsigned binary blocks
+      # on first run (Gatekeeper), so this is part of the release, not polish.
+      # Needs the secrets below; without them the job builds an ad-hoc-signed
+      # binary and the release notes say so.
+      - name: Developer ID sign and notarize (macOS)
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE_P12 != ''
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          security create-keychain -p "" "$keychain"
+          security set-keychain-settings -lut 1200 "$keychain"
+          security unlock-keychain -p "" "$keychain"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "dist/${{ matrix.artifact }}"
+          ditto -c -k --keepParent "dist/${{ matrix.artifact }}" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          codesign --verify --strict --verbose=2 "dist/${{ matrix.artifact }}"
+          echo "notarized=true" >> "$GITHUB_ENV"
+      # Windows: Authenticode. Needs a code-signing certificate (PFX) and its password.
+      - name: Authenticode sign (Windows)
+        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_PFX != ''
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD "dist/${{ matrix.artifact }}"
+          & $signtool.FullName verify /pa "dist/${{ matrix.artifact }}"
+          "authenticode=true" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Sign (keyless)
         shell: bash
         run: |
           cosign sign-blob --yes --bundle "dist/${{ matrix.artifact }}.sigstore" "dist/${{ matrix.artifact }}"
           sha256sum "dist/${{ matrix.artifact }}" > "dist/${{ matrix.artifact }}.sha256" 2>/dev/null || shasum -a 256 "dist/${{ matrix.artifact }}" > "dist/${{ matrix.artifact }}.sha256"
+          {
+            echo "artifact=${{ matrix.artifact }}"
+            echo "node=$(node --version)"
+            echo "size_bytes=$(wc -c < "dist/${{ matrix.artifact }}" | tr -d ' ')"
+            echo "platform_signature=${notarized:-${authenticode:-none}}"
+          } > "dist/${{ matrix.artifact }}.provenance.txt"
       - name: SBOM
         uses: anchore/sbom-action@v0
         with:

@@ -1,0 +1,33 @@
+{
+  "name": "@airprompter/cli",
+  "version": "0.1.0",
+  "description": "airprompter — pull, verify, apply, status, diff and keygen for AirPrompter agent releases; shipped as signed single-file executables.",
+  "license": "BSD-3-Clause",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/airprompter/airprompter-agent-sdk",
+    "directory": "cli"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "airprompter": "./dist/airprompter.cjs"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "bundle": "node scripts/bundle.mjs",
+    "build:sea": "node scripts/build-sea.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.5",
+    "esbuild": "^0.25.9",
+    "postject": "^1.0.0-alpha.6",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.3"
+  }
+}

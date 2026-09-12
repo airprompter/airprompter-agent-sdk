@@ -86,12 +86,14 @@ jobs:
     outputs:
       typescript: ${{ steps.detect.outputs.typescript }}
       python: ${{ steps.detect.outputs.python }}
+      cli: ${{ steps.detect.outputs.cli }}
     steps:
       - uses: actions/checkout@v4
       - id: detect
         run: |
           echo "typescript=$([ -f sdk-typescript/package.json ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "python=$([ -f sdk-python/pyproject.toml ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "cli=$([ -f cli/package.json ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   sdk-typescript:
     name: SDK (TypeScript)
@@ -124,3 +126,48 @@ jobs:
         working-directory: sdk-python
       - run: python -m pytest
         working-directory: sdk-python
+
+  cli:
+    name: CLI (${{ matrix.artifact }})
+    needs: packages
+    if: needs.packages.outputs.cli == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: airprompter-linux-x64
+          - os: macos-latest
+            artifact: airprompter-darwin-arm64
+          - os: windows-latest
+            artifact: airprompter-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: cli
+      - run: npm run typecheck
+        working-directory: cli
+      - run: npm test
+        working-directory: cli
+      - name: Single executable
+        run: npm run build:sea -- --out "dist/${{ matrix.artifact }}"
+        working-directory: cli
+      - name: Binary smoke test
+        # The built executable, not node: version, help, keygen (modes, worktree
+        # refusal), a verify refusal with its exit code, --json shape, and the
+        # rule that the Agent key never comes from argv.
+        run: node scripts/smoke.mjs "dist/${{ matrix.artifact }}"
+        working-directory: cli
+      - name: Size
+        shell: bash
+        run: ls -l "cli/dist/${{ matrix.artifact }}" | awk '{ printf "%s %.1f MiB\n", $NF, $5/1048576 }'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: cli/dist/${{ matrix.artifact }}
+          retention-days: 7

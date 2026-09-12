@@ -3,7 +3,7 @@
   "reason": "directive kinds are a closed set",
   "document": {
     "payload": {
-      "protocol": "0.2.0",
+      "protocol": "0.2.3",
       "organizationId": "org_7d3f9a2b",
       "agentId": "agt_4e8c1b6d",
       "target": "prod",

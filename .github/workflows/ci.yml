@@ -51,6 +51,15 @@ jobs:
         run: |
           node protocol/tools/gen_trust_vectors.mjs /tmp/manifest-verify.json
           TRUST_VECTORS=/tmp/manifest-verify.json npm test --prefix conformance
+      - name: A protocol tag names the version in protocol/VERSION
+        if: startsWith(github.ref, 'refs/tags/protocol/v')
+        run: test "protocol/v$(cat protocol/VERSION)" = "$GITHUB_REF_NAME"
+      - name: Examples and vectors carry the protocol version
+        run: |
+          v=$(cat protocol/VERSION)
+          test "$(node -p "require('./protocol/examples/manifest.json').payload.protocol")" = "$v"
+          test "$(node -p "require('./protocol/vectors/assignment.json').protocol")" = "$v"
+          test "$(node -p "require('./protocol/vectors/manifest-verify.json').protocol")" = "$v"
       - name: Every protocol change carries a CHANGELOG entry
         if: github.event_name == 'pull_request'
         env:

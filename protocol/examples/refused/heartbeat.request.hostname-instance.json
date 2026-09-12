@@ -2,7 +2,7 @@
   "schema": "heartbeat-request",
   "reason": "instanceId is random and opaque, never a hostname",
   "document": {
-    "protocol": "0.2.0",
+    "protocol": "0.2.3",
     "instanceId": "web-01.acme.internal",
     "sdk": {
       "name": "airprompterd",

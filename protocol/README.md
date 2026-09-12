@@ -44,7 +44,8 @@ are `trust-chain.md`; `vectors/manifest-verify.json` has a case per refusal.
 
 ## Versioning
 
-This directory has its own semver, tagged `protocol/vX.Y.Z`. A manifest
+This directory has its own semver, tagged `protocol/vX.Y.Z`; `VERSION`
+holds the current one and CI refuses a tag that disagrees with it. A manifest
 carries the `protocol` version it was written for; the hosted service
 supports the current and previous major. SDK packages declare the
 protocol range they speak. Consumers pin a tag and vendor `schemas/`,

@@ -1,5 +1,12 @@
 # Protocol changelog
 
+## 0.2.3 — 2026-09-12 (tag `protocol/v0.2.3`)
+
+- `protocol/VERSION` is the one source of the version: the generators read
+  it, so examples and vectors carry the tag's version (0.2.1 and 0.2.2
+  shipped examples still saying 0.2.0 — the hosted service's pin test
+  caught it). CI refuses a protocol tag that does not match VERSION.
+
 ## 0.2.2 — 2026-09-12 (tag `protocol/v0.2.2`)
 
 - trust-chain.md: timestamps compare as instants, never as strings; the

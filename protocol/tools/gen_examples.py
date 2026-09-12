@@ -8,7 +8,7 @@ import json
 import os
 import sys
 
-PROTOCOL = "0.2.0"
+PROTOCOL = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "VERSION"), encoding="utf-8").read().strip()
 
 def canonical(v) -> str:
     return json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=False)

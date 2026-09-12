@@ -8,7 +8,7 @@
 //
 //   node protocol/tools/gen_trust_vectors.mjs protocol/vectors/manifest-verify.json
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,7 +16,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const { canonicalJson, releaseDigest, sha256Prefixed } = await import(join(here, "..", "..", "conformance", "reference.mjs"));
 const { jwkThumbprint, publicJwkOf, signBytes } = await import(join(here, "..", "..", "conformance", "trust.mjs"));
 
-const PROTOCOL = "0.2.0";
+const PROTOCOL = readFileSync(join(here, "..", "VERSION"), "utf8").trim();
 const KEYS = {
   root: { kty: "EC", crv: "P-256", x: "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4", y: "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU", d: "hUxny0ocprVEGy2YVbwSFp3-SDNGSaZ2CEtyPISSNx8" },
   root2: { kty: "EC", crv: "P-256", x: "hOULaRqrgyc2St_4ql3hM3izY_z_LQttTS86ttFtrog", y: "DMcYKS3vcb6f87MfX9LMswbwb1GHmP4nGdRAn2l_9II", d: "hdViynm0uZGus5CvdSmMOZhmasQlv79Hh8zCLiTafbM" },

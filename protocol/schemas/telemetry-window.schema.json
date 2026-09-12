@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/telemetry-window/1",
+  "title": "Telemetry window row (draft 1)",
+  "description": "One minute of one dimension set. Content-free by schema: additionalProperties is false everywhere, and no field can carry prompt text, model output or end-user identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "v", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "usageSource", "count", "latencyMs", "tokens"],
+  "properties": {
+    "type": { "const": "window" },
+    "v": { "const": 1 },
+    "minute": { "type": "string", "format": "date-time", "description": "UTC minute boundary" },
+    "instanceId": { "type": "string", "pattern": "^[A-Za-z0-9._~-]{8,64}$" },
+    "instanceClass": { "enum": ["resident", "ephemeral"] },
+    "tag": { "type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$", "maxLength": 128 },
+    "versionId": { "type": "string", "maxLength": 128 },
+    "arm": { "type": "string", "pattern": "^[a-z0-9_-]{1,32}$", "description": "control, candidate, or a named arm; 'none' when no experiment" },
+    "model": { "type": "string", "maxLength": 128 },
+    "status": { "enum": ["ok", "error", "refused"] },
+    "errorClass": {
+      "anyOf": [
+        { "type": "null" },
+        { "enum": ["render_missing_variable", "context_length_exceeded", "output_schema_invalid", "truncated", "content_filter", "provider_error", "provider_timeout", "provider_rate_limited"] }
+      ]
+    },
+    "usageSource": { "enum": ["reported", "measured", "estimated", "unavailable"] },
+    "count": { "type": "integer", "minimum": 1 },
+    "latencyMs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["buckets", "sum"],
+      "properties": {
+        "buckets": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "integer", "minimum": 0 }, "description": "Counts against the fixed edges in latency-buckets.json" },
+        "sum": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output"],
+      "properties": {
+        "input": { "type": "integer", "minimum": 0 },
+        "cachedInput": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "description": "Declared feedback signals only (see feedback-signals.schema.json); each as {n, sum}. Booleans count 1/0.",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-zA-Z0-9]{0,31}$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["n", "sum"],
+          "properties": { "n": { "type": "integer", "minimum": 0 }, "sum": { "type": "number" } }
+        }
+      }
+    },
+    "sdk": { "type": "string", "maxLength": 64, "description": "writer name/version, e.g. agent-sdk-ts/0.1.0 or a third-party writer" }
+  }
+}

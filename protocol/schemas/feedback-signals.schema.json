@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/feedback-signals/1",
+  "title": "Feedback signal catalogue (draft 1)",
+  "description": "What ap.feedback(runRef, signal) accepts. Numbers, booleans and declared enums only. Free text is rejected by schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "thumbs": { "enum": ["up", "down"] },
+    "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "flagged": { "type": "boolean" },
+    "accepted": { "type": "boolean" },
+    "edited": { "type": "boolean" },
+    "regenerated": { "type": "boolean" },
+    "editDistanceRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+    "regenerations": { "type": "integer", "minimum": 0 },
+    "timeToAcceptMs": { "type": "integer", "minimum": 0 },
+    "copied": { "type": "boolean" },
+    "followUp": { "type": "boolean" },
+    "escalated": { "type": "boolean" },
+    "abandoned": { "type": "boolean" },
+    "corrected": { "type": "boolean" },
+    "correctedValue": { "type": "string", "maxLength": 64, "description": "Only when the slot's output check declares an enum; must be one of its values" },
+    "resolved": { "type": "boolean" },
+    "reopened": { "type": "boolean" },
+    "converted": { "type": "boolean" },
+    "refunded": { "type": "boolean" },
+    "slaMet": { "type": "boolean" },
+    "judgeScore": { "type": "number", "minimum": 0, "maximum": 1, "description": "From ap.judge() run on the customer's own key; only the score is reported" },
+    "custom": {
+      "type": "object",
+      "additionalProperties": { "type": ["number", "boolean"] },
+      "propertyNames": { "pattern": "^[a-z][a-zA-Z0-9]{0,31}$" },
+      "maxProperties": 8
+    }
+  }
+}

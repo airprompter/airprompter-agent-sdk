@@ -11,6 +11,7 @@ import { diff } from "./commands/diff.js";
 import { keygen } from "./commands/keygen.js";
 import { pull } from "./commands/pull.js";
 import { status } from "./commands/status.js";
+import { unlock } from "./commands/unlock.js";
 import { verify } from "./commands/verify.js";
 import { CliError, EXIT, type Context } from "./io.js";
 import { CLI_VERSION } from "./version.js";
@@ -20,6 +21,7 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   verify: { run: verify, summary: "Run the verification chain on a bundle or a state directory and print the reasons" },
   apply: { run: apply, summary: "Stage a bundle into the store and activate it per the environment's policy" },
   status: { run: status, summary: "Active and staged generation, lease, storage protection, spool depth, last upload" },
+  unlock: { run: unlock, summary: "Make the staged release live on this host (the operator's unlock; --generation N to name it)" },
   diff: { run: diff, summary: "What a bundle would change against the active release on this host" },
   keygen: { run: keygen, summary: "Generate a distribution or countersign keypair" },
   daemon: { run: daemon, summary: "airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket" },

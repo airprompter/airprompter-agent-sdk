@@ -65,6 +65,8 @@ export interface ManifestPayload {
   leaseSeconds: number;
   onLeaseExpiry: "degrade" | "halt";
   applyPolicy: "auto" | "unlock_required";
+  /** T9: the console's update window (advisory; a local `apply.window` wins). Only with `unlock_required`. */
+  unlockWindow?: { timezone: string; start: string; end: string; days?: Array<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"> };
   requireCountersign: boolean;
   slots: ManifestSlot[];
   experiment?: Experiment;

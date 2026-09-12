@@ -20,10 +20,11 @@ import type { Manifest, RefusalCode, RootMetadata } from "../protocol/types.js";
 import type { LoadedSlot, SlotStore } from "../store/slotStore.js";
 import type { SyncClient } from "./client.js";
 
-export type ApplyPolicyDecision = "activated" | "staged";
+/** `activated_externally`: the customer's hook (or an operator) already made the staged release live during the decision. */
+export type ApplyPolicyDecision = "activated" | "staged" | "activated_externally";
 
 export interface SyncPassResult {
-  outcome: "unchanged" | "activated" | "staged" | "refused" | "unavailable" | "nothing_promoted" | "held_back";
+  outcome: "unchanged" | "activated" | "activated_externally" | "staged" | "refused" | "unavailable" | "nothing_promoted" | "held_back";
   generation?: number;
   reason?: RefusalCode | "unauthorized" | "forbidden" | "network" | string;
 }
@@ -47,6 +48,14 @@ export interface SyncPassInput {
   /** Local policy: `auto` activates a verified release; `unlock_required` stages it and calls `onStaged`. */
   applyPolicy: (manifest: Manifest) => ApplyPolicyDecision | Promise<ApplyPolicyDecision>;
   onRefusal?: (reason: RefusalCode | string, generation: number | null) => void;
+  /**
+   * T9: called with every manifest whose envelope verifies (signature, scope,
+   * generation not below the stored one) BEFORE the pass decides whether to
+   * stage, hold back or ignore it — so a `disable` (Freeze) or a
+   * `request_unlock` rides a manifest the runtime would otherwise leave
+   * staged or unchanged. Never a manifest that failed the trust chain.
+   */
+  onDirectives?: (payload: Manifest["payload"]) => void;
 }
 
 export interface SyncPassOutput extends SyncPassResult {
@@ -103,6 +112,8 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
       input.onRefusal?.(envelope.reason, manifest.payload.generation);
       return done({ outcome: "refused", reason: envelope.reason, generation: manifest.payload.generation });
     }
+    // The signature verified and the generation is not a rollback: its directives stand from here on.
+    input.onDirectives?.(manifest.payload);
     if (manifest.payload.generation === stored) return done({ outcome: "unchanged" }, input.active, fetched.etag);
     const heldBackBelow = input.store.state.heldBackBelow;
     if (heldBackBelow !== undefined && manifest.payload.generation <= heldBackBelow) {
@@ -135,6 +146,8 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
     input.store.stage({ manifest, payloads });
     const decision = await input.applyPolicy(manifest);
     if (decision === "staged") return done({ outcome: "staged", generation: manifest.payload.generation }, input.active, fetched.etag);
+    // The hook activated it itself: the caller's active slot already moved; nothing here to load.
+    if (decision === "activated_externally") return done({ outcome: "activated_externally", generation: manifest.payload.generation }, input.active, fetched.etag);
     const slot = input.store.activate();
     const active = input.store.load(slot, { now, root: trustedRoot, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) });
     return done({ outcome: "activated", generation: manifest.payload.generation }, active, fetched.etag);

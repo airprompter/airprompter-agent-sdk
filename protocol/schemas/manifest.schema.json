@@ -228,6 +228,18 @@
           "enum": ["degrade", "halt"]
         },
         "applyPolicy": { "type": "string", "enum": ["auto", "unlock_required"] },
+        "unlockWindow": {
+          "description": "The console's update window (D33): a release staged under unlock_required activates on its own inside it. Advisory — a runtime's local apply.window wins, and the local side is never looser. Present only with unlock_required.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["timezone", "start", "end"],
+          "properties": {
+            "timezone": { "description": "An IANA zone name (Europe/Berlin).", "type": "string", "minLength": 1, "maxLength": 64 },
+            "start": { "description": "Local wall-clock HH:MM, 24-hour; a window whose end precedes its start runs past midnight and belongs to the day it starts on.", "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+            "end": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+            "days": { "description": "Days the window opens on, in the zone; absent = every day.", "type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": { "type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] } }
+          }
+        },
         "requireCountersign": { "type": "boolean" },
         "slots": {
           "description": "Every live slot of the release. Sorted by tag; tags are unique.",

@@ -17,19 +17,22 @@ import { bundlePayloadBytes, openBundle, type DistributionKey } from "./bundle/a
 import { assignArm } from "./protocol/assignment.js";
 import { orderedSteps } from "./protocol/assignment.js";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyRootMetadata } from "./protocol/trust.js";
-import type { Bundle, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target } from "./protocol/types.js";
+import type { Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target } from "./protocol/types.js";
 import { mintRunRef, parseRunRef, type RunRefFacts } from "./render/runRef.js";
 import { renderTemplate, type Delimiters } from "./render/template.js";
 import { normalizeFeedback } from "./spool/feedback.js";
 import { DirectorySink, MemorySink, SpoolWriter, type Observation, type RefusalRow, type SpoolSink } from "./spool/writer.js";
 import { fileKey, type KeyProvider, type StorageProtection } from "./store/keyProvider.js";
 import { SlotStore, StoreError, type LoadedSlot } from "./store/slotStore.js";
+import { parseWindow, windowState, type UpdateWindow } from "./apply/window.js";
 import { SyncClient, type FetchLike } from "./sync/client.js";
 import { DaemonClient, DaemonError, daemonSocketPath } from "./sync/daemon.js";
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "./sync/loop.js";
 
 export const SDK_NAME = "agent-sdk-ts";
 export const SDK_VERSION = "0.1.0";
+/** The protocol this SDK speaks; the heartbeat names it (the manifest carries its own). */
+export const PROTOCOL_VERSION = "0.2.5";
 
 export type SyncMode = "resident" | "on_invoke" | "daemon" | "offline";
 
@@ -56,9 +59,22 @@ export interface StartOptions {
   apply?: {
     /** Overrides the manifest's policy locally (the local side can be stricter, never looser). */
     policy?: "auto" | "unlock_required";
-    /** Called when a release is staged under unlock_required; `activate()` makes it live. */
-    onStaged?: (staged: { generation: number; manifest: Manifest; activate: () => void }) => void | Promise<void>;
+    /**
+     * T9: the update window — `"02:00-04:00 Europe/Berlin"` (optionally `"… mon,tue"`) or an object. A release
+     * staged under unlock_required activates on its own inside it. A local window wins over the manifest's.
+     */
+    window?: string | UpdateWindow;
+    /**
+     * Called when a release is staged under unlock_required; `activate()` makes it live. The hook is the change-control
+     * integration point: resolve after `activate()` to go live, resolve or reject without it to leave the release staged
+     * (reported as `staged`, never activated by accident). `unlockRequest` is the console's open request, when there is one.
+     */
+    onStaged?: (staged: { generation: number; manifest: Manifest; activate: () => void; unlockRequest: Extract<Directive, { kind: "request_unlock" }> | null }) => void | Promise<void>;
   };
+  /** T9: how often this instance reports to AirPrompter (30–3600 s; the server may clamp and echo a cadence). Default 300. */
+  heartbeatSeconds?: number;
+  /** The models this application can actually call, as the provider names them (reported on heartbeat; promotion refuses a slot whose model is absent). */
+  models?: Record<string, unknown> | string[];
   delimiters?: Delimiters;
   telemetry?: { sink?: "directory" | "memory"; instanceClass?: "resident" | "ephemeral" };
   now?: () => number;
@@ -93,8 +109,12 @@ export interface AgentStatus {
   forcedDowngrade: boolean;
   /** Emergency disable from the manifest (§6.5): the whole agent, or named slots. */
   disabled: { agent: boolean; slots: string[] };
-  /** Open unlock requests carried by the active manifest, for operator tooling. */
+  /** Open (unexpired) unlock requests carried by the latest verified manifest, for operator tooling. */
   unlockRequests: Array<{ releaseDigest: string; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }>;
+  /** T9: the update window in force (local, else the manifest's) and whether it is open now. */
+  window: { source: "local" | "manifest"; open: boolean; opensAt: string; closesAt: string } | null;
+  /** T9: the last heartbeat the server accepted, and when the next one goes out. */
+  heartbeat: { lastAt: string | null; nextAt: string | null; intervalSeconds: number; lastRefusal: string | null };
   spool: { depthSegments: number; depthBytes: number };
   source: ReleaseSource;
   /** Attached to the host daemon (`sync.mode: "daemon"`), and whether that attachment is currently live. */
@@ -153,6 +173,20 @@ export class AirPrompterAgent {
   private stagedManifest: Manifest | null = null;
   private lastContactMs: number | null = null;
   private bundleNotAfter: string | null = null;
+  /**
+   * T9: directives from the latest manifest whose envelope verified — honoured even when that manifest was left staged,
+   * held back, or ignored as the generation already held. A Freeze reaches a fleet that never unlocks.
+   */
+  private standingDirectives: { generation: number; directives: Directive[] } | null = null;
+  private windowTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatIntervalSeconds: number;
+  private lastHeartbeatMs: number | null = null;
+  private nextHeartbeatMs: number | null = null;
+  private lastHeartbeatRefusal: string | null = null;
+  private heartbeating: Promise<void> | null = null;
+  private haltWithoutContactWarned = false;
+  private readonly localWindow: UpdateWindow | null;
   private readonly stampedRefusals = new Set<string>();
   private trustedRoot: RootMetadata;
   private readonly runRefKey: Buffer;
@@ -171,6 +205,8 @@ export class AirPrompterAgent {
   ) {
     this.trustedRoot = trustedRoot;
     this.runRefKey = createHmac("sha256", Buffer.from(ownInstanceId, "utf8")).update("runRef").digest();
+    this.localWindow = options.apply?.window ? parseWindow(options.apply.window) : null;
+    this.heartbeatIntervalSeconds = Math.min(3600, Math.max(30, Math.round(options.heartbeatSeconds ?? 300)));
     const serverless = (options.sync?.mode ?? "resident") === "on_invoke";
     this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink() : new DirectorySink(spoolDir, ownInstanceId);
     this.spool = new SpoolWriter(this.sink, { instanceId: ownInstanceId, instanceClass: options.telemetry?.instanceClass ?? (serverless ? "ephemeral" : "resident"), sdk: `${SDK_NAME}/${SDK_VERSION}` });
@@ -335,7 +371,12 @@ export class AirPrompterAgent {
       await this.syncNow();
     }
     if (!this.active) throw new AgentStartError("no_verified_release", "no verified release in the store, no usable vendored bundle, and nothing could be fetched");
-    if (this.client && (this.options.sync?.mode ?? "resident") === "resident") this.schedule();
+    if (this.client && (this.options.sync?.mode ?? "resident") === "resident") {
+      this.schedule();
+      // The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
+      void this.heartbeatNow().finally(() => this.scheduleHeartbeat());
+    }
+    this.scheduleWindowUnlock();
   }
 
   /** Called whenever the active or staged generation changes (sync, unlock, rollback, daemon event). */
@@ -375,12 +416,88 @@ export class AirPrompterAgent {
     this.timer.unref?.();
   }
 
+  /**
+   * The apply policy engine (T9, D33). `auto` activates. `unlock_required` stages, then:
+   * inside an open update window → activates now; the customer's `onStaged` hook may call
+   * `activate()` (a hook that throws, rejects or never activates leaves the release staged and
+   * says so in the log); otherwise the window timer, an operator's `unlock`, or the hook later.
+   * The local policy can only tighten the manifest's (`auto` never overrides `unlock_required`).
+   */
   private async applyPolicy(manifest: Manifest): Promise<ApplyPolicyDecision> {
-    const policy = this.options.apply?.policy ?? manifest.payload.applyPolicy;
+    const local = this.options.apply?.policy;
+    const policy = local === "unlock_required" || manifest.payload.applyPolicy === "unlock_required" ? "unlock_required" : "auto";
     if (policy === "auto") return "activated";
     this.stagedManifest = manifest;
-    await this.options.apply?.onStaged?.({ generation: manifest.payload.generation, manifest, activate: () => this.unlock() });
-    return this.stagedManifest ? "staged" : "activated";
+    const window = this.windowInForce(manifest);
+    if (window && windowState(window.window, this.nowMs()).open) {
+      this.log({ event: "window_open_on_stage", generation: manifest.payload.generation, source: window.source });
+      this.stagedManifest = null;
+      return "activated";
+    }
+    const request = this.openUnlockRequests(manifest.payload).find((d) => d.releaseDigest === manifest.payload.releaseDigest) ?? null;
+    let activation: Promise<{ generation: number } | null> | null = null;
+    try {
+      await this.options.apply?.onStaged?.({
+        generation: manifest.payload.generation,
+        manifest,
+        // `activate()` may be called without awaiting; the decision waits for it either way.
+        activate: () => void (activation = activation ?? this.unlock()),
+        unlockRequest: request,
+      });
+    } catch (error) {
+      // The hook refused (change control said no, or it broke): the release stays staged and the fleet view says so.
+      this.log({ event: "on_staged_hook_rejected", generation: manifest.payload.generation, reason: (error as Error).message });
+    }
+    if (activation) {
+      const result = await (activation as Promise<{ generation: number } | null>);
+      if (result) return "activated_externally";
+    }
+    if (this.stagedManifest === null) return "activated_externally";
+    this.scheduleWindowUnlock();
+    return "staged";
+  }
+
+  /** The window that governs this runtime: the local one, else the manifest's; null when neither is set. */
+  private windowInForce(manifest: Manifest | null): { source: "local" | "manifest"; window: UpdateWindow } | null {
+    if (this.localWindow) return { source: "local", window: this.localWindow };
+    const carried = manifest?.payload.unlockWindow;
+    if (!carried) return null;
+    try {
+      return { source: "manifest", window: parseWindow(carried) };
+    } catch (error) {
+      this.log({ event: "manifest_window_unusable", reason: (error as Error).message });
+      return null;
+    }
+  }
+
+  /** While a release is staged and a window applies, wake at the next opening and activate. */
+  private scheduleWindowUnlock(): void {
+    if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.windowTimer = null;
+    if (this.stopped || !this.stagedManifest) return;
+    const governing = this.windowInForce(this.stagedManifest);
+    if (!governing) return;
+    const state = windowState(governing.window, this.nowMs());
+    const delay = Math.max(1000, Math.min(2_147_000_000, (state.open ? 0 : state.opensAtMs - this.nowMs()) + 500));
+    this.windowTimer = setTimeout(() => {
+      this.windowTimer = null;
+      void (async () => {
+        if (!this.stagedManifest) return;
+        if (windowState(governing.window, this.nowMs()).open) {
+          this.log({ event: "window_unlock", generation: this.stagedManifest.payload.generation, source: governing.source });
+          await this.unlock();
+        }
+        this.scheduleWindowUnlock();
+      })();
+    }, delay);
+    this.windowTimer.unref?.();
+  }
+
+  /** Unexpired `request_unlock` directives from the latest verified manifest (or the active one before any sync). */
+  private openUnlockRequests(payload: Manifest["payload"] | null): Array<Extract<Directive, { kind: "request_unlock" }>> {
+    const directives = this.standingDirectives && (!payload || this.standingDirectives.generation >= payload.generation) ? this.standingDirectives.directives : (payload?.directives ?? []);
+    const now = this.nowMs();
+    return directives.flatMap((d) => (d.kind === "request_unlock" && instant(d.expiresAt) > now ? [d] : []));
   }
 
   /** One sync pass now (resident timers call this; on_invoke hosts call it from `invoke`). Never throws. */
@@ -415,13 +532,14 @@ export class AirPrompterAgent {
           this.lastRefusal = reason;
           this.log({ event: "sync_refused", reason, generation });
         },
+        onDirectives: (payload) => this.takeDirectives(payload),
       });
       this.etag = result.etag;
       this.edgeEtag = result.edgeEtag;
       this.trustedRoot = result.trustedRoot;
       this.lastSyncMs = this.nowMs();
       this.lastSyncOutcome = result.outcome;
-      const contact = result.outcome === "unchanged" || result.outcome === "activated" || result.outcome === "staged" || result.outcome === "nothing_promoted" || result.outcome === "held_back";
+      const contact = result.outcome === "unchanged" || result.outcome === "activated" || result.outcome === "activated_externally" || result.outcome === "staged" || result.outcome === "nothing_promoted" || result.outcome === "held_back";
       if (contact) this.lastContactMs = this.nowMs();
       this.consecutiveSyncFailures = contact ? 0 : this.consecutiveSyncFailures + 1;
       if (result.outcome === "activated" && result.active) {
@@ -441,6 +559,100 @@ export class AirPrompterAgent {
     return this.syncing;
   }
 
+  /** T9: a verified manifest's directives stand from the moment its envelope verifies; a Freeze is honoured before anything else. */
+  private takeDirectives(payload: Manifest["payload"]): void {
+    if (this.standingDirectives && this.standingDirectives.generation > payload.generation) return;
+    const before = this.disabledNow();
+    this.standingDirectives = { generation: payload.generation, directives: [...payload.directives] };
+    const after = this.disabledNow();
+    if (before.agent !== after.agent || before.slots.join(",") !== after.slots.join(",")) this.log({ event: after.agent || after.slots.length ? "disabled_by_directive" : "disable_lifted", generation: payload.generation, ...after });
+    const requests = this.openUnlockRequests(payload);
+    if (requests.length) this.log({ event: "unlock_requested", generation: payload.generation, requests: requests.map((r) => ({ releaseDigest: r.releaseDigest, expiresAt: r.expiresAt, requestedBy: r.requestedBy })) });
+  }
+
+  /** What is disabled right now: the standing directives when they are as new as the active manifest, else the active manifest's own. */
+  private disabledNow(): { agent: boolean; slots: string[] } {
+    const active = this.active?.manifest.payload ?? null;
+    if (this.standingDirectives && (!active || this.standingDirectives.generation >= active.generation)) return this.disabledFrom(this.standingDirectives.directives);
+    return active ? this.disabledFrom(active.directives) : { agent: false, slots: [] };
+  }
+
+  // ---------------------------------------------------------------------------
+  // T9: the heartbeat
+  // ---------------------------------------------------------------------------
+
+  /** The protocol's heartbeat body, built from what this process knows about itself. Content-free by construction. */
+  heartbeatBody(): Record<string, unknown> {
+    const status = this.status();
+    const store = this.store?.state ?? null;
+    const models = Array.isArray(this.options.models) ? this.options.models : Object.keys(this.options.models ?? {});
+    const activeDigest = this.active?.manifest.payload.releaseDigest;
+    const stagedDigest = this.stagedManifest?.payload.releaseDigest;
+    const applyState = status.applyState === "awaiting_unlock" && this.stagedManifest ? (this.options.requireCountersign && !this.stagedManifest.countersignatures?.length ? "awaiting_countersign" : "awaiting_unlock") : status.applyState;
+    return {
+      protocol: PROTOCOL_VERSION,
+      instanceId: this.ownInstanceId,
+      instanceClass: this.options.telemetry?.instanceClass ?? ((this.options.sync?.mode ?? "resident") === "on_invoke" ? "ephemeral" : "resident"),
+      sdk: { name: "agent-sdk-typescript", version: SDK_VERSION },
+      host: { os: process.platform === "linux" || process.platform === "darwin" || process.platform === "win32" ? (process.platform === "win32" ? "windows" : process.platform) : "other", arch: process.arch.slice(0, 16), runtime: `node ${process.versions.node}`.slice(0, 64) },
+      syncMode: (this.options.sync?.mode ?? "resident") === "on_invoke" ? "on_invoke" : this.client ? "resident" : "offline",
+      heartbeatIntervalSeconds: this.heartbeatIntervalSeconds,
+      generation: { active: status.generation, ...(status.stagedGeneration !== null ? { staged: status.stagedGeneration } : {}) },
+      ...(activeDigest ? { activeReleaseDigest: activeDigest } : {}),
+      ...(stagedDigest ? { stagedReleaseDigest: stagedDigest } : {}),
+      applyState,
+      ...(status.applyState === "refused" && status.lastRefusal && /^[a-z_]+$/.test(status.lastRefusal) ? { refusal: status.lastRefusal } : {}),
+      ...(status.signingKeyId ? { signingKeyId: status.signingKeyId } : {}),
+      storageProtection: status.storageProtection === "daemon" ? "custom" : status.storageProtection,
+      catalog: { models: [...new Set(models)].slice(0, 256), reportedAt: this.nowIso() },
+      lease: { ...(status.leaseExpiresAt ? { expiresAt: status.leaseExpiresAt } : {}), expired: status.leaseExpired },
+      ...(store ? { localRollback: { active: store.heldBackBelow !== undefined, forced: store.forcedDowngrade === true } } : {}),
+      spool: { depthSegments: status.spool.depthSegments, depthBytes: status.spool.depthBytes, droppedSegments: 0, quarantinedSegments: 0 },
+      unlockRequestsSeen: status.unlockRequests.map((r) => r.releaseDigest).slice(0, 8),
+      disabled: status.disabled,
+    };
+  }
+
+  /** One heartbeat now (resident timers call this; on_invoke hosts send one when the interval has elapsed). Never throws. */
+  async heartbeatNow(): Promise<void> {
+    if (!this.client || this.daemon) return;
+    if (this.heartbeating) return this.heartbeating;
+    this.heartbeating = (async () => {
+      try {
+        const result = await this.client!.heartbeat(this.heartbeatBody());
+        if (result.status === "ok") {
+          this.lastHeartbeatMs = this.nowMs();
+          this.lastHeartbeatRefusal = null;
+          this.lastContactMs = this.nowMs();
+          const interval = Number(result.response.heartbeatIntervalSeconds);
+          if (Number.isFinite(interval) && interval >= 30 && interval <= 3600) this.heartbeatIntervalSeconds = interval;
+          this.log({ event: "heartbeat", intervalSeconds: this.heartbeatIntervalSeconds, expiresAt: result.response.expiresAt ?? null });
+        } else if (result.status === "refused") {
+          this.lastHeartbeatRefusal = result.code ?? `http_${result.httpStatus}`;
+          this.log({ event: "heartbeat_refused", httpStatus: result.httpStatus, code: result.code });
+        } else {
+          this.log({ event: "heartbeat_failed", httpStatus: result.httpStatus });
+        }
+      } catch (error) {
+        this.log({ event: "heartbeat_failed", reason: (error as Error).message });
+      }
+    })().finally(() => {
+      this.heartbeating = null;
+    });
+    return this.heartbeating;
+  }
+
+  private scheduleHeartbeat(): void {
+    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
+    if (this.stopped || !this.client || this.daemon) return;
+    const delay = jitteredDelayMs(this.heartbeatIntervalSeconds, this.options.random);
+    this.nextHeartbeatMs = this.nowMs() + delay;
+    this.heartbeatTimer = setTimeout(() => {
+      void this.heartbeatNow().finally(() => this.scheduleHeartbeat());
+    }, delay);
+    this.heartbeatTimer.unref?.();
+  }
+
   private async fetchRoot(url: string): Promise<RootMetadata | null> {
     try {
       const response = await (this.options.fetch ?? (globalThis.fetch as unknown as FetchLike))(url, { headers: { "user-agent": `${SDK_NAME}/${SDK_VERSION}` } });
@@ -454,6 +666,7 @@ export class AirPrompterAgent {
   /** on_invoke mode: run the handler between two sync passes (the trailing one is not awaited on the response path). */
   async invoke<T>(handler: () => Promise<T>): Promise<T> {
     await this.syncNow();
+    if (this.lastHeartbeatMs === null || this.nowMs() - this.lastHeartbeatMs >= this.heartbeatIntervalSeconds * 1000) void this.heartbeatNow();
     try {
       return await handler();
     } finally {
@@ -471,6 +684,8 @@ export class AirPrompterAgent {
     }
     const store = this.store!;
     if (!store.state.staged) return null;
+    if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.windowTimer = null;
     const slot = store.activate();
     this.active = store.load(slot, { now: this.nowIso(), root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null });
     this.stagedManifest = null;
@@ -505,9 +720,15 @@ export class AirPrompterAgent {
   }
 
   private disabledBy(payload: Manifest["payload"]): { agent: boolean; slots: string[] } {
+    // The standing directives (from the latest verified manifest) win when they are as new as this one.
+    if (this.standingDirectives && this.standingDirectives.generation >= payload.generation) return this.disabledFrom(this.standingDirectives.directives);
+    return this.disabledFrom(payload.directives);
+  }
+
+  private disabledFrom(directives: readonly Directive[]): { agent: boolean; slots: string[] } {
     const slots: string[] = [];
     let agent = false;
-    for (const directive of payload.directives) {
+    for (const directive of directives) {
       if (directive.kind !== "disable") continue;
       if (directive.scope === "agent") agent = true;
       else if (directive.tag) slots.push(directive.tag);
@@ -536,7 +757,16 @@ export class AirPrompterAgent {
     if (expiresAt && instant(expiresAt) <= this.nowMs()) {
       // §6.4: degrade keeps serving and reports it; halt stops rendering. Either way the spool carries one row.
       this.stampRefusal("lease_expired", active.generation, null);
-      if (payload.onLeaseExpiry === "halt") throw new RenderRefusedError("lease_expired", tag, active.generation);
+      if (payload.onLeaseExpiry === "halt") {
+        // A runtime with no way to call home (no key, offline sync) can never renew: halt there is a self-inflicted
+        // outage, so it degrades and says so once. The console refuses to save halt on an offline environment too.
+        if (!this.client) {
+          if (!this.haltWithoutContactWarned) {
+            this.haltWithoutContactWarned = true;
+            this.log({ event: "halt_without_contact_degraded", generation: active.generation });
+          }
+        } else throw new RenderRefusedError("lease_expired", tag, active.generation);
+      }
     }
   }
 
@@ -623,8 +853,15 @@ export class AirPrompterAgent {
       onLeaseExpiry: manifest?.onLeaseExpiry ?? null,
       lastContactAt: this.lastContactMs === null ? null : new Date(this.lastContactMs).toISOString(),
       forcedDowngrade: state?.forcedDowngrade === true,
-      disabled: manifest ? this.disabledBy(manifest) : { agent: false, slots: [] },
-      unlockRequests: (manifest?.directives ?? []).flatMap((d) => (d.kind === "request_unlock" ? [{ releaseDigest: d.releaseDigest, requestedBy: d.requestedBy, requestedAt: d.requestedAt, expiresAt: d.expiresAt, ...(d.note !== undefined ? { note: d.note } : {}) }] : [])),
+      disabled: this.disabledNow(),
+      unlockRequests: this.openUnlockRequests(manifest ?? null).map((d) => ({ releaseDigest: d.releaseDigest, requestedBy: d.requestedBy, requestedAt: d.requestedAt, expiresAt: d.expiresAt, ...(d.note !== undefined ? { note: d.note } : {}) })),
+      window: (() => {
+        const governing = this.windowInForce(this.stagedManifest ?? this.active?.manifest ?? null);
+        if (!governing) return null;
+        const state = windowState(governing.window, this.nowMs());
+        return { source: governing.source, open: state.open, opensAt: new Date(state.opensAtMs).toISOString(), closesAt: new Date(state.closesAtMs).toISOString() };
+      })(),
+      heartbeat: { lastAt: this.lastHeartbeatMs === null ? null : new Date(this.lastHeartbeatMs).toISOString(), nextAt: this.nextHeartbeatMs === null || !this.heartbeatTimer ? null : new Date(this.nextHeartbeatMs).toISOString(), intervalSeconds: this.heartbeatIntervalSeconds, lastRefusal: this.lastHeartbeatRefusal },
       spool: { depthSegments: depth.segments, depthBytes: depth.bytes },
       source: this.source,
       daemon: this.daemonSocket ? { attached: this.daemon !== null, socketPath: this.daemonSocket } : null,
@@ -654,6 +891,11 @@ export class AirPrompterAgent {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.windowTimer = null;
+    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+    if (this.heartbeating) await this.heartbeating;
     if (this.syncing) await this.syncing;
     if (this.daemonRefreshing) await this.daemonRefreshing;
     const daemon = this.daemon;

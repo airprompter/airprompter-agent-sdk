@@ -164,18 +164,25 @@ paths:
     post:
       operationId: postAgentHeartbeat
       tags: [telemetry]
-      summary: Report instance state; receive the upload grant
-      x-airprompter-status: planned
-      x-airprompter-ticket: AIR-1942
+      summary: Report instance state; receive the cadence (and, later, the upload grant)
+      x-airprompter-status: shipped
+      x-airprompter-ticket: AIR-1939
       x-airprompter-scope: agent.telemetry.write
       description: |
         The daemon (or an SDK without a daemon) reports what the instance is
-        running and how, and receives a presigned S3 POST grant for its spool,
-        `uploadIntervalSeconds`, the suggested poll interval and the edge
-        pointer URL. Telemetry bytes never pass through this route; they are
-        PUT straight to S3 under the grant. Refusing a grant *is* the throttle:
-        an over-quota organization, a revoked key or an incident answers with
-        `retryAfterSeconds` and the spool holds.
+        running and how (AIR-1939): its identity and class, apply state, the
+        generations it holds, its catalogue, lease, spool depth, the unlock
+        requests it has surfaced and what it is refusing under a Freeze. The
+        answer carries the cadence the server holds it to (`heartbeatIntervalSeconds`,
+        clamped to 30–3600; three misses expire the instance from the fleet
+        view), `expiresAt`, the suggested poll interval and the upload interval.
+        The presigned S3 POST grant for the spool (AIR-1942) rides here when it
+        ships; until then `uploadGrant` is absent and the spool holds. Telemetry
+        bytes never pass through this route.
+
+        Per key, an environment holds at most 500 live instances (D57): the
+        first heartbeat of an instance past that cap is refused with
+        `403 instance_cap_reached` and never recorded.
       parameters:
         - $ref: "#/components/parameters/agentId"
         - $ref: "#/components/parameters/target"

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Heartbeat is shipped** (AIR-1939): `POST /v1/agents/{agentId}/targets/{target}/heartbeat`
+  on the Agent key with `agent.telemetry.write`. `heartbeat.schema.json`
+  gains additive request fields — `instanceClass` (resident | ephemeral,
+  D57), `heartbeatIntervalSeconds` (the runtime's intended cadence),
+  `unlockRequestsSeen` (release digests of the open `request_unlock`
+  directives the instance has surfaced), `disabled` (what it refuses under
+  a Freeze) — and additive response fields `heartbeatIntervalSeconds` (the
+  clamped cadence to adopt) and `expiresAt` (three intervals on). The
+  upload grant stays absent until AIR-1942. Per key, 500 live instances
+  per environment; the 501st is `403 instance_cap_reached`.
+- `manifest.schema.json`: optional `unlockWindow` on the payload — the
+  console's update window (IANA zone, HH:MM start/end, optional days),
+  present only with `unlock_required`, advisory: a runtime's local
+  `apply.window` wins and the local side is never looser (D33).
+- Directive precedence stated for runtimes: a `disable` (Freeze) or a
+  `request_unlock` on any manifest whose envelope verifies (signature,
+  scope, generation not below the stored one) is honoured **before** the
+  apply decision — a frozen fleet stops rendering even when the manifest
+  is left staged, held back, or already held.
+
 - `openapi.yaml`: the run route is **shipped** (AIR-1949) with its final
   shape — `RunRequest` gains `stream`, `stepId`, `maxOutputTokens`,
   `metadata`; `RunResponse` gains `runId`, `generation`, `priceMicros`,

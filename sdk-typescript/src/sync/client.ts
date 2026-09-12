@@ -7,7 +7,7 @@
 
 import type { EdgePointer, Manifest } from "../protocol/types.js";
 
-export type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; redirect?: "follow" }) => Promise<{
+export type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; redirect?: "follow"; body?: string }) => Promise<{
   status: number;
   headers: { get(name: string): string | null };
   arrayBuffer(): Promise<ArrayBuffer>;
@@ -69,6 +69,23 @@ export class SyncClient {
     if (response.status !== 200) return { status: "error", httpStatus: response.status };
     const generation = response.headers.get("x-agent-generation");
     return { status: "ok", manifest: JSON.parse(await response.text()) as Manifest, etag: response.headers.get("etag"), generation: generation ? Number(generation) : null };
+  }
+
+  /** T9: the heartbeat. Content-free by schema; the response carries the cadence, the expiry and (T12) the upload grant. */
+  async heartbeat(body: Record<string, unknown>): Promise<{ status: "ok"; response: Record<string, unknown> } | { status: "refused"; httpStatus: number; code: string | null } | { status: "error"; httpStatus: number }> {
+    const url = `${this.options.baseUrl}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/heartbeat`;
+    const response = await this.fetchImpl(url, { method: "POST", headers: this.headers({ "content-type": "application/json" }), body: JSON.stringify(body) });
+    if (response.status === 200) return { status: "ok", response: JSON.parse(await response.text()) as Record<string, unknown> };
+    if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 429) {
+      let code: string | null = null;
+      try {
+        code = ((JSON.parse(await response.text()) as { details?: { code?: string } }).details?.code as string | undefined) ?? null;
+      } catch {
+        code = null;
+      }
+      return { status: "refused", httpStatus: response.status, code };
+    }
+    return { status: "error", httpStatus: response.status };
   }
 
   async payload(contentHash: string): Promise<Buffer | null> {

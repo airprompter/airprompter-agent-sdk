@@ -69,6 +69,44 @@ The local side can be stricter than the manifest
 (`apply.policy: "unlock_required"`), never looser. In `daemon` mode both
 calls act for the whole host.
 
+Three things unlock a staged release, and only your side holds them:
+
+```ts
+const ap = await AirPrompterAgent.start({
+  …,
+  apply: {
+    // (b) an update window: staged releases go live on their own inside it.
+    //     "HH:MM-HH:MM <IANA zone> [days]"; a window that ends before it
+    //     starts runs past midnight. A local window wins over the console's.
+    window: "02:00-04:00 Europe/Berlin sat,sun",
+    // (c) your change-control hook: resolve after activate() to go live;
+    //     resolve or reject without it to leave the release staged.
+    onStaged: async (staged) => {
+      const ticket = await changeControl.open({ generation: staged.generation, request: staged.unlockRequest?.note });
+      if (ticket.approved) staged.activate();
+    },
+  },
+  heartbeatSeconds: 300,          // how often this instance reports to the fleet view (30–3600)
+  models: { "gpt-5": { provider: "openai" } },   // the catalogue the fleet view shows
+});
+// (a) an operator: `airprompter unlock --agent … --environment prod --generation 42`
+```
+
+The console can **request** an unlock (a signed, expiring
+`request_unlock` directive rides the next manifest); `status().unlockRequests`
+lists the open ones and your hook receives it as `staged.unlockRequest`.
+A **Freeze** (`disable` directive) is honoured from any manifest whose
+signature verifies — before staging or anti-rollback decide anything — so a
+frozen fleet stops rendering even when nobody ever unlocks. `halt` on lease
+expiry degrades (with one log line) on a runtime that has no way to check
+in; the console refuses to save it on an offline environment.
+
+Every `heartbeatSeconds` the runtime reports the protocol's heartbeat
+(content-free: generations, apply state, catalogue, lease, spool depth,
+the requests it has surfaced) and adopts the cadence the server answers
+with; a key past its 500-live-instance cap is refused and reported in
+`status().heartbeat.lastRefusal`.
+
 ## Hosted mode (`ManagedAgent`)
 
 When an environment runs hosted, there is no store, no models and no keys of

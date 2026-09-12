@@ -15,6 +15,17 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{16,64}$"
         },
+        "instanceClass": {
+          "description": "resident: a long-lived process; ephemeral: a serverless invocation or a CI job. Defaults to resident (D57).",
+          "type": "string",
+          "enum": ["resident", "ephemeral"]
+        },
+        "heartbeatIntervalSeconds": {
+          "description": "How often this instance intends to report. The server clamps it to 30–3600 and echoes the cadence it holds the instance to; three misses expire the instance from the fleet view.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
         "sdk": {
           "type": "object",
           "additionalProperties": false,
@@ -109,6 +120,23 @@
           "required": ["active", "forced"],
           "properties": { "active": { "type": "boolean" }, "forced": { "type": "boolean" } }
         },
+        "unlockRequestsSeen": {
+          "description": "The open request_unlock directives this instance has surfaced to its operator and hook, by releaseDigest — so the fleet view can say who saw a request, and when one expired unseen.",
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "manifest.schema.json#/$defs/sha256" }
+        },
+        "disabled": {
+          "description": "What this instance is refusing to render under a disable directive (Freeze): the whole agent, or named slots.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent", "slots"],
+          "properties": {
+            "agent": { "type": "boolean" },
+            "slots": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 128 } }
+          }
+        },
         "spool": {
           "type": "object",
           "additionalProperties": false,
@@ -172,6 +200,16 @@
           "type": "string",
           "format": "uri",
           "pattern": "^https://"
+        },
+        "heartbeatIntervalSeconds": {
+          "description": "The cadence the server holds this instance to (the request's value, clamped to 30–3600). Adopt it.",
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 3600
+        },
+        "expiresAt": {
+          "description": "When the server considers this instance gone unless it hears from it again: three intervals from this heartbeat.",
+          "$ref": "manifest.schema.json#/$defs/timestamp"
         }
       }
     }

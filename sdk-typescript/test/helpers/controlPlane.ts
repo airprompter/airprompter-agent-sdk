@@ -98,7 +98,12 @@ export class FakeControlPlane {
   }
 
   /** Seal and promote: generation + 1, signed with the signing key. */
-  promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "directives" | "onLeaseExpiry">> & { signWith?: P256PrivateJwk; generation?: number } = {}): Manifest {
+  /** T9: every heartbeat body the fake accepted, and what it answers (a test may change the cadence). */
+  readonly heartbeats: Array<Record<string, unknown>> = [];
+  heartbeatIntervalSeconds = 300;
+  heartbeatRefusal: { status: number; code: string } | null = null;
+
+  promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "directives" | "onLeaseExpiry" | "unlockWindow">> & { signWith?: P256PrivateJwk; generation?: number } = {}): Manifest {
     const sorted = [...slots].sort((a, b) => (a.tag < b.tag ? -1 : 1));
     this.generation = options.generation ?? this.generation + 1;
     const payload: ManifestPayload = {
@@ -110,6 +115,7 @@ export class FakeControlPlane {
       leaseSeconds: options.leaseSeconds ?? 3600,
       onLeaseExpiry: options.onLeaseExpiry ?? "degrade",
       applyPolicy: options.applyPolicy ?? "auto",
+      ...(options.unlockWindow ? { unlockWindow: options.unlockWindow } : {}),
       requireCountersign: this.requireCountersign,
       slots: sorted,
       ...(options.experiment ? { experiment: options.experiment } : {}),
@@ -160,6 +166,21 @@ export class FakeControlPlane {
         if (!this.current) return respond(404, JSON.stringify({ error: "nothing is promoted to this environment", code: "nothing_promoted" }));
         const payload = this.current.manifest.payload;
         return respond(200, JSON.stringify({ agentId: payload.agentId, target: payload.target, generation: payload.generation, releaseDigest: payload.releaseDigest, slots: payload.slots.map((pin) => ({ tag: pin.tag, kind: pin.kind, model: pin.model, variables: pin.variables, steps: pin.steps ? pin.steps.map((s) => ({ stepId: s.stepId })) : null })), experiment: payload.experiment ? { salt: payload.experiment.salt, subjectKey: payload.experiment.subjectKey, arms: payload.experiment.arms.map((a) => a.arm) } : null }), { "x-agent-generation": String(payload.generation) });
+      }
+      // T9: the heartbeat — the protocol schema's required keys, content-free; answers the cadence and the expiry.
+      const heartbeatMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/heartbeat$/.exec(parsed.pathname);
+      if (heartbeatMatch) {
+        if (heartbeatMatch[1] !== this.scope.agentId || heartbeatMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "x", details: { code: heartbeatMatch[1] !== this.scope.agentId ? "agent_mismatch" : "target_mismatch" } }));
+        if (this.heartbeatRefusal) return respond(this.heartbeatRefusal.status, JSON.stringify({ error: "x", details: { code: this.heartbeatRefusal.code } }));
+        const body = JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+        for (const key of ["protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"]) {
+          if (!(key in body)) return respond(400, JSON.stringify({ error: `heartbeat: missing ${key}` }));
+        }
+        for (const key of Object.keys(body)) {
+          if (!["protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
+        }
+        this.heartbeats.push(body);
+        return respond(200, JSON.stringify({ pollSeconds: 30, uploadIntervalSeconds: 300, heartbeatIntervalSeconds: this.heartbeatIntervalSeconds, expiresAt: new Date(Date.now() + this.heartbeatIntervalSeconds * 3000).toISOString() }), { "content-type": "application/json" });
       }
       const manifestMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/manifest$/.exec(parsed.pathname);
       if (manifestMatch) {

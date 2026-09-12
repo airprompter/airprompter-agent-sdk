@@ -247,6 +247,8 @@ def release_digest_input(slots: list[Mapping[str, Any]]) -> list[dict[str, Any]]
         }
         if slot.get("modelRequired") is True:
             entry["modelRequired"] = True
+        if slot.get("outputChecks"):
+            entry["outputChecks"] = list(slot["outputChecks"])
         if slot.get("steps") is not None:
             entry["steps"] = [
                 {"stepId": s["stepId"], "ordinal": s["ordinal"], "promptArtifactId": s["promptArtifactId"], "promptVersionId": s["promptVersionId"], "contentHash": s["contentHash"], "byteLength": s["byteLength"]}

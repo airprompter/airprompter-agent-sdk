@@ -336,6 +336,13 @@ class SpoolWriter:
             if observation.outcomes:
                 _merge_outcomes(row, observation.outcomes)
 
+    def checks(self, *, tag: str, version_id: str, arm: str, model: str, passed: int, failed: int, at_ms: float) -> None:
+        """T29: output-check counts against a run already counted (an app that evaluated after the fact): the run's window, no extra count."""
+        with self._lock:
+            row = self._window(tag=tag, version_id=version_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms)
+            current = row.get("checks") or {"passed": 0, "failed": 0}
+            row["checks"] = {"passed": current["passed"] + passed, "failed": current["failed"] + failed}
+
     def outcomes(self, *, tag: str, version_id: str, arm: str, model: str, outcomes: Mapping[str, Union[int, float, bool]], at_ms: float) -> None:
         """Quality signals against a run already counted: they ride on the run's window (status ok) and never add to ``count``."""
         with self._lock:

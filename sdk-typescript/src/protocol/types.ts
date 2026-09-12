@@ -22,6 +22,13 @@ export interface SlotStep {
   byteLength: number;
 }
 
+/** One declared output check as a pin carries it (checks.md): the kind's own members only. */
+export type OutputCheck =
+  | { kind: "json_schema"; name: string; schema: Record<string, unknown> }
+  | { kind: "enum"; name: string; path: string; values: string[] }
+  | { kind: "length"; name: string; minTokens?: number; maxTokens?: number }
+  | { kind: "must_match" | "must_not_match"; name: string; pattern: string; flags?: "i" };
+
 export interface ManifestSlot {
   tag: string;
   kind: "prompt" | "workflow";
@@ -33,6 +40,8 @@ export interface ManifestSlot {
   model: string;
   /** The model is required: a runtime whose declared catalog lacks it refuses the release (`model_unavailable`). In the digest input only when true. */
   modelRequired?: boolean;
+  /** T29: the slot's enabled output checks (checks.md), sorted by name; in the digest input only when present. */
+  outputChecks?: OutputCheck[];
   variables: SlotVariable[];
   steps?: SlotStep[];
 }

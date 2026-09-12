@@ -42,6 +42,7 @@ from .store.slot_store import LoadedSlot, SlotStore, StoreError
 from .sync.client import SyncClient
 from .sync.daemon import DaemonClient, daemon_socket_path
 from .sync.loop import jittered_delay_ms, sync_once
+from .checks import evaluate_checks, output_text_of
 from .telemetry.observe import ObserveTarget, observe_call, observe_call_async
 
 SDK_NAME = "agent-sdk-python"
@@ -1021,12 +1022,56 @@ class AirPrompterAgent:
     def observe(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], call: Callable[[], T], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None) -> T:
         """Time a model call against a rendered prompt (or a workflow step) and report it: latency, ``usage`` read off the
         provider's response (OpenAI, Anthropic, Bedrock shapes, dicts or SDK objects), a raised failure classified into the
-        closed error set. The result comes back unchanged; an error is re-raised after it is counted."""
-        return observe_call(self._target_of(rendered, model), call, lambda o: self.spool.observe(o, self._now_ms()), checks=checks, model=model, now=self._now_ms)
+        closed error set, and (T29) the slot's declared output checks evaluated on the answer here on the host — only their
+        counts leave. The result comes back unchanged; an error is re-raised after it is counted."""
+        target = self._target_of(rendered, model)
+        return observe_call(target, call, lambda o: self.spool.observe(o, self._now_ms()), checks=checks, model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
 
     async def observe_async(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], call: Callable[[], Union[Awaitable[T], T]], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None) -> T:
         """``observe`` for a coroutine-returning call (``AsyncOpenAI``, ``AsyncAnthropic``)."""
-        return await observe_call_async(self._target_of(rendered, model), call, lambda o: self.spool.observe(o, self._now_ms()), checks=checks, model=model, now=self._now_ms)
+        target = self._target_of(rendered, model)
+        return await observe_call_async(target, call, lambda o: self.spool.observe(o, self._now_ms()), checks=checks, model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
+
+    def checks(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], output: Any, *, output_tokens: Optional[int] = None, record: bool = True) -> dict[str, Any]:
+        """T29: run the slot's declared output checks on an output you already have (an app that calls the model without
+        ``observe()``, or one that wants the per-check results) and count them on the window. Never raises."""
+        target = self._target_of(rendered, None)
+        declared = self._declared_checks_for(target.tag, target.arm)
+        text = output if isinstance(output, str) else output_text_of(output)
+        if not declared or text is None:
+            return {"passed": 0, "failed": 0, "results": []}
+        outcome = evaluate_checks(declared, text, output_tokens)
+        if record and (outcome["passed"] or outcome["failed"]):
+            self.spool.checks(tag=target.tag, version_id=target.version_id, arm=target.arm, model=target.model, passed=outcome["passed"], failed=outcome["failed"], at_ms=self._now_ms())
+        return outcome
+
+    def _declared_checks_for(self, tag: str, arm: str) -> list[Mapping[str, Any]]:
+        """The active manifest's checks for a slot on an arm (the arm's override when it carries one)."""
+        active = self._active
+        if active is None:
+            return []
+        payload = active.manifest["payload"]
+        slot: Optional[Mapping[str, Any]] = None
+        for candidate in (payload.get("experiment") or {}).get("arms", []):
+            if candidate.get("arm") == arm:
+                slot = next((o for o in candidate.get("overrides", []) if o.get("tag") == tag), None)
+        if slot is None:
+            slot = next((s for s in payload.get("slots", []) if s.get("tag") == tag), None)
+        return list((slot or {}).get("outputChecks") or [])
+
+    def _check_evaluator(self, target: ObserveTarget) -> Optional[Callable[[Any, Any], Optional[Mapping[str, int]]]]:
+        declared = self._declared_checks_for(target.tag, target.arm)
+        if not declared:
+            return None
+
+        def evaluate(result: Any, usage: Any) -> Optional[Mapping[str, int]]:
+            text = output_text_of(result)
+            if text is None:
+                return None
+            outcome = evaluate_checks(declared, text, usage.output if usage.source == "reported" else None)
+            return {"passed": outcome["passed"], "failed": outcome["failed"]}
+
+        return evaluate
 
     def _target_of(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], model: Optional[str]) -> ObserveTarget:
         if isinstance(rendered, ObserveTarget):

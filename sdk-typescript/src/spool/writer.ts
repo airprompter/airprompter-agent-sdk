@@ -340,6 +340,12 @@ export class SpoolWriter {
     if (observation.outcomes) mergeOutcomes(row, observation.outcomes);
   }
 
+  /** T29: output-check counts against a run already counted (an app that evaluated after the fact): the run's window, no extra count. */
+  checks(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model">, counts: { passed: number; failed: number }, nowMs: number): void {
+    const row = this.window({ ...dimensions, status: "ok" }, nowMs);
+    row.checks = { passed: (row.checks?.passed ?? 0) + counts.passed, failed: (row.checks?.failed ?? 0) + counts.failed };
+  }
+
   /** Quality signals against a run already counted: they ride on the run's window (status ok) and never add to `count`. */
   outcomes(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model">, outcomes: Record<string, number | boolean>, nowMs: number): void {
     mergeOutcomes(this.window({ ...dimensions, status: "ok" }, nowMs), outcomes);

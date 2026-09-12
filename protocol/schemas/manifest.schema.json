@@ -60,6 +60,28 @@
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
     },
+    "outputCheck": {
+      "description": "One declared output check (checks.md, 5-E): deterministic, evaluated on the host on the output the SDK already sees, counted on the window as `checks.passed` / `checks.failed`. The projection a pin carries: enabled checks only, the kind's own members, sorted by `name` — part of the release digest input when the list is non-empty.",
+      "type": "object",
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["json_schema", "enum", "length", "must_match", "must_not_match"] },
+        "name": { "type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$", "maxLength": 64 },
+        "schema": { "description": "json_schema: the JSON Schema subset checks.md names; at most 16 KiB.", "type": "object" },
+        "path": { "description": "enum: a dotted path into the parsed JSON output (`category`, `items.0.kind`); empty for the whole trimmed output.", "type": "string", "maxLength": 128 },
+        "values": { "description": "enum: the allowed strings.", "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "minTokens": { "description": "length: output tokens, from the provider's usage when reported, else ceil(UTF-8 bytes / 4).", "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "maxTokens": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "pattern": { "description": "must_match / must_not_match: RE2-class syntax only (no backreferences, lookaround, atomic or possessive groups, or nested quantifiers), at most 256 characters; an output over 64 KiB fails the check closed.", "type": "string", "minLength": 1, "maxLength": 256 },
+        "flags": { "type": "string", "enum": ["i"] }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "json_schema" } } }, "then": { "required": ["schema"], "not": { "anyOf": [{ "required": ["path"] }, { "required": ["values"] }, { "required": ["minTokens"] }, { "required": ["maxTokens"] }, { "required": ["pattern"] }, { "required": ["flags"] }] } } },
+        { "if": { "properties": { "kind": { "const": "enum" } } }, "then": { "required": ["path", "values"], "not": { "anyOf": [{ "required": ["schema"] }, { "required": ["minTokens"] }, { "required": ["maxTokens"] }, { "required": ["pattern"] }, { "required": ["flags"] }] } } },
+        { "if": { "properties": { "kind": { "const": "length" } } }, "then": { "anyOf": [{ "required": ["minTokens"] }, { "required": ["maxTokens"] }], "not": { "anyOf": [{ "required": ["schema"] }, { "required": ["path"] }, { "required": ["values"] }, { "required": ["pattern"] }, { "required": ["flags"] }] } } },
+        { "if": { "properties": { "kind": { "enum": ["must_match", "must_not_match"] } } }, "then": { "required": ["pattern"], "not": { "anyOf": [{ "required": ["schema"] }, { "required": ["path"] }, { "required": ["values"] }, { "required": ["minTokens"] }, { "required": ["maxTokens"] }] } } }
+      ]
+    },
     "variable": {
       "type": "object",
       "additionalProperties": false,
@@ -88,7 +110,7 @@
       }
     },
     "slot": {
-      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true.",
+      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true, `outputChecks` only when present.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model", "variables"],
@@ -106,6 +128,13 @@
           "type": "boolean"
         },
         "variables": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/variable" } },
+        "outputChecks": {
+          "description": "The slot's enabled output checks, sorted by name (checks.md). Omitted when none; in the digest input only when present.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/outputCheck" }
+        },
         "steps": {
           "description": "Workflow slots only: ordered steps, 1-based and contiguous, tagged `<tag>#<ordinal>`.",
           "type": "array",

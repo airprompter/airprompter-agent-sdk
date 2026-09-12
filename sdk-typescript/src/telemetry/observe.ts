@@ -75,10 +75,16 @@ export interface ObserveTarget {
 }
 
 export interface ObserveOptions {
-  /** Output checks already run (T29): counted on the same window. */
+  /** Output checks already run (T29): counted on the same window. When given, the slot's declared checks are not run again. */
   checks?: { passed?: number; failed?: number };
   /** Override the model the window names (a router that picked another model than the slot's). */
   model?: string;
+  /**
+   * T29: the slot's declared checks, evaluated on the result before the observation is recorded. Given the raw
+   * provider result and its normalised usage; returns the counters, or undefined when there is nothing to count
+   * (no checks declared, or no recognisable output text). Never throws into the request path.
+   */
+  evaluate?: (result: unknown, usage: UsageNormalized) => { passed: number; failed: number } | undefined;
 }
 
 /**
@@ -94,6 +100,14 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
     const result = await call();
     const usage = normalizeUsage(result);
     const errorClass = classifyResult(result);
+    let checks = options.checks;
+    if (!checks && options.evaluate) {
+      try {
+        checks = options.evaluate(result, usage);
+      } catch {
+        checks = undefined;
+      }
+    }
     record({
       tag: target.tag,
       versionId: target.versionId,
@@ -104,7 +118,7 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
       latencyMs: Math.max(0, now() - started),
       tokens: { input: usage.input, cachedInput: usage.cachedInput, output: usage.output },
       usageSource: usage.source,
-      ...(options.checks ? { checks: options.checks } : {}),
+      ...(checks ? { checks } : {}),
     });
     return result;
   } catch (error) {

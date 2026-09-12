@@ -25,6 +25,7 @@ import { DirectorySink, MemorySink, SpoolWriter, epochMinute, segmentName, type 
 import { fileKey, type KeyProvider, type StorageProtection } from "./store/keyProvider.js";
 import { SlotStore, StoreError, type LoadedSlot } from "./store/slotStore.js";
 import { observeCall, type ObserveOptions } from "./telemetry/observe.js";
+import { evaluateChecks, outputTextOf, type CheckOutcome } from "./checks/index.js";
 import { postSegment, type GrantDecision, type UploadGrant } from "./telemetry/uploader.js";
 import { parseWindow, windowState, type UpdateWindow } from "./apply/window.js";
 import { SyncClient, type FetchLike } from "./sync/client.js";
@@ -973,7 +974,42 @@ export class AirPrompterAgent {
    * is read; nothing of an error but its code and status.
    */
   async observe<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model">, call: () => Promise<T> | T, options: ObserveOptions = {}): Promise<T> {
-    return observeCall(rendered, call, (observation) => this.spool.observe(observation, this.nowMs()), { ...options, now: () => this.nowMs() });
+    // T29: the slot's declared output checks run on the result here, on the host, and only their counts leave.
+    const declared = this.declaredChecksFor(rendered.tag, rendered.arm);
+    const evaluate: ObserveOptions["evaluate"] | undefined =
+      declared.length > 0
+        ? (result, usage) => {
+            const text = outputTextOf(result);
+            if (text === null) return undefined;
+            const outcome = evaluateChecks(declared, { text, outputTokens: usage.source === "reported" ? usage.output : null });
+            return { passed: outcome.passed, failed: outcome.failed };
+          }
+        : undefined;
+    return observeCall(rendered, call, (observation) => this.spool.observe(observation, this.nowMs()), { ...options, ...(evaluate ? { evaluate } : {}), now: () => this.nowMs() });
+  }
+
+  /**
+   * T29: run the slot's declared output checks on an output you already have (an app that calls the model without
+   * `observe()`, or one that wants the per-check results), and count them on the window. Never throws.
+   */
+  checks(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model">, output: unknown, options: { outputTokens?: number | null; record?: boolean } = {}): CheckOutcome {
+    const declared = this.declaredChecksFor(rendered.tag, rendered.arm);
+    const text = typeof output === "string" ? output : outputTextOf(output);
+    if (declared.length === 0 || text === null) return { passed: 0, failed: 0, results: [] };
+    const outcome = evaluateChecks(declared, { text, outputTokens: options.outputTokens ?? null });
+    if (options.record !== false && (outcome.passed > 0 || outcome.failed > 0)) {
+      this.spool.checks({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model }, { passed: outcome.passed, failed: outcome.failed }, this.nowMs());
+    }
+    return outcome;
+  }
+
+  /** The active manifest's checks for a slot on an arm (the arm's override when it carries one). */
+  private declaredChecksFor(tag: string, arm: string): NonNullable<ManifestSlot["outputChecks"]> {
+    const payload = this.active?.manifest.payload;
+    if (!payload) return [];
+    const override = payload.experiment?.arms.find((entry) => entry.arm === arm)?.overrides.find((entry) => entry.tag === tag);
+    const slot = override ?? payload.slots.find((entry) => entry.tag === tag);
+    return slot?.outputChecks ?? [];
   }
 
   /** Quality signals against a run: numbers, booleans and declared enums only; anything else is refused. */

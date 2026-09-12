@@ -36,6 +36,8 @@ export { normalizeFeedback, type NormalizedFeedback, type FeedbackRejection } fr
 export { ManagedAgent, ManagedRunError, parseSse, MANAGED_SDK_USER_AGENT } from "./managed/client.js";
 export type { ManagedStartOptions, ManagedRunOptions, ManagedRunResult, ManagedRunStream, ManagedCatalogue, ManagedSlot, ManagedRefusalCode, ManagedFetchLike, ManagedTarget } from "./managed/client.js";
 export { classifyError, classifyResult, normalizeUsage, observeCall, type ObserveOptions, type ObserveTarget, type UsageNormalized } from "./telemetry/observe.js";
+export { CHECK_BOUNDS, checkRefusal, checksRefusals, patternRefusal, validateJsonSchema, valueAtPath, evaluateCheck, evaluateChecks, projectChecks, outputTextOf, estimateTokens, type DeclaredCheck, type CheckResult, type CheckOutcome } from "./checks/index.js";
+export type { OutputCheck } from "./protocol/types.js";
 export { HOST_SPOOL_BUDGET_BYTES, SERVERLESS_BUFFER_BYTES, type DroppedRow } from "./spool/writer.js";
 export { SpoolUploader, validateSpoolRow, inspectSegment, postSegment, multipartBody, backoffDelayMs, UPLOAD_BACKOFF_BASE_MS, UPLOAD_BACKOFF_CAP_MS, GRANT_REFRESH_MARGIN_MS } from "./telemetry/uploader.js";
 export type { UploadGrant, GrantDecision, UploaderOptions, UploaderStatus, PassResult, PostOutcome, RowVerdict, SegmentInspection } from "./telemetry/uploader.js";

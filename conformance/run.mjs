@@ -23,6 +23,7 @@ import {
 } from "./reference.mjs";
 import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./trust.mjs";
 import { LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "./spool.mjs";
+import { checksRefusals, evaluateChecks, patternRefusal, projectChecks } from "./checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const protocolDir = join(here, "..", "protocol");
@@ -363,6 +364,35 @@ for (const c of fb.cases) {
   const partiallyValidCorrected = Object.values(c.expected.rejected).every((r) => r === "needs_slot_enum") && Object.keys(c.expected.rejected).length > 0;
   if (schemaAccepts === (wholly || partiallyValidCorrected) || Object.keys(c.signals).length === 0) ok(`feedback: ${c.name} — schema and normaliser agree`);
   else fail(`feedback: ${c.name} — schema and normaliser agree`, `schema ${schemaAccepts ? "accepts" : "refuses"}, normaliser rejects ${JSON.stringify(c.expected.rejected)}`);
+}
+
+section("vectors: output checks (checks.md)");
+const ck = readJson(join(protocolDir, "vectors", "checks.json"));
+const checkSchema = validatorFor("manifest#/$defs/outputCheck");
+for (const c of ck.evaluations) {
+  const got = evaluateChecks(c.checks, c.input);
+  if (sameJson(got, c.expected)) ok(`checks: ${c.name}`);
+  else fail(`checks: ${c.name}`, `got ${JSON.stringify(got)}, expected ${JSON.stringify(c.expected)}`);
+}
+for (const c of ck.patterns) {
+  const got = patternRefusal(c.pattern);
+  if (got === c.refusal) ok(`checks: pattern ${JSON.stringify(c.pattern).slice(0, 40)} → ${c.refusal ?? "accepted"}`);
+  else fail(`checks: pattern ${JSON.stringify(c.pattern).slice(0, 40)}`, `got ${got}, expected ${c.refusal}`);
+}
+for (const c of ck.declarations) {
+  const got = checksRefusals(c.checks);
+  if (sameJson(got, c.refusals)) ok(`checks: declaration — ${c.name}`);
+  else fail(`checks: declaration — ${c.name}`, `got ${JSON.stringify(got)}, expected ${JSON.stringify(c.refusals)}`);
+  // The manifest schema accepts exactly the projections of well-formed checks.
+  for (const projected of projectChecks(c.checks.filter((check) => !checksRefusals([check]).length))) {
+    if (checkSchema(projected)) ok(`checks: schema accepts ${projected.name}`);
+    else fail(`checks: schema accepts ${projected.name}`, JSON.stringify(checkSchema.errors));
+  }
+}
+{
+  const got = projectChecks(ck.projection.checks);
+  if (sameJson(got, ck.projection.expected)) ok(`checks: ${ck.projection.name}`);
+  else fail(`checks: ${ck.projection.name}`, `got ${JSON.stringify(got)}`);
 }
 
 // ---------------------------------------------------------------------------

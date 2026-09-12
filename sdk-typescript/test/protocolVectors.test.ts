@@ -7,6 +7,7 @@ import test from "node:test";
 import { assignArm, AssignmentError, orderedSteps, StepError } from "../src/protocol/assignment.js";
 import { canonicalJson, CanonicalJsonError, sha256Prefixed } from "../src/protocol/canonicalJson.js";
 import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../src/protocol/trust.js";
+import { checksRefusals, evaluateChecks, patternRefusal, projectChecks, type DeclaredCheck } from "../src/checks/index.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));
 
@@ -72,4 +73,20 @@ test("manifest-verify.json", () => {
       assert.equal(result.generation, c.expected.generation, c.name);
     } else assert.equal(result.reason, c.expected.reason, c.name);
   }
+});
+
+// T29: the output-check evaluator agrees with the reference on every vector — verdicts and reasons, the regex safety
+// rule, the declaration refusals, and the pin projection.
+test("checks.json: evaluations, patterns, declarations and the projection", () => {
+  const file = vector("checks.json") as {
+    evaluations: Array<{ name: string; checks: DeclaredCheck[]; input: { text: string; outputTokens: number | null }; expected: unknown }>;
+    patterns: Array<{ pattern: string; refusal: string | null }>;
+    declarations: Array<{ name: string; checks: unknown; refusals: unknown }>;
+    projection: { checks: DeclaredCheck[]; expected: unknown };
+  };
+  for (const v of file.evaluations) assert.deepEqual(evaluateChecks(v.checks, v.input), v.expected, v.name);
+  for (const v of file.patterns) assert.equal(patternRefusal(v.pattern), v.refusal, JSON.stringify(v.pattern).slice(0, 40));
+  for (const v of file.declarations) assert.deepEqual(checksRefusals(v.checks), v.refusals, v.name);
+  assert.deepEqual(projectChecks(file.projection.checks), file.projection.expected);
+  assert.ok(file.evaluations.length >= 20);
 });

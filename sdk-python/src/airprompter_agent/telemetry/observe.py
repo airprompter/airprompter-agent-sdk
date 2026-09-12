@@ -146,12 +146,18 @@ class ObserveTarget:
     model: str
 
 
-def _observation(target: ObserveTarget, model: str, started: float, now: Callable[[], float], result: Any, error: Any, checks: Optional[Mapping[str, int]]) -> Observation:
+def _observation(target: ObserveTarget, model: str, started: float, now: Callable[[], float], result: Any, error: Any, checks: Optional[Mapping[str, int]], evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> Observation:
     latency = max(0.0, now() - started)
     if error is not None:
         return Observation(tag=target.tag, version_id=target.version_id, arm=target.arm, model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable", checks=checks)
     usage = normalize_usage(result)
     error_class = classify_result(result)
+    if checks is None and evaluate is not None:
+        # T29: the slot's declared checks, on the host, before the observation is recorded; never into the request path.
+        try:
+            checks = evaluate(result, usage)
+        except Exception:  # noqa: BLE001
+            checks = None
     return Observation(
         tag=target.tag,
         version_id=target.version_id,
@@ -166,7 +172,7 @@ def _observation(target: ObserveTarget, model: str, started: float, now: Callabl
     )
 
 
-def observe_call(target: ObserveTarget, call: Callable[[], T], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None) -> T:
+def observe_call(target: ObserveTarget, call: Callable[[], T], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> T:
     """Time ``call``, then hand one observation to ``record``. The result is returned unchanged; a raised error is
     re-raised after it is observed. Nothing about the result but its usage and finish reason is read."""
     clock = now or now_ms
@@ -177,11 +183,11 @@ def observe_call(target: ObserveTarget, call: Callable[[], T], record: Callable[
     except BaseException as error:
         record(_observation(target, named, started, clock, None, error, checks))
         raise
-    record(_observation(target, named, started, clock, result, None, checks))
+    record(_observation(target, named, started, clock, result, None, checks, evaluate))
     return result
 
 
-async def observe_call_async(target: ObserveTarget, call: Callable[[], Union[Awaitable[T], T]], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None) -> T:
+async def observe_call_async(target: ObserveTarget, call: Callable[[], Union[Awaitable[T], T]], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> T:
     """``observe_call`` for a coroutine (an ``AsyncOpenAI`` / ``AsyncAnthropic`` call)."""
     clock = now or now_ms
     started = clock()
@@ -193,5 +199,5 @@ async def observe_call_async(target: ObserveTarget, call: Callable[[], Union[Awa
     except BaseException as error:
         record(_observation(target, named, started, clock, None, error, checks))
         raise
-    record(_observation(target, named, started, clock, result, None, checks))
+    record(_observation(target, named, started, clock, result, None, checks, evaluate))
     return result  # type: ignore[return-value]

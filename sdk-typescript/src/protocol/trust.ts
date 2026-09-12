@@ -186,6 +186,7 @@ export function releaseDigestInput(slots: readonly ManifestSlot[]): unknown[] {
       byteLength: slot.byteLength,
       model: slot.model,
       ...(slot.modelRequired === true ? { modelRequired: true } : {}),
+      ...(Array.isArray(slot.outputChecks) && slot.outputChecks.length > 0 ? { outputChecks: slot.outputChecks } : {}),
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
       ...(slot.steps
         ? { steps: slot.steps.map((s) => ({ stepId: s.stepId, ordinal: s.ordinal, promptArtifactId: s.promptArtifactId, promptVersionId: s.promptVersionId, contentHash: s.contentHash, byteLength: s.byteLength })) }

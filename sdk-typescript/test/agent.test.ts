@@ -381,3 +381,37 @@ test("feedback on a candidate-arm run lands on the window of the model that ran"
   assert.deepEqual(windows[0]!.outcomes, { rating: { n: 1, sum: 5 } });
   rmSync(stateDir, { recursive: true, force: true });
 });
+
+// T29: the slot's declared checks travel in the manifest (in its digest), run inside observe() on the provider's
+// answer without the text leaving, and count on the run's window; the manual entry point counts on the same window.
+test("declared output checks run inside observe() and count on the window; the digest carries them", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const outputChecks = [
+    { kind: "enum" as const, name: "category", path: "category", values: ["billing", "shipping", "other"] },
+    { kind: "must_not_match" as const, name: "no-guarantee", pattern: "refund guaranteed", flags: "i" as const },
+    { kind: "length" as const, name: "band", maxTokens: 50 },
+  ];
+  const plain = plane.slot({ tag: "support.triage", text: "Triage.", versionId: "ver_1" });
+  const checked = { ...plain, outputChecks };
+  assert.notEqual(releaseDigest([checked]), releaseDigest([plain]), "checks are part of the release");
+  plane.promote([checked]);
+  const ap = await start(plane, stateDir, { telemetry: { sink: "memory" } });
+  const rendered = ap.prompt("support.triage").render({});
+  // OpenAI shape: two checks pass, one fails (the guarantee); the reported 20 output tokens are inside the band.
+  await ap.observe(rendered, () => ({ choices: [{ message: { content: JSON.stringify({ category: "billing", note: "Refund Guaranteed!" }) }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 20 } }));
+  // Anthropic shape: everything passes.
+  await ap.observe(rendered, () => ({ content: [{ type: "text", text: JSON.stringify({ category: "other" }) }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } }));
+  // A shape with no recognisable text: nothing counted, the run still is.
+  await ap.observe(rendered, () => ({ usage: { input_tokens: 1, output_tokens: 1 } }));
+  // The manual entry point, on a string the app already has: the estimate (ceil(bytes/4)) puts 400 bytes over the band.
+  const manual = ap.checks(rendered, JSON.stringify({ category: "shipping", pad: "x".repeat(380) }));
+  assert.deepEqual(manual.results.map((r) => [r.name, r.verdict, r.reason ?? null]), [["category", "pass", null], ["no-guarantee", "pass", null], ["band", "fail", "too_long"]]);
+  await ap.stop();
+  const windows = ap.drainMemorySink().filter((r) => (r as { type: string }).type === "window") as WindowRow[];
+  assert.equal(windows.length, 1);
+  assert.equal(windows[0]!.count, 3);
+  assert.deepEqual(windows[0]!.checks, { passed: 7, failed: 2 });
+  assert.equal(JSON.stringify(windows).includes("Guaranteed"), false, "no output text on the wire");
+  rmSync(stateDir, { recursive: true, force: true });
+});

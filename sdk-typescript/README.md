@@ -95,6 +95,18 @@ const ap = await AirPrompterAgent.start({
 // (a) an operator: `airprompter unlock --agent … --environment prod --generation 42`
 ```
 
+**Output checks.** A prompt's owner can declare checks on the slot
+(Settings › Prompt settings): the answer parses as a JSON schema, a field is
+one of an enum, the length sits in a token band, a pattern must or must not
+occur. `observe()` runs them on the provider's answer right here — the text
+never leaves — and counts `passed` / `failed` on the run's window; the
+console shows the failed rate per arm as a guardrail. Checks are form, not
+quality. An app that calls the model itself can run
+`ap.checks(rendered, output)` and get the per-check results; a failing
+check never throws. Patterns are RE2-class only (no backreferences,
+lookaround or nested quantifiers) and an output over 64 KiB fails a pattern
+check closed — `protocol/checks.md`.
+
 `models` is the catalogue the console shows under Settings › Models
 ("available on 3 of 5 instances") and the gate a release must pass: a
 version naming a model no instance declared is refused at seal. A release

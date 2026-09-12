@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Declared output checks** (AIR-1959, T29, 5-E / D63): checks.md. A slot
+  may carry `outputChecks` — `json_schema` (a documented JSON Schema
+  subset), `enum` (a string at a dotted path), `length` (an output-token
+  band; the provider's count when reported, else `ceil(UTF-8 bytes / 4)`),
+  `must_match` / `must_not_match` (RE2-class patterns only: no
+  backreferences, lookaround, possessive/atomic groups or nested
+  quantifiers; ≤ 256 chars; an output over 64 KiB fails closed). Enabled
+  checks travel on the pin sorted by name and are part of the release
+  digest input when present (canonical-json.md). Both SDKs evaluate them
+  inside `observe()` on the host and count `checks.passed` / `checks.failed`
+  on the run's window (the counters spool-format.md already carried); the
+  text never leaves. New `vectors/checks.json` and the reference
+  `conformance/checks.mjs`; the manifest schema gains `$defs/outputCheck`.
+
 - **Model catalog** (AIR-1945, T15, design §7): a slot may carry
   `modelRequired: true` — part of the release digest input only when true
   (canonical-json.md; every earlier digest unchanged; new manifest-verify

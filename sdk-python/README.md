@@ -100,6 +100,15 @@ ap = AirPrompterAgent.start(
 )
 ```
 
+**Output checks.** Checks declared on the slot (a JSON schema, an enum at a
+path, a token band, a pattern that must or must not occur) run inside
+`observe()` on the provider's answer, here on the host, and count
+`passed` / `failed` on the run's window; `ap.checks(rendered, output)` runs
+them on text you already have and returns the per-check results. Checks
+are form, not quality; a failing check never raises. Patterns are RE2-class
+only and an output over 64 KiB fails a pattern check closed —
+`protocol/checks.md`.
+
 `models` is the catalogue the console shows under Settings › Models and the
 gate a release must pass at seal. A release may mark a slot's model
 **required**; a process whose `models` lacks it refuses that release

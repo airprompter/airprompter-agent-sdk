@@ -93,6 +93,7 @@ from .store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
 from .sync.client import SyncClient
 from .sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
 from .sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
+from .checks import CHECK_BOUNDS, check_refusal, checks_refusals, estimate_tokens, evaluate_check, evaluate_checks, output_text_of, pattern_refusal, project_checks, validate_json_schema, value_at_path
 from .telemetry.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
 
 __version__ = SDK_VERSION
@@ -201,6 +202,17 @@ __all__ = [
     "normalize_usage",
     "observe_call",
     "observe_call_async",
+    "CHECK_BOUNDS",
+    "check_refusal",
+    "checks_refusals",
+    "estimate_tokens",
+    "evaluate_check",
+    "evaluate_checks",
+    "output_text_of",
+    "pattern_refusal",
+    "project_checks",
+    "validate_json_schema",
+    "value_at_path",
     "open_bundle",
     "ordered_steps",
     "os_keystore",

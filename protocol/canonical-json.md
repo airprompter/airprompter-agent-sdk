@@ -31,10 +31,14 @@ Only the pins, sorted by `tag`, each projected to exactly these members:
 ```
 tag, kind, artifactId, versionId, versionOrdinal (integer or null),
 contentHash, byteLength, model, modelRequired (only when true),
+outputChecks[{ kind, name, …the kind's own members }]   (only when present; checks.md),
 variables[{ name, required, trust }],
 steps[{ stepId, ordinal, promptArtifactId, promptVersionId, contentHash, byteLength }]   (workflow pins only)
 ```
 
+`outputChecks` is projected only when the slot carries enabled checks
+(sorted by name, the kind's own members — `projectChecks` in checks.md), so
+a changed check is a new release and a slot without checks keeps its digest.
 `modelRequired` is projected only when it is `true`: an absent flag and an
 explicit `false` are the same release, so every release sealed before the
 flag existed keeps its digest, and a required model is a different release

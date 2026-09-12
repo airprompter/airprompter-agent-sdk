@@ -1,5 +1,13 @@
 # Protocol changelog
 
+## 0.2.1 — 2026-09-12 (tag `protocol/v0.2.1`)
+
+- `keyId` (manifest signatures, root metadata keys and roles, bundle
+  `recipientKeyId`) is now *schema*-constrained to the lowercase hex
+  thumbprint trust-chain.md already required; examples use real
+  thumbprints. Breaking only for documents that used another id form,
+  which no implementation has shipped.
+
 ## 0.2.0 — 2026-09-12 (tag `protocol/v0.2.0`)
 
 Breaking for readers of `heartbeat.refusal` (new enum values); additive

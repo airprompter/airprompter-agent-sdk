@@ -33,9 +33,20 @@ def release_digest(slots):
     return sha256_prefixed(canonical(digest_input(slots)).encode("utf-8"))
 
 placeholder_sig = b64url(bytes(range(64)))          # 86 chars, structurally valid, NOT a real signature
-key_platform = "sha256-9f2c1e7a4b0d5c3e8a1f6b2d7c4e9a0b"
-key_root = "root-2026-09-prod"
-key_customer = "acme-release-2026"
+
+def thumbprint(jwk) -> str:
+    """RFC 7638: sha256 over the canonical JSON of {crv, kty, x, y}, hex."""
+    return hashlib.sha256(canonical({k: jwk[k] for k in ("crv", "kty", "x", "y")}).encode("utf-8")).hexdigest()
+
+# Structurally valid P-256 points are not needed for schema examples; these are fixed test coordinates.
+jwk_root = {"kty": "EC", "crv": "P-256", "x": b64url(bytes([1] * 32)), "y": b64url(bytes([2] * 32))}
+jwk_platform = {"kty": "EC", "crv": "P-256", "x": b64url(bytes([3] * 32)), "y": b64url(bytes([2] * 32))}
+jwk_old = {"kty": "EC", "crv": "P-256", "x": b64url(bytes([4] * 32)), "y": b64url(bytes([2] * 32))}
+jwk_customer = {"kty": "EC", "crv": "P-256", "x": b64url(bytes([6] * 32)), "y": b64url(bytes([2] * 32))}
+key_platform = thumbprint(jwk_platform)
+key_root = thumbprint(jwk_root)
+key_old = thumbprint(jwk_old)
+key_customer = thumbprint(jwk_customer)
 
 triage_text = b"You are a support triage assistant.\nClassify the ticket below.\n<ticket>{{ticket_body}}</ticket>\n"
 reply_text = b"Draft a reply for {{customer_name}} about {{topic}}.\n"
@@ -132,7 +143,7 @@ manifest = {
     ],
 }
 
-jwk = {"kty": "EC", "crv": "P-256", "x": b64url(bytes([1] * 32)), "y": b64url(bytes([2] * 32))}
+jwk = jwk_root
 key_set = {
     "signed": {
         "type": "root",
@@ -142,13 +153,13 @@ key_set = {
         "version": 3,
         "expires": "2026-12-11T00:00:00Z",
         "keys": {
-            key_root: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": jwk},
-            key_platform: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": {**jwk, "x": b64url(bytes([3] * 32))}, "notBefore": "2026-09-01T00:00:00Z"},
-            "sha256-0ld1e7a4b0d5c3e8a1f6b2d7c4e9a0b1": {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": {**jwk, "x": b64url(bytes([4] * 32))}, "notAfter": "2026-10-01T00:00:00Z"},
+            key_root: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": jwk_root},
+            key_platform: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": jwk_platform, "notBefore": "2026-09-01T00:00:00Z"},
+            key_old: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": jwk_old, "notAfter": "2026-10-01T00:00:00Z"},
         },
         "roles": {
             "root": {"keyIds": [key_root], "threshold": 1},
-            "targets": {"keyIds": [key_platform, "sha256-0ld1e7a4b0d5c3e8a1f6b2d7c4e9a0b1"], "threshold": 1},
+            "targets": {"keyIds": [key_platform, key_old], "threshold": 1},
         },
     },
     "signatures": [{"keyId": key_root, "alg": "ES256", "sig": placeholder_sig}],
@@ -182,7 +193,7 @@ bundle_encrypted = {
     "protocol": PROTOCOL,
     "encryption": {
         "scheme": "hpke-x25519-hkdf-sha256-aes-256-gcm",
-        "recipientKeyId": "dist-acme-prod-2026",
+        "recipientKeyId": hashlib.sha256(canonical({"crv": "X25519", "kty": "OKP", "x": b64url(bytes([8] * 32))}).encode("utf-8")).hexdigest(),
         "enc": b64url(bytes([7] * 32)),
         "info": "airprompter-apbundle-v1",
         "ciphertext": b64url(bytes([9] * 96)),
@@ -239,6 +250,7 @@ refused = {
     "manifest.uppercase-tag.json": {"schema": "manifest", "reason": "slot tags follow the tag grammar", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[0], "tag": "Support.Triage"}]}}},
     "manifest.slot-disable-without-tag.json": {"schema": "manifest", "reason": "a slot-scoped disable names the slot", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "slot", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
     "key-set.wrong-curve.json": {"schema": "key-set", "reason": "only P-256 keys in this protocol major", "document": {**key_set, "signed": {**key_set["signed"], "keys": {key_root: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": {**jwk, "crv": "P-384"}}}}}},
+    "key-set.non-thumbprint-key-id.json": {"schema": "key-set", "reason": "key ids are thumbprints, lowercase hex", "document": {**key_set, "signed": {**key_set["signed"], "keys": {**key_set["signed"]["keys"], "root-2026-09-prod": key_set["signed"]["keys"][key_root]}}}},
     "key-set.missing-targets-role.json": {"schema": "key-set", "reason": "root metadata always names the targets role", "document": {**key_set, "signed": {**key_set["signed"], "roles": {"root": key_set["signed"]["roles"]["root"]}}}},
     "bundle.unknown-scheme.json": {"schema": "bundle", "reason": "encryption schemes are a closed set", "document": {**bundle_encrypted, "encryption": {**bundle_encrypted["encryption"], "scheme": "aes-128-cbc"}}},
     "bundle.plaintext-without-contents.json": {"schema": "bundle", "reason": "a plaintext bundle carries its contents", "document": {**bundle_plain, "encryption": {"scheme": "none"}}},

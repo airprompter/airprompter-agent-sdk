@@ -22,7 +22,7 @@
     "activeReleaseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "stagedReleaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
     "applyState": "awaiting_unlock",
-    "signingKeyId": "sha256-9f2c1e7a4b0d5c3e8a1f6b2d7c4e9a0b",
+    "signingKeyId": "d248f03be9e1629a74451cb3b5de16e0809bcf35db684b71b6f935231e756cc8",
     "storageProtection": "kms",
     "catalog": {
       "models": [

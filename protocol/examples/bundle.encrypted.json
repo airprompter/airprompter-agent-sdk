@@ -4,7 +4,7 @@
   "protocol": "0.2.0",
   "encryption": {
     "scheme": "hpke-x25519-hkdf-sha256-aes-256-gcm",
-    "recipientKeyId": "dist-acme-prod-2026",
+    "recipientKeyId": "c28a84e0b01e6bd7eaa666d2e91ca9a7c5e8f14082bceae9db5a1a01f6ff8ef3",
     "enc": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
     "info": "airprompter-apbundle-v1",
     "ciphertext": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJ"

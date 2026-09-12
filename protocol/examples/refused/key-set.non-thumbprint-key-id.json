@@ -1,6 +1,6 @@
 {
   "schema": "key-set",
-  "reason": "only P-256 keys in this protocol major",
+  "reason": "key ids are thumbprints, lowercase hex",
   "document": {
     "signed": {
       "type": "root",
@@ -15,7 +15,39 @@
           "scheme": "ES256",
           "publicKey": {
             "kty": "EC",
-            "crv": "P-384",
+            "crv": "P-256",
+            "x": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+          }
+        },
+        "d248f03be9e1629a74451cb3b5de16e0809bcf35db684b71b6f935231e756cc8": {
+          "keyType": "ecdsa-p256",
+          "scheme": "ES256",
+          "publicKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+            "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+          },
+          "notBefore": "2026-09-01T00:00:00Z"
+        },
+        "04442fff73c21d1c9b6d40fa654a57b777d100ce4781d2a1f982cf03b67147c2": {
+          "keyType": "ecdsa-p256",
+          "scheme": "ES256",
+          "publicKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+            "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+          },
+          "notAfter": "2026-10-01T00:00:00Z"
+        },
+        "root-2026-09-prod": {
+          "keyType": "ecdsa-p256",
+          "scheme": "ES256",
+          "publicKey": {
+            "kty": "EC",
+            "crv": "P-256",
             "x": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
             "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
           }

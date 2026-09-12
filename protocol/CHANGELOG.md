@@ -1,5 +1,14 @@
 # Protocol changelog
 
+## Unreleased
+
+- `daemon-socket.md` (draft 1): the local socket between `airprompterd`
+  and SDK processes — path and mode, newline-JSON framing, `hello` /
+  `slot` / `status` / `sync` / `unlock` / `rollback` / `healthz`,
+  `generation` and `shutdown` events, `GET /healthz` over the same
+  socket, and the in-process fallback. No schema change; tagged with the
+  spool-upload half (P4).
+
 ## 0.2.5 — 2026-09-12 (tag `protocol/v0.2.5`)
 
 - Spool conformance vectors (`vectors/spool.json`: latency bucket index,

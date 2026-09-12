@@ -1,0 +1,30 @@
+<!--
+  airprompterd as a Windows service through WinSW (https://github.com/winsw/winsw):
+
+    1. Copy airprompter-windows-x64.exe to C:\Program Files\AirPrompter\airprompter.exe
+    2. Copy WinSW-x64.exe next to this file as airprompterd.exe (the wrapper takes the XML's base name)
+    3. Set the Agent key on the service account, never in this file:
+         setx /M AIRPROMPTER_AGENT_KEY apa_live_...
+    4. airprompterd.exe install
+       airprompterd.exe start
+
+  The daemon listens on the named pipe \\.\pipe\airprompter-<hash>; SDK processes
+  running as the same user attach to it.
+-->
+<service>
+  <id>airprompterd</id>
+  <name>AirPrompter agent daemon</name>
+  <description>One sync loop and one shared, encrypted store per host for AirPrompter agent releases.</description>
+  <executable>C:\Program Files\AirPrompter\airprompter.exe</executable>
+  <arguments>daemon --org org_… --agent agt_… --environment prod --root "C:\ProgramData\AirPrompter\root.jwk.json" --root-url https://EDGE/roots/prod/root.json --edge-pointer-url https://EDGE/g/TOKEN/generation.json --poll-seconds 30 --json</arguments>
+  <env name="LOCALAPPDATA" value="C:\ProgramData\AirPrompter\state" />
+  <workingdirectory>C:\ProgramData\AirPrompter</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>20 sec</stoptimeout>
+  <startmode>Automatic</startmode>
+</service>

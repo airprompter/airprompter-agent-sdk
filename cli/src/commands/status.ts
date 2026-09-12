@@ -10,7 +10,9 @@ import { join } from "node:path";
 
 import { instant } from "../../../sdk-typescript/src/protocol/trust.js";
 import { StoreError } from "../../../sdk-typescript/src/store/slotStore.js";
-import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, scopeOf, type OptionSpec } from "../args.js";
+import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/src/sync/daemon.js";
+import { CLI_VERSION } from "../version.js";
+import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { summarizeManifest } from "../chain.js";
 import { EXIT, Output, refused, type Context } from "../io.js";
 
@@ -19,6 +21,7 @@ export const STATUS_OPTIONS: OptionSpec = {
   environment: SCOPE_OPTIONS.environment!,
   org: { type: "string", help: "Organization id (optional for status)" },
   ...STORE_OPTIONS,
+  socket: { type: "string", help: "Daemon socket path to ask (default: the store's daemon.sock when present)" },
   ...COMMON_OPTIONS,
 };
 
@@ -97,6 +100,27 @@ export async function status(argv: string[], ctx: Context): Promise<number> {
   const depth = spoolDepth(spoolDir);
   out.field("spool", depth, "spool");
   out.field("lastUpload", lastUpload(join(spoolDir, "sent")), "last upload");
+
+  // A daemon on this host knows what the store cannot: last sync, backoff, attached clients.
+  const socketPath = str(parsed, "socket") ?? daemonSocketPath({ stateDir: str(parsed, "state-dir") ?? defaultStateDir(ctx), agentId: scope.agentId, target: scope.target });
+  try {
+    const client = await DaemonClient.connect({ socketPath, agentId: scope.agentId, target: scope.target, sdk: `airprompter-cli/${CLI_VERSION}` });
+    if (client) {
+      try {
+        const daemon = await client.request("status");
+        out.set("daemon", daemon);
+        out.line(`daemon: ${daemon.daemon} pid ${daemon.pid}, up ${daemon.uptimeSeconds}s, ${daemon.clients} client${daemon.clients === 1 ? "" : "s"}, last sync ${daemon.lastSyncAt ?? "never"} (${daemon.lastSyncOutcome ?? "—"}), ${daemon.consecutiveFailures} consecutive failure${daemon.consecutiveFailures === 1 ? "" : "s"}, next ${daemon.nextSyncAt ?? "—"}, rss ${Math.round(Number(daemon.rssBytes) / 1048576)} MiB`);
+      } finally {
+        client.close();
+      }
+    } else {
+      out.set("daemon", null);
+      out.line("daemon: none on this host (SDKs sync in-process)");
+    }
+  } catch (error) {
+    out.set("daemon", { error: (error as Error).message });
+    out.line(`daemon: ${(error as Error).message}`);
+  }
   out.flush();
   return EXIT.ok;
 }

@@ -25,12 +25,16 @@ import { DirectorySink, MemorySink, SpoolWriter, type Observation, type RefusalR
 import { fileKey, type KeyProvider, type StorageProtection } from "./store/keyProvider.js";
 import { SlotStore, StoreError, type LoadedSlot } from "./store/slotStore.js";
 import { SyncClient, type FetchLike } from "./sync/client.js";
+import { DaemonClient, DaemonError, daemonSocketPath } from "./sync/daemon.js";
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "./sync/loop.js";
 
 export const SDK_NAME = "agent-sdk-ts";
 export const SDK_VERSION = "0.1.0";
 
 export type SyncMode = "resident" | "on_invoke" | "daemon" | "offline";
+
+/** Where the release comes from: this process's own store, a vendored bundle, or the host daemon over its socket. */
+export type ReleaseSource = "store" | "vendored_bundle" | "daemon";
 
 export interface StartOptions {
   organizationId: string;
@@ -79,7 +83,7 @@ export interface AgentStatus {
   stagedGeneration: number | null;
   applyState: "active" | "staged" | "awaiting_unlock" | "refused" | "vendored_fallback";
   lastRefusal: string | null;
-  storageProtection: StorageProtection;
+  storageProtection: StorageProtection | "daemon";
   signingKeyId: string | null;
   /** When the lease runs out: last successful contact + leaseSeconds (a vendored bundle's notAfter when nothing ever synced). */
   leaseExpiresAt: string | null;
@@ -92,7 +96,19 @@ export interface AgentStatus {
   /** Open unlock requests carried by the active manifest, for operator tooling. */
   unlockRequests: Array<{ releaseDigest: string; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }>;
   spool: { depthSegments: number; depthBytes: number };
-  source: "store" | "vendored_bundle";
+  source: ReleaseSource;
+  /** Attached to the host daemon (`sync.mode: "daemon"`), and whether that attachment is currently live. */
+  daemon: { attached: boolean; socketPath: string | null } | null;
+  /** The last sync pass this process ran (resident / on_invoke), for hosts and daemons that report it. */
+  lastSyncAt: string | null;
+  lastSyncOutcome: string | null;
+  consecutiveSyncFailures: number;
+  nextSyncAt: string | null;
+}
+
+export interface ReleaseChange {
+  generation: number;
+  stagedGeneration: number | null;
 }
 
 /** `render()` refused by the control plane's standing instructions: a disable directive, or a lapsed lease on a `halt` target. */
@@ -119,7 +135,16 @@ export class AgentStartError extends Error {
 
 export class AirPrompterAgent {
   private active: LoadedSlot | null = null;
-  private source: "store" | "vendored_bundle" = "store";
+  private source: ReleaseSource = "store";
+  private daemon: DaemonClient | null = null;
+  private daemonSocket: string | null = null;
+  private daemonStagedGeneration: number | null = null;
+  private daemonRefreshing: Promise<void> | null = null;
+  private lastSyncMs: number | null = null;
+  private lastSyncOutcome: string | null = null;
+  private consecutiveSyncFailures = 0;
+  private nextSyncMs: number | null = null;
+  private readonly changeListeners = new Set<(change: ReleaseChange) => void>();
   private etag: string | null = null;
   private edgeEtag: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -137,22 +162,42 @@ export class AirPrompterAgent {
 
   private constructor(
     private readonly options: StartOptions,
-    private readonly store: SlotStore,
+    /** This process's own store; null when attached to the host daemon, which holds the store and its key. */
+    private readonly store: SlotStore | null,
     trustedRoot: RootMetadata,
+    /** The writer identity: the store's instanceId, or a fresh one per daemon-attached process. */
+    private readonly ownInstanceId: string,
+    spoolDir: string,
   ) {
     this.trustedRoot = trustedRoot;
-    this.runRefKey = createHmac("sha256", Buffer.from(store.instanceId, "utf8")).update("runRef").digest();
+    this.runRefKey = createHmac("sha256", Buffer.from(ownInstanceId, "utf8")).update("runRef").digest();
     const serverless = (options.sync?.mode ?? "resident") === "on_invoke";
-    this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink() : new DirectorySink(join(store.dir, "spool", "telemetry"), store.instanceId);
-    this.spool = new SpoolWriter(this.sink, { instanceId: store.instanceId, instanceClass: options.telemetry?.instanceClass ?? (serverless ? "ephemeral" : "resident"), sdk: `${SDK_NAME}/${SDK_VERSION}` });
+    this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink() : new DirectorySink(spoolDir, ownInstanceId);
+    this.spool = new SpoolWriter(this.sink, { instanceId: ownInstanceId, instanceClass: options.telemetry?.instanceClass ?? (serverless ? "ephemeral" : "resident"), sdk: `${SDK_NAME}/${SDK_VERSION}` });
     this.client =
-      options.apiKey && options.sync?.mode !== "offline"
+      options.apiKey && options.sync?.mode !== "offline" && options.sync?.mode !== "daemon"
         ? new SyncClient({ baseUrl: options.baseUrl ?? "https://api.airprompter.com", agentId: options.agentId, target: options.target, apiKey: options.apiKey, ...(options.fetch ? { fetch: options.fetch } : {}), userAgent: `${SDK_NAME}/${SDK_VERSION}` })
         : null;
   }
 
   static async start(options: StartOptions): Promise<AirPrompterAgent> {
     const stateDir = options.stateDir ?? defaultStateDir();
+    const pinnedRoot = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.target, pinnedRoot: options.root.pinned }) : options.root;
+    if (options.sync?.mode === "daemon") {
+      // The host daemon holds the store and its key; this process attaches and never touches store files.
+      const socketPath = options.sync.daemonSocketPath ?? daemonSocketPath({ stateDir, agentId: options.agentId, target: options.target });
+      const client = await DaemonClient.connect({ socketPath, agentId: options.agentId, target: options.target, sdk: `${SDK_NAME}/${SDK_VERSION}` });
+      if (client) {
+        const storeDir = SlotStore.path({ stateDir, agentId: options.agentId, target: options.target });
+        const agent = new AirPrompterAgent(options, null, pinnedRoot, AirPrompterAgent.newInstanceId(), join(storeDir, "spool", "telemetry"));
+        agent.daemonSocket = socketPath;
+        await agent.attachDaemon(client);
+        return agent;
+      }
+      options.logger?.({ sdk: SDK_NAME, agentId: options.agentId, target: options.target, event: "daemon_absent", socketPath });
+      // No daemon on this host: in-process sync from this process's own store, exactly as resident mode.
+      options = { ...options, sync: { ...options.sync, mode: "resident" } };
+    }
     const keyProvider = options.keyProvider ?? fileKey(join(SlotStore.path({ stateDir, agentId: options.agentId, target: options.target }), "store.key"));
     let store: SlotStore;
     try {
@@ -161,26 +206,92 @@ export class AirPrompterAgent {
       if (error instanceof StoreError && (error.code === "kek_unavailable" || error.code === "store_corrupt")) throw new AgentStartError(error.code, error.message);
       throw error;
     }
-    const pinned = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.target, pinnedRoot: options.root.pinned }) : options.root;
+    const pinned = pinnedRoot;
     // The stored root (accepted on an earlier run) is trusted only if it still verifies against the pinned key.
     const stored = store.state.root;
     const trusted = stored && verifyRootMetadata({ candidate: stored, trusted: pinned, now: new Date(options.now?.() ?? Date.now()).toISOString() }).ok ? stored : pinned;
-    const agent = new AirPrompterAgent(options, store, trusted);
+    const agent = new AirPrompterAgent(options, store, trusted, store.instanceId, join(store.dir, "spool", "telemetry"));
     await agent.boot();
     return agent;
   }
 
+  /** Daemon mode: the active release comes over the socket; `generation` events refresh it; a lost daemon keeps what is held and reconnects. */
+  private async attachDaemon(client: DaemonClient): Promise<void> {
+    this.daemon = client;
+    this.daemonStagedGeneration = client.hello.stagedGeneration;
+    this.active = await client.slot();
+    this.source = "daemon";
+    this.lastContactMs = this.nowMs();
+    this.log({ event: "daemon_attached", generation: this.active.generation, daemon: client.hello.daemon });
+    client.onEvent((event) => {
+      if (event.event === "generation") {
+        this.daemonStagedGeneration = typeof event.stagedGeneration === "number" ? event.stagedGeneration : null;
+        void this.refreshFromDaemon();
+      }
+      if (event.event === "shutdown") this.log({ event: "daemon_shutdown" });
+    });
+    client.onClose(() => {
+      if (this.daemon !== client) return;
+      this.daemon = null;
+      this.log({ event: "daemon_lost", socketPath: this.daemonSocket });
+      this.scheduleDaemonReconnect();
+    });
+  }
+
+  private async refreshFromDaemon(): Promise<void> {
+    if (!this.daemon) return;
+    if (this.daemonRefreshing) return this.daemonRefreshing;
+    this.daemonRefreshing = (async () => {
+      try {
+        const slot = await this.daemon!.slot();
+        const changed = slot.generation !== this.active?.generation;
+        this.active = slot;
+        this.source = "daemon";
+        this.lastContactMs = this.nowMs();
+        this.lastRefusal = null;
+        if (changed) this.emitChange();
+      } catch (error) {
+        this.log({ event: "daemon_slot_unavailable", reason: (error as Error).message });
+      }
+    })().finally(() => {
+      this.daemonRefreshing = null;
+    });
+    return this.daemonRefreshing;
+  }
+
+  private scheduleDaemonReconnect(): void {
+    if (this.timer) clearTimeout(this.timer);
+    if (this.stopped) return;
+    this.timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const client = await DaemonClient.connect({ socketPath: this.daemonSocket!, agentId: this.options.agentId, target: this.options.target, sdk: `${SDK_NAME}/${SDK_VERSION}` });
+          if (client) {
+            await this.attachDaemon(client);
+            return;
+          }
+        } catch (error) {
+          this.log({ event: "daemon_reconnect_failed", reason: (error as Error).message });
+        }
+        this.scheduleDaemonReconnect();
+      })();
+    }, jitteredDelayMs(this.options.sync?.pollSeconds ?? 30, this.options.random));
+    this.timer.unref?.();
+  }
+
   /** Store first (active slot, then the other), then the vendored bundle, then refuse. Zero network. */
   private async boot(): Promise<void> {
+    if (!this.store) throw new AgentStartError("no_verified_release", "boot without a store");
     const now = this.nowIso();
     const verifyOptions = { now, root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) };
-    const state = this.store.state;
+    const store = this.store;
+    const state = store.state;
     // The other slot is a fallback only when it holds a previously activated release: a release staged under
     // unlock_required and never unlocked is not approved for this host and is never served by accident.
     for (const slot of [state.active, state.active ? (state.active === "A" ? "B" : "A") : null] as const) {
       if (!slot || (slot !== state.active && slot === state.staged)) continue;
       try {
-        const loaded = this.store.load(slot, slot === state.active ? { ...verifyOptions, expectGeneration: state.generation } : verifyOptions);
+        const loaded = store.load(slot, slot === state.active ? { ...verifyOptions, expectGeneration: state.generation } : verifyOptions);
         if (slot !== state.active) this.log({ event: "fallback_to_other_slot", slot });
         this.active = loaded;
         this.source = "store";
@@ -192,10 +303,10 @@ export class AirPrompterAgent {
     // A staged slot left by an unanswered unlock (or a crash after staging) is still staged: report it, keep it verifiable.
     if (state.staged && state.staged !== state.active) {
       try {
-        this.stagedManifest = this.store.load(state.staged, verifyOptions).manifest;
+        this.stagedManifest = store.load(state.staged, verifyOptions).manifest;
       } catch (error) {
         this.log({ event: "staged_slot_unusable", slot: state.staged, reason: (error as Error).message });
-        this.store.discardStaged();
+        store.discardStaged();
       }
     }
     if (!this.active && this.options.vendoredBundle) {
@@ -207,12 +318,12 @@ export class AirPrompterAgent {
         const rootVerdict = verifyRootMetadata({ candidate: contents.keySet, trusted: this.trustedRoot, now });
         if (rootVerdict.ok) {
           this.trustedRoot = contents.keySet;
-          this.store.acceptRoot(contents.keySet);
+          store.acceptRoot(contents.keySet);
         }
         // Stage through the store so the bundle's release becomes the encrypted A slot: the same verification path as OTA.
-        this.store.stage({ manifest: contents.manifest, payloads: bundlePayloadBytes(contents) });
-        const slot = this.store.activate();
-        this.active = this.store.load(slot, { ...verifyOptions, root: this.trustedRoot });
+        store.stage({ manifest: contents.manifest, payloads: bundlePayloadBytes(contents) });
+        const slot = store.activate();
+        this.active = store.load(slot, { ...verifyOptions, root: this.trustedRoot });
         this.source = "vendored_bundle";
         this.log({ event: "vendored_bundle_applied", generation: this.active.generation });
       } catch (error) {
@@ -225,6 +336,22 @@ export class AirPrompterAgent {
     }
     if (!this.active) throw new AgentStartError("no_verified_release", "no verified release in the store, no usable vendored bundle, and nothing could be fetched");
     if (this.client && (this.options.sync?.mode ?? "resident") === "resident") this.schedule();
+  }
+
+  /** Called whenever the active or staged generation changes (sync, unlock, rollback, daemon event). */
+  onChange(listener: (change: ReleaseChange) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
+  }
+
+  private emitChange(): void {
+    const change: ReleaseChange = { generation: this.generation, stagedGeneration: this.status().stagedGeneration };
+    for (const listener of this.changeListeners) listener(change);
+  }
+
+  /** The active, verified release this process serves (manifest + payload bytes), or null. */
+  get release(): LoadedSlot | null {
+    return this.active;
   }
 
   private log(event: Record<string, unknown>): void {
@@ -241,6 +368,7 @@ export class AirPrompterAgent {
   private schedule(): void {
     if (this.timer) clearTimeout(this.timer);
     const delay = jitteredDelayMs(this.options.sync?.pollSeconds ?? 30, this.options.random);
+    this.nextSyncMs = this.nowMs() + delay;
     this.timer = setTimeout(() => {
       void this.syncNow().finally(() => this.schedule());
     }, delay);
@@ -257,11 +385,20 @@ export class AirPrompterAgent {
 
   /** One sync pass now (resident timers call this; on_invoke hosts call it from `invoke`). Never throws. */
   async syncNow(): Promise<void> {
-    if (!this.client) return;
+    if (this.daemon) {
+      try {
+        await this.daemon.request("sync");
+        await this.refreshFromDaemon();
+      } catch (error) {
+        this.log({ event: "daemon_sync_failed", reason: (error as Error).message });
+      }
+      return;
+    }
+    if (!this.client || !this.store) return;
     if (this.syncing) return this.syncing;
     this.syncing = (async () => {
       const result = await syncOnce({
-        store: this.store,
+        store: this.store!,
         client: this.client!,
         now: () => this.nowIso(),
         scope: { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target },
@@ -282,14 +419,22 @@ export class AirPrompterAgent {
       this.etag = result.etag;
       this.edgeEtag = result.edgeEtag;
       this.trustedRoot = result.trustedRoot;
-      if (result.outcome === "unchanged" || result.outcome === "activated" || result.outcome === "staged" || result.outcome === "nothing_promoted") this.lastContactMs = this.nowMs();
+      this.lastSyncMs = this.nowMs();
+      this.lastSyncOutcome = result.outcome;
+      const contact = result.outcome === "unchanged" || result.outcome === "activated" || result.outcome === "staged" || result.outcome === "nothing_promoted" || result.outcome === "held_back";
+      if (contact) this.lastContactMs = this.nowMs();
+      this.consecutiveSyncFailures = contact ? 0 : this.consecutiveSyncFailures + 1;
       if (result.outcome === "activated" && result.active) {
         this.active = result.active;
         this.source = "store";
         this.stagedManifest = null;
         this.lastRefusal = null;
+        this.emitChange();
       }
-      if (result.outcome === "staged") this.log({ event: "release_staged", generation: result.generation });
+      if (result.outcome === "staged") {
+        this.log({ event: "release_staged", generation: result.generation });
+        this.emitChange();
+      }
     })().finally(() => {
       this.syncing = null;
     });
@@ -317,23 +462,37 @@ export class AirPrompterAgent {
     }
   }
 
-  /** Make a staged release live (an operator's `airprompter unlock`, an update window, or the change-control hook). */
-  unlock(): { generation: number } | null {
-    if (!this.store.state.staged) return null;
-    const slot = this.store.activate();
-    this.active = this.store.load(slot, { now: this.nowIso(), root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null });
+  /** Make a staged release live (an operator's `airprompter unlock`, an update window, or the change-control hook). Host-wide when attached to a daemon. */
+  async unlock(): Promise<{ generation: number } | null> {
+    if (this.daemon) {
+      const result = (await this.daemon.request("unlock")) as { generation: number | null };
+      await this.refreshFromDaemon();
+      return result.generation === null ? null : { generation: result.generation };
+    }
+    const store = this.store!;
+    if (!store.state.staged) return null;
+    const slot = store.activate();
+    this.active = store.load(slot, { now: this.nowIso(), root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null });
     this.stagedManifest = null;
     this.source = "store";
+    this.emitChange();
     return { generation: this.active.generation };
   }
 
-  /** Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence. */
-  rollback(): { generation: number; forced: boolean } {
-    const before = this.store.state.generation;
-    const slot = this.store.rollbackLocal();
-    this.active = this.store.load(slot, { now: this.nowIso(), root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null });
+  /** Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence. Host-wide when attached to a daemon. */
+  async rollback(): Promise<{ generation: number; forced: boolean }> {
+    if (this.daemon) {
+      const result = (await this.daemon.request("rollback")) as { generation: number; forced: boolean };
+      await this.refreshFromDaemon();
+      return { generation: result.generation, forced: result.forced };
+    }
+    const store = this.store!;
+    const before = store.state.generation;
+    const slot = store.rollbackLocal();
+    this.active = store.load(slot, { now: this.nowIso(), root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null });
     const forced = this.active.generation < before;
     if (forced) this.spool.refusal({ at: this.nowIso(), reason: "forced_downgrade", generation: this.active.generation, tag: null }, this.nowMs());
+    this.emitChange();
     return { generation: this.active.generation, forced };
   }
 
@@ -388,7 +547,7 @@ export class AirPrompterAgent {
     let slot = payload.slots.find((entry) => entry.tag === tag);
     if (!slot) throw new Error(`no slot ${tag} on generation ${active.generation}`);
     if (!payload.experiment) return { slot, arm: "none", bucket: null };
-    const subjectValue = payload.experiment.subjectKey === "instance" || subject === undefined ? this.store.instanceId : subject;
+    const subjectValue = payload.experiment.subjectKey === "instance" || subject === undefined ? this.ownInstanceId : subject;
     const assigned = assignArm({ salt: payload.experiment.salt, subject: subjectValue, arms: payload.experiment.arms });
     const override = assigned.arm.overrides.find((entry) => entry.tag === tag);
     if (override) slot = override;
@@ -447,27 +606,32 @@ export class AirPrompterAgent {
   }
 
   status(): AgentStatus {
-    const state = this.store.state;
+    const state = this.store?.state ?? null;
     const manifest = this.active?.manifest.payload;
     const leaseExpiresAt = this.leaseExpiresAt();
     const depth = this.sink instanceof DirectorySink ? this.sink.depth() : { segments: 0, bytes: 0 };
     return {
-      instanceId: this.store.instanceId,
+      instanceId: this.ownInstanceId,
       generation: this.active?.generation ?? 0,
-      stagedGeneration: this.stagedManifest?.payload.generation ?? null,
-      applyState: this.stagedManifest ? "awaiting_unlock" : this.lastRefusal ? "refused" : this.source === "vendored_bundle" ? "vendored_fallback" : "active",
+      stagedGeneration: this.daemonSocket ? this.daemonStagedGeneration : (this.stagedManifest?.payload.generation ?? null),
+      applyState: this.stagedManifest || (this.daemonSocket && this.daemonStagedGeneration !== null) ? "awaiting_unlock" : this.lastRefusal ? "refused" : this.source === "vendored_bundle" ? "vendored_fallback" : "active",
       lastRefusal: this.lastRefusal,
-      storageProtection: this.store.storageProtection,
+      storageProtection: state ? this.store!.storageProtection : "daemon",
       signingKeyId: this.active?.signingKeyId ?? null,
       leaseExpiresAt,
       leaseExpired: leaseExpiresAt ? instant(leaseExpiresAt) <= this.nowMs() : false,
       onLeaseExpiry: manifest?.onLeaseExpiry ?? null,
       lastContactAt: this.lastContactMs === null ? null : new Date(this.lastContactMs).toISOString(),
-      forcedDowngrade: state.forcedDowngrade === true,
+      forcedDowngrade: state?.forcedDowngrade === true,
       disabled: manifest ? this.disabledBy(manifest) : { agent: false, slots: [] },
       unlockRequests: (manifest?.directives ?? []).flatMap((d) => (d.kind === "request_unlock" ? [{ releaseDigest: d.releaseDigest, requestedBy: d.requestedBy, requestedAt: d.requestedAt, expiresAt: d.expiresAt, ...(d.note !== undefined ? { note: d.note } : {}) }] : [])),
       spool: { depthSegments: depth.segments, depthBytes: depth.bytes },
       source: this.source,
+      daemon: this.daemonSocket ? { attached: this.daemon !== null, socketPath: this.daemonSocket } : null,
+      lastSyncAt: this.lastSyncMs === null ? null : new Date(this.lastSyncMs).toISOString(),
+      lastSyncOutcome: this.lastSyncOutcome,
+      consecutiveSyncFailures: this.consecutiveSyncFailures,
+      nextSyncAt: this.nextSyncMs === null || !this.timer ? null : new Date(this.nextSyncMs).toISOString(),
     };
   }
 
@@ -483,17 +647,24 @@ export class AirPrompterAgent {
     return Object.keys(this.trustedRoot.signed.keys);
   }
 
-  /** Stop timers and close the spool. */
+  private stopped = false;
+
+  /** Stop timers, detach from the daemon, and close the spool. */
   async stop(): Promise<void> {
+    this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     if (this.syncing) await this.syncing;
+    if (this.daemonRefreshing) await this.daemonRefreshing;
+    const daemon = this.daemon;
+    this.daemon = null;
+    daemon?.close();
     this.spool.closeWindows(this.nowMs());
   }
 
-  /** The runtime's own random-per-store id (never a hostname). */
+  /** The runtime's own random id (the store's, or a fresh one per daemon-attached process; never a hostname). */
   get instanceId(): string {
-    return this.store.instanceId;
+    return this.ownInstanceId;
   }
 
   static thumbprint(jwk: P256PublicJwk): string {

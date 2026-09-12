@@ -132,6 +132,8 @@ export class FakeControlPlane {
     const respond = (status: number, body: Buffer | string = "", headers: Record<string, string> = {}) => ({
       status,
       headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+      /** Every header, for a test that bridges this fake onto a real HTTP listener. */
+      headerEntries: Object.entries(headers),
       arrayBuffer: async () => {
         // A Buffer may be a view into a shared pool: copy exactly its bytes, never the pool.
         const bytes = typeof body === "string" ? Buffer.from(body, "utf8") : body;
@@ -167,4 +169,24 @@ export class FakeControlPlane {
       return respond(404, JSON.stringify({ error: "Not found" }));
     };
   }
+}
+
+/** The fake behind a real HTTP listener, for daemons and CLIs that run as their own process. */
+export async function serveOverHttp(plane: FakeControlPlane): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+  const { createServer } = await import("node:http");
+  const fetchImpl = plane.fetch();
+  const server = createServer((request, response) => {
+    void (async () => {
+      const headers: Record<string, string> = {};
+      for (const [name, value] of Object.entries(request.headers)) if (typeof value === "string") headers[name.toLowerCase()] = value;
+      const url = `http://${request.headers.host ?? "127.0.0.1"}${request.url ?? "/"}`;
+      const result = (await fetchImpl(url, { headers })) as Awaited<ReturnType<FetchLike>> & { headerEntries?: Array<[string, string]> };
+      const body = Buffer.from(await result.arrayBuffer());
+      response.writeHead(result.status, Object.fromEntries(result.headerEntries ?? []));
+      response.end(body);
+    })();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  return { baseUrl: `http://127.0.0.1:${address.port}`, close: () => new Promise((resolve) => server.close(() => resolve())) };
 }

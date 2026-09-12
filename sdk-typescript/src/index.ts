@@ -1,5 +1,7 @@
 export { AirPrompterAgent, AgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION } from "./agent.js";
-export type { AgentStatus, Rendered, StartOptions, SyncMode } from "./agent.js";
+export type { AgentStatus, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange } from "./agent.js";
+export { DaemonClient, DaemonError, daemonSocketPath, DAEMON_MAX_LINE_BYTES } from "./sync/daemon.js";
+export type { DaemonHello, DaemonSlotResponse, DaemonGenerationEvent } from "./sync/daemon.js";
 
 export { canonicalJson, canonicalBytes, sha256Prefixed, CanonicalJsonError } from "./protocol/canonicalJson.js";
 export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, orderedSteps, AssignmentError, StepError, ASSIGNMENT_MODULUS } from "./protocol/assignment.js";

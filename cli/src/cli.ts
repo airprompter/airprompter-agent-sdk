@@ -6,6 +6,7 @@
  */
 
 import { apply } from "./commands/apply.js";
+import { daemon } from "./commands/daemon.js";
 import { diff } from "./commands/diff.js";
 import { keygen } from "./commands/keygen.js";
 import { pull } from "./commands/pull.js";
@@ -21,6 +22,7 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   status: { run: status, summary: "Active and staged generation, lease, storage protection, spool depth, last upload" },
   diff: { run: diff, summary: "What a bundle would change against the active release on this host" },
   keygen: { run: keygen, summary: "Generate a distribution or countersign keypair" },
+  daemon: { run: daemon, summary: "airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket" },
 };
 
 export function help(): string {

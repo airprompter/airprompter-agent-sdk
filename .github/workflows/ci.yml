@@ -175,3 +175,35 @@ jobs:
           name: ${{ matrix.artifact }}
           path: cli/dist/${{ matrix.artifact }}
           retention-days: 7
+
+  deploy-manifests:
+    name: Deploy manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: systemd unit
+        run: systemd-analyze verify deploy/systemd/airprompterd.service
+      - name: WinSW service definition is well-formed XML
+        run: sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null && xmllint --noout deploy/windows/airprompterd.xml
+      - name: launchd plist is well-formed (plutil runs on macOS; here the XML must at least parse)
+        run: xmllint --noout deploy/launchd/com.airprompter.airprompterd.plist
+      - name: Kubernetes DaemonSet
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          ./kubeconform -strict -summary deploy/kubernetes/daemonset.yaml
+      - name: Compose file resolves
+        run: AIRPROMPTER_AGENT_KEY=x docker compose -f deploy/docker/docker-compose.yml config >/dev/null
+      - name: Sidecar image builds and runs
+        run: |
+          docker build -f deploy/docker/Dockerfile -t airprompterd:ci .
+          docker run --rm airprompterd:ci --version
+          code=0; docker run --rm airprompterd:ci daemon --org o --agent agt_1 --environment prod --root /nonexistent.json --exit-after 1 || code=$?; test "$code" -eq 2
+
+  deploy-manifests-macos:
+    name: Deploy manifests (launchd)
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: plutil -lint deploy/launchd/com.airprompter.airprompterd.plist

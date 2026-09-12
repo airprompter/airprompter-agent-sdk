@@ -1,0 +1,58 @@
+# airprompterd as a systemd service: one sync loop and one shared store per
+# host, served to SDK processes over a 0600 socket.
+#
+#   install -m 0755 airprompter-linux-x64 /usr/local/bin/airprompter
+#   install -d -o airprompter -g airprompter -m 0700 /var/lib/airprompter
+#   install -m 0600 -o airprompter airprompterd.env /etc/airprompter/airprompterd.env   # AIRPROMPTER_AGENT_KEY=…
+#   install -m 0644 airprompter-root.jwk.json /etc/airprompter/root.jwk.json
+#   systemctl enable --now airprompterd
+#
+# Application processes that should attach run as the same user (or start
+# their SDK with sync.mode "daemon" pointed at the same state directory);
+# a process that cannot reach the socket syncs in-process — the daemon is
+# never a hard requirement.
+
+[Unit]
+Description=AirPrompter agent daemon (airprompterd)
+Documentation=https://github.com/airprompter/airprompter-agent-sdk/blob/main/protocol/daemon-socket.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=airprompter
+Group=airprompter
+EnvironmentFile=/etc/airprompter/airprompterd.env
+Environment=XDG_STATE_HOME=/var/lib/airprompter
+ExecStart=/usr/local/bin/airprompter daemon \
+  --org ${AIRPROMPTER_ORG} \
+  --agent ${AIRPROMPTER_AGENT} \
+  --environment ${AIRPROMPTER_ENVIRONMENT} \
+  --root /etc/airprompter/root.jwk.json \
+  --root-url ${AIRPROMPTER_ROOT_URL} \
+  --edge-pointer-url ${AIRPROMPTER_EDGE_POINTER_URL} \
+  --poll-seconds 30 \
+  --json
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# Hardening: the daemon needs its state directory, outbound HTTPS, and nothing else.
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/airprompter
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,64 @@
+# airprompterd as a sidecar: the daemon and the application share the state
+# volume, so the app's SDK (sync.mode "daemon", same stateDir) attaches over
+# the socket the daemon creates there. Both run as the same uid.
+#
+#   AIRPROMPTER_AGENT_KEY=apa_live_… docker compose -f deploy/docker/docker-compose.yml up
+#
+# One process per container that never shares a host gains nothing from
+# the daemon — run the SDK in-process there. The sidecar is the value when
+# several processes on one host would otherwise each pull and each hold a
+# store.
+
+services:
+  airprompterd:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: airprompterd
+    user: "10001:10001"
+    command:
+      - daemon
+      - --org
+      - org_…
+      - --agent
+      - agt_…
+      - --environment
+      - prod
+      - --root
+      - /etc/airprompter/root.jwk.json
+      - --root-url
+      - https://EDGE/roots/prod/root.json
+      - --edge-pointer-url
+      - https://EDGE/g/TOKEN/generation.json
+      - --poll-seconds
+      - "30"
+      - --json
+    environment:
+      AIRPROMPTER_AGENT_KEY: ${AIRPROMPTER_AGENT_KEY:?set AIRPROMPTER_AGENT_KEY}
+      XDG_STATE_HOME: /var/lib/airprompter
+    volumes:
+      - airprompter-state:/var/lib/airprompter
+      - ./root.jwk.json:/etc/airprompter/root.jwk.json:ro
+    healthcheck:
+      # The socket answers GET /healthz; 503 until a verified release is active.
+      test: ["CMD", "airprompter", "status", "--agent", "agt_…", "--environment", "prod", "--json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  app:
+    image: your-application:latest
+    user: "10001:10001"
+    environment:
+      # The SDK finds the daemon at <XDG_STATE_HOME>/airprompter/<agent>/<env>/daemon.sock
+      # and needs no Agent key of its own; without the daemon it would sync in-process.
+      XDG_STATE_HOME: /var/lib/airprompter
+    volumes:
+      - airprompter-state:/var/lib/airprompter
+    depends_on:
+      airprompterd:
+        condition: service_started
+
+volumes:
+  airprompter-state:

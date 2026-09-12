@@ -51,17 +51,23 @@ variable the slot did not declare throws.
 Sync modes: `resident` (timer + jitter, edge pointer first so idle
 instances never wake a Lambda), `on_invoke` (serverless: `ap.invoke(fn)`
 syncs before and after the handler; telemetry goes to a memory sink
-flushed at invocation end), `offline` (no `apiKey`: serve the store or the
+flushed at invocation end), `daemon` (attach to the host's `airprompterd`
+over its socket: no key, no store of its own, `generation` events push
+new releases; with no daemon on the host the runtime syncs in-process
+exactly as `resident`), `offline` (no `apiKey`: serve the store or the
 bundle, never call home).
 
 ## Apply policy
 
 The manifest carries `applyPolicy`. Under `unlock_required` a new
 generation is staged, not activated; `apply.onStaged` is called, and
-`ap.unlock()` makes it live. `ap.rollback()` flips to the other slot
-instantly; going below the stored generation is a forced downgrade,
-stamped in the store and in the spool. The local side can be stricter
-than the manifest (`apply.policy: "unlock_required"`), never looser.
+`await ap.unlock()` makes it live. `await ap.rollback()` flips to the
+other slot instantly; going below the stored generation is a forced
+downgrade, stamped in the store and in the spool, and the control plane's
+current generation is held back until it moves past the one you left.
+The local side can be stricter than the manifest
+(`apply.policy: "unlock_required"`), never looser. In `daemon` mode both
+calls act for the whole host.
 
 ## Module map
 
@@ -73,7 +79,7 @@ than the manifest (`apply.policy: "unlock_required"`), never looser.
 | `src/bundle/` | `.apbundle` v1: HPKE X25519 / HKDF-SHA256 / AES-256-GCM (RFC 9180 vectors), AAD `agentId|target` so a bundle cannot be relabelled |
 | `src/render/` | `{{name}}` substitution with trust-aware fencing; `runRef` (HMAC, content-free) |
 | `src/spool/` | Minute windows per dimension set, segment naming and rotation (`SegmentPlanner`), `DirectorySink` (0600, `.open` until fsync + rename, crash recovery) and `MemorySink`, the feedback catalogue normaliser |
-| `src/sync/` | `SyncClient` (edge pointer, manifest with ETag, payloads by hash) and `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy) |
+| `src/sync/` | `SyncClient` (edge pointer, manifest with ETag, payloads by hash), `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `DaemonClient` (the socket side of `protocol/daemon-socket.md`) |
 
 Every file in `protocol/vectors/` runs through these modules in `test/`.
 

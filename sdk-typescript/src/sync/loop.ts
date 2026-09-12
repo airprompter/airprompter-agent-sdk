@@ -23,7 +23,7 @@ import type { SyncClient } from "./client.js";
 export type ApplyPolicyDecision = "activated" | "staged";
 
 export interface SyncPassResult {
-  outcome: "unchanged" | "activated" | "staged" | "refused" | "unavailable" | "nothing_promoted";
+  outcome: "unchanged" | "activated" | "staged" | "refused" | "unavailable" | "nothing_promoted" | "held_back";
   generation?: number;
   reason?: RefusalCode | "unauthorized" | "forbidden" | "network" | string;
 }
@@ -104,6 +104,11 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
       return done({ outcome: "refused", reason: envelope.reason, generation: manifest.payload.generation });
     }
     if (manifest.payload.generation === stored) return done({ outcome: "unchanged" }, input.active, fetched.etag);
+    const heldBackBelow = input.store.state.heldBackBelow;
+    if (heldBackBelow !== undefined && manifest.payload.generation <= heldBackBelow) {
+      // A local rollback stepped down from this generation on purpose; only a newer one ends the hold.
+      return done({ outcome: "held_back", generation: manifest.payload.generation }, input.active, fetched.etag);
+    }
 
     // Fetch only what moved; the bytes already verified in the active slot are reused for unchanged hashes.
     const payloads = new Map<string, Uint8Array>();

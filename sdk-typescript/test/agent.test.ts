@@ -105,15 +105,24 @@ test("a new generation is noticed through the edge pointer, only the changed pay
   assert.equal(ap.status().applyState, "awaiting_unlock");
   assert.equal(ap.status().stagedGeneration, 2);
   assert.equal(ap.prompt("support.reply").render({ name: "Ann" }).text, "Reply politely to Ann.");
-  assert.deepEqual(ap.unlock(), { generation: 2 });
+  assert.deepEqual(await ap.unlock(), { generation: 2 });
   assert.equal(ap.prompt("support.reply").render({ name: "Ann" }).text, "Reply warmly to Ann.");
   assert.equal(ap.prompt("support.reply").render({ name: "Ann" }).versionId, "ver_reply_2");
   assert.equal(ap.status().applyState, "active");
 
   // Local rollback: instant, the other slot, stamped as a forced downgrade in the spool.
-  assert.deepEqual(ap.rollback(), { generation: 1, forced: true });
+  assert.deepEqual(await ap.rollback(), { generation: 1, forced: true });
   assert.equal(ap.prompt("support.reply").render({ name: "Ann" }).text, "Reply politely to Ann.");
   assert.equal(ap.status().forcedDowngrade, true);
+  // The control plane still says generation 2: sync holds it back (even with the ETag forgotten, as after a restart) until something newer is promoted.
+  Object.assign(ap as unknown as { etag: string | null; edgeEtag: string | null }, { etag: null, edgeEtag: null });
+  await ap.syncNow();
+  assert.equal(ap.generation, 1, "the rolled-back generation is not re-applied");
+  assert.equal(ap.status().lastSyncOutcome, "held_back");
+  plane.promote([triage!, plane.slot({ tag: "support.reply", text: "Reply thrice to {{name}}.", variables: [{ name: "name", required: false, trust: "operator" }], versionId: "ver_reply_3" })]);
+  await ap.syncNow();
+  assert.equal(ap.generation, 3, "a newer generation ends the hold");
+  assert.equal(ap.status().forcedDowngrade, true, "the downgrade stays on the record");
   await ap.stop();
   rmSync(stateDir, { recursive: true, force: true });
 });
@@ -331,7 +340,7 @@ test("a staged release survives a restart as staged: it is reported, unlockable,
   assert.equal(restarted.generation, 1);
   assert.equal(restarted.status().stagedGeneration, 2);
   assert.equal(restarted.status().applyState, "awaiting_unlock");
-  assert.deepEqual(restarted.unlock(), { generation: 2 });
+  assert.deepEqual(await restarted.unlock(), { generation: 2 });
   assert.equal(restarted.prompt("support.reply").render({}).text, "v2");
   await restarted.stop();
 

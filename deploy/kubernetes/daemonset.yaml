@@ -1,0 +1,97 @@
+# airprompterd on every node: one sync loop per node, the store on a hostPath
+# the application pods mount read-write (they write their own spool segments
+# there; the daemon uploads them). Pods attach through the socket in the
+# store directory and need no Agent key of their own.
+#
+#   kubectl create secret generic airprompterd --from-literal=AIRPROMPTER_AGENT_KEY=apa_live_…
+#   kubectl create configmap airprompterd-root --from-file=root.jwk.json
+#   kubectl apply -f deploy/kubernetes/daemonset.yaml
+#
+# Application pods: mount the same hostPath at the same mountPath, run as the
+# same runAsUser (10001), and start the SDK with sync.mode "daemon" and
+# stateDir "/var/lib/airprompter". If the daemon is not there, the SDK
+# syncs in-process — the DaemonSet is an optimization.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: airprompterd
+  labels:
+    app.kubernetes.io/name: airprompterd
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airprompterd
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airprompterd
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airprompterd
+          image: ghcr.io/airprompter/airprompterd:0.1.0
+          args:
+            - daemon
+            - --org
+            - org_…
+            - --agent
+            - agt_…
+            - --environment
+            - prod
+            - --root
+            - /etc/airprompter/root.jwk.json
+            - --root-url
+            - https://EDGE/roots/prod/root.json
+            - --edge-pointer-url
+            - https://EDGE/g/TOKEN/generation.json
+            - --poll-seconds
+            - "30"
+            - --json
+          env:
+            - name: XDG_STATE_HOME
+              value: /var/lib/airprompter
+            - name: AIRPROMPTER_AGENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airprompterd
+                  key: AIRPROMPTER_AGENT_KEY
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/airprompter
+            - name: root
+              mountPath: /etc/airprompter
+              readOnly: true
+          livenessProbe:
+            exec:
+              command: ["airprompter", "status", "--agent", "agt_…", "--environment", "prod", "--json"]
+            initialDelaySeconds: 10
+            periodSeconds: 60
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 20m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: state
+          hostPath:
+            path: /var/lib/airprompter
+            type: DirectoryOrCreate
+        - name: root
+          configMap:
+            name: airprompterd-root
+      terminationGracePeriodSeconds: 20

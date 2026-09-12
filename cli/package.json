@@ -18,7 +18,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "node --import tsx --test --test-timeout=60000 --test-force-exit \"test/**/*.test.ts\"",
     "bundle": "node scripts/bundle.mjs",
     "build:sea": "node scripts/build-sea.mjs",
     "smoke": "node scripts/smoke.mjs"

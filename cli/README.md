@@ -11,10 +11,34 @@ airprompter apply    Stage a bundle into the store and activate it per the envir
 airprompter status   Active and staged generation, lease, storage protection, spool depth, last upload
 airprompter diff     What a bundle would change against the active release on this host
 airprompter keygen   Generate a distribution or countersign keypair
+airprompter daemon   airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket
 ```
 
 Coming with later tickets: `unlock`, `rollback` (T9), `countersign`
-(T10), `export-telemetry` (T16), `daemon` / `airprompterd` (T26).
+(T10), `export-telemetry` (T16); the daemon's spool uploader (T26, P4).
+
+## The daemon
+
+```bash
+AIRPROMPTER_AGENT_KEY=… airprompter daemon \
+  --org org_… --agent agt_… --environment prod \
+  --root ./airprompter-root.jwk.json --root-url https://<edge>/roots/prod/root.json \
+  --edge-pointer-url https://<edge>/g/<token>/generation.json --poll-seconds 30 --json
+```
+
+The daemon is the runtime every SDK process runs, once per host: the
+same store, the same verification, the same apply policy — and a local
+socket (`<store>/daemon.sock`, mode `0600`; a named pipe on Windows)
+over which SDK processes started with `sync.mode: "daemon"` receive the
+verified release, `generation` events, and host-wide `unlock` /
+`rollback`. A process that finds no socket syncs in-process from its own
+store; a daemon that cannot obtain the store's key does not listen. Logs
+are one JSON object per line on stderr and never carry prompt text.
+`GET /healthz` on the socket answers `200` with a verified release active
+and `503` without; `airprompter status` asks the daemon when it is there.
+Service manifests for systemd, launchd, Windows (WinSW), Docker and
+Kubernetes are in [`../deploy/`](../deploy/); the wire format is
+[`../protocol/daemon-socket.md`](../protocol/daemon-socket.md).
 
 ## The contract scripts can rely on
 

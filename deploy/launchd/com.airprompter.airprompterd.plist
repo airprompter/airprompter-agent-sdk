@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  airprompterd as a launchd agent (per user) or daemon (system-wide).
+
+    install -m 0755 airprompter-darwin-arm64 /usr/local/bin/airprompter
+    mkdir -p ~/Library/Application\ Support/airprompter
+    cp com.airprompter.airprompterd.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.airprompter.airprompterd.plist
+
+  Put the Agent key in the EnvironmentVariables dictionary below only on a
+  single-user machine; on shared hosts wrap the command in a script that
+  reads it from the keychain (security find-generic-password -w ...).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.airprompter.airprompterd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/airprompter</string>
+    <string>daemon</string>
+    <string>--org</string><string>org_…</string>
+    <string>--agent</string><string>agt_…</string>
+    <string>--environment</string><string>prod</string>
+    <string>--root</string><string>/usr/local/etc/airprompter/root.jwk.json</string>
+    <string>--root-url</string><string>https://EDGE/roots/prod/root.json</string>
+    <string>--edge-pointer-url</string><string>https://EDGE/g/TOKEN/generation.json</string>
+    <string>--poll-seconds</string><string>30</string>
+    <string>--json</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AIRPROMPTER_AGENT_KEY</key>
+    <string>apa_live_…</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>ExitTimeOut</key>
+  <integer>20</integer>
+  <key>StandardErrorPath</key>
+  <string>/tmp/airprompterd.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

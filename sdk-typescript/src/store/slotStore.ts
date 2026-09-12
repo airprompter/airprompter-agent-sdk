@@ -46,6 +46,8 @@ export interface StoreFile {
   root: RootMetadata | null;
   /** Set by a forced local downgrade; reported on evidence. */
   forcedDowngrade?: boolean;
+  /** The generation a local rollback stepped down from: sync holds that generation (and older) back until the control plane moves past it. */
+  heldBackBelow?: number;
   updatedAt: string;
 }
 
@@ -240,7 +242,10 @@ export class SlotStore {
     const slot = this.file.staged;
     if (!slot) throw new StoreError("not_staged", "nothing is staged");
     const manifest = this.readManifest(slot);
-    this.write({ ...this.file, active: slot, staged: null, generation: manifest.payload.generation });
+    const generation = manifest.payload.generation;
+    // Moving past a held-back generation ends the hold; a forced downgrade stays stamped.
+    const { heldBackBelow, ...rest } = this.file;
+    this.write({ ...(heldBackBelow !== undefined && generation > heldBackBelow ? rest : this.file), active: slot, staged: null, generation });
     return slot;
   }
 
@@ -249,7 +254,8 @@ export class SlotStore {
     if (!this.file.active) throw new StoreError("no_release", "nothing is active");
     const previous = otherSlot(this.file.active);
     const manifest = this.readManifest(previous);
-    this.write({ ...this.file, active: previous, staged: null, generation: manifest.payload.generation, forcedDowngrade: manifest.payload.generation < this.file.generation });
+    const downgrade = manifest.payload.generation < this.file.generation;
+    this.write({ ...this.file, active: previous, staged: null, generation: manifest.payload.generation, forcedDowngrade: downgrade, ...(downgrade ? { heldBackBelow: this.file.generation } : {}) });
     return previous;
   }
 

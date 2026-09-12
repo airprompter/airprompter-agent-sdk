@@ -72,6 +72,9 @@ try {
   const status = run(["status", "--agent", "agt_1", "--environment", "prod", "--state-dir", join(work, "state"), "--json"]);
   check("status on an empty host exits 0 with no active release", status.code === 0 && JSON.parse(status.stdout).activeSlot === null && JSON.parse(status.stdout).storageProtection === "file_key", status.stderr);
 
+  const daemon = run(["daemon", "--org", "org_1", "--agent", "agt_1", "--environment", "prod", "--root", root, "--state-dir", join(work, "daemon-state"), "--exit-after", "1", "--json"], { env: { ...process.env, AIRPROMPTER_AGENT_KEY: "" } });
+  check("daemon with nothing verified refuses to listen (exit 1, not serving)", daemon.code === 1 && daemon.stderr.includes("not serving"), `${daemon.code}: ${daemon.stderr}`);
+
   const noKey = run(["pull", "--org", "org_1", "--agent", "agt_1", "--environment", "prod", "--root", root, "--out", join(work, "b.apbundle")], { env: { ...process.env, AIRPROMPTER_AGENT_KEY: "" } });
   check("pull without the key env exits 2 and names the variable", noKey.code === 2 && noKey.stderr.includes("AIRPROMPTER_AGENT_KEY"), noKey.stderr);
 } finally {

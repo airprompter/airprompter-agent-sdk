@@ -4,7 +4,7 @@
   "document": {
     "format": "apbundle",
     "version": 1,
-    "protocol": "0.2.3",
+    "protocol": "0.2.4",
     "encryption": {
       "scheme": "aes-128-cbc",
       "recipientKeyId": "c28a84e0b01e6bd7eaa666d2e91ca9a7c5e8f14082bceae9db5a1a01f6ff8ef3",

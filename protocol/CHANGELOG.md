@@ -1,5 +1,15 @@
 # Protocol changelog
 
+## 0.2.4 — 2026-09-12 (tag `protocol/v0.2.4`)
+
+- OpenAPI: the manifest and payload routes are **shipped** by the hosted
+  service (AIR-1936). Manifest `ETag` is the sha256 of the stored envelope
+  (a rollback is a new envelope even when it names an older release), both
+  answers carry `x-agent-generation`, and the long poll holds only while
+  the caller already has the current envelope. Payload responses carry
+  `x-content-hash`; the presigned redirect is minted only after the bytes
+  were verified. No schema change.
+
 ## 0.2.3 — 2026-09-12 (tag `protocol/v0.2.3`)
 
 - `protocol/VERSION` is the one source of the version: the generators read

@@ -60,6 +60,7 @@ jobs:
           test "$(node -p "require('./protocol/examples/manifest.json').payload.protocol")" = "$v"
           test "$(node -p "require('./protocol/vectors/assignment.json').protocol")" = "$v"
           test "$(node -p "require('./protocol/vectors/manifest-verify.json').protocol")" = "$v"
+          grep -q "^  version: $v$" protocol/openapi.yaml
       - name: Every protocol change carries a CHANGELOG entry
         if: github.event_name == 'pull_request'
         env:

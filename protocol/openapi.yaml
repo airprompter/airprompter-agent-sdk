@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AirPrompter Agent routes (customer-v1)
-  version: 0.2.0
+  version: 0.2.4
   summary: The routes an agent runtime calls. Pull only; the control plane never opens a connection to you.
   description: |
     Every route is called by the customer's runtime over outbound HTTPS with an
@@ -46,17 +46,20 @@ paths:
       operationId: getAgentManifest
       tags: [distribution]
       summary: Signed manifest for the target
-      x-airprompter-status: planned
+      x-airprompter-status: shipped
       x-airprompter-ticket: AIR-1936
       x-airprompter-scope: agent.bundle.read
       description: |
-        Returns the current signed manifest. `ETag` is the manifest's
-        `releaseDigest`; send it back as `If-None-Match` for a `304`.
-        `?wait=<seconds>` opts into a long poll of up to 25 s, held only until
-        the generation changes; it is bounded by a per-organization concurrency
-        cap and refused with `429` above it. Idle runtimes should poll the edge
-        pointer (`edgePointerUrl` from the heartbeat) and call this only when
-        the generation moved.
+        Returns the current signed manifest. `ETag` is the sha256 of the
+        stored envelope (a rollback is a new generation and therefore a new
+        envelope even when it names an older release); send it back as
+        `If-None-Match` for a `304`. `x-agent-generation` carries the
+        generation on both. `?wait=<seconds>` opts into a long poll of up to
+        25 s, held only while the runtime already has the current envelope (or
+        nothing is promoted yet); it is bounded by a per-organization
+        concurrency cap and refused with `429` above it. Idle runtimes should
+        poll the edge pointer (`edgePointerUrl` from the heartbeat) and call
+        this only when the generation moved.
       parameters:
         - $ref: "#/components/parameters/agentId"
         - $ref: "#/components/parameters/target"
@@ -76,18 +79,23 @@ paths:
           description: The current manifest
           headers:
             ETag:
+              description: sha256 of the stored envelope, `sha256:<hex>`.
               schema:
                 $ref: "schemas/manifest.schema.json#/$defs/sha256"
             Cache-Control:
               schema:
                 type: string
                 const: no-store
+            x-agent-generation:
+              schema:
+                type: integer
+                minimum: 1
           content:
             application/json:
               schema:
                 $ref: "schemas/manifest.schema.json"
         "304":
-          description: Unchanged since the digest in `If-None-Match`
+          description: The envelope in `If-None-Match` is still current
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404":
@@ -102,15 +110,16 @@ paths:
       operationId: getAgentPayload
       tags: [distribution]
       summary: Content-addressed, immutable payload bytes
-      x-airprompter-status: planned
+      x-airprompter-status: shipped
       x-airprompter-ticket: AIR-1936
       x-airprompter-scope: agent.bundle.read
       description: |
         Bytes for one content hash referenced by a manifest the key may read.
-        The route checks that the key's binding covers a release referencing
-        this hash — hashes are unguessable, but that is not the authorization.
-        Bodies up to 16 KiB are returned inline; larger ones `302` to a
-        short-lived presigned URL. The runtime verifies `sha256` of the bytes
+        The route serves only a hash the key target's CURRENT manifest
+        references — hashes are unguessable, but that is not the
+        authorization. Bodies up to 16 KiB are returned inline
+        (`x-content-hash` names the hash); larger ones `302` to a five-minute
+        presigned URL, minted only after the bytes were read and verified. The runtime verifies `sha256` of the bytes
         against `contentHash` after download and again after decrypt-on-load.
       parameters:
         - $ref: "#/components/parameters/agentId"

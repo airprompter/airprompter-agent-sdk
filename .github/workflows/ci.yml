@@ -183,7 +183,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: systemd unit
-        run: systemd-analyze verify deploy/systemd/airprompterd.service
+        # verify checks that ExecStart exists and the env file is readable: stand both in as the install steps would.
+        run: |
+          sudo install -m 0755 /bin/true /usr/local/bin/airprompter
+          sudo install -d /etc/airprompter && sudo install -m 0600 deploy/systemd/airprompterd.env.example /etc/airprompter/airprompterd.env
+          systemd-analyze verify deploy/systemd/airprompterd.service
       - name: WinSW service definition is well-formed XML
         run: sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null && xmllint --noout deploy/windows/airprompterd.xml
       - name: launchd plist is well-formed (plutil runs on macOS; here the XML must at least parse)

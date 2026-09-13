@@ -6,7 +6,8 @@ counts, token totals, a 16-bucket latency histogram, error classes, output
 check counts and declared feedback outcomes — written to a local spool and
 uploaded under a short-lived grant to your organization's own prefix.
 The spool is a **public contract** (design D66): any process, in any
-language, can write to it and be picked up by the daemon.
+language, can write to it and be picked up by the daemon — or by the
+runtime itself, on a host that runs none.
 
 ## The contract, in one table
 
@@ -61,6 +62,46 @@ Python): a filesystem you can fill, fail and take files from, with a clock
 you can advance or skew. Our own vectors are those cases — two writers over
 budget, a crash mid-open, no daemon, no grant — and they are the same
 cases your host will meet.
+
+## Telemetry without a daemon (S5)
+
+The daemon is an optimisation, never a requirement. A resident host with
+no `airprompterd` runs the same uploader in-process (`SpoolUploader`, the
+one the daemon runs): closed segments go out under the runtime's **own**
+grant, on a timer with a random phase (never on the request path), a
+failed pass backs off with full jitter and the next one retries, and past
+the host budget the oldest unsent segments are dropped and counted — one
+`dropped` row in the spool, `spool.droppedSegments` on the heartbeat, the
+fleet view's "metric batches waiting" — never silently. `ap.status().upload`
+says what the uploader is doing; `ap.uploadNow()` runs one pass by hand.
+`telemetry.upload: false` (`TelemetryOptions(upload=False)`) leaves the
+spool for a daemon or for `airprompter export-telemetry`; the budget still
+holds and the loss is still counted. The daemon itself starts its runtime
+with the uploader off and runs the host's own, one grant per attached
+writer.
+
+Serverless (`on_invoke`) hosts keep no spool: the invocation's rows sit in
+a memory buffer and `invoke()` POSTs them as one segment under the
+runtime's own grant **before it returns** — a platform that freezes the
+process at the response (Lambda) would otherwise lose rows in flight with
+no `dropped` row possible. The cost is one POST on the response path,
+never more than the buffer (256 KiB by default). `telemetry.flush:
+"background"` (`TelemetryOptions(flush="background")`) is the documented
+opt-out for hosts that keep running after the response: the flush goes to
+the event loop (a thread in Python) and `invoke()` returns at once.
+
+The blast radius of a grant held by an application host is exactly the
+daemon's: a presigned S3 POST, ≤ 15 minutes, ≤ 1 MiB per object, bound to
+one prefix — `org/{org}/agent/{agent}/{target}/{instance}/` — and to
+`application/x-ndjson`. A process that holds one can write NDJSON objects
+under its own instance prefix and nothing else: it cannot read, list,
+delete, or write another instance's prefix, and the ingest processor
+quarantines a row whose `instanceId` is not the prefix's. The grant is
+minted by the same heartbeat the runtime already sends; no new secret
+reaches the host. Vectors: `sdk-typescript/test/uploadHost.test.ts`,
+`sdk-python/tests/test_upload_host.py` (grant present; no grant, budget,
+a grant lapsing mid-run; `upload: false`; the awaited flush and the
+opt-out).
 
 ## What a spool row can and cannot tell an observer
 

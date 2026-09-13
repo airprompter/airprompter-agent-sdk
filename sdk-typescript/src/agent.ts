@@ -33,7 +33,7 @@ import { aiSdkMiddleware, type AiSdkMiddleware, type AiSdkMiddlewareOptions } fr
 import { evaluateChecks, outputTextOf, type CheckOutcome } from "./checks/index.js";
 import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "./golden/index.js";
 import { JUDGE_RUBRICS, judgePrompt, judgeSignalsOf, parseJudgeReply, rubricFromPrompt, type JudgeResult, type JudgeRubric } from "./judge/index.js";
-import { postSegment, type GrantDecision, type UploadGrant } from "./telemetry/uploader.js";
+import { SpoolUploader, postSegment, type GrantDecision, type UploadGrant, type UploaderStatus } from "./telemetry/uploader.js";
 import { parseWindow, windowState, type UpdateWindow } from "./apply/window.js";
 import { SyncClient, type FetchLike } from "./sync/client.js";
 import { DaemonClient, DaemonError, daemonSocketPath } from "./sync/daemon.js";
@@ -100,6 +100,19 @@ export interface StartOptions {
     bufferBytes?: number;
     /** Hosts: the closed-segment budget (default 100 MiB); the oldest unsent segments go past it and a `dropped` row says so. */
     spoolBudgetBytes?: number;
+    /**
+     * S5: a resident host with no daemon uploads its own spool — the same `SpoolUploader` the daemon runs, in-process,
+     * on a timer off the request path, under this runtime's own grant. `false` leaves the spool for a daemon or an
+     * operator's `airprompter export-telemetry`; the budget still holds and `dropped` rows still count.
+     */
+    upload?: boolean;
+    /**
+     * S5: serverless (`on_invoke`) — `invoke()` waits for the invocation's rows to land before it returns
+     * (`"await"`, the default: one POST under the runtime's own grant, never more than the buffer). `"background"`
+     * hands the flush to the event loop and returns at once; on a platform that freezes the process at the response
+     * (Lambda), rows in flight are lost with no `dropped` row possible.
+     */
+    flush?: "await" | "background";
   };
   now?: () => number;
   fetch?: FetchLike;
@@ -175,6 +188,8 @@ export interface AgentStatus {
   lastSyncAt: string | null;
   /** T34: the last golden-set run before activation — counts only; null until one ran. */
   golden: { generation: number; met: boolean; reports: Array<{ tag: string; arm: string; cases: number; passed: number; minPassBps: number }> } | null;
+  /** S5: this process's own uploader (a resident host with no daemon); null when a daemon, a memory sink or `telemetry.upload: false` owns the spool. */
+  upload: UploaderStatus | null;
   lastSyncOutcome: string | null;
   consecutiveSyncFailures: number;
   nextSyncAt: string | null;
@@ -265,6 +280,8 @@ export class AirPrompterAgent {
   private uploadIntervalSeconds = 300;
   private uploadRetryAfterMs: number | null = null;
   private spoolReporter: (() => SpoolReport) | null = null;
+  /** S5: the in-process uploader of a resident host with no daemon; null when a daemon, a memory sink, or `telemetry.upload: false` owns the spool. */
+  private uploader: SpoolUploader | null = null;
   private flushSegmentN = 0;
   private lastFlushMinute: number | null = null;
   private trustedRoot: RootMetadata;
@@ -282,7 +299,7 @@ export class AirPrompterAgent {
     trustedRoot: RootMetadata,
     /** The writer identity: the store's instanceId, or a fresh one per daemon-attached process. */
     private readonly ownInstanceId: string,
-    spoolDir: string,
+    private readonly spoolDir: string,
   ) {
     this.trustedRoot = trustedRoot;
     this.runRefKey = createHmac("sha256", Buffer.from(ownInstanceId, "utf8")).update("runRef").digest();
@@ -465,8 +482,49 @@ export class AirPrompterAgent {
       this.schedule();
       // The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
       void this.heartbeatNow().finally(() => this.scheduleHeartbeat());
+      this.startUploader();
     }
     this.scheduleWindowUnlock();
+  }
+
+  /**
+   * S5: the daemon is an optimisation, never a requirement — a resident host with no daemon uploads its own spool. The
+   * same uploader the daemon runs, in-process, on a timer off the request path: closed segments go out under this
+   * runtime's own grant (its heartbeat's), a failed pass backs off and the next one retries, and past the budget the
+   * oldest unsent segments are dropped and counted (`dropped` rows, the heartbeat's `spool.droppedSegments`). Nothing
+   * here ever blocks a render.
+   */
+  private startUploader(): void {
+    if (this.uploader || !this.client || !this.store) return;
+    if (this.options.telemetry?.upload === false) return;
+    // A memory sink has no directory to sweep; `flushTelemetry()` is its path.
+    if (typeof this.sink.drain === "function") return;
+    const uploader = new SpoolUploader({
+      dir: this.spoolDir,
+      instanceId: this.ownInstanceId,
+      grantFor: (instanceId) => this.requestUploadGrant({ instanceId, instanceClass: this.options.telemetry?.instanceClass ?? "resident" }),
+      fetch: this.options.fetch ?? (globalThis.fetch as unknown as FetchLike),
+      now: () => this.nowMs(),
+      ...(this.options.fs ? { fs: this.options.fs } : {}),
+      ...(this.options.random ? { random: this.options.random } : {}),
+      logger: (event) => this.log(event),
+      intervalSeconds: this.uploadIntervalSeconds,
+      ...(this.options.telemetry?.spoolBudgetBytes !== undefined ? { budgetBytes: this.options.telemetry.spoolBudgetBytes } : {}),
+    });
+    this.uploader = uploader;
+    this.spoolReporter = () => {
+      const s = uploader.status();
+      return { droppedSegments: s.droppedSegments, quarantinedSegments: s.quarantinedSegments, lastUploadAt: s.lastUploadAt, backoffUntil: s.backoffUntil };
+    };
+    uploader.start();
+    this.log({ event: "uploader_started", intervalSeconds: this.uploadIntervalSeconds });
+  }
+
+  /** S5: one upload pass now (tests and operators); `null` when this process runs no uploader. Never throws. */
+  async uploadNow(): Promise<{ uploaded: number; quarantined: number; dropped: number; held: boolean } | null> {
+    if (!this.uploader) return null;
+    const result = await this.uploader.runOnce();
+    return { uploaded: result.uploaded.length, quarantined: result.quarantined.length, dropped: result.dropped, held: result.held };
   }
 
   /** S3: contact with the origin — a signed manifest or an authenticated answer. Renews the lease and tells the daemon's clients. */
@@ -972,7 +1030,12 @@ export class AirPrompterAgent {
     }
   }
 
-  /** on_invoke mode: run the handler between two sync passes (the trailing one is not awaited on the response path). */
+  /**
+   * on_invoke mode: run the handler between two sync passes (the trailing one is not awaited on the response path).
+   * S5: the invocation's rows are flushed before `invoke()` returns — a platform that freezes the process at the
+   * response (Lambda) would otherwise lose them with no `dropped` row possible. `telemetry.flush: "background"` is the
+   * documented opt-out for hosts that keep running after the response.
+   */
   async invoke<T>(handler: () => Promise<T>): Promise<T> {
     await this.syncNow();
     if (this.lastHeartbeatMs === null || this.nowMs() - this.lastHeartbeatMs >= this.heartbeatIntervalSeconds * 1000) void this.heartbeatNow();
@@ -982,7 +1045,10 @@ export class AirPrompterAgent {
       this.spool.closeWindows(this.nowMs());
       void this.syncNow();
       // D25 on serverless: the invocation's rows go out under the runtime's own grant; a failure keeps them for the next one.
-      if (this.client && typeof this.sink.drain === "function") void this.flushTelemetry();
+      if (this.client && typeof this.sink.drain === "function") {
+        if (this.options.telemetry?.flush === "background") void this.flushTelemetry();
+        else await this.flushTelemetry();
+      }
     }
   }
 
@@ -1336,6 +1402,7 @@ export class AirPrompterAgent {
       daemon: this.daemonSocket ? { attached: this.daemon !== null, socketPath: this.daemonSocket } : null,
       lastSyncAt: this.lastSyncMs === null ? null : new Date(this.lastSyncMs).toISOString(),
       golden: this.lastGolden,
+      upload: this.uploader?.status() ?? null,
       lastSyncOutcome: this.lastSyncOutcome,
       consecutiveSyncFailures: this.consecutiveSyncFailures,
       nextSyncAt: this.nextSyncMs === null || !this.timer ? null : new Date(this.nextSyncMs).toISOString(),
@@ -1368,6 +1435,7 @@ export class AirPrompterAgent {
     if (this.heartbeating) await this.heartbeating;
     if (this.syncing) await this.syncing;
     if (this.daemonRefreshing) await this.daemonRefreshing;
+    if (this.uploader) await this.uploader.stop();
     const daemon = this.daemon;
     this.daemon = null;
     daemon?.close();

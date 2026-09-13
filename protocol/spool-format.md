@@ -142,6 +142,8 @@ enters a window.
 
 ## Upload (for reference; implemented by the daemon)
 
+S5: on a host that runs no daemon, the runtime implements the same upload itself (`docs/telemetry.md` › Telemetry without a daemon).
+
 Heartbeat with the Agent key returns a presigned S3 POST grant (≤ 15 min,
 prefix `org/{org}/agent/{agent}/{target}/{instance}/`, ≤ 1 MiB, NDJSON,
 SSE-KMS, grant id) plus `uploadIntervalSeconds`. Closed segments are POSTed

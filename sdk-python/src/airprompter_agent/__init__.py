@@ -98,6 +98,7 @@ from .sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, Daemo
 from .sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
 from .checks import CHECK_BOUNDS, check_refusal, checks_refusals, estimate_tokens, evaluate_check, evaluate_checks, output_text_of, pattern_refusal, project_checks, validate_json_schema, value_at_path
 from .telemetry.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
+from .telemetry.uploader import GrantDecision, PassResult, SpoolUploader, UploadGrant, backoff_delay_ms, inspect_segment, post_segment, validate_spool_row
 
 __version__ = SDK_VERSION
 
@@ -224,6 +225,14 @@ __all__ = [
     "normalize_usage",
     "observe_call",
     "observe_call_async",
+    "GrantDecision",
+    "PassResult",
+    "SpoolUploader",
+    "UploadGrant",
+    "backoff_delay_ms",
+    "inspect_segment",
+    "post_segment",
+    "validate_spool_row",
     "CHECK_BOUNDS",
     "check_refusal",
     "checks_refusals",

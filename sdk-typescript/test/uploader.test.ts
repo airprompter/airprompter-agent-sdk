@@ -287,7 +287,7 @@ test("serverless: invoke() flushes the memory sink under the runtime's own grant
   try {
     const r = ap.prompt("support.reply").render({});
     await ap.invoke(async () => ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 }));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // S5: the flush is awaited — the segment is there the moment invoke() returns, with nothing left for a frozen process to lose.
     assert.equal(plane.uploads.length, 1, "one segment per invocation");
     assert.ok(plane.uploads[0]!.startsWith(`org/org_1/agent/agt_1/prod/${ap.instanceId}/seg-${ap.instanceId}-`));
     const rows = plane.objects.get(plane.uploads[0]!)!.toString("utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; count: number });

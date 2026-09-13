@@ -56,12 +56,22 @@ Sync modes: `resident` (timer + jitter, edge pointer first so idle
 instances never wake a Lambda), `on_invoke` (serverless: `ap.invoke(fn)`
 syncs before and after the handler; telemetry goes to a memory sink that
 `invoke` POSTs at invocation end as one segment under the runtime's own
-upload grant — `ap.flushTelemetry()` does the same by hand, and rows a
-hold or a refused POST leaves behind wait for the next invocation), `daemon` (attach to the host's `airprompterd`
+upload grant, **before it returns** (S5: a frozen Lambda loses nothing;
+`telemetry.flush: "background"` is the opt-out) — `ap.flushTelemetry()`
+does the same by hand, and rows a hold or a refused POST leaves behind
+wait for the next invocation), `daemon` (attach to the host's `airprompterd`
 over its socket: no key, no store of its own, `generation` events push
 new releases; with no daemon on the host the runtime syncs in-process
 exactly as `resident`), `offline` (no `apiKey`: serve the store or the
 bundle, never call home).
+
+A resident host with no daemon uploads its own spool (S5): the same
+uploader the daemon runs, in-process, on a timer off the request path,
+under the runtime's own grant; past the budget the oldest segments are
+dropped and counted, never silently. `ap.status().upload` says what it is
+doing, `ap.uploadNow()` runs one pass, `telemetry.upload: false` leaves the
+spool for a daemon or an operator's export. See `docs/telemetry.md` ›
+Telemetry without a daemon.
 
 ## Apply policy
 

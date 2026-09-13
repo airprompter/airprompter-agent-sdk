@@ -243,5 +243,5 @@ a `run_ref` minted there).
 | `observe()`: OpenAI / Anthropic / Bedrock usage, error classes | ✓ | ✓ + SDK objects, async variant |
 | Managed mode (catalogue, run, stream, typed refusals, 429 retry) | ✓ | ✓ |
 | Provider wrappers | `ap.wrap()` for openai / Anthropic, AI SDK middleware | `ap.wrap()` for openai / anthropic (sync + async), explicit helpers, LiteLLM callback |
-| Spool upload on hosts | `airprompterd` uploads every writer's segments (T26) | same daemon — the SDK writes, the daemon uploads |
-| Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓ | next phase (drain the memory sink with `drain_memory_sink()` and POST it yourself until then) |
+| Spool upload on hosts | `airprompterd` uploads every writer's segments (T26); with no daemon the runtime uploads its own (S5) | ✓ (`SpoolUploader`, `upload_now()`, `TelemetryOptions(upload=False)`) |
+| Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓, awaited before `invoke()` returns (S5) | ✓ (`flush_telemetry()`, `request_upload_grant()`, `TelemetryOptions(flush="background")` opt-out) |

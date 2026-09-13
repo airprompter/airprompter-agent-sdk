@@ -68,6 +68,8 @@ export async function daemon(argv: string[], ctx: Context): Promise<number> {
       stateDir,
       root: root.kind === "pinned" ? { pinned: root.jwk } : root.document,
       sync: { mode: "resident", pollSeconds, ...(str(parsed, "edge-pointer-url") ? { edgePointerUrl: str(parsed, "edge-pointer-url")! } : {}), ...(str(parsed, "root-url") ? { rootUrl: str(parsed, "root-url")! } : {}) },
+      // S5: the daemon runs the host's uploader itself (one grant per attached writer, the `upload` op); the runtime's own is off.
+      telemetry: { upload: false },
       ...(applyPolicy ? { apply: { policy: applyPolicy } } : {}),
       ...(ctx.fetch ? { fetch: ctx.fetch } : {}),
       now: ctx.now,

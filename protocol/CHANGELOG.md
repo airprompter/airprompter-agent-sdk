@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Telemetry without a daemon (S5, AIR-1973)
+- SDK (TypeScript and Python): a resident host with no daemon runs the spool uploader in-process — the same `SpoolUploader` the daemon runs, on a timer off the request path, under the runtime's own grant; past the budget the oldest segments are dropped and counted. `AgentStatus.upload`, `uploadNow()` / `upload_now()`, `telemetry.upload: false` / `TelemetryOptions(upload=False)`. The daemon starts its runtime with the uploader off and keeps running the host's own.
+- Serverless: `invoke()` flushes the invocation's rows before it returns; `telemetry.flush: "background"` / `TelemetryOptions(flush="background")` is the documented opt-out.
+- Python parity: `airprompter_agent.telemetry.uploader` (`validate_spool_row`, `inspect_segment`, `post_segment`, `SpoolUploader`), `request_upload_grant()`, `flush_telemetry()`, the heartbeat's grant taken; the fake control plane issues grants and fakes the bucket.
+- docs/telemetry.md › "Telemetry without a daemon" (the blast radius of a grant held by an application host). No wire change; vectors unchanged.
+
 ### The apply policy is the customer's (S4, AIR-1972)
 - `trust-chain.md` M13: the directive kinds a runtime honours are a closed set (`disable`, `request_unlock`); any other kind refuses the whole manifest — `directive_unknown`, a new refusal code in `heartbeat.schema.json` — before a payload is fetched. Vectors in `vectors/manifest-verify.json` ("a directive of a kind the runtime does not honour…", "the two kinds the runtime honours verify"); the reference verifier checks it.
 - `heartbeat.schema.json` request: `applyPolicy { effective, source }` (optional, additive) — what the host runs under and where it comes from (`local` / `pinned` / `operator` / `manifest`), so the fleet view can say the console's setting is advisory on a pinned host. Example `heartbeat.request.json` carries it.

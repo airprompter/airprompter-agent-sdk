@@ -6,14 +6,15 @@ exactly as the hosted service does (canonical payload bytes, ES256, P1363).
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
-from airprompter_agent._util import iso_ms, now_ms
+from airprompter_agent._util import instant, iso_ms, now_ms
 from airprompter_agent.protocol.canonical_json import canonical_bytes, sha256_prefixed
 from airprompter_agent.protocol.trust import generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
 
@@ -67,6 +68,77 @@ class FakeControlPlane:
         self.heartbeat_latest_generation = True
         self.heartbeat_interval_seconds = 300
         self.heartbeat_refusal: Optional[dict[str, Any]] = None
+        # T26 / S5: the grant issuer and a fake S3 behind it. With ``grant_base_url`` set, every accepted heartbeat answers an
+        # ``uploadGrant`` for the body's instance prefix (or ``retryAfterSeconds`` while ``grant_hold`` is set); the POST endpoint
+        # at ``<grant_base_url>/s3/agent-telemetry`` checks the policy the way the bucket would and keeps the objects by key.
+        self.grant_base_url: Optional[str] = None
+        self.grant_ttl_ms = 15 * 60 * 1000
+        self.grant_hold: Optional[dict[str, int]] = None
+        self.grants: list[dict[str, str]] = []
+        self.uploads: list[str] = []
+        self.objects: dict[str, bytes] = {}
+        self.fail_next_uploads = 0
+        #: The issuer's and the bucket's clock (grant expiry, policy expiry); a test drives it beside the runtime's.
+        self.now: Callable[[], float] = lambda: float(now_ms())
+        self._grant_seq = 0
+
+    def _issue_grant(self, instance_id: str, now: float) -> dict[str, Any]:
+        self._grant_seq += 1
+        grant_id = re.sub(r"[^A-Za-z0-9_-]", "_", f"grant_{self._grant_seq:04d}_{instance_id[:8]}").ljust(16, "0")
+        key_prefix = f"org/{self.scope['organizationId']}/agent/{self.scope['agentId']}/{self.scope['target']}/{instance_id}/"
+        expires_at = iso_ms(now + self.grant_ttl_ms)
+        policy = base64.b64encode(json.dumps({"expiration": expires_at, "conditions": [["starts-with", "$key", key_prefix], ["content-length-range", 0, 1048576], {"Content-Type": "application/x-ndjson"}, {"x-amz-meta-grant-id": grant_id}]}).encode("utf-8")).decode("ascii")
+        self.grants.append({"grantId": grant_id, "instanceId": instance_id, "keyPrefix": key_prefix, "expiresAt": expires_at})
+        return {
+            "grantId": grant_id,
+            "url": f"{self.grant_base_url}/s3/agent-telemetry",
+            "fields": {"policy": policy, "x-amz-algorithm": "AWS4-HMAC-SHA256", "x-amz-credential": "AKIAFAKE/20260912/eu-west-1/s3/aws4_request", "x-amz-date": "20260912T000000Z", "x-amz-signature": "fake", "x-amz-server-side-encryption": "aws:kms", "x-amz-server-side-encryption-aws-kms-key-id": "arn:aws:kms:eu-west-1:000000000000:key/fake", "x-amz-meta-grant-id": grant_id},
+            "keyPrefix": key_prefix,
+            "expiresAt": expires_at,
+            "maxObjectBytes": 1048576,
+            "contentType": "application/x-ndjson",
+        }
+
+    def _accept_upload(self, request: httpx.Request, now: float) -> httpx.Response:
+        content_type = request.headers.get("content-type", "")
+        match = re.search(r"boundary=([^;]+)", content_type)
+        if not match:
+            return httpx.Response(400, text="<Error><Code>MalformedPOSTRequest</Code></Error>")
+        boundary = match.group(1).encode("utf-8")
+        fields: dict[str, bytes] = {}
+        file_bytes: Optional[bytes] = None
+        for part in request.content.split(b"--" + boundary):
+            if not part or part.startswith(b"--"):
+                continue
+            head, sep, body = part.partition(b"\r\n\r\n")
+            if not sep:
+                continue
+            body = body[:-2] if body.endswith(b"\r\n") else body
+            name_match = re.search(rb'name="([^"]+)"', head)
+            if not name_match:
+                continue
+            name = name_match.group(1).decode("utf-8")
+            if name == "file":
+                file_bytes = body
+            else:
+                fields[name] = body
+        key = fields.get("key", b"").decode("utf-8")
+        grant_id = fields.get("x-amz-meta-grant-id", b"").decode("utf-8")
+        grant = next((g for g in self.grants if g["grantId"] == grant_id), None)
+        if grant is None or not key.startswith(grant["keyPrefix"]):
+            return httpx.Response(403, text="<Error><Code>AccessDenied</Code><Message>Invalid according to Policy: Policy Condition failed: [\"starts-with\", \"$key\", ...]</Message></Error>")
+        if now >= float(instant(grant["expiresAt"])):
+            return httpx.Response(403, text="<Error><Code>AccessDenied</Code><Message>Invalid according to Policy: Policy expired.</Message></Error>")
+        if fields.get("Content-Type", b"").decode("utf-8") != "application/x-ndjson":
+            return httpx.Response(403, text="<Error><Code>AccessDenied</Code><Message>Invalid according to Policy: Policy Condition failed: [\"eq\", \"$Content-Type\", ...]</Message></Error>")
+        if file_bytes is None or len(file_bytes) > 1048576:
+            return httpx.Response(400, text="<Error><Code>EntityTooLarge</Code></Error>")
+        if self.fail_next_uploads > 0:
+            self.fail_next_uploads -= 1
+            return httpx.Response(500, text="<Error><Code>InternalError</Code></Error>")
+        self.uploads.append(key)
+        self.objects[key] = file_bytes
+        return httpx.Response(204)
 
     def slot(self, *, tag: str, text: str, model: str = "claude-sonnet-5", variables: Optional[list] = None, version_id: Optional[str] = None, steps: Optional[list[dict]] = None) -> dict[str, Any]:
         data = text.encode("utf-8")
@@ -132,6 +204,8 @@ class FakeControlPlane:
             self.requests.append(url)
             path = request.url.path
             auth = request.headers.get("authorization")
+            if self.grant_base_url and url.startswith(self.grant_base_url) and path.endswith("/s3/agent-telemetry") and request.method == "POST":
+                return self._accept_upload(request, self.now())
             if path.endswith("/generation.json"):
                 if not self._current:
                     return httpx.Response(404)
@@ -182,6 +256,11 @@ class FakeControlPlane:
                         return httpx.Response(400, json={"error": f"heartbeat: unknown {key}"})
                 self.heartbeats.append(body)
                 answer: dict = {"pollSeconds": 30, "uploadIntervalSeconds": 300, "heartbeatIntervalSeconds": self.heartbeat_interval_seconds, "expiresAt": iso_ms(now_ms() + self.heartbeat_interval_seconds * 3000)}
+                if self.grant_base_url:
+                    if self.grant_hold:
+                        answer["retryAfterSeconds"] = self.grant_hold["retryAfterSeconds"]
+                    else:
+                        answer["uploadGrant"] = self._issue_grant(str(body["instanceId"]), self.now())
                 # S3: the authenticated answer names the origin's generation; a runtime whose pointer says less goes to the manifest.
                 if self.heartbeat_latest_generation:
                     answer["latestGeneration"] = self._current["manifest"]["payload"]["generation"] if self._current else 0

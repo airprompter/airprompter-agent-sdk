@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import platform
 import random as _random
@@ -38,9 +39,10 @@ from .telemetry.wrap import WrapHooks, wrap_client
 from .render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
 from .render.template import Delimiters, render_template
 from .spool.feedback import normalize_feedback
-from .spool.writer import DirectorySink, MemorySink, Observation, SpoolSink, SpoolWriter, WriterIdentity
+from .spool.writer import DirectorySink, MemorySink, Observation, SpoolSink, SpoolWriter, WriterIdentity, epoch_minute, segment_name
 from .store.key_provider import KeyProvider, file_key
 from .store.slot_store import LoadedSlot, SlotStore, StoreError
+from .telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant, post_segment
 from .sync.client import SyncClient
 from .sync.daemon import DaemonClient, daemon_socket_path
 from .sync.loop import jittered_delay_ms, sync_once
@@ -113,6 +115,12 @@ class TelemetryOptions:
     buffer_bytes: Optional[int] = None
     #: Hosts: the closed-segment budget (default 100 MiB); the oldest unsent segments go past it and a ``dropped`` row says so.
     spool_budget_bytes: Optional[int] = None
+    #: S5: a resident host with no daemon uploads its own spool — the same uploader the daemon runs, in-process, on a timer
+    #: off the request path, under this runtime's own grant. ``False`` leaves the spool for a daemon or an operator's export.
+    upload: bool = True
+    #: S5: serverless — ``invoke()`` flushes the invocation's rows before it returns (``"await"``, the default). ``"background"``
+    #: hands the flush to a thread; a platform that freezes the process at the response loses rows in flight, silently.
+    flush: str = "await"
 
 
 @dataclass
@@ -179,6 +187,8 @@ class AgentStatus:
     golden: Optional[dict[str, Any]] = None
     #: S4: the apply policy in force and where it comes from — {"effective", "source": local|pinned|operator|manifest, "manifestSaid"}.
     apply_policy: dict[str, Any] = field(default_factory=lambda: {"effective": "auto", "source": "manifest", "manifestSaid": None})
+    #: S5: this process's own uploader (a resident host with no daemon); None when a daemon, a memory sink or ``upload=False`` owns the spool.
+    upload: Optional[dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -311,6 +321,15 @@ class AirPrompterAgent:
         self._next_heartbeat_ms: Optional[float] = None
         self._last_heartbeat_refusal: Optional[str] = None
         self._halt_without_contact_warned = False
+        # T26 / S5: the runtime's own upload grant as the last heartbeat left it, the cadence it asked for, and a hold.
+        self._upload_grant: Optional[UploadGrant] = None
+        self._upload_interval_seconds = 300
+        self._upload_retry_after_ms: Optional[float] = None
+        self._uploader: Optional[SpoolUploader] = None
+        self._flush_lock = threading.Lock()
+        self._flush_segment_n = 0
+        self._last_flush_minute: Optional[int] = None
+        self._spool_dir = spool_dir
         self._local_window: Optional[UpdateWindow] = parse_window(self._apply_options.window) if self._apply_options.window else None
         self._stamped_refusals: set[str] = set()
         self._stopped = False
@@ -557,7 +576,38 @@ class AirPrompterAgent:
             self._schedule()
             # The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
             threading.Thread(target=self._first_heartbeat, name="airprompter-heartbeat", daemon=True).start()
+            self._start_uploader()
         self._schedule_window_unlock()
+
+    def _start_uploader(self) -> None:
+        """S5: the daemon is an optimisation, never a requirement — a resident host with no daemon uploads its own spool. The same
+        uploader the daemon runs, in-process, on a timer off the request path: closed segments go out under this runtime's own
+        grant, a failed pass backs off, and past the budget the oldest unsent segments are dropped and counted. Never blocks a render."""
+        if self._uploader is not None or self._client is None or self._store is None or not self._telemetry.upload:
+            return
+        if callable(getattr(self._sink, "drain", None)):
+            return  # a memory sink has no directory to sweep; flush_telemetry() is its path
+        uploader = SpoolUploader(
+            directory=self._spool_dir,
+            instance_id=self._own_instance_id,
+            grant_for=lambda instance_id: self.request_upload_grant(instance_id=instance_id, instance_class=self._telemetry.instance_class or "resident"),
+            transport=self._o.get("transport"),
+            now_ms=self._now_ms,
+            rand=self._rand,
+            logger=self._log,
+            interval_seconds=self._upload_interval_seconds,
+            budget_bytes=self._telemetry.spool_budget_bytes,
+        )
+        self._uploader = uploader
+        uploader.start()
+        self._log({"event": "uploader_started", "intervalSeconds": self._upload_interval_seconds})
+
+    def upload_now(self) -> Optional[dict[str, Any]]:
+        """S5: one upload pass now (tests and operators); ``None`` when this process runs no uploader. Never raises."""
+        if self._uploader is None:
+            return None
+        result = self._uploader.run_once()
+        return {"uploaded": len(result.uploaded), "quarantined": len(result.quarantined), "dropped": result.dropped, "held": result.held}
 
     def _first_heartbeat(self) -> None:
         try:
@@ -912,7 +962,14 @@ class AirPrompterAgent:
             "storageProtection": "custom" if status.storage_protection == "daemon" else status.storage_protection,
             "catalog": {"models": list(dict.fromkeys(models))[:256], "reportedAt": self._now_iso()},
             "lease": {**({"expiresAt": status.lease_expires_at} if status.lease_expires_at else {}), "expired": status.lease_expired},
-            "spool": {"depthSegments": status.spool["depth_segments"], "depthBytes": status.spool["depth_bytes"], "droppedSegments": 0, "quarantinedSegments": 0},
+            "spool": {
+                "depthSegments": status.spool["depth_segments"],
+                "depthBytes": status.spool["depth_bytes"],
+                "droppedSegments": status.upload["droppedSegments"] if status.upload else 0,
+                "quarantinedSegments": status.upload["quarantinedSegments"] if status.upload else 0,
+                **({"lastUploadAt": status.upload["lastUploadAt"]} if status.upload and status.upload.get("lastUploadAt") else {}),
+                **({"backoffUntil": status.upload["backoffUntil"]} if status.upload and status.upload.get("backoffUntil") else {}),
+            },
             "unlockRequestsSeen": [r["releaseDigest"] for r in status.unlock_requests][:8],
             "disabled": status.disabled,
             # S4: what this host runs under, so the fleet view can say the console's setting is advisory here.
@@ -949,6 +1006,7 @@ class AirPrompterAgent:
                         interval = response.get("heartbeatIntervalSeconds")
                         if isinstance(interval, (int, float)) and 30 <= interval <= 3600:
                             self._heartbeat_interval_seconds = int(interval)
+                        self._take_grant(response)
                         # S3: the heartbeat names the origin's generation; a pointer that shows less is behind.
                         latest = response.get("latestGeneration")
                         if isinstance(latest, int) and not isinstance(latest, bool) and latest >= 0:
@@ -973,6 +1031,90 @@ class AirPrompterAgent:
             except Exception as error:  # noqa: BLE001
                 self._log({"event": "heartbeat_failed", "reason": str(error)})
 
+    def _take_grant(self, response: Mapping[str, Any]) -> None:
+        """T26: the heartbeat's answer carries the cadence and, on a host with a key, the upload grant or a hold."""
+        interval = response.get("uploadIntervalSeconds")
+        if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval >= 1:
+            self._upload_interval_seconds = int(interval)
+        grant = UploadGrant.from_wire(response.get("uploadGrant") or {})
+        if grant is not None:
+            self._upload_grant = grant
+            self._upload_retry_after_ms = None
+        else:
+            self._upload_grant = None
+            retry = response.get("retryAfterSeconds")
+            self._upload_retry_after_ms = self._now_ms() + float(retry) * 1000 if isinstance(retry, (int, float)) and retry > 0 else None
+
+    def request_upload_grant(self, *, instance_id: Optional[str] = None, instance_class: Optional[str] = None) -> GrantDecision:
+        """T26: an upload grant for one writer's prefix — a heartbeat carrying that writer's instance id (this runtime's own by
+        default). Never raises."""
+        if self._client is None:
+            return GrantDecision("unavailable", reason="offline")
+        own = instance_id is None or instance_id == self._own_instance_id
+        if own:
+            self.heartbeat_now()
+            if self._upload_grant is not None:
+                return GrantDecision("grant", grant=self._upload_grant, upload_interval_seconds=self._upload_interval_seconds)
+            if self._upload_retry_after_ms is not None:
+                return GrantDecision("hold", retry_after_seconds=max(1, math.ceil((self._upload_retry_after_ms - self._now_ms()) / 1000)), reason="retry_after")
+            return GrantDecision("unavailable", reason=self._last_heartbeat_refusal or "heartbeat_failed")
+        try:
+            body = {**self.heartbeat_body(), "instanceId": instance_id, **({"instanceClass": instance_class} if instance_class else {})}
+            result = self._client.heartbeat(body)
+            if result.status == "ok":
+                response = result.response or {}
+                interval = response.get("uploadIntervalSeconds")
+                if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval >= 1:
+                    self._upload_interval_seconds = int(interval)
+                grant = UploadGrant.from_wire(response.get("uploadGrant") or {})
+                if grant is not None:
+                    return GrantDecision("grant", grant=grant, upload_interval_seconds=self._upload_interval_seconds)
+                retry = response.get("retryAfterSeconds")
+                return GrantDecision("hold", retry_after_seconds=int(retry) if isinstance(retry, (int, float)) and retry > 0 else 900, reason="retry_after")
+            return GrantDecision("unavailable", reason=(result.code or f"http_{result.http_status}") if result.status == "refused" else f"http_{result.http_status}")
+        except Exception as error:  # noqa: BLE001
+            return GrantDecision("unavailable", reason=f"network:{error}")
+
+    def flush_telemetry(self) -> dict[str, Any]:
+        """T26 (D25 survives on serverless): the memory sink's rows, closed as one segment and POSTed under this runtime's own
+        grant. Rows that cannot go (no grant, a hold, a refused POST) are put back so the next flush carries them; past the
+        buffer the sink's own eviction reports the loss. Never raises; returns what happened."""
+        drain = getattr(self._sink, "drain", None)
+        if not callable(drain):
+            return {"status": "nothing"}
+        with self._flush_lock:
+            rows = drain(self._now_ms())
+            if not rows:
+                return {"status": "nothing"}
+
+            def requeue() -> None:
+                for row in rows:
+                    self._sink.append(row, self._now_ms())
+
+            if self._upload_grant is not None and instant(self._upload_grant.expires_at) - 60_000 > self._now_ms():
+                decision = GrantDecision("grant", grant=self._upload_grant)
+            else:
+                decision = self.request_upload_grant()
+            if decision.kind != "grant" or decision.grant is None:
+                requeue()
+                reason = f"retry_after:{decision.retry_after_seconds}" if decision.kind == "hold" else str(decision.reason)
+                return {"status": "held", "reason": reason, "rows": len(rows)}
+            minute = epoch_minute(self._now_ms())
+            self._flush_segment_n = self._flush_segment_n + 1 if self._last_flush_minute == minute else 0
+            self._last_flush_minute = minute
+            segment = segment_name(self._own_instance_id, minute, self._flush_segment_n)
+            data = ("\n".join(json.dumps(row, separators=(",", ":")) for row in rows) + "\n").encode("utf-8")
+            outcome = post_segment(grant=decision.grant, segment=segment, data=data, transport=self._o.get("transport"), now_ms=self._now_ms)
+            if outcome.status == "ok":
+                self._log({"event": "telemetry_flushed", "segment": segment, "rows": len(rows)})
+                return {"status": "uploaded", "segment": segment, "rows": len(rows)}
+            requeue()
+            if outcome.status == "refused" and outcome.expired:
+                self._upload_grant = None
+            reason = f"http_{outcome.http_status}" if outcome.status == "refused" else ("too_large" if outcome.status == "too_large" else f"network:{outcome.reason}")
+            self._log({"event": "telemetry_flush_failed", "reason": reason, "rows": len(rows)})
+            return {"status": "held", "reason": reason, "rows": len(rows)}
+
     def _schedule_heartbeat(self) -> None:
         self._heartbeat_timer.cancel()
         if self._stopped or self._client is None or self._daemon is not None:
@@ -991,7 +1133,10 @@ class AirPrompterAgent:
     # ------------------------------------------------------------------ serverless
 
     def invoke(self, handler: Callable[[], T]) -> T:
-        """on_invoke mode: run the handler between two sync passes (the trailing one runs on its own thread, off the response path)."""
+        """on_invoke mode: run the handler between two sync passes (the trailing one runs on its own thread, off the response path).
+        S5: the invocation's rows are flushed before ``invoke()`` returns — a platform that freezes the process at the response
+        (Lambda) would otherwise lose them with no ``dropped`` row possible. ``TelemetryOptions.flush="background"`` is the
+        documented opt-out for hosts that keep running after the response."""
         self.sync_now()
         if self._last_heartbeat_ms is None or self._now_ms() - self._last_heartbeat_ms >= self._heartbeat_interval_seconds * 1000:
             threading.Thread(target=self.heartbeat_now, name="airprompter-heartbeat", daemon=True).start()
@@ -1000,6 +1145,12 @@ class AirPrompterAgent:
         finally:
             self.spool.close_windows(self._now_ms())
             threading.Thread(target=self.sync_now, name="airprompter-sync", daemon=True).start()
+            # D25 on serverless: the invocation's rows go out under the runtime's own grant; a failure keeps them for the next one.
+            if self._client is not None and callable(getattr(self._sink, "drain", None)):
+                if self._telemetry.flush == "background":
+                    threading.Thread(target=self.flush_telemetry, name="airprompter-flush", daemon=True).start()
+                else:
+                    self.flush_telemetry()
 
     # ------------------------------------------------------------------ unlock / rollback
 
@@ -1408,6 +1559,7 @@ class AirPrompterAgent:
             next_sync_at=None if self._next_sync_ms is None or not self._timer.armed else iso_ms(self._next_sync_ms),
             golden=self._last_golden,
             apply_policy=self._effective_apply_policy(),
+            upload=self._uploader.status() if self._uploader is not None else None,
         )
 
     @property
@@ -1449,6 +1601,8 @@ class AirPrompterAgent:
         self._timer.cancel()
         self._window_timer.cancel()
         self._heartbeat_timer.cancel()
+        if self._uploader is not None:
+            self._uploader.stop()
         # A pass or a heartbeat in flight finishes first.
         with self._heartbeat_lock:
             pass

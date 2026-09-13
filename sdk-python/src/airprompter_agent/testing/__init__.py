@@ -7,6 +7,7 @@ Nothing here is loaded by the runtime.
 from __future__ import annotations
 
 import errno
+import re
 from typing import Optional
 
 from ..ports import ClockPort, FsPort
@@ -20,8 +21,9 @@ def _failure(code: str, path: str) -> OSError:
 
 
 def _normalize(path: str) -> str:
+    """POSIX keys whatever the host's separator: ``os.path.join`` on Windows hands the sink backslashes; a drive letter is dropped."""
     parts: list[str] = []
-    for part in path.split("/"):
+    for part in re.split(r"[\\/]+", re.sub(r"^[A-Za-z]:", "", path)):
         if part in ("", "."):
             continue
         if part == "..":

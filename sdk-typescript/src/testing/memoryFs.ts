@@ -23,9 +23,10 @@ function failure(code: string, path: string): FsFailure {
   return error;
 }
 
+/** POSIX keys whatever the host's separator: `path.join` on Windows hands the sink backslashes, and a drive letter is dropped. */
 function normalize(path: string): string {
   const parts: string[] = [];
-  for (const part of path.split("/")) {
+  for (const part of path.replace(/^[A-Za-z]:/, "").split(/[\\/]+/)) {
     if (part === "" || part === ".") continue;
     if (part === "..") parts.pop();
     else parts.push(part);

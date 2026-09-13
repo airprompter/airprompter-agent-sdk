@@ -61,6 +61,10 @@ class FakeControlPlane:
         self.require_countersign = False
         # T9: every heartbeat body the fake accepted, and what it answers (a test may change the cadence).
         self.heartbeats: list[dict[str, Any]] = []
+        #: S3: the generation a pinned pointer keeps answering with (None: the pointer follows promotions).
+        self.pinned_pointer: Optional[int] = None
+        #: S3: whether the heartbeat answer names the origin's generation (an older service does not).
+        self.heartbeat_latest_generation = True
         self.heartbeat_interval_seconds = 300
         self.heartbeat_refusal: Optional[dict[str, Any]] = None
 
@@ -131,10 +135,16 @@ class FakeControlPlane:
             if path.endswith("/generation.json"):
                 if not self._current:
                     return httpx.Response(404)
+                payload = self._current["manifest"]["payload"]
+                if self.pinned_pointer is not None:
+                    # S3: a party between the fleet and the edge pins the pointer — the same stale answer, the same ETag, forever.
+                    pinned_etag = f'"edge-pinned-{self.pinned_pointer}"'
+                    if request.headers.get("if-none-match") == pinned_etag:
+                        return httpx.Response(304)
+                    return httpx.Response(200, json={"generation": self.pinned_pointer, "releaseDigest": payload["releaseDigest"], "leaseSeconds": payload["leaseSeconds"]}, headers={"etag": pinned_etag})
                 etag = f'"edge-{self.edge_etag}"'
                 if request.headers.get("if-none-match") == etag:
                     return httpx.Response(304)
-                payload = self._current["manifest"]["payload"]
                 return httpx.Response(200, json={"generation": payload["generation"], "releaseDigest": payload["releaseDigest"], "leaseSeconds": payload["leaseSeconds"]}, headers={"etag": etag})
             if path.endswith("/root.json"):
                 return httpx.Response(200, json=self.root)
@@ -171,7 +181,11 @@ class FakeControlPlane:
                     if key not in allowed:
                         return httpx.Response(400, json={"error": f"heartbeat: unknown {key}"})
                 self.heartbeats.append(body)
-                return httpx.Response(200, json={"pollSeconds": 30, "uploadIntervalSeconds": 300, "heartbeatIntervalSeconds": self.heartbeat_interval_seconds, "expiresAt": iso_ms(now_ms() + self.heartbeat_interval_seconds * 3000)})
+                answer: dict = {"pollSeconds": 30, "uploadIntervalSeconds": 300, "heartbeatIntervalSeconds": self.heartbeat_interval_seconds, "expiresAt": iso_ms(now_ms() + self.heartbeat_interval_seconds * 3000)}
+                # S3: the authenticated answer names the origin's generation; a runtime whose pointer says less goes to the manifest.
+                if self.heartbeat_latest_generation:
+                    answer["latestGeneration"] = self._current["manifest"]["payload"]["generation"] if self._current else 0
+                return httpx.Response(200, json=answer)
             manifest_match = re.match(r"^/v1/agents/([^/]+)/targets/([^/]+)/manifest$", path)
             if manifest_match:
                 if manifest_match.group(1) != self.scope["agentId"]:

@@ -32,7 +32,9 @@ ApplyPolicyDecision = str  # "activated" | "staged" | "activated_externally"
 
 @dataclass
 class SyncPassOutput:
-    outcome: str  # "unchanged" | "activated" | "activated_externally" | "staged" | "refused" | "unavailable" | "nothing_promoted" | "held_back"
+    #: ``pointer_unchanged``: the unsigned edge pointer said nothing moved — silence, not contact (S3).
+    #: ``unchanged``: the origin's authenticated 304, or a signed manifest at the generation already held — contact.
+    outcome: str  # "pointer_unchanged" | "unchanged" | "activated" | "activated_externally" | "staged" | "refused" | "unavailable" | "nothing_promoted" | "held_back"
     etag: Optional[str]
     edge_etag: Optional[str]
     trusted_root: Mapping[str, Any]
@@ -65,6 +67,7 @@ def sync_once(
     fetch_root: Optional[Callable[[], Optional[Mapping[str, Any]]]] = None,
     edge_pointer_url: Optional[str] = None,
     edge_etag: Optional[str] = None,
+    skip_pointer: bool = False,
     require_countersign: Optional[bool] = None,
     countersign_root: Optional[Mapping[str, Any]] = None,
     on_refusal: Optional[Callable[[str, Optional[int]], None]] = None,
@@ -98,15 +101,16 @@ def sync_once(
                 else:
                     refuse(verdict.reason or "root_signature_invalid", None)
 
-        # Idle path: the edge pointer says whether anything moved, without a Lambda on the other end.
-        if edge_pointer_url:
+        # Idle path: the edge pointer says whether anything moved, without a Lambda on the other end. It is unsigned and
+        # cacheable, so its silence is never contact (S3): the lease does not move on ``pointer_unchanged``.
+        if edge_pointer_url and not skip_pointer:
             edge = client.edge_pointer(edge_pointer_url, current_edge_etag)
             if edge.status == "not_modified":
-                return done("unchanged")
+                return done("pointer_unchanged")
             if edge.status == "ok" and edge.pointer is not None:
                 current_edge_etag = edge.etag
                 if active and edge.pointer.get("generation", 0) <= active.generation:
-                    return done("unchanged")
+                    return done("pointer_unchanged")
 
         fetched = client.manifest(if_none_match=etag)
         if fetched.status == "not_modified":

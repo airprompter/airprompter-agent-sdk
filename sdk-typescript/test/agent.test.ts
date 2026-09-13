@@ -297,16 +297,20 @@ test("a disable directive stops rendering the slot (or the agent) and stamps one
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("the lease counts from the last successful contact: 304s keep it fresh; without contact it lapses — degrade keeps serving and stamps once, halt refuses", async () => {
+test("the lease counts from the last successful contact: the origin's 304 keeps it fresh, the pointer's does not; without contact it lapses — degrade keeps serving and stamps once, halt refuses", async () => {
   const stateDir = tempDir();
   const plane = new FakeControlPlane(scope);
   const [triage, reply] = triageSlots(plane);
   plane.promote([triage!, reply!], { leaseSeconds: 600 });
   let clock = Date.parse("2026-09-12T14:03:10Z");
   const ap = await start(plane, stateDir, { now: () => clock, telemetry: { sink: "memory" } });
-  assert.equal(ap.status().leaseExpiresAt, new Date(clock + 600_000).toISOString());
+  const leaseAtStart = ap.status().leaseExpiresAt;
+  assert.equal(leaseAtStart, new Date(clock + 600_000).toISOString());
   clock += 500_000;
-  await ap.syncNow(); // unchanged (edge 304): still a contact
+  await ap.syncNow(); // the edge pointer's 304 (S3): silence, not contact
+  assert.equal(ap.status().lastSyncOutcome, "pointer_unchanged");
+  assert.equal(ap.status().leaseExpiresAt, leaseAtStart, "a pointer 304 does not move the lease");
+  await ap.heartbeatNow(); // the authenticated answer does
   assert.equal(ap.status().leaseExpiresAt, new Date(clock + 600_000).toISOString());
   assert.equal(ap.status().onLeaseExpiry, "degrade");
   clock += 601_000;
@@ -324,7 +328,9 @@ test("the lease counts from the last successful contact: 304s keep it fresh; wit
   const halt = await start(haltPlane, haltDir, { now: () => clock });
   clock += 61_000;
   assert.throws(() => halt.prompt("support.reply").render({}), (e: unknown) => e instanceof RenderRefusedError && e.reason === "lease_expired");
-  await halt.syncNow();
+  await halt.syncNow(); // the pointer's 304 is not contact (S3): still halted
+  assert.throws(() => halt.prompt("support.reply").render({}), (e: unknown) => e instanceof RenderRefusedError && e.reason === "lease_expired");
+  await halt.heartbeatNow(); // the origin's authenticated answer is
   assert.equal(halt.prompt("support.reply").render({}).text, "Reply politely to .");
   await halt.stop();
   rmSync(stateDir, { recursive: true, force: true });

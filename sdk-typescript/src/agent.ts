@@ -223,6 +223,11 @@ export class AirPrompterAgent {
   private stagedManifest: Manifest | null = null;
   private lastGolden: AgentStatus["golden"] = null;
   private lastContactMs: number | null = null;
+  /** S3: the heartbeat named a generation the pointer has not shown; the next pass goes to the signed manifest. */
+  private pointerBehind = false;
+  /** S3: attached to a daemon, the lease is the daemon's — its `slot` answer and `lease` events carry it. */
+  private daemonLeaseExpiresAt: string | null = null;
+  private readonly contactListeners = new Set<(contact: { expiresAt: string | null; lastContactAt: string }) => void>();
   private bundleNotAfter: string | null = null;
   /**
    * T9: directives from the latest manifest whose envelope verified — honoured even when that manifest was left staged,
@@ -315,15 +320,18 @@ export class AirPrompterAgent {
   private async attachDaemon(client: DaemonClient): Promise<void> {
     this.daemon = client;
     this.daemonStagedGeneration = client.hello.stagedGeneration;
-    this.active = await client.slot();
+    const { leaseExpiresAt, ...slot } = await client.slot();
+    this.active = slot;
     this.source = "daemon";
-    this.lastContactMs = this.nowMs();
+    this.daemonLeaseExpiresAt = leaseExpiresAt;
     this.log({ event: "daemon_attached", generation: this.active.generation, daemon: client.hello.daemon });
     client.onEvent((event) => {
       if (event.event === "generation") {
         this.daemonStagedGeneration = typeof event.stagedGeneration === "number" ? event.stagedGeneration : null;
         void this.refreshFromDaemon();
       }
+      // S3: the daemon is the process that talks to the origin; its contact is the fleet's lease.
+      if (event.event === "lease") this.daemonLeaseExpiresAt = typeof event.expiresAt === "string" ? event.expiresAt : null;
       if (event.event === "shutdown") this.log({ event: "daemon_shutdown" });
     });
     client.onClose(() => {
@@ -339,11 +347,11 @@ export class AirPrompterAgent {
     if (this.daemonRefreshing) return this.daemonRefreshing;
     this.daemonRefreshing = (async () => {
       try {
-        const slot = await this.daemon!.slot();
+        const { leaseExpiresAt, ...slot } = await this.daemon!.slot();
         const changed = slot.generation !== this.active?.generation;
         this.active = slot;
         this.source = "daemon";
-        this.lastContactMs = this.nowMs();
+        this.daemonLeaseExpiresAt = leaseExpiresAt ?? this.daemonLeaseExpiresAt;
         this.lastRefusal = null;
         if (changed) this.emitChange();
       } catch (error) {
@@ -439,6 +447,32 @@ export class AirPrompterAgent {
       void this.heartbeatNow().finally(() => this.scheduleHeartbeat());
     }
     this.scheduleWindowUnlock();
+  }
+
+  /** S3: contact with the origin — a signed manifest or an authenticated answer. Renews the lease and tells the daemon's clients. */
+  private markContact(): void {
+    this.lastContactMs = this.nowMs();
+    const contact = { expiresAt: this.leaseExpiresAt(), lastContactAt: new Date(this.lastContactMs).toISOString() };
+    for (const listener of this.contactListeners) listener(contact);
+  }
+
+  /** S3: the heartbeat names the origin's generation; a pointer that shows less is behind, and the next pass skips it. */
+  private takeLatestGeneration(response: { latestGeneration?: unknown }): void {
+    const latest = response.latestGeneration;
+    if (typeof latest !== "number" || !Number.isInteger(latest) || latest < 0) return;
+    const seen = Math.max(this.active?.generation ?? 0, this.stagedManifest?.payload.generation ?? 0, this.store?.state.generation ?? 0);
+    if (latest > seen && !this.pointerBehind) {
+      this.pointerBehind = true;
+      this.log({ event: "pointer_behind", latestGeneration: latest, seen });
+      // Go now: the origin has something the pointer has not shown (a freeze, a dial-down, a release).
+      void this.syncNow();
+    }
+  }
+
+  /** S3: the daemon subscribes to broadcast its lease to attached SDKs. */
+  onContact(listener: (contact: { expiresAt: string | null; lastContactAt: string }) => void): () => void {
+    this.contactListeners.add(listener);
+    return () => void this.contactListeners.delete(listener);
   }
 
   /** Called whenever the active or staged generation changes (sync, unlock, rollback, daemon event). */
@@ -596,6 +630,7 @@ export class AirPrompterAgent {
         etag: this.etag,
         edgePointerUrl: this.options.sync?.edgePointerUrl ?? null,
         edgeEtag: this.edgeEtag,
+        skipPointer: this.pointerBehind,
         ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}),
         countersignRoot: this.options.countersignRoot ?? null,
         applyPolicy: (manifest) => this.applyPolicy(manifest),
@@ -615,9 +650,12 @@ export class AirPrompterAgent {
       this.trustedRoot = result.trustedRoot;
       this.lastSyncMs = this.nowMs();
       this.lastSyncOutcome = result.outcome;
+      // S3: contact is a signed manifest or the origin's authenticated answer — never the pointer's silence.
       const contact = result.outcome === "unchanged" || result.outcome === "activated" || result.outcome === "activated_externally" || result.outcome === "staged" || result.outcome === "nothing_promoted" || result.outcome === "held_back";
-      if (contact) this.lastContactMs = this.nowMs();
-      this.consecutiveSyncFailures = contact ? 0 : this.consecutiveSyncFailures + 1;
+      if (contact) this.markContact();
+      // The pass went to the origin (any outcome but the pointer's silence): the pointer is trusted again from here.
+      if (result.outcome !== "pointer_unchanged" && result.outcome !== "unavailable") this.pointerBehind = false;
+      this.consecutiveSyncFailures = contact || result.outcome === "pointer_unchanged" ? 0 : this.consecutiveSyncFailures + 1;
       if (result.outcome === "activated" && result.active) {
         this.active = result.active;
         this.source = "store";
@@ -715,7 +753,8 @@ export class AirPrompterAgent {
         if (result.status === "ok") {
           this.lastHeartbeatMs = this.nowMs();
           this.lastHeartbeatRefusal = null;
-          this.lastContactMs = this.nowMs();
+          this.markContact();
+          this.takeLatestGeneration(result.response);
           const interval = Number(result.response.heartbeatIntervalSeconds);
           if (Number.isFinite(interval) && interval >= 30 && interval <= 3600) this.heartbeatIntervalSeconds = interval;
           this.takeGrant(result.response);
@@ -925,6 +964,8 @@ export class AirPrompterAgent {
   private leaseExpiresAt(): string | null {
     const manifest = this.active?.manifest.payload;
     if (!manifest) return null;
+    // S3: attached to a daemon, the daemon's contact with the origin is the lease; a local socket answer is not contact.
+    if (this.source === "daemon" || this.daemon) return this.daemonLeaseExpiresAt;
     if (this.lastContactMs !== null) return new Date(this.lastContactMs + manifest.leaseSeconds * 1000).toISOString();
     if (this.bundleNotAfter && this.source === "vendored_bundle") return new Date(instant(this.bundleNotAfter)).toISOString();
     return new Date(instant(manifest.issuedAt) + manifest.leaseSeconds * 1000).toISOString();

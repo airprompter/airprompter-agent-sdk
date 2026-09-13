@@ -58,6 +58,7 @@ export class DaemonServer {
   private server: Server | null = null;
   private readonly clients = new Set<Socket>();
   private readonly startedMs: number;
+  private detachContact: (() => void) | null = null;
   private detachChange: (() => void) | null = null;
 
   constructor(
@@ -109,6 +110,8 @@ export class DaemonServer {
     });
     if (process.platform !== "win32") chmodSync(this.options.socketPath, 0o600);
     this.detachChange = this.agent.onChange((change) => this.broadcast({ event: "generation", generation: change.generation, stagedGeneration: change.stagedGeneration }));
+    // S3: every contact with the origin (a signed manifest, an authenticated answer) renews the fleet's lease.
+    this.detachContact = this.agent.onContact((contact) => this.broadcast({ event: "lease", expiresAt: contact.expiresAt, lastContactAt: contact.lastContactAt }));
     this.log({ event: "listening", socketPath: this.options.socketPath });
   }
 
@@ -185,7 +188,8 @@ export class DaemonServer {
       case "slot": {
         const release = this.agent.release;
         if (!release) throw new Error("no_verified_release");
-        return { slot: release.slot, generation: release.generation, signingKeyId: release.signingKeyId, manifest: release.manifest, payloads: [...release.payloads].map(([contentHash, bytes]) => ({ contentHash, bytes: Buffer.from(bytes).toString("base64url") })) };
+        // S3: the daemon's lease rides the slot answer — an attached SDK never counts this socket as contact with the origin.
+        return { slot: release.slot, generation: release.generation, signingKeyId: release.signingKeyId, manifest: release.manifest, payloads: [...release.payloads].map(([contentHash, bytes]) => ({ contentHash, bytes: Buffer.from(bytes).toString("base64url") })), leaseExpiresAt: status.leaseExpiresAt };
       }
       case "status":
         return this.status() as unknown as Record<string, unknown>;
@@ -256,6 +260,7 @@ export class DaemonServer {
 
   async close(): Promise<void> {
     this.detachChange?.();
+    this.detachContact?.();
     this.broadcast({ event: "shutdown" });
     for (const client of this.clients) client.end();
     const server = this.server;

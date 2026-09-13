@@ -263,6 +263,18 @@ writes the same catalogue for build steps.
 
 Every file in `protocol/vectors/` runs through these modules in `test/`.
 
+### The pointer never extends trust
+
+The edge pointer is unsigned and cacheable, so a party between your fleet
+and the edge can pin it. It cannot keep you on the last release: the lease
+renews only when a signed manifest is fetched or the origin answers an
+authenticated request (the manifest route's `304`, the heartbeat), the
+heartbeat's `latestGeneration` sends a runtime whose pointer lags straight
+to the signed manifest (`pointer_behind` in the log), and an SDK attached
+to a host daemon takes the daemon's lease rather than counting the local
+socket as contact. `status().lastSyncOutcome` says `pointer_unchanged` for
+the pointer's silence and `unchanged` for the origin's.
+
 ### Error identity is data, never the class
 
 A lockfile can hold two copies of this package (a sibling package pinning a

@@ -24,7 +24,11 @@ import type { SyncClient } from "./client.js";
 export type ApplyPolicyDecision = "activated" | "staged" | "activated_externally";
 
 export interface SyncPassResult {
-  outcome: "unchanged" | "activated" | "activated_externally" | "staged" | "refused" | "unavailable" | "nothing_promoted" | "held_back";
+  /**
+   * `pointer_unchanged`: the unsigned edge pointer said nothing moved — silence, not contact (S3).
+   * `unchanged`: the origin's authenticated `304`, or a signed manifest at the generation already held — contact.
+   */
+  outcome: "pointer_unchanged" | "unchanged" | "activated" | "activated_externally" | "staged" | "refused" | "unavailable" | "nothing_promoted" | "held_back";
   generation?: number;
   reason?: RefusalCode | "unauthorized" | "forbidden" | "network" | string;
 }
@@ -36,6 +40,8 @@ export interface SyncPassInput {
   scope: { organizationId: string; agentId: string; target: "dev" | "staging" | "prod" };
   /** The last accepted root, or the synthetic pinned document. */
   trustedRoot: RootMetadata;
+  /** S3: the heartbeat said the origin is ahead of what the pointer showed — go to the signed manifest, skip the pointer. */
+  skipPointer?: boolean;
   /** A candidate root document fetched beside the manifest, when the runtime polls one. */
   fetchRoot?: () => Promise<RootMetadata | null>;
   /** What the active slot holds (its payload bytes are reused for unchanged hashes). */
@@ -104,13 +110,14 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
       }
     }
 
-    // Idle path: the edge pointer says whether anything moved, without a Lambda on the other end.
-    if (input.edgePointerUrl) {
+    // Idle path: the edge pointer says whether anything moved, without a Lambda on the other end. It is unsigned and
+    // cacheable, so its silence is never contact (S3): the lease does not move on `pointer_unchanged`.
+    if (input.edgePointerUrl && !input.skipPointer) {
       const edge = await input.client.edgePointer(input.edgePointerUrl, edgeEtag);
-      if (edge.status === "not_modified") return done({ outcome: "unchanged" });
+      if (edge.status === "not_modified") return done({ outcome: "pointer_unchanged" });
       if (edge.status === "ok") {
         edgeEtag = edge.etag;
-        if (input.active && edge.pointer.generation <= input.active.generation) return done({ outcome: "unchanged" });
+        if (input.active && edge.pointer.generation <= input.active.generation) return done({ outcome: "pointer_unchanged" });
       }
     }
 

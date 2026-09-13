@@ -290,6 +290,10 @@ class AirPrompterAgent:
         self._staged_manifest: Optional[Mapping[str, Any]] = None
         self._last_golden: Optional[dict[str, Any]] = None
         self._last_contact_ms: Optional[float] = None
+        #: S3: the heartbeat named a generation the pointer has not shown; the next pass goes to the signed manifest.
+        self._pointer_behind = False
+        #: S3: attached to a daemon, the lease is the daemon's.
+        self._daemon_lease_expires_at: Optional[str] = None
         self._bundle_not_after: Optional[str] = None
         # T9: directives from the latest manifest whose envelope verified — honoured even when that manifest was left staged,
         # held back, or ignored as the generation already held. A Freeze reaches a fleet that never unlocks.
@@ -406,7 +410,8 @@ class AirPrompterAgent:
             self._daemon_staged_generation = client.hello.staged_generation
             self._active = client.slot()
             self._source = "daemon"
-            self._last_contact_ms = self._now_ms()
+            # S3: the daemon is the process that talks to the origin; its lease is the fleet's. The socket is not contact.
+            self._daemon_lease_expires_at = client.last_lease_expires_at
         self._log({"event": "daemon_attached", "generation": self._active.generation, "daemon": client.hello.daemon})
 
         def on_event(event: dict[str, Any]) -> None:
@@ -414,6 +419,9 @@ class AirPrompterAgent:
                 staged = event.get("stagedGeneration")
                 self._daemon_staged_generation = staged if isinstance(staged, int) else None
                 self._refresh_from_daemon()
+            if event.get("event") == "lease":
+                expires = event.get("expiresAt")
+                self._daemon_lease_expires_at = expires if isinstance(expires, str) else None
             if event.get("event") == "shutdown":
                 self._log({"event": "daemon_shutdown"})
 
@@ -440,7 +448,8 @@ class AirPrompterAgent:
             changed = slot.generation != (self._active.generation if self._active else None)
             self._active = slot
             self._source = "daemon"
-            self._last_contact_ms = self._now_ms()
+            if daemon.last_lease_expires_at is not None:
+                self._daemon_lease_expires_at = daemon.last_lease_expires_at
             self._last_refusal = None
         if changed:
             self._emit_change()
@@ -727,6 +736,7 @@ class AirPrompterAgent:
                 etag=self._etag,
                 edge_pointer_url=self._sync_options.edge_pointer_url,
                 edge_etag=self._edge_etag,
+                skip_pointer=self._pointer_behind,
                 require_countersign=self._o.get("require_countersign"),
                 countersign_root=self._o.get("countersign_root"),
                 apply_policy=self._apply_policy,
@@ -741,10 +751,13 @@ class AirPrompterAgent:
                 self._trusted_root = result.trusted_root
                 self._last_sync_ms = self._now_ms()
                 self._last_sync_outcome = result.outcome
+                # S3: contact is a signed manifest or the origin's authenticated answer — never the pointer's silence.
                 contact = result.outcome in ("unchanged", "activated", "activated_externally", "staged", "nothing_promoted", "held_back")
                 if contact:
                     self._last_contact_ms = self._now_ms()
-                self._consecutive_sync_failures = 0 if contact else self._consecutive_sync_failures + 1
+                if result.outcome not in ("pointer_unchanged", "unavailable"):
+                    self._pointer_behind = False
+                self._consecutive_sync_failures = 0 if (contact or result.outcome == "pointer_unchanged") else self._consecutive_sync_failures + 1
                 activated = result.outcome == "activated" and result.active is not None
                 if activated:
                     self._active = result.active
@@ -849,6 +862,7 @@ class AirPrompterAgent:
                 result = self._client.heartbeat(self.heartbeat_body())
                 if result.status == "ok":
                     response = result.response or {}
+                    behind = False
                     with self._lock:
                         self._last_heartbeat_ms = self._now_ms()
                         self._last_heartbeat_refusal = None
@@ -856,7 +870,22 @@ class AirPrompterAgent:
                         interval = response.get("heartbeatIntervalSeconds")
                         if isinstance(interval, (int, float)) and 30 <= interval <= 3600:
                             self._heartbeat_interval_seconds = int(interval)
+                        # S3: the heartbeat names the origin's generation; a pointer that shows less is behind.
+                        latest = response.get("latestGeneration")
+                        if isinstance(latest, int) and not isinstance(latest, bool) and latest >= 0:
+                            seen = max(
+                                self._active.generation if self._active else 0,
+                                self._staged_manifest["payload"]["generation"] if self._staged_manifest else 0,
+                                self._store.state.get("generation", 0) if self._store else 0,
+                            )
+                            if latest > seen and not self._pointer_behind:
+                                self._pointer_behind = True
+                                behind = True
+                                self._log({"event": "pointer_behind", "latestGeneration": latest, "seen": seen})
                     self._log({"event": "heartbeat", "intervalSeconds": self._heartbeat_interval_seconds, "expiresAt": response.get("expiresAt")})
+                    if behind:
+                        # Go now: the origin has something the pointer has not shown (a freeze, a dial-down, a release).
+                        self.sync_now()
                 elif result.status == "refused":
                     self._last_heartbeat_refusal = result.code or f"http_{result.http_status}"
                     self._log({"event": "heartbeat_refused", "httpStatus": result.http_status, "code": result.code})
@@ -969,6 +998,9 @@ class AirPrompterAgent:
         if self._active is None:
             return None
         payload = self._active.manifest["payload"]
+        # S3: attached to a daemon, the daemon's contact with the origin is the lease; a local socket answer is not contact.
+        if self._source == "daemon" or self._daemon is not None:
+            return self._daemon_lease_expires_at
         if self._last_contact_ms is not None:
             return iso_ms(self._last_contact_ms + payload["leaseSeconds"] * 1000)
         if self._bundle_not_after and self._source == "vendored_bundle":

@@ -125,3 +125,33 @@ fresh file as well and runs the reference verifier over both, which proves
 the chain logic and not one lucky nonce. Each case gives the runtime's
 configuration (pinned root, stored root version, stored generation, `now`,
 scope), the documents, and the expected verdict.
+
+## The pointer never extends trust (S3)
+
+The edge pointer (`generation.json`) is unsigned and cacheable: it tells a
+runtime whether anything *may* have moved, cheaply, without a Lambda behind
+it. It is therefore the thing a party between the fleet and the edge can
+pin or serve stale, and a pinned pointer must not be able to keep a fleet
+on the last release indefinitely — that would hide a Freeze (`disable`), a
+retreat and a dial-down. Three rules:
+
+1. **Pointer contact does not renew the lease.** The lease counts from the
+   last *signed* manifest fetch (an envelope that verified, whether it
+   activated, staged, was held back, or was unchanged at the same
+   generation) or from an *authenticated* answer of the origin (the
+   manifest route's `304`, the heartbeat's `200`). A `304` from the edge
+   pointer, or a pointer whose generation is not above the active one,
+   is silence, not contact.
+2. **The heartbeat carries `latestGeneration`.** The authenticated answer
+   names the environment's current generation as the origin knows it. A
+   runtime whose pointer says less marks the pointer behind, fetches the
+   signed manifest directly on its next pass (skipping the pointer), and
+   only then trusts the pointer again.
+3. **A runtime attached to a host daemon takes the daemon's lease.** The
+   daemon is the process that talks to the origin; its `slot` answer and
+   its `lease` event carry `leaseExpiresAt`, and an attached SDK never
+   counts a local socket answer as contact with the registry.
+
+Together: a stale or pinned pointer costs at most one heartbeat interval
+of delay before the fleet sees what the origin has, and a runtime that can
+reach only the pointer expires honestly.

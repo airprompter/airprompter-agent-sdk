@@ -34,6 +34,15 @@ export interface DaemonSlotResponse {
   signingKeyId: string;
   manifest: Manifest;
   payloads: Array<{ contentHash: string; bytes: string }>;
+  /** S3: the daemon's lease — when its last contact with the origin runs out; null before any contact. */
+  leaseExpiresAt?: string | null;
+}
+
+/** S3: the daemon's contact with the origin renewed; attached SDKs adopt the lease. */
+export interface DaemonLeaseEvent {
+  event: "lease";
+  expiresAt: string | null;
+  lastContactAt: string;
 }
 
 export interface DaemonGenerationEvent {
@@ -187,9 +196,17 @@ export class DaemonClient {
     });
   }
 
-  async slot(): Promise<LoadedSlot> {
+  async slot(): Promise<LoadedSlot & { leaseExpiresAt: string | null }> {
     const response = (await this.request("slot")) as unknown as DaemonSlotResponse;
-    return { slot: response.slot, generation: response.generation, signingKeyId: response.signingKeyId, manifest: response.manifest, payloads: new Map(response.payloads.map((entry) => [entry.contentHash, Buffer.from(entry.bytes, "base64url")])) };
+    return {
+      slot: response.slot,
+      generation: response.generation,
+      signingKeyId: response.signingKeyId,
+      manifest: response.manifest,
+      payloads: new Map(response.payloads.map((entry) => [entry.contentHash, Buffer.from(entry.bytes, "base64url")])),
+      // S3: the daemon's lease rides the slot answer; an older daemon says nothing and the SDK keeps what it had.
+      leaseExpiresAt: typeof response.leaseExpiresAt === "string" ? response.leaseExpiresAt : null,
+    };
   }
 
   onEvent(listener: (event: Record<string, unknown>) => void): () => void {

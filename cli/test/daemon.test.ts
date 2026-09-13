@@ -83,6 +83,9 @@ test("two SDK processes attach to one daemon; one poll moves both; healthz answe
   assert.equal(sdkA.status().source, "daemon");
   assert.deepEqual(sdkA.status().daemon, { attached: true, socketPath });
   assert.equal(sdkA.status().storageProtection, "daemon");
+  // S3: an attached SDK takes the daemon's lease; its own socket answers are not contact with the origin.
+  assert.equal(sdkA.status().lastContactAt, null, "the socket is not contact");
+  assert.ok(sdkA.status().leaseExpiresAt, "the daemon's lease rides the slot answer");
   assert.equal(sdkA.prompt("support.reply").render({ name: "x" }).text, "one x");
   assert.equal(sdkB.generation, 1);
   assert.notEqual(sdkA.instanceId, sdkB.instanceId, "each writer has its own instance id");

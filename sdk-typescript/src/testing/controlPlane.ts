@@ -108,6 +108,10 @@ export class FakeControlPlane {
    * `<grantBaseUrl>/s3/agent-telemetry` checks the policy the way the bucket would and keeps the objects by key.
    */
   grantBaseUrl: string | null = null;
+  /** S3: a party between the fleet and the edge pins the pointer at this generation; the origin moves on regardless. */
+  pinnedPointer: { generation: number } | null = null;
+  /** S3: whether the heartbeat answer names the origin's generation (an older service does not). */
+  heartbeatLatestGeneration = true;
   grantTtlMs = 15 * 60 * 1000;
   grantHold: { retryAfterSeconds: number } | null = null;
   uploadIntervalSeconds = 300;
@@ -228,6 +232,12 @@ export class FakeControlPlane {
       const parsed = new URL(url);
       if (parsed.pathname.endsWith("/generation.json")) {
         if (!this.current) return respond(404);
+        if (this.pinnedPointer) {
+          // The pinned pointer: the same stale answer, the same ETag, forever.
+          const pinnedEtag = `"edge-pinned-${this.pinnedPointer.generation}"`;
+          if (init?.headers?.["if-none-match"] === pinnedEtag) return respond(304);
+          return respond(200, JSON.stringify({ generation: this.pinnedPointer.generation, releaseDigest: this.current.manifest.payload.releaseDigest, leaseSeconds: this.current.manifest.payload.leaseSeconds }), { etag: pinnedEtag });
+        }
         const etag = `"edge-${this.edgeEtag}"`;
         if (init?.headers?.["if-none-match"] === etag) return respond(304);
         return respond(200, JSON.stringify({ generation: this.current.manifest.payload.generation, releaseDigest: this.current.manifest.payload.releaseDigest, leaseSeconds: this.current.manifest.payload.leaseSeconds }), { etag });
@@ -260,6 +270,8 @@ export class FakeControlPlane {
         }
         this.heartbeats.push(body);
         const answer: Record<string, unknown> = { pollSeconds: 30, uploadIntervalSeconds: this.uploadIntervalSeconds, heartbeatIntervalSeconds: this.heartbeatIntervalSeconds, expiresAt: new Date(Date.now() + this.heartbeatIntervalSeconds * 3000).toISOString() };
+        // S3: the authenticated answer names the origin's generation; a runtime whose pointer says less goes to the manifest.
+        if (this.heartbeatLatestGeneration) answer.latestGeneration = this.current?.manifest.payload.generation ?? 0;
         if (this.grantBaseUrl) {
           if (this.grantHold) answer.retryAfterSeconds = this.grantHold.retryAfterSeconds;
           else answer.uploadGrant = this.issueGrant(String(body.instanceId), this.now());

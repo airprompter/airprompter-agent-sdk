@@ -46,7 +46,7 @@ connection.
 | `op` | Result | Notes |
 |---|---|---|
 | `hello` | `daemon`, `protocol`, `agentId`, `target`, `instanceId`, `generation`, `stagedGeneration` | First message on a connection; the SDK checks `agentId`/`target` match what it was started with. |
-| `slot` | `slot`, `generation`, `signingKeyId`, `manifest`, `payloads[]` | The active, verified release: the manifest envelope and every referenced payload's bytes. Plaintext over the local socket — that is what the store's key protects at rest and the socket's mode protects in transit. |
+| `slot` | `slot`, `generation`, `signingKeyId`, `manifest`, `payloads[]`, `leaseExpiresAt` | The active, verified release: the manifest envelope and every referenced payload's bytes. Plaintext over the local socket — that is what the store's key protects at rest and the socket's mode protects in transit. `leaseExpiresAt` (S3) is the daemon's own lease — when its last contact with the origin runs out, or `null` before any — and an attached SDK adopts it: the socket is never contact with the registry. |
 | `status` | the daemon's status (see below) | |
 | `sync` | `outcome` | Run one sync pass now. |
 | `unlock` | `generation` or `null` | Activate the staged release for the whole host. |
@@ -61,6 +61,7 @@ Anything else answers `{"ok":false,"error":"unknown_op"}`.
 | `event` | Fields | When |
 |---|---|---|
 | `generation` | `generation`, `stagedGeneration` | The active or staged generation changed (sync, unlock, rollback). SDKs fetch `slot` again. |
+| `lease` | `expiresAt`, `lastContactAt` | S3: the daemon's contact with the origin renewed (a signed manifest fetched, or an authenticated answer). Attached SDKs adopt `expiresAt` as their lease; the unsigned edge pointer never triggers it. |
 | `shutdown` | — | The daemon is stopping; SDKs keep serving what they hold and reconnect when it is back. |
 
 ## Status document

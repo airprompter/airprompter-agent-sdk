@@ -2,14 +2,27 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://airprompter.com/protocol/0.2/heartbeat.schema.json",
   "title": "AirPrompter heartbeat",
-  "description": "One route, one Lambda (D41): an instance reports its state and receives the presigned S3 upload grant for its spool (§9.1). Telemetry bytes never pass through this route. Everything here is content-free by schema: no prompt text, no outputs, no end-user identifiers.",
+  "description": "One route, one Lambda (D41): an instance reports its state and receives the presigned S3 upload grant for its spool (\u00a79.1). Telemetry bytes never pass through this route. Everything here is content-free by schema: no prompt text, no outputs, no end-user identifiers.",
   "$defs": {
     "request": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"],
+      "required": [
+        "protocol",
+        "instanceId",
+        "sdk",
+        "syncMode",
+        "generation",
+        "applyState",
+        "storageProtection",
+        "catalog",
+        "lease",
+        "spool"
+      ],
       "properties": {
-        "protocol": { "$ref": "manifest.schema.json#/$defs/protocolVersion" },
+        "protocol": {
+          "$ref": "manifest.schema.json#/$defs/protocolVersion"
+        },
         "instanceId": {
           "description": "Stable per store, random at first boot; never a hostname or user identifier.",
           "type": "string",
@@ -18,10 +31,13 @@
         "instanceClass": {
           "description": "resident: a long-lived process; ephemeral: a serverless invocation or a CI job. Defaults to resident (D57).",
           "type": "string",
-          "enum": ["resident", "ephemeral"]
+          "enum": [
+            "resident",
+            "ephemeral"
+          ]
         },
         "heartbeatIntervalSeconds": {
-          "description": "How often this instance intends to report. The server clamps it to 30–3600 and echoes the cadence it holds the instance to; three misses expire the instance from the fleet view.",
+          "description": "How often this instance intends to report. The server clamps it to 30\u20133600 and echoes the cadence it holds the instance to; three misses expire the instance from the fleet view.",
           "type": "integer",
           "minimum": 1,
           "maximum": 3600
@@ -29,38 +45,95 @@
         "sdk": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "version"],
+          "required": [
+            "name",
+            "version"
+          ],
           "properties": {
-            "name": { "type": "string", "enum": ["agent-sdk-typescript", "agent-sdk-python", "airprompter-cli", "airprompterd"] },
-            "version": { "type": "string", "maxLength": 64 },
-            "protocolRange": { "type": "string", "maxLength": 64 }
+            "name": {
+              "type": "string",
+              "enum": [
+                "agent-sdk-typescript",
+                "agent-sdk-python",
+                "airprompter-cli",
+                "airprompterd"
+              ]
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "protocolRange": {
+              "type": "string",
+              "maxLength": 64
+            }
           }
         },
         "host": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "os": { "type": "string", "enum": ["linux", "darwin", "windows", "other"] },
-            "arch": { "type": "string", "maxLength": 16 },
-            "runtime": { "type": "string", "maxLength": 64 }
+            "os": {
+              "type": "string",
+              "enum": [
+                "linux",
+                "darwin",
+                "windows",
+                "other"
+              ]
+            },
+            "arch": {
+              "type": "string",
+              "maxLength": 16
+            },
+            "runtime": {
+              "type": "string",
+              "maxLength": 64
+            }
           }
         },
-        "syncMode": { "type": "string", "enum": ["resident", "on_invoke", "offline"] },
+        "syncMode": {
+          "type": "string",
+          "enum": [
+            "resident",
+            "on_invoke",
+            "offline"
+          ]
+        },
         "generation": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["active"],
+          "required": [
+            "active"
+          ],
           "properties": {
-            "active": { "type": "integer", "minimum": 0 },
-            "staged": { "type": "integer", "minimum": 1 }
+            "active": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "staged": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
-        "activeReleaseDigest": { "$ref": "manifest.schema.json#/$defs/sha256" },
-        "stagedReleaseDigest": { "$ref": "manifest.schema.json#/$defs/sha256" },
+        "activeReleaseDigest": {
+          "$ref": "manifest.schema.json#/$defs/sha256"
+        },
+        "stagedReleaseDigest": {
+          "$ref": "manifest.schema.json#/$defs/sha256"
+        },
         "applyState": {
           "description": "What the runtime did with the latest manifest it verified. The fleet view is built from this, not from what the control plane hoped.",
           "type": "string",
-          "enum": ["active", "staged", "awaiting_unlock", "awaiting_countersign", "refused", "vendored_fallback"]
+          "enum": [
+            "active",
+            "staged",
+            "awaiting_unlock",
+            "awaiting_countersign",
+            "refused",
+            "vendored_fallback"
+          ]
         },
         "refusal": {
           "description": "Why the latest manifest (or root document) was refused, when applyState is `refused`. The vocabulary and order are trust-chain.md.",
@@ -87,104 +160,207 @@
           ]
         },
         "unavailableModels": {
-          "description": "With `refusal: model_unavailable` — the one local refusal after the chain verified — the required models this runtime cannot call (one per refusing slot at most).",
+          "description": "With `refusal: model_unavailable` \u2014 the one local refusal after the chain verified \u2014 the required models this runtime cannot call (one per refusing slot at most).",
           "type": "array",
           "maxItems": 16,
-          "items": { "$ref": "manifest.schema.json#/$defs/modelId" }
+          "items": {
+            "$ref": "manifest.schema.json#/$defs/modelId"
+          }
         },
         "signingKeyId": {
           "description": "keyId that signed the active manifest, so rotation progress is visible per fleet.",
           "$ref": "manifest.schema.json#/$defs/keyId"
         },
         "storageProtection": {
-          "description": "How the store's KEK is held (§10). `file_key` is reported and shown as a finding, never blocked (D15).",
+          "description": "How the store's KEK is held (\u00a710). `file_key` is reported and shown as a finding, never blocked (D15).",
           "type": "string",
-          "enum": ["os_keystore", "kms", "vault", "custom", "file_key"]
+          "enum": [
+            "os_keystore",
+            "kms",
+            "vault",
+            "custom",
+            "file_key"
+          ]
         },
         "catalog": {
-          "description": "Models this instance can actually call, as the provider names them. Promotion refuses a slot whose model is absent (§7).",
+          "description": "Models this instance can actually call, as the provider names them. Promotion refuses a slot whose model is absent (\u00a77).",
           "type": "object",
           "additionalProperties": false,
-          "required": ["models"],
+          "required": [
+            "models"
+          ],
           "properties": {
-            "models": { "type": "array", "maxItems": 256, "uniqueItems": true, "items": { "$ref": "manifest.schema.json#/$defs/modelId" } },
-            "reportedAt": { "$ref": "manifest.schema.json#/$defs/timestamp" }
+            "models": {
+              "type": "array",
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "manifest.schema.json#/$defs/modelId"
+              }
+            },
+            "reportedAt": {
+              "$ref": "manifest.schema.json#/$defs/timestamp"
+            }
           }
         },
         "lease": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["expired"],
+          "required": [
+            "expired"
+          ],
           "properties": {
-            "expiresAt": { "$ref": "manifest.schema.json#/$defs/timestamp" },
-            "expired": { "type": "boolean" }
+            "expiresAt": {
+              "$ref": "manifest.schema.json#/$defs/timestamp"
+            },
+            "expired": {
+              "type": "boolean"
+            }
           }
         },
         "localRollback": {
           "description": "Set while the instance serves the other slot after `airprompter rollback`; `forced` when a downgrade below the stored generation was forced.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["active", "forced"],
-          "properties": { "active": { "type": "boolean" }, "forced": { "type": "boolean" } }
+          "required": [
+            "active",
+            "forced"
+          ],
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "forced": {
+              "type": "boolean"
+            }
+          }
         },
         "unlockRequestsSeen": {
-          "description": "The open request_unlock directives this instance has surfaced to its operator and hook, by releaseDigest — so the fleet view can say who saw a request, and when one expired unseen.",
+          "description": "The open request_unlock directives this instance has surfaced to its operator and hook, by releaseDigest \u2014 so the fleet view can say who saw a request, and when one expired unseen.",
           "type": "array",
           "maxItems": 8,
           "uniqueItems": true,
-          "items": { "$ref": "manifest.schema.json#/$defs/sha256" }
+          "items": {
+            "$ref": "manifest.schema.json#/$defs/sha256"
+          }
         },
         "disabled": {
           "description": "What this instance is refusing to render under a disable directive (Freeze): the whole agent, or named slots.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["agent", "slots"],
+          "required": [
+            "agent",
+            "slots"
+          ],
           "properties": {
-            "agent": { "type": "boolean" },
-            "slots": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 128 } }
+            "agent": {
+              "type": "boolean"
+            },
+            "slots": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            }
           }
         },
         "spool": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["depthSegments", "depthBytes", "droppedSegments", "quarantinedSegments"],
+          "required": [
+            "depthSegments",
+            "depthBytes",
+            "droppedSegments",
+            "quarantinedSegments"
+          ],
           "properties": {
-            "depthSegments": { "type": "integer", "minimum": 0 },
-            "depthBytes": { "type": "integer", "minimum": 0 },
-            "droppedSegments": { "type": "integer", "minimum": 0 },
-            "quarantinedSegments": { "type": "integer", "minimum": 0 },
-            "lastUploadAt": { "$ref": "manifest.schema.json#/$defs/timestamp" },
-            "backoffUntil": { "$ref": "manifest.schema.json#/$defs/timestamp" }
+            "depthSegments": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "depthBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "droppedSegments": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "quarantinedSegments": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "lastUploadAt": {
+              "$ref": "manifest.schema.json#/$defs/timestamp"
+            },
+            "backoffUntil": {
+              "$ref": "manifest.schema.json#/$defs/timestamp"
+            }
           }
         }
       }
     },
     "uploadGrant": {
-      "description": "A presigned S3 POST policy minted by the grant issuer (§9.1). The policy pins the key prefix, the content-length range, the content type, server-side encryption and the grant id; it expires within 15 minutes.",
+      "description": "A presigned S3 POST policy minted by the grant issuer (\u00a79.1). The policy pins the key prefix, the content-length range, the content type, server-side encryption and the grant id; it expires within 15 minutes.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["grantId", "url", "fields", "keyPrefix", "expiresAt", "maxObjectBytes"],
+      "required": [
+        "grantId",
+        "url",
+        "fields",
+        "keyPrefix",
+        "expiresAt",
+        "maxObjectBytes"
+      ],
       "properties": {
-        "grantId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,64}$" },
-        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "grantId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,64}$"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
         "fields": {
           "description": "Form fields to send verbatim with each PUT/POST (policy, signature, key template, metadata). Opaque to the daemon.",
           "type": "object",
-          "additionalProperties": { "type": "string", "maxLength": 4096 },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 4096
+          },
           "maxProperties": 32
         },
-        "keyPrefix": { "type": "string", "maxLength": 512 },
-        "expiresAt": { "$ref": "manifest.schema.json#/$defs/timestamp" },
-        "maxObjectBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
-        "contentType": { "const": "application/x-ndjson" }
+        "keyPrefix": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "expiresAt": {
+          "$ref": "manifest.schema.json#/$defs/timestamp"
+        },
+        "maxObjectBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "contentType": {
+          "const": "application/x-ndjson"
+        }
       }
     },
     "response": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pollSeconds", "uploadIntervalSeconds"],
+      "required": [
+        "pollSeconds",
+        "uploadIntervalSeconds"
+      ],
       "properties": {
-        "uploadGrant": { "$ref": "#/$defs/uploadGrant" },
+        "uploadGrant": {
+          "$ref": "#/$defs/uploadGrant"
+        },
         "uploadIntervalSeconds": {
           "description": "How often the daemon may upload. Rides on the grant so AirPrompter can slow a whole fleet without touching a host.",
           "type": "integer",
@@ -209,7 +385,7 @@
           "pattern": "^https://"
         },
         "heartbeatIntervalSeconds": {
-          "description": "The cadence the server holds this instance to (the request's value, clamped to 30–3600). Adopt it.",
+          "description": "The cadence the server holds this instance to (the request's value, clamped to 30\u20133600). Adopt it.",
           "type": "integer",
           "minimum": 30,
           "maximum": 3600
@@ -217,6 +393,11 @@
         "expiresAt": {
           "description": "When the server considers this instance gone unless it hears from it again: three intervals from this heartbeat.",
           "$ref": "manifest.schema.json#/$defs/timestamp"
+        },
+        "latestGeneration": {
+          "description": "The environment's current generation as the origin knows it (S3). A runtime whose edge pointer says less skips the pointer on its next pass and fetches the signed manifest directly: the pointer can be stale or pinned, and it never extends trust.",
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

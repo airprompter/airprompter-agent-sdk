@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The pointer never extends trust (S3, AIR-1971)
+- `heartbeat.schema.json` response: `latestGeneration` (optional, additive) — the environment's current generation as the origin knows it. A runtime whose edge pointer says less marks the pointer behind, skips it on its next pass and fetches the signed manifest directly. Example `heartbeat.response.json` carries it.
+- Sync loop (TypeScript and Python): `pointer_unchanged` is a distinct outcome from `unchanged`. The edge pointer's silence never renews the lease; a signed manifest (activated / staged / held back / same generation) or the origin's authenticated answer (manifest `304`, heartbeat `200`) does. `syncOnce({ skipPointer })`.
+- Daemon socket: the `slot` answer carries `leaseExpiresAt`; a new `lease` event broadcasts every renewal; an attached SDK adopts the daemon's lease and never counts the socket as contact. `AirPrompterAgent.onContact(listener)`.
+- `trust-chain.md` › "The pointer never extends trust"; threat-model row with its vectors (`sdk-typescript/test/pointer.test.ts`, `sdk-python/tests/test_agent.py`).
+
 ### SDK — the spool never throws on the request path; the ports and the testing kit (S2, AIR-1970)
 - TypeScript: `FsPort` / `ClockPort` / `FetchPort` in `protocol/ports.ts`; `DirectorySink`, `SlotStore` and `SpoolUploader` take an `fs` (the Node port by default). The sink never throws: filesystem failures are counted on `sink.faults` by code and the rows it could not keep are reported as one `dropped` row when a write succeeds again; an unsynced segment stays `.open` for recovery; a file a sibling took away is skipped by the writer's sweep and the uploader's (`uploader.fsFaults`). `AirPrompterAgent.start({ fs })` passes the port through. `src/testing/`: `MemoryFs`, `FakeClock`, and the fake registry moved out of the tests. `PROTOCOL_VERSION` lives in `protocol/version.ts`.
 - Python: `airprompter_agent.ports` (`FsPort`, `OsFs`, `fs_failure_code`), `DirectorySink(..., fs=)` with the same never-raise rule and `faults`, and `airprompter_agent.testing` (`MemoryFs`, `FakeClock`).

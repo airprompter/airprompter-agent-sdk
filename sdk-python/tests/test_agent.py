@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 
 import pytest
 
@@ -274,9 +275,14 @@ def test_lease_counts_from_last_contact_degrade_and_halt(state_dir):
     plane.promote([triage, reply], lease_seconds=600)
     clock = {"ms": instant("2026-09-12T14:03:10Z")}
     ap = start(plane, state_dir, now=lambda: clock["ms"], telemetry={"sink": "memory"})
-    assert ap.status().lease_expires_at == iso_ms(clock["ms"] + 600_000)
+    time.sleep(0.3)  # the first heartbeat runs on its own thread right after boot: let it land at t0
+    lease_at_start = ap.status().lease_expires_at
+    assert lease_at_start == iso_ms(clock["ms"] + 600_000)
     clock["ms"] += 500_000
-    ap.sync_now()
+    ap.sync_now()  # the edge pointer's 304 (S3): silence, not contact
+    assert ap.status().last_sync_outcome == "pointer_unchanged"
+    assert ap.status().lease_expires_at == lease_at_start, "a pointer 304 does not move the lease"
+    ap.heartbeat_now()  # the authenticated answer does
     assert ap.status().lease_expires_at == iso_ms(clock["ms"] + 600_000)
     assert ap.status().on_lease_expiry == "degrade"
     clock["ms"] += 601_000
@@ -292,11 +298,15 @@ def test_lease_counts_from_last_contact_degrade_and_halt(state_dir):
     halt_dir = tempfile.mkdtemp(prefix="ap-agent-halt-")
     try:
         halt = start(halt_plane, halt_dir, now=lambda: clock["ms"])
+        time.sleep(0.3)  # let the boot heartbeat land before the clock moves
         clock["ms"] += 61_000
         with pytest.raises(RenderRefusedError) as lapsed:
             halt.prompt("support.reply").render()
         assert lapsed.value.reason == "lease_expired"
-        halt.sync_now()
+        halt.sync_now()  # the pointer's 304 is not contact (S3): still halted
+        with pytest.raises(RenderRefusedError):
+            halt.prompt("support.reply").render()
+        halt.heartbeat_now()  # the origin's authenticated answer is
         assert halt.prompt("support.reply").render().text == "Reply politely to ."
         halt.stop()
     finally:
@@ -391,4 +401,46 @@ def test_required_model_outside_the_declared_catalog_is_refused_locally(state_di
     assert ap.generation == 3
     assert "unavailableModels" not in ap.heartbeat_body(), "cleared once a release activates"
     assert ap.prompt("support.triage").render(team="a", ticket="b").model == "claude-haiku-4-5"
+    ap.stop()
+
+
+def test_pinned_pointer_does_not_renew_the_lease_and_latest_generation_bypasses_it(state_dir):
+    """S3: a pinned edge pointer cannot keep a fleet on the last release — its silence is not contact, and the heartbeat's
+    latestGeneration sends the runtime past it to the signed manifest; a Freeze behind it lands the same way."""
+    plane = FakeControlPlane(SCOPE)
+    triage, reply = triage_slots(plane)
+    plane.promote([triage, reply], lease_seconds=600)
+    clock = {"ms": instant("2026-09-13T12:00:00Z")}
+    events: list[dict] = []
+    ap = start(plane, state_dir, now=lambda: clock["ms"], telemetry={"sink": "memory"}, logger=events.append)
+    time.sleep(0.3)  # let the boot heartbeat land before the clock moves
+    lease_at_start = ap.status().lease_expires_at
+    plane.pinned_pointer = 1
+    for _ in range(5):
+        clock["ms"] += 100_000
+        ap.sync_now()
+        assert ap.status().last_sync_outcome == "pointer_unchanged"
+        assert ap.status().lease_expires_at == lease_at_start
+    clock["ms"] += 200_000
+    assert ap.status().lease_expired is True, "a runtime that only ever hears the pointer expires"
+    ap.heartbeat_now()
+    assert ap.status().lease_expired is False
+    # A promotion behind the pinned pointer lands after one heartbeat.
+    plane.promote([triage, plane.slot(tag="support.reply", text="v2 {{name}}", version_id="ver_2", variables=[{"name": "name", "required": False, "trust": "operator"}])])
+    ap.sync_now()
+    assert ap.status().last_sync_outcome == "pointer_unchanged"
+    assert ap.generation == 1
+    ap.heartbeat_now()
+    assert any(e.get("event") == "pointer_behind" and e.get("latestGeneration") == 2 for e in events)
+    assert ap.generation == 2
+    assert ap.prompt("support.reply").render(name="x").text == "v2 x"
+    # A Freeze behind the pinned pointer lands the same way.
+    plane.promote([triage, reply], directives=[{"kind": "disable", "scope": "agent", "issuedAt": iso_ms(clock["ms"]).replace(".000Z", "Z"), "reason": "incident"}])
+    ap.sync_now()
+    assert ap.status().last_sync_outcome == "pointer_unchanged"
+    ap.heartbeat_now()
+    assert ap.generation == 3
+    with pytest.raises(RenderRefusedError) as frozen:
+        ap.prompt("support.reply").render(name="x")
+    assert frozen.value.reason == "disabled"
     ap.stop()

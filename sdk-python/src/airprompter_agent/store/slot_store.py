@@ -49,7 +49,7 @@ class LoadedSlot:
 
 class StoreError(Exception):
     def __init__(self, code: str, message: str, detail: Optional[str] = None):
-        # code: "kek_unavailable" | "store_corrupt" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged"
+        # code: "kek_unavailable" | "store_corrupt" | "store_newer" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged"
         super().__init__(message)
         self.code = code
         self.detail = detail
@@ -83,6 +83,15 @@ class StoreHooks:
     """Test seams: a crash between fsync and rename is the case the layout exists for."""
 
     before_rename: Optional[Callable[[str], None]] = None
+    #: S8: the writer this runtime records in store.json (the SDK's or the daemon's name and version).
+    writer: Optional[Mapping[str, str]] = None
+
+
+#: S8: store.json is a cross-package contract (``protocol/store-format.md``): a reader at format N accepts N and N-1, writes N,
+#: migrates an N-1 file forward on its first write, and refuses N+1 with ``store_newer`` naming the writer.
+STORE_FORMAT_VERSION = 2
+STORE_FORMATS_READ = frozenset({1, 2})
+DEFAULT_WRITER = {"name": "agent-sdk-python", "version": "0.1.0"}
 
 
 class SlotStore:
@@ -110,7 +119,8 @@ class SlotStore:
             except Exception as error:  # noqa: BLE001 — whatever the provider raised is the reason
                 raise StoreError("kek_unavailable", f"the key provider could not wrap the store key: {error}") from error
             file: dict[str, Any] = {
-                "version": 1,
+                "version": STORE_FORMAT_VERSION,
+                "writer": dict(hooks.writer) if hooks and hooks.writer else dict(DEFAULT_WRITER),
                 "agentId": agent_id,
                 "target": target,
                 "instanceId": random_id(),
@@ -129,7 +139,13 @@ class SlotStore:
                 file = json.load(f)
         except (OSError, ValueError) as error:
             raise StoreError("store_corrupt", "store.json is unreadable") from error
-        if file.get("version") != 1 or file.get("agentId") != agent_id or file.get("target") != target:
+        version = file.get("version")
+        if isinstance(version, int) and not isinstance(version, bool) and version > STORE_FORMAT_VERSION:
+            # N+1: written by something newer than this reader. Never guessed at; the writer is named so the operator knows what to update.
+            writer = file.get("writer")
+            named = f"{writer.get('name')} {writer.get('version')}" if isinstance(writer, Mapping) else "an unknown writer"
+            raise StoreError("store_newer", f"store.json is format {version}, written by {named}; this runtime reads formats {' and '.join(str(v) for v in sorted(STORE_FORMATS_READ))} — update it, or roll the writer back before its next write", named)
+        if version not in STORE_FORMATS_READ or file.get("agentId") != agent_id or file.get("target") != target:
             raise StoreError("store_corrupt", "store.json belongs to another agent or target")
         try:
             dek = key_provider.unwrap(b64url_decode(file["wrappedDek"]))
@@ -293,6 +309,7 @@ class SlotStore:
             raise StoreError("slot_corrupt", f"slot {slot} manifest is unreadable", "schema_invalid") from error
 
     def _write(self, next_file: dict[str, Any]) -> None:
-        file = {**next_file, "updatedAt": iso_ms(now_ms())}
+        # S8: what this reader would write — an N-1 file migrates forward here, on the first write, never on open (the rollback window).
+        file = {**next_file, "version": STORE_FORMAT_VERSION, "writer": dict(self._hooks.writer) if self._hooks and self._hooks.writer else dict(DEFAULT_WRITER), "updatedAt": iso_ms(now_ms())}
         _replace_file_atomically(os.path.join(self.dir, "store.json"), json.dumps(file, indent=2).encode("utf-8"), self._hooks.before_rename if self._hooks else None)
         self._file = file

@@ -3,6 +3,7 @@
 import { parseArgs } from "node:util";
 
 import { fileKey } from "../../sdk-typescript/src/store/keyProvider.js";
+import { CLI_VERSION } from "./version.js";
 import { SlotStore } from "../../sdk-typescript/src/store/slotStore.js";
 import type { Target } from "../../sdk-typescript/src/protocol/types.js";
 import { join } from "node:path";
@@ -78,7 +79,8 @@ export function defaultStateDir(ctx: Context): string {
 
 export async function openStore(parsed: Parsed, ctx: Context, scope: { agentId: string; target: Target }): Promise<SlotStore> {
   const stateDir = str(parsed, "state-dir") ?? defaultStateDir(ctx);
-  return SlotStore.open({ stateDir, agentId: scope.agentId, target: scope.target, keyProvider: fileKey(join(SlotStore.path({ stateDir, agentId: scope.agentId, target: scope.target }), "store.key")) });
+  // S8: a CLI write (apply, unlock, policy set) names the CLI as store.json's writer.
+  return SlotStore.open({ stateDir, agentId: scope.agentId, target: scope.target, keyProvider: fileKey(join(SlotStore.path({ stateDir, agentId: scope.agentId, target: scope.target }), "store.key")), hooks: { writer: { name: "airprompter-cli", version: CLI_VERSION } } });
 }
 
 export function helpFor(command: string, synopsis: string, spec: OptionSpec): string {

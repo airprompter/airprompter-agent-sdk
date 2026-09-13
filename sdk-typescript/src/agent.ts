@@ -39,11 +39,11 @@ import { SyncClient, type FetchLike } from "./sync/client.js";
 import { DaemonClient, DaemonError, daemonSocketPath } from "./sync/daemon.js";
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "./sync/loop.js";
 
+import { PROTOCOL_VERSION, SDK_VERSION } from "./protocol/version.js";
+
 export const SDK_NAME = "agent-sdk-ts";
-export const SDK_VERSION = "0.1.0";
-/** The protocol this SDK speaks; the heartbeat names it (the manifest carries its own). */
-export { PROTOCOL_VERSION } from "./protocol/version.js";
-import { PROTOCOL_VERSION } from "./protocol/version.js";
+/** This package's version and the protocol it speaks (`protocol/version.ts`); the heartbeat names both, store.json records the first (S8). */
+export { PROTOCOL_VERSION, SDK_VERSION };
 /** A vendored bundle this close to its notAfter logs `vendored_bundle_expiring_soon` at start (the platform warns at the same distance). */
 export const VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30;
 
@@ -214,7 +214,7 @@ export class RenderRefusedError extends Error {
 
 export class AgentStartError extends Error {
   constructor(
-    readonly code: "no_verified_release" | "kek_unavailable" | "store_corrupt",
+    readonly code: "no_verified_release" | "kek_unavailable" | "store_corrupt" | "store_newer",
     message: string,
   ) {
     super(message);
@@ -344,9 +344,10 @@ export class AirPrompterAgent {
     const keyProvider = options.keyProvider ?? fileKey(join(SlotStore.path({ stateDir, agentId: options.agentId, target: options.target }), "store.key"));
     let store: SlotStore;
     try {
-      store = await SlotStore.open({ stateDir, agentId: options.agentId, target: options.target, keyProvider, ...(options.fs ? { fs: options.fs } : {}) });
+      // S8: store.json records who wrote it — this SDK, or the daemon naming itself through `sdk`.
+      store = await SlotStore.open({ stateDir, agentId: options.agentId, target: options.target, keyProvider, hooks: { writer: options.sdk ? { name: options.sdk.name, version: options.sdk.version } : { name: "agent-sdk-typescript", version: SDK_VERSION } }, ...(options.fs ? { fs: options.fs } : {}) });
     } catch (error) {
-      if (isStoreError(error) && (error.code === "kek_unavailable" || error.code === "store_corrupt")) throw new AgentStartError(error.code, error.message);
+      if (isStoreError(error) && (error.code === "kek_unavailable" || error.code === "store_corrupt" || error.code === "store_newer")) throw new AgentStartError(error.code, error.message);
       throw error;
     }
     const pinned = pinnedRoot;

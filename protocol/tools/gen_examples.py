@@ -265,6 +265,27 @@ refused = {
     "edge-pointer.generation-zero.json": {"schema": "edge-pointer", "reason": "the pointer exists only after the first promotion", "document": {**edge_pointer, "generation": 0}},
 }
 
+# S8: store.json, the host's record. Format 1 (what 0.2.0–0.2.5 wrote) and format 2 (the writer, the S4 pin).
+store_v1 = {
+    "version": 1,
+    "agentId": "agt_7Qx2mN9pLk3sRt4v",
+    "target": "prod",
+    "instanceId": "i-c3VwZXJzZWNyZXQ",
+    "wrappedDek": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "storageProtection": "os_keystore",
+    "active": "A",
+    "staged": None,
+    "generation": 41,
+    "root": key_set,
+    "updatedAt": "2026-09-12T10:03:00Z",
+}
+store_v2 = {**store_v1, "version": 2, "writer": {"name": "airprompterd", "version": "0.1.0"}, "applyPolicyPin": {"value": "unlock_required", "source": "manifest", "generation": 41, "setAt": "2026-09-12T10:03:00Z"}}
+refused.update({
+    "store.newer-format.json": {"schema": "store", "reason": "a reader at format 2 refuses format 3 with store_newer, naming the writer (S8)", "document": {**store_v2, "version": 3}},
+    "store.v2-without-writer.json": {"schema": "store", "reason": "format 2 names its writer", "document": {k: v for k, v in store_v2.items() if k != "writer"}},
+    "store.unknown-field.json": {"schema": "store", "reason": "store.json carries no prompt text and no free-form members", "document": {**store_v2, "lastPrompt": "You are..."}},
+})
+
 root = sys.argv[1]
 os.makedirs(os.path.join(root, "refused"), exist_ok=True)
 def write(name, doc):
@@ -279,6 +300,8 @@ write("heartbeat.request.json", heartbeat_request)
 write("heartbeat.response.json", heartbeat_response)
 write("heartbeat.response.throttled.json", heartbeat_throttled)
 write("edge-pointer.json", edge_pointer)
+write("store.v1.json", store_v1)
+write("store.v2.json", store_v2)
 for name, entry in refused.items():
     write(os.path.join("refused", name), entry)
 print("releaseDigest", digest)

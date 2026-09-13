@@ -21,6 +21,7 @@ them. Both cite the design revision they follow.
 | [`../protocol/golden-sets.md`](../protocol/golden-sets.md) | Golden sets before activation; the customer-side judge | §8.2 (5-D), §9.2 |
 | [`../protocol/compatible-endpoints.md`](../protocol/compatible-endpoints.md) | Managed mode through OpenAI- and Anthropic-shaped endpoints | §11.2, §18 |
 | [`../protocol/daemon-socket.md`](../protocol/daemon-socket.md) | One sync loop per host, the socket, the uploader | §9.1 |
+| [`../protocol/store-format.md`](../protocol/store-format.md) | `store.json` as a cross-package contract: N/N-1, migrate on first write, `store_newer` naming the writer (S8) | D35 |
 | [`../protocol/assignment-hash.md`](../protocol/assignment-hash.md) | Sticky rollout assignment | §8 |
 | [`../SECURITY.md`](../SECURITY.md) | Reporting, and the threat model in one paragraph | §1 |
 | [`../sdk-typescript/README.md`](../sdk-typescript/README.md), [`../sdk-python/README.md`](../sdk-python/README.md), [`../cli/README.md`](../cli/README.md) | Using the SDKs and the CLI | §11 |

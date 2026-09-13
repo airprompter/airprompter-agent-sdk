@@ -23,6 +23,7 @@ import type { FsPort } from "../protocol/ports.js";
 import { join } from "node:path";
 
 import { sha256Prefixed } from "../protocol/canonicalJson.js";
+import { SDK_VERSION } from "../protocol/version.js";
 import { referencedPayloads, verifyManifest, type Verdict } from "../protocol/trust.js";
 import type { ApplyPolicy, Manifest, RefusalCode, RootMetadata, Target } from "../protocol/types.js";
 import type { KeyProvider, StorageProtection } from "./keyProvider.js";
@@ -30,8 +31,19 @@ import { decryptPayload, encryptPayload, isPayloadDecryptError, payloadAad } fro
 
 export type SlotName = "A" | "B";
 
+/**
+ * S8: store.json is a cross-package contract (`protocol/store-format.md`) — the daemon binary writes it, the application's
+ * SDK reads it, and they deploy on different days. A reader at format N accepts N and N-1, writes N, migrates an N-1 file
+ * forward on its first write, and refuses N+1 with `store_newer` naming the writer. Format 2 adds the writer and the S4 pin.
+ */
+export const STORE_FORMAT_VERSION = 2 as const;
+export const STORE_FORMATS_READ: ReadonlySet<number> = new Set([1, 2]);
+
 export interface StoreFile {
-  version: 1;
+  /** The format (S8): 1 or 2 on disk, 2 once this runtime has written. */
+  version: 1 | 2;
+  /** Format 2: the package that last wrote the file, so a reader that meets a newer format can name what wrote it. */
+  writer?: { name: string; version: string };
   agentId: string;
   target: Target;
   instanceId: string;
@@ -78,7 +90,7 @@ export interface LoadedSlot {
   payloads: Map<string, Buffer>;
 }
 
-export type StoreErrorCode = "kek_unavailable" | "store_corrupt" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged";
+export type StoreErrorCode = "kek_unavailable" | "store_corrupt" | "store_newer" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged";
 
 export class StoreError extends Error {
   constructor(
@@ -97,6 +109,8 @@ export function isStoreError(error: unknown): error is StoreError {
 }
 
 const otherSlot = (slot: SlotName): SlotName => (slot === "A" ? "B" : "A");
+/** The SDK's own name and version, recorded as the writer unless the host (the daemon) names itself. */
+const DEFAULT_WRITER = { name: "agent-sdk-typescript", version: SDK_VERSION };
 
 function fsyncFile(fs: FsPort, path: string): void {
   // Write access: on Windows an fsync on a read-only descriptor is refused (FlushFileBuffers needs it).
@@ -134,6 +148,8 @@ function replaceFileAtomically(fs: FsPort, path: string, bytes: Uint8Array, hook
 /** Test seams: a crash between fsync and rename is the case the layout exists for. */
 export interface StoreHooks {
   beforeRename?: (path: string) => void;
+  /** S8: the writer this runtime records in store.json (the SDK's or the daemon's name and version). */
+  writer?: { name: string; version: string };
 }
 
 export interface OpenStoreInput {
@@ -175,7 +191,8 @@ export class SlotStore {
         throw new StoreError("kek_unavailable", `the key provider could not wrap the store key: ${(error as Error).message}`);
       }
       const file: StoreFile = {
-        version: 1,
+        version: STORE_FORMAT_VERSION,
+        writer: input.hooks?.writer ?? DEFAULT_WRITER,
         agentId: input.agentId,
         target: input.target,
         instanceId: `i-${randomBytes(12).toString("base64url")}`,
@@ -196,7 +213,12 @@ export class SlotStore {
     } catch {
       throw new StoreError("store_corrupt", "store.json is unreadable");
     }
-    if (file.version !== 1 || file.agentId !== input.agentId || file.target !== input.target) {
+    if (typeof file.version === "number" && Number.isInteger(file.version) && file.version > STORE_FORMAT_VERSION) {
+      // N+1: written by something newer than this reader. Never guessed at; the writer is named so the operator knows what to update.
+      const writer = file.writer && typeof file.writer === "object" ? `${file.writer.name} ${file.writer.version}` : "an unknown writer";
+      throw new StoreError("store_newer", `store.json is format ${file.version}, written by ${writer}; this runtime reads formats ${[...STORE_FORMATS_READ].join(" and ")} — update it, or roll the writer back before its next write`, writer);
+    }
+    if (!STORE_FORMATS_READ.has(file.version) || file.agentId !== input.agentId || file.target !== input.target) {
       throw new StoreError("store_corrupt", "store.json belongs to another agent or target");
     }
     let dek: Uint8Array;
@@ -365,8 +387,9 @@ export class SlotStore {
     }
   }
 
+  /** S8: what this reader would write — an N-1 file migrates forward here, on the first write, never on open (the rollback window). */
   private write(next: StoreFile): void {
-    const file = { ...next, updatedAt: new Date().toISOString() };
+    const file: StoreFile = { ...next, version: STORE_FORMAT_VERSION, writer: this.hooks?.writer ?? DEFAULT_WRITER, updatedAt: new Date().toISOString() };
     replaceFileAtomically(this.fs, join(this.dir, "store.json"), Buffer.from(JSON.stringify(file, null, 2), "utf8"), this.hooks);
     this.file = file;
   }

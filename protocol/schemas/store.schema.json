@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/0.2/store.schema.json",
+  "title": "AirPrompter slot store — store.json",
+  "description": "The host's record of what it holds (D35, S8): the active and staged slots, the generation, the accepted root document, the wrapped store key, and — from format 2 — the apply-policy pin (S4) and the writer. store.json is a cross-package contract: the daemon binary writes it and the application's SDK reads it, and they deploy on different days. The N/N-1 rule (store-format.md): a reader at format N accepts N and N-1, writes N, migrates an N-1 file forward on its first write, and refuses N+1 with `store_newer` naming the writer. No prompt text is ever in store.json; the slots' manifests and encrypted payloads live beside it.",
+  "$defs": {
+    "slotName": { "type": "string", "enum": ["A", "B"] },
+    "target": { "type": "string", "enum": ["dev", "staging", "prod"] },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "writer": {
+      "description": "Format 2: the package that last wrote the file, so a reader that meets a newer format can name what wrote it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "applyPolicyPin": {
+      "description": "S4: the apply policy this host holds — trust-on-first-use from a manifest, tightened by a later one, loosened only by an operator.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source", "generation", "setAt"],
+      "properties": {
+        "value": { "type": "string", "enum": ["auto", "unlock_required"] },
+        "source": { "type": "string", "enum": ["manifest", "operator"] },
+        "generation": { "type": "integer", "minimum": 0 },
+        "setAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "common": {
+      "type": "object",
+      "required": ["version", "agentId", "target", "instanceId", "wrappedDek", "storageProtection", "active", "staged", "generation", "root", "updatedAt"],
+      "properties": {
+        "agentId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "target": { "$ref": "#/$defs/target" },
+        "instanceId": { "description": "The store's own identity — the seed of the runRef key every process on the host shares (S6). Never a process's instance id.", "type": "string", "pattern": "^[A-Za-z0-9._~-]{8,64}$" },
+        "wrappedDek": { "description": "The store key, wrapped by the key provider; base64url.", "type": "string", "minLength": 1 },
+        "storageProtection": { "type": "string", "enum": ["os_keystore", "kms", "vault", "custom", "file_key"] },
+        "active": { "oneOf": [{ "$ref": "#/$defs/slotName" }, { "type": "null" }] },
+        "staged": { "oneOf": [{ "$ref": "#/$defs/slotName" }, { "type": "null" }] },
+        "generation": { "type": "integer", "minimum": 0 },
+        "root": { "description": "The last accepted root document (key-set.schema.json), or null until one is accepted.", "oneOf": [{ "type": "object" }, { "type": "null" }] },
+        "forcedDowngrade": { "type": "boolean" },
+        "heldBackBelow": { "type": "integer", "minimum": 1 },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "v1": {
+      "description": "Format 1 (0.2.0–0.2.5): read by readers at format 2 (N-1), written by nothing current.",
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": { "const": 1 },
+            "agentId": true, "target": true, "instanceId": true, "wrappedDek": true, "storageProtection": true, "active": true, "staged": true, "generation": true, "root": true, "forcedDowngrade": true, "heldBackBelow": true, "updatedAt": true,
+            "applyPolicyPin": { "$ref": "#/$defs/applyPolicyPin" }
+          }
+        }
+      ]
+    },
+    "v2": {
+      "description": "Format 2 (S8): format 1 plus the writer and the apply-policy pin.",
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["writer"],
+          "properties": {
+            "version": { "const": 2 },
+            "agentId": true, "target": true, "instanceId": true, "wrappedDek": true, "storageProtection": true, "active": true, "staged": true, "generation": true, "root": true, "forcedDowngrade": true, "heldBackBelow": true, "updatedAt": true,
+            "writer": { "$ref": "#/$defs/writer" },
+            "applyPolicyPin": { "$ref": "#/$defs/applyPolicyPin" }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [{ "$ref": "#/$defs/v1" }, { "$ref": "#/$defs/v2" }]
+}

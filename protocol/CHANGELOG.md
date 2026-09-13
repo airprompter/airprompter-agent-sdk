@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### store.json joins the protocol with an N/N-1 rule (S8, AIR-1976)
+- `schemas/store.schema.json` + `store-format.md`: `store.json` is a cross-package contract. Format 2 adds `writer { name, version }` and carries the S4 `applyPolicyPin`; format 1 (0.2.0–0.2.5) is still read. A reader at format N accepts N and N-1, writes N, migrates an N-1 file forward on its first write (never on open — the rollback window), and refuses N+1 with `store_newer` naming the writer. Examples `store.v1.json` / `store.v2.json`; refused: a format-3 file, a format-2 file without its writer, a free-form member.
+- SDK (TypeScript and Python): `STORE_FORMAT_VERSION = 2`, `STORE_FORMATS_READ = {1, 2}`, `StoreError("store_newer", …, detail = the writer)`, `AgentStartError("store_newer")`; `StoreHooks.writer` — the SDK names itself, the daemon names itself through `sdk`, the CLI names itself. `SDK_VERSION` moves to `protocol/version.ts` (still exported from the package root).
+- Vectors: `sdk-typescript/test/storeFormat.test.ts`, `sdk-python/tests/test_store_format.py` (N-1 read + first-write migration, N as written, a fresh store at N, N+1 refused naming the writer, the start error).
+
 ### Vendored bundles at boot and in git (S7, AIR-1975)
 - SDK (TypeScript and Python): with a store already serving, a vendored bundle whose generation is above the host's is verified through the same chain as OTA and staged, and the host's apply policy decides (`vendored_bundle_staged` / `vendored_bundle_activated`); the held generation changes nothing; an older one is refused with `vendored_bundle_refused: generation_rollback` and the sentence naming `airprompter rollback`; a tampered or expired newer one is refused. With nothing held the bundle is the fallback as before.
 - CLI: `airprompter diff <bundle> --against <other>` compares two update files with no store and names a backward one; `airprompter apply` of an older file says the sentence and carries `bundleGeneration` / `heldGeneration`.

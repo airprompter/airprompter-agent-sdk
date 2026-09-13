@@ -62,6 +62,13 @@ variable the slot did not declare throws.
    `AgentStartError("no_verified_release")`. Serving an unverified release
    is never an option.
 
+`store.json` is a versioned contract between the daemon that writes it
+and the SDK that reads it (S8, `protocol/store-format.md`): a reader
+accepts its own format and the one before, migrates an older file
+forward on its first write (never on open, so a rolled-back writer still
+finds the file it can read), and refuses a newer one with
+`AgentStartError("store_newer")` naming the package that wrote it.
+
 Sync modes: `resident` (timer + jitter, edge pointer first so idle
 instances never wake a Lambda), `on_invoke` (serverless: `ap.invoke(fn)`
 syncs before and after the handler; telemetry goes to a memory sink that

@@ -1,0 +1,88 @@
+{
+  "schema": "store",
+  "reason": "format 2 names its writer",
+  "document": {
+    "version": 2,
+    "agentId": "agt_7Qx2mN9pLk3sRt4v",
+    "target": "prod",
+    "instanceId": "i-c3VwZXJzZWNyZXQ",
+    "wrappedDek": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "storageProtection": "os_keystore",
+    "active": "A",
+    "staged": null,
+    "generation": 41,
+    "root": {
+      "signed": {
+        "type": "root",
+        "protocol": "0.2.5",
+        "purpose": "platform",
+        "environment": "prod",
+        "version": 3,
+        "expires": "2026-12-11T00:00:00Z",
+        "keys": {
+          "90e14ac6325d3aa243e46e18bb0f9cc477bae151b2c4a10efe1a15f3741f1a3d": {
+            "keyType": "ecdsa-p256",
+            "scheme": "ES256",
+            "publicKey": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+              "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+            }
+          },
+          "d248f03be9e1629a74451cb3b5de16e0809bcf35db684b71b6f935231e756cc8": {
+            "keyType": "ecdsa-p256",
+            "scheme": "ES256",
+            "publicKey": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+              "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+            },
+            "notBefore": "2026-09-01T00:00:00Z"
+          },
+          "04442fff73c21d1c9b6d40fa654a57b777d100ce4781d2a1f982cf03b67147c2": {
+            "keyType": "ecdsa-p256",
+            "scheme": "ES256",
+            "publicKey": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+              "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+            },
+            "notAfter": "2026-10-01T00:00:00Z"
+          }
+        },
+        "roles": {
+          "root": {
+            "keyIds": [
+              "90e14ac6325d3aa243e46e18bb0f9cc477bae151b2c4a10efe1a15f3741f1a3d"
+            ],
+            "threshold": 1
+          },
+          "targets": {
+            "keyIds": [
+              "d248f03be9e1629a74451cb3b5de16e0809bcf35db684b71b6f935231e756cc8",
+              "04442fff73c21d1c9b6d40fa654a57b777d100ce4781d2a1f982cf03b67147c2"
+            ],
+            "threshold": 1
+          }
+        }
+      },
+      "signatures": [
+        {
+          "keyId": "90e14ac6325d3aa243e46e18bb0f9cc477bae151b2c4a10efe1a15f3741f1a3d",
+          "alg": "ES256",
+          "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw"
+        }
+      ]
+    },
+    "updatedAt": "2026-09-12T10:03:00Z",
+    "applyPolicyPin": {
+      "value": "unlock_required",
+      "source": "manifest",
+      "generation": 41,
+      "setAt": "2026-09-12T10:03:00Z"
+    }
+  }
+}

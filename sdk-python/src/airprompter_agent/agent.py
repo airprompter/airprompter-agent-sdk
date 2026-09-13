@@ -41,7 +41,7 @@ from .render.template import Delimiters, render_template
 from .spool.feedback import normalize_feedback
 from .spool.writer import DirectorySink, MemorySink, Observation, SpoolSink, SpoolWriter, WriterIdentity, epoch_minute, segment_name
 from .store.key_provider import KeyProvider, file_key
-from .store.slot_store import LoadedSlot, SlotStore, StoreError
+from .store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
 from .telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant, post_segment
 from .sync.client import SyncClient
 from .sync.daemon import DaemonClient, daemon_socket_path
@@ -208,7 +208,7 @@ class RenderRefusedError(Exception):
 
 
 class AgentStartError(Exception):
-    def __init__(self, code: str, message: str):  # "no_verified_release" | "kek_unavailable" | "store_corrupt"
+    def __init__(self, code: str, message: str):  # "no_verified_release" | "kek_unavailable" | "store_corrupt" | "store_newer"
         super().__init__(message)
         self.code = code
 
@@ -420,9 +420,10 @@ class AirPrompterAgent:
             options["sync"] = SyncOptions(mode="resident", poll_seconds=sync_options.poll_seconds, edge_pointer_url=sync_options.edge_pointer_url, root_url=sync_options.root_url, daemon_socket_path=sync_options.daemon_socket_path)
         provider = key_provider or file_key(os.path.join(SlotStore.path(state_dir=resolved_state_dir, agent_id=agent_id, target=target), "store.key"))
         try:
-            store = SlotStore.open(state_dir=resolved_state_dir, agent_id=agent_id, target=target, key_provider=provider)
+            # S8: store.json records who wrote it — this SDK by default.
+            store = SlotStore.open(state_dir=resolved_state_dir, agent_id=agent_id, target=target, key_provider=provider, hooks=StoreHooks(writer={"name": "agent-sdk-python", "version": SDK_VERSION}))
         except StoreError as error:
-            if error.code in ("kek_unavailable", "store_corrupt"):
+            if error.code in ("kek_unavailable", "store_corrupt", "store_newer"):
                 raise AgentStartError(error.code, str(error)) from error
             raise
         # The stored root (accepted on an earlier run) is trusted only if it still verifies against the pinned key.

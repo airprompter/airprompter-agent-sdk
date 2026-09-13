@@ -74,6 +74,7 @@ const exampleSchema = (file) => {
   if (file.startsWith("heartbeat.request")) return "heartbeat#/$defs/request";
   if (file.startsWith("heartbeat.response")) return "heartbeat#/$defs/response";
   if (file.startsWith("edge-pointer")) return "edge-pointer";
+  if (file.startsWith("store.")) return "store";
   throw new Error(`no schema mapping for example ${file}`);
 };
 const exampleDir = join(protocolDir, "examples");
@@ -91,7 +92,7 @@ section("refused examples are refused");
 const refusedDir = join(exampleDir, "refused");
 for (const file of readdirSync(refusedDir).filter((f) => f.endsWith(".json")).sort()) {
   const entry = readJson(join(refusedDir, file));
-  const name = { manifest: "manifest", "key-set": "key-set", bundle: "bundle", "heartbeat-request": "heartbeat#/$defs/request", "heartbeat-response": "heartbeat#/$defs/response", "edge-pointer": "edge-pointer" }[entry.schema];
+  const name = { manifest: "manifest", "key-set": "key-set", bundle: "bundle", "heartbeat-request": "heartbeat#/$defs/request", "heartbeat-response": "heartbeat#/$defs/response", "edge-pointer": "edge-pointer", store: "store" }[entry.schema];
   const validate = validatorFor(name);
   if (validate(entry.document)) fail(file, `accepted, but: ${entry.reason}`);
   else ok(`${file} — ${entry.reason}`);

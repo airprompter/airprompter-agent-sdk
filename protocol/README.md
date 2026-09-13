@@ -20,6 +20,7 @@ service, and by any self-hosted registry that implements it.
 | `trust-chain.md` | Root metadata acceptance (R1–R5), manifest verification (M1–M12), refusal vocabulary, rotation, and why expiry degrades instead of bricking |
 | `assignment-hash.md` | Sticky assignment: `SHA-256(salt ‖ subject)`, first 8 bytes big-endian mod 10000, cumulative arm weights |
 | `spool-format.md` | The local telemetry spool: file layout, row types, what may never be in it, how third-party instrumentation writes to it |
+| `store-format.md` | `store.json`, the host's record: the N/N-1 rule between the daemon (writer) and the SDK (reader), format 2's fields, `store_newer` (S8) |
 | `golden-sets.md` | Golden sets run before activation (5-D): the reference on the slot, the payload, the run, `goldenPass`, the apply decision, and the customer-side judge |
 | `examples/` | One valid document per schema, and `refused/` documents each schema must reject |
 | `vectors/` | Conformance vectors every SDK must pass |

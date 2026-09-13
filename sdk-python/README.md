@@ -75,7 +75,11 @@ update-window timers on daemon threads.
    distribution key, so keep that column as private as the key.
 3. With still nothing, one synchronous sync runs — the only time the SDK
    waits on the network. If that fails too, `start()` raises
-   `AgentStartError("no_verified_release")`. Serving an unverified release
+   `AgentStartError("no_verified_release")` — or `"store_newer"` when
+   `store.json` was written by a newer package than this one (S8,
+   `protocol/store-format.md`: N and N-1 are read, N is written, an older
+   file migrates on first write, a newer one is refused naming its
+   writer). Serving an unverified release
    is never an option.
 
 Sync modes: `resident` (timer + jitter, edge pointer first so idle

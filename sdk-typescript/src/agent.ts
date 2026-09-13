@@ -11,6 +11,7 @@
 
 import { createHmac, randomBytes } from "node:crypto";
 import { errorNamed } from "./protocol/errors.js";
+import type { FsPort } from "./protocol/ports.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -41,7 +42,8 @@ import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "./sync/loop
 export const SDK_NAME = "agent-sdk-ts";
 export const SDK_VERSION = "0.1.0";
 /** The protocol this SDK speaks; the heartbeat names it (the manifest carries its own). */
-export const PROTOCOL_VERSION = "0.2.5";
+export { PROTOCOL_VERSION } from "./protocol/version.js";
+import { PROTOCOL_VERSION } from "./protocol/version.js";
 /** A vendored bundle this close to its notAfter logs `vendored_bundle_expiring_soon` at start (the platform warns at the same distance). */
 export const VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30;
 
@@ -97,6 +99,8 @@ export interface StartOptions {
   };
   now?: () => number;
   fetch?: FetchLike;
+  /** S2: the filesystem behind the store and the spool — the Node port by default; a fake that fills, fails or loses files in a customer's CI. */
+  fs?: FsPort;
   random?: () => number;
   logger?: (event: Record<string, unknown>) => void;
   /** T26: who reports on the heartbeat — the SDK by default; the daemon names itself `airprompterd`. */
@@ -264,7 +268,7 @@ export class AirPrompterAgent {
     this.localWindow = options.apply?.window ? parseWindow(options.apply.window) : null;
     this.heartbeatIntervalSeconds = Math.min(3600, Math.max(30, Math.round(options.heartbeatSeconds ?? 300)));
     const serverless = (options.sync?.mode ?? "resident") === "on_invoke";
-    this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink({ instanceId: ownInstanceId }, options.telemetry?.bufferBytes) : new DirectorySink(spoolDir, ownInstanceId, options.telemetry?.spoolBudgetBytes);
+    this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink({ instanceId: ownInstanceId }, options.telemetry?.bufferBytes) : new DirectorySink(spoolDir, ownInstanceId, options.telemetry?.spoolBudgetBytes, options.fs);
     this.spool = new SpoolWriter(this.sink, { instanceId: ownInstanceId, instanceClass: options.telemetry?.instanceClass ?? (serverless ? "ephemeral" : "resident"), sdk: `${SDK_NAME}/${SDK_VERSION}` });
     this.client =
       options.apiKey && options.sync?.mode !== "offline" && options.sync?.mode !== "daemon"
@@ -293,7 +297,7 @@ export class AirPrompterAgent {
     const keyProvider = options.keyProvider ?? fileKey(join(SlotStore.path({ stateDir, agentId: options.agentId, target: options.target }), "store.key"));
     let store: SlotStore;
     try {
-      store = await SlotStore.open({ stateDir, agentId: options.agentId, target: options.target, keyProvider });
+      store = await SlotStore.open({ stateDir, agentId: options.agentId, target: options.target, keyProvider, ...(options.fs ? { fs: options.fs } : {}) });
     } catch (error) {
       if (isStoreError(error) && (error.code === "kek_unavailable" || error.code === "store_corrupt")) throw new AgentStartError(error.code, error.message);
       throw error;

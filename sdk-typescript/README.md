@@ -258,6 +258,8 @@ writes the same catalogue for build steps.
 | `src/judge/` | `ap.judge()`: rubric templates, the prompt's `## Success criteria` as a rubric, the judge prompt, the reply folded to a score |
 | `src/spool/` | Minute windows per dimension set, segment naming and rotation (`SegmentPlanner`), `DirectorySink` (0600, `.open` until fsync + rename, crash recovery) and `MemorySink`, the feedback catalogue normaliser |
 | `src/sync/` | `SyncClient` (edge pointer, manifest with ETag, payloads by hash), `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `DaemonClient` (the socket side of `protocol/daemon-socket.md`) |
+| `src/protocol/ports.ts`, `src/ports/` | The seams to the world: `FsPort`, `ClockPort`, `FetchPort` (pure types) and the Node implementations. The spool, the store and the uploader reach the filesystem only through `FsPort`; the spool never throws on the request path (`faults` counts what it could not keep, a `dropped` row says it) |
+| `src/testing/` | The kit a customer's CI imports: `MemoryFs` (a filesystem that fills, fails and loses files), `FakeClock` (advances, skews), `FakeControlPlane` (signed manifests, refusals, lease, an expiring upload grant). Never loaded by the runtime |
 
 Every file in `protocol/vectors/` runs through these modules in `test/`.
 

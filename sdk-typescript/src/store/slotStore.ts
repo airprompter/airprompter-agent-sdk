@@ -18,7 +18,8 @@
 
 import { randomBytes } from "node:crypto";
 import { errorNamed } from "../protocol/errors.js";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { nodeFs } from "../ports/node.js";
+import type { FsPort } from "../protocol/ports.js";
 import { join } from "node:path";
 
 import { sha256Prefixed } from "../protocol/canonicalJson.js";
@@ -81,33 +82,33 @@ export function isStoreError(error: unknown): error is StoreError {
 
 const otherSlot = (slot: SlotName): SlotName => (slot === "A" ? "B" : "A");
 
-function fsyncFile(path: string): void {
+function fsyncFile(fs: FsPort, path: string): void {
   // Write access: on Windows an fsync on a read-only descriptor is refused (FlushFileBuffers needs it).
-  const fd = openSync(path, "r+");
+  const fd = fs.open(path, "r+");
   try {
-    fsyncSync(fd);
+    fs.fsync(fd);
   } finally {
-    closeSync(fd);
+    fs.close(fd);
   }
 }
 
-function writeFileSynced(path: string, bytes: Uint8Array, mode = 0o600): void {
-  writeFileSync(path, bytes, { mode });
-  fsyncFile(path);
+function writeFileSynced(fs: FsPort, path: string, bytes: Uint8Array, mode = 0o600): void {
+  fs.writeFile(path, bytes, mode);
+  fsyncFile(fs, path);
 }
 
 /** Write to a temp file, fsync, rename: the file is either the old one or the new one, never half. */
-function replaceFileAtomically(path: string, bytes: Uint8Array, hooks?: StoreHooks): void {
+function replaceFileAtomically(fs: FsPort, path: string, bytes: Uint8Array, hooks?: StoreHooks): void {
   const temp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
-  writeFileSynced(temp, bytes);
+  writeFileSynced(fs, temp, bytes);
   hooks?.beforeRename?.(path);
-  renameSync(temp, path);
+  fs.rename(temp, path);
   try {
-    const dir = openSync(join(path, ".."), "r");
+    const dir = fs.open(join(path, ".."), "r");
     try {
-      fsyncSync(dir);
+      fs.fsync(dir);
     } finally {
-      closeSync(dir);
+      fs.close(dir);
     }
   } catch {
     // Directory fsync is best effort on platforms that refuse it (Windows refuses to open a directory this way).
@@ -125,6 +126,8 @@ export interface OpenStoreInput {
   target: Target;
   keyProvider: KeyProvider;
   hooks?: StoreHooks;
+  /** The filesystem (S2): the Node port by default; a fake that fills or fails in tests. */
+  fs?: FsPort;
 }
 
 export class SlotStore {
@@ -133,6 +136,7 @@ export class SlotStore {
     private file: StoreFile,
     private readonly dek: Uint8Array,
     private readonly hooks: StoreHooks | undefined,
+    private readonly fs: FsPort,
   ) {}
 
   static path(input: { stateDir: string; agentId: string; target: Target }): string {
@@ -142,10 +146,11 @@ export class SlotStore {
   /** Opens (creating on first use). Throws `kek_unavailable` when the key provider cannot produce the KEK. */
   static async open(input: OpenStoreInput): Promise<SlotStore> {
     const dir = SlotStore.path(input);
-    mkdirSync(join(dir, "slots", "A", "payloads"), { recursive: true, mode: 0o700 });
-    mkdirSync(join(dir, "slots", "B", "payloads"), { recursive: true, mode: 0o700 });
+    const fs = input.fs ?? nodeFs;
+    fs.mkdirp(join(dir, "slots", "A", "payloads"), 0o700);
+    fs.mkdirp(join(dir, "slots", "B", "payloads"), 0o700);
     const storePath = join(dir, "store.json");
-    if (!existsSync(storePath)) {
+    if (!fs.exists(storePath)) {
       const dek = randomBytes(32);
       let wrapped: Uint8Array;
       try {
@@ -166,12 +171,12 @@ export class SlotStore {
         root: null,
         updatedAt: new Date().toISOString(),
       };
-      replaceFileAtomically(storePath, Buffer.from(JSON.stringify(file, null, 2), "utf8"));
-      return new SlotStore(dir, file, dek, input.hooks);
+      replaceFileAtomically(fs, storePath, Buffer.from(JSON.stringify(file, null, 2), "utf8"));
+      return new SlotStore(dir, file, dek, input.hooks, fs);
     }
     let file: StoreFile;
     try {
-      file = JSON.parse(readFileSync(storePath, "utf8")) as StoreFile;
+      file = JSON.parse(Buffer.from(fs.readFile(storePath)).toString("utf8")) as StoreFile;
     } catch {
       throw new StoreError("store_corrupt", "store.json is unreadable");
     }
@@ -185,7 +190,7 @@ export class SlotStore {
       throw new StoreError("kek_unavailable", `the key provider could not unwrap the store key: ${(error as Error).message}`);
     }
     if (dek.length !== 32) throw new StoreError("store_corrupt", "unwrapped store key has the wrong length");
-    return new SlotStore(dir, file, dek, input.hooks);
+    return new SlotStore(dir, file, dek, input.hooks, fs);
   }
 
   get state(): Readonly<StoreFile> {
@@ -234,13 +239,13 @@ export class SlotStore {
     }
     const slot = this.file.active ? otherSlot(this.file.active) : "A";
     const slotDir = join(this.dir, "slots", slot);
-    rmSync(join(slotDir, "payloads"), { recursive: true, force: true });
-    mkdirSync(join(slotDir, "payloads"), { recursive: true, mode: 0o700 });
+    this.fs.rm(join(slotDir, "payloads"), { recursive: true, force: true });
+    this.fs.mkdirp(join(slotDir, "payloads"), 0o700);
     for (const [hash, bytes] of input.payloads) {
       const aad = payloadAad({ agentId: this.file.agentId, target: this.file.target, generation, contentHash: hash });
-      writeFileSynced(join(slotDir, "payloads", `${hash.replace(":", "-")}.enc`), encryptPayload(this.dek, bytes, aad));
+      writeFileSynced(this.fs, join(slotDir, "payloads", `${hash.replace(":", "-")}.enc`), encryptPayload(this.dek, bytes, aad));
     }
-    writeFileSynced(join(slotDir, "manifest.json"), Buffer.from(JSON.stringify(input.manifest), "utf8"));
+    writeFileSynced(this.fs, join(slotDir, "manifest.json"), Buffer.from(JSON.stringify(input.manifest), "utf8"));
     this.write({ ...this.file, staged: slot, ...(input.force && generation < this.file.generation ? { forcedDowngrade: true } : {}) });
     return slot;
   }
@@ -270,8 +275,8 @@ export class SlotStore {
   /** Discard a staged slot (a crashed apply, or a refused unlock). */
   discardStaged(): void {
     if (!this.file.staged) return;
-    rmSync(join(this.dir, "slots", this.file.staged, "payloads"), { recursive: true, force: true });
-    rmSync(join(this.dir, "slots", this.file.staged, "manifest.json"), { force: true });
+    this.fs.rm(join(this.dir, "slots", this.file.staged, "payloads"), { recursive: true, force: true });
+    this.fs.rm(join(this.dir, "slots", this.file.staged, "manifest.json"), { force: true });
     this.write({ ...this.file, staged: null });
   }
 
@@ -294,9 +299,9 @@ export class SlotStore {
     const payloads = new Map<string, Buffer>();
     for (const hash of referencedPayloads(manifest.payload).keys()) {
       const path = join(this.dir, "slots", slot, "payloads", `${hash.replace(":", "-")}.enc`);
-      if (!existsSync(path)) throw new StoreError("slot_corrupt", `payload ${hash} missing`, "payload_missing");
+      if (!this.fs.exists(path)) throw new StoreError("slot_corrupt", `payload ${hash} missing`, "payload_missing");
       try {
-        payloads.set(hash, decryptPayload(this.dek, readFileSync(path), payloadAad({ agentId: this.file.agentId, target: this.file.target, generation, contentHash: hash })));
+        payloads.set(hash, decryptPayload(this.dek, Buffer.from(this.fs.readFile(path)), payloadAad({ agentId: this.file.agentId, target: this.file.target, generation, contentHash: hash })));
       } catch (error) {
         if (isPayloadDecryptError(error)) throw new StoreError("slot_corrupt", `payload ${hash} does not decrypt for this slot`, "payload_hash_mismatch");
         throw error;
@@ -326,14 +331,14 @@ export class SlotStore {
 
   listSlotFiles(slot: SlotName): string[] {
     const dir = join(this.dir, "slots", slot);
-    return existsSync(dir) ? readdirSync(dir, { recursive: true }).map(String).sort() : [];
+    return this.fs.listRecursive(dir);
   }
 
   private readManifest(slot: SlotName): Manifest {
     const path = join(this.dir, "slots", slot, "manifest.json");
-    if (!existsSync(path)) throw new StoreError("slot_corrupt", `slot ${slot} has no manifest`);
+    if (!this.fs.exists(path)) throw new StoreError("slot_corrupt", `slot ${slot} has no manifest`);
     try {
-      return JSON.parse(readFileSync(path, "utf8")) as Manifest;
+      return JSON.parse(Buffer.from(this.fs.readFile(path)).toString("utf8")) as Manifest;
     } catch {
       throw new StoreError("slot_corrupt", `slot ${slot} manifest is unreadable`, "schema_invalid");
     }
@@ -341,7 +346,7 @@ export class SlotStore {
 
   private write(next: StoreFile): void {
     const file = { ...next, updatedAt: new Date().toISOString() };
-    replaceFileAtomically(join(this.dir, "store.json"), Buffer.from(JSON.stringify(file, null, 2), "utf8"), this.hooks);
+    replaceFileAtomically(this.fs, join(this.dir, "store.json"), Buffer.from(JSON.stringify(file, null, 2), "utf8"), this.hooks);
     this.file = file;
   }
 }

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### SDK — the spool never throws on the request path; the ports and the testing kit (S2, AIR-1970)
+- TypeScript: `FsPort` / `ClockPort` / `FetchPort` in `protocol/ports.ts`; `DirectorySink`, `SlotStore` and `SpoolUploader` take an `fs` (the Node port by default). The sink never throws: filesystem failures are counted on `sink.faults` by code and the rows it could not keep are reported as one `dropped` row when a write succeeds again; an unsynced segment stays `.open` for recovery; a file a sibling took away is skipped by the writer's sweep and the uploader's (`uploader.fsFaults`). `AirPrompterAgent.start({ fs })` passes the port through. `src/testing/`: `MemoryFs`, `FakeClock`, and the fake registry moved out of the tests. `PROTOCOL_VERSION` lives in `protocol/version.ts`.
+- Python: `airprompter_agent.ports` (`FsPort`, `OsFs`, `fs_failure_code`), `DirectorySink(..., fs=)` with the same never-raise rule and `faults`, and `airprompter_agent.testing` (`MemoryFs`, `FakeClock`).
+- spool-format.md: the writer-fault paragraph. No wire change; vectors unchanged.
+
 ### SDK — error and sink identity as data (S1, AIR-1969)
 - TypeScript: every SDK error sets `name` and carries a `code`; `isStoreError`, `isDaemonError`, `isAgentStartError`, `isManagedRunError`, `isPayloadDecryptError` and `errorNamed` replace `instanceof`, so an error from a duplicated copy of the package is still recognised. `SpoolSink` gains `kind` and optional `drain()` / `depth()`; the runtime branches on those. `PayloadDecryptError` gains `code: "payload_decrypt_failed"`. A source pin refuses `instanceof` on any SDK class in the SDK and the CLI.
 - Python: `SpoolSink.kind` (`"memory"` / `"directory"`, `"custom"` on the base); the runtime reads `drain` / `depth` by capability.

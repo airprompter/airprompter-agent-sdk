@@ -4,6 +4,10 @@ export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedErro
 export type { AgentStatus, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange } from "./agent.js";
 export { DaemonClient, DaemonError, isDaemonError, daemonSocketPath, DAEMON_MAX_LINE_BYTES } from "./sync/daemon.js";
 export { errorNamed } from "./protocol/errors.js";
+export type { FsPort, FsFailure, FsOpenFlags, ClockPort, FetchPort } from "./protocol/ports.js";
+export { fsFailureCode } from "./protocol/ports.js";
+export { nodeFs, systemClock } from "./ports/node.js";
+export { PROTOCOL_VERSION } from "./protocol/version.js";
 export type { DaemonHello, DaemonSlotResponse, DaemonGenerationEvent } from "./sync/daemon.js";
 
 export { canonicalJson, canonicalBytes, sha256Prefixed, CanonicalJsonError } from "./protocol/canonicalJson.js";
@@ -28,7 +32,7 @@ export { mintRunRef, parseRunRef } from "./render/runRef.js";
 export type { RunRefFacts } from "./render/runRef.js";
 
 export { SpoolWriter, DirectorySink, MemorySink, latencyBucketIndex, minuteOf, epochMinute, segmentName, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES } from "./spool/writer.js";
-export type { Observation, WindowRow, RefusalRow, SpoolRow, SpoolSink, ErrorClass } from "./spool/writer.js";
+export type { Observation, WindowRow, RefusalRow, SpoolRow, SpoolSink, SinkFaults, ErrorClass } from "./spool/writer.js";
 
 export { SyncClient } from "./sync/client.js";
 export type { FetchLike, ManifestFetch, SyncClientOptions } from "./sync/client.js";

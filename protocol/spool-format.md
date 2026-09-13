@@ -44,6 +44,16 @@ Status: **draft 1** — matches design decision D52/D66. Breaking changes bump
 - Serverless hosts keep a **256 KiB** memory buffer instead of a directory
   and flush at invocation end; past the buffer the oldest rows are evicted
   and one `dropped` row (rows counted as `segments`) closes the flush.
+- **A writer that cannot write never fails the caller** (S2). A full disk
+  (`ENOSPC`), an I/O error, or a file a sibling process took away between a
+  listing and a stat is counted by the writer — by filesystem code, on its
+  own status — and the rows it could not keep are reported as one `dropped`
+  row (rows counted as `segments`) in the first segment it can open
+  again. A segment whose fsync failed is left `.open` for the same writer's
+  next start to recover; the bytes written before a failed row are kept
+  and the partial last line is the daemon's to skip. The proof is the
+  fault vector the SDKs run over a filesystem that fills
+  (`sdk-typescript/test/spoolFaults.test.ts`, `sdk-python/tests/test_spool_faults.py`).
 
 ## Row types
 

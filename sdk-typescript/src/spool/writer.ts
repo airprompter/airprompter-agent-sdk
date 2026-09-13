@@ -11,8 +11,10 @@
  * flush at invocation end.
  */
 
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { join } from "node:path";
+
+import { nodeFs } from "../ports/node.js";
+import { fsFailureCode, type FsPort } from "../protocol/ports.js";
 
 export const LATENCY_BUCKET_EDGES_MS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 65536] as const;
 export const SEGMENT_MAX_BYTES = 1024 * 1024;
@@ -187,35 +189,79 @@ export class MemorySink implements SpoolSink {
   }
 }
 
+/**
+ * What a `DirectorySink` could not keep: rows it failed to write, counted by
+ * the filesystem code that refused them. Reported as a `dropped` row the
+ * moment a write succeeds again, so the loss is visible in the spool itself.
+ */
+export interface SinkFaults {
+  /** Rows the sink could not write (disk full, I/O error), not yet reported in a `dropped` row. */
+  pendingRows: number;
+  pendingBytes: number;
+  /** Every failure by code, for status and the heartbeat. */
+  byCode: Record<string, number>;
+  /** The last failure, as a sentence a customer can act on. */
+  last: string | null;
+}
+
+/**
+ * Segments on disk, through an `FsPort`. Never throws: the request path calls
+ * `append`, and a full disk, an I/O error or a file a sibling process took
+ * away are counted, reported as a `dropped` row when writing works again,
+ * and surfaced on `faults` — never surfaced to the caller as an exception.
+ */
 export class DirectorySink implements SpoolSink {
   readonly kind = "directory" as const;
   private fd: number | null = null;
   private openPath: string | null = null;
   private readonly planner: SegmentPlanner;
+  private readonly fs: FsPort;
+  readonly faults: SinkFaults = { pendingRows: 0, pendingBytes: 0, byCode: {}, last: null };
 
   constructor(
     readonly dir: string,
     private readonly instanceId: string,
     private readonly budgetBytes: number = HOST_SPOOL_BUDGET_BYTES,
+    fs: FsPort = nodeFs,
   ) {
+    this.fs = fs;
     this.planner = new SegmentPlanner(instanceId);
-    mkdirSync(join(dir, "sent"), { recursive: true, mode: 0o700 });
-    mkdirSync(join(dir, "quarantine"), { recursive: true, mode: 0o700 });
+    this.guard("open_spool", () => {
+      this.fs.mkdirp(join(dir, "sent"), 0o700);
+      this.fs.mkdirp(join(dir, "quarantine"), 0o700);
+    });
     this.recoverOpenSegments();
+  }
+
+  /** Run a filesystem step; on failure count it by code and return false. The sink never throws. */
+  private guard(step: string, run: () => void): boolean {
+    try {
+      run();
+      return true;
+    } catch (error) {
+      const code = fsFailureCode(error);
+      this.faults.byCode[code] = (this.faults.byCode[code] ?? 0) + 1;
+      this.faults.last = `${step}: ${code}`;
+      return false;
+    }
   }
 
   /** A writer that crashed left `.open` files; the same writer closes them on its next start (a partial last line is the daemon's to skip). */
   private recoverOpenSegments(): void {
-    for (const name of readdirSync(this.dir)) {
+    let names: string[] = [];
+    this.guard("list_spool", () => void (names = this.fs.list(this.dir)));
+    for (const name of names) {
       if (name.startsWith(`seg-${this.instanceId}-`) && name.endsWith(".ndjson.open")) {
         const path = join(this.dir, name);
-        const fd = openSync(path, "r+");
-        try {
-          fsyncSync(fd);
-        } finally {
-          closeSync(fd);
-        }
-        renameSync(path, path.slice(0, -".open".length));
+        this.guard("recover_open_segment", () => {
+          const fd = this.fs.open(path, "r+");
+          try {
+            this.fs.fsync(fd);
+          } finally {
+            this.fs.close(fd);
+          }
+          this.fs.rename(path, path.slice(0, -".open".length));
+        });
       }
     }
   }
@@ -225,16 +271,57 @@ export class DirectorySink implements SpoolSink {
     const plan = this.planner.append(nowMs, line.length);
     if (plan.rotated || this.fd === null) {
       this.flush(nowMs);
-      // A name already on disk (a previous process of the same instance in the same minute) is skipped, never appended to.
-      let name = plan.segment;
-      while (existsSync(join(this.dir, name)) || existsSync(join(this.dir, `${name}.open`))) {
-        this.planner.n += 1;
-        name = segmentName(this.instanceId, this.planner.openMinute!, this.planner.n);
+      const opened = this.guard("open_segment", () => {
+        // A name already on disk (a previous process of the same instance in the same minute) is skipped, never appended to.
+        let name = plan.segment;
+        while (this.fs.exists(join(this.dir, name)) || this.fs.exists(join(this.dir, `${name}.open`))) {
+          this.planner.n += 1;
+          name = segmentName(this.instanceId, this.planner.openMinute!, this.planner.n);
+        }
+        const openPath = join(this.dir, `${name}.open`);
+        this.fd = this.fs.open(openPath, "a", 0o600);
+        this.openPath = openPath;
+      });
+      if (!opened) {
+        this.fd = null;
+        this.openPath = null;
+        this.lose(1, line.length);
+        return;
       }
-      this.openPath = join(this.dir, `${name}.open`);
-      this.fd = openSync(this.openPath, "a", 0o600);
+      this.reportPendingLoss(nowMs);
+      if (this.fd === null) {
+        // The loss could not even be said (still no space): this row joins it.
+        this.lose(1, line.length);
+        return;
+      }
     }
-    writeSync(this.fd, line);
+    const fd = this.fd;
+    if (!this.guard("write_row", () => this.fs.write(fd, line))) {
+      // What was written before this row is good; close the segment (a partial last line is the daemon's to skip) and count the row.
+      this.closeOpen();
+      this.lose(1, line.length);
+    }
+  }
+
+  /** A row the sink could not keep. Counted now; said in a `dropped` row when a write succeeds again. */
+  private lose(rows: number, bytes: number): void {
+    this.faults.pendingRows += rows;
+    this.faults.pendingBytes += bytes;
+  }
+
+  /** Rows lost to failures become one `dropped` row (rows counted as `segments`, as the memory sink does) in the segment just opened. */
+  private reportPendingLoss(nowMs: number): void {
+    if (this.faults.pendingRows === 0 || this.fd === null) return;
+    const rows = this.faults.pendingRows;
+    const bytes = this.faults.pendingBytes;
+    const line = Buffer.from(`${JSON.stringify({ type: "dropped", v: 1, at: isoSeconds(nowMs), instanceId: this.instanceId, segments: rows, bytes })}\n`, "utf8");
+    const fd = this.fd;
+    if (this.guard("write_dropped_row", () => this.fs.write(fd, line))) {
+      this.faults.pendingRows = 0;
+      this.faults.pendingBytes = 0;
+    } else {
+      this.closeOpen();
+    }
   }
 
   flush(nowMs?: number): void {
@@ -243,35 +330,43 @@ export class DirectorySink implements SpoolSink {
     // Over budget after this close: evict the oldest, then write the loss as its own small closed segment, at once.
     const evicted = this.enforceBudget();
     if (evicted) {
-      this.append({ type: "dropped", v: 1, at: new Date(nowMs ?? Date.now()).toISOString().replace(/\.\d{3}Z$/, "Z"), instanceId: this.instanceId, segments: evicted.segments, bytes: evicted.bytes }, nowMs ?? Date.now());
+      const at = nowMs ?? Date.now();
+      this.append({ type: "dropped", v: 1, at: isoSeconds(at), instanceId: this.instanceId, segments: evicted.segments, bytes: evicted.bytes }, at);
       this.closeOpen();
     }
   }
 
   private closeOpen(): void {
     if (this.fd === null || !this.openPath) return;
-    fsyncSync(this.fd);
-    closeSync(this.fd);
-    renameSync(this.openPath, this.openPath.slice(0, -".open".length));
+    const fd = this.fd;
+    const openPath = this.openPath;
     this.fd = null;
     this.openPath = null;
+    const synced = this.guard("fsync_segment", () => this.fs.fsync(fd));
+    this.guard("close_segment", () => this.fs.close(fd));
+    // A segment that did not fsync is not closed: it stays `.open` for the next start to recover (its bytes are on disk or they are not).
+    if (synced) this.guard("close_segment", () => this.fs.rename(openPath, openPath.slice(0, -".open".length)));
   }
 
-  /** Over the host budget: evict the OLDEST closed, unsent segments and say how much went (spool-format.md). */
+  /** Over the host budget: evict the OLDEST closed, unsent segments and say how much went (spool-format.md). A file a sibling took away is skipped. */
   private enforceBudget(): { segments: number; bytes: number } | null {
-    const segments = this.closedSegments();
+    const sizes: Array<{ name: string; size: number }> = [];
     let total = 0;
-    const sizes = segments.map((name) => {
-      const size = statSync(join(this.dir, name)).size;
-      total += size;
-      return { name, size };
-    });
+    for (const name of this.closedSegments()) {
+      this.guard("stat_segment", () => {
+        const size = this.fs.stat(join(this.dir, name)).size;
+        sizes.push({ name, size });
+        total += size;
+      });
+    }
     let evicted = 0;
     let evictedBytes = 0;
     for (const { name, size } of sizes) {
       if (total <= this.budgetBytes) break;
-      unlinkSync(join(this.dir, name));
+      // Gone already (the daemon or a sibling evicted it): it no longer counts, and nothing was lost here.
+      const removed = this.guard("evict_segment", () => this.fs.unlink(join(this.dir, name)));
       total -= size;
+      if (!removed) continue;
       evicted += 1;
       evictedBytes += size;
     }
@@ -279,15 +374,22 @@ export class DirectorySink implements SpoolSink {
   }
 
   closedSegments(): string[] {
-    return readdirSync(this.dir)
-      .filter((name) => name.startsWith("seg-") && name.endsWith(".ndjson"))
-      .sort();
+    let names: string[] = [];
+    this.guard("list_spool", () => void (names = this.fs.list(this.dir)));
+    return names.filter((name) => name.startsWith("seg-") && name.endsWith(".ndjson")).sort();
   }
 
   depth(): { segments: number; bytes: number } {
     const segments = this.closedSegments();
-    return { segments: segments.length, bytes: segments.reduce((sum, name) => sum + statSync(join(this.dir, name)).size, 0) };
+    let bytes = 0;
+    for (const name of segments) this.guard("stat_segment", () => void (bytes += this.fs.stat(join(this.dir, name)).size));
+    return { segments: segments.length, bytes };
   }
+}
+
+/** ISO-8601 to the second, the spool's timestamp form. */
+function isoSeconds(ms: number): string {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 type WindowKey = string;

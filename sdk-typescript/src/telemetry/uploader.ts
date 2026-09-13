@@ -16,7 +16,8 @@
  * runtime's own grant at invocation end.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { nodeFs } from "../ports/node.js";
+import { fsFailureCode, type FsPort } from "../protocol/ports.js";
 import { join } from "node:path";
 
 import { HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epochMinute, segmentName, type ErrorClass, type SpoolRow } from "../spool/writer.js";
@@ -211,6 +212,8 @@ export interface UploaderOptions {
   grantFor: (instanceId: string) => Promise<GrantDecision>;
   fetch: FetchLike;
   now?: () => number;
+  /** The filesystem (S2): the Node port by default; a fake that fills, fails or loses files in tests. */
+  fs?: FsPort;
   random?: () => number;
   logger?: (event: Record<string, unknown>) => void;
   budgetBytes?: number;
@@ -258,10 +261,28 @@ export class SpoolUploader {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
 
+  private readonly fs: FsPort;
+  /** Filesystem failures by code — a sweep that could not stat, an evict that found the file gone (S2). */
+  readonly fsFaults: Record<string, number> = {};
+
   constructor(private readonly options: UploaderOptions) {
     this.intervalSeconds = options.intervalSeconds ?? 300;
-    mkdirSync(join(options.dir, "sent"), { recursive: true, mode: 0o700 });
-    mkdirSync(join(options.dir, "quarantine"), { recursive: true, mode: 0o700 });
+    this.fs = options.fs ?? nodeFs;
+    this.fs.mkdirp(join(options.dir, "sent"), 0o700);
+    this.fs.mkdirp(join(options.dir, "quarantine"), 0o700);
+  }
+
+  /** Run a filesystem step; a failure is counted by code and returns false (a segment a sibling took away is not an error). */
+  private guard(step: string, run: () => void): boolean {
+    try {
+      run();
+      return true;
+    } catch (error) {
+      const code = fsFailureCode(error);
+      this.fsFaults[code] = (this.fsFaults[code] ?? 0) + 1;
+      this.log({ event: "fs_fault", step, code });
+      return false;
+    }
   }
 
   private now(): number {
@@ -274,7 +295,8 @@ export class SpoolUploader {
 
   /** Closed, unsent segments, oldest first (by epoch minute, then n, then name). */
   closedSegments(): string[] {
-    return readdirSync(this.options.dir)
+    return this.fs
+      .list(this.options.dir)
       .filter((name) => SEGMENT_NAME.test(name))
       .sort((a, b) => {
         const [, , ma, na] = SEGMENT_NAME.exec(a)!;
@@ -285,20 +307,24 @@ export class SpoolUploader {
 
   depth(): { segments: number; bytes: number } {
     const segments = this.closedSegments();
-    return { segments: segments.length, bytes: segments.reduce((sum, name) => sum + statSync(join(this.options.dir, name)).size, 0) };
+    let bytes = 0;
+    for (const name of segments) this.guard("stat_segment", () => void (bytes += this.fs.stat(join(this.options.dir, name)).size));
+    return { segments: segments.length, bytes };
   }
 
   /** Attached SDK processes and the daemon both write here; over the host budget the OLDEST unsent segments go and the loss is one `dropped` row under the daemon's own id. */
   enforceBudget(): number {
     const budget = this.options.budgetBytes ?? HOST_SPOOL_BUDGET_BYTES;
-    const segments = this.closedSegments().map((name) => ({ name, size: statSync(join(this.options.dir, name)).size }));
+    const segments: Array<{ name: string; size: number }> = [];
+    for (const name of this.closedSegments()) this.guard("stat_segment", () => void segments.push({ name, size: this.fs.stat(join(this.options.dir, name)).size }));
     let total = segments.reduce((sum, s) => sum + s.size, 0);
     let evicted = 0;
     let evictedBytes = 0;
     for (const segment of segments) {
       if (total <= budget) break;
-      unlinkSync(join(this.options.dir, segment.name));
+      const removed = this.guard("evict_segment", () => this.fs.unlink(join(this.options.dir, segment.name)));
       total -= segment.size;
+      if (!removed) continue;
       evicted += 1;
       evictedBytes += segment.size;
     }
@@ -307,12 +333,21 @@ export class SpoolUploader {
       const row = { type: "dropped", v: 1, at: new Date(at).toISOString().replace(/\.\d{3}Z$/, "Z"), instanceId: this.options.instanceId, segments: evicted, bytes: evictedBytes };
       let n = 0;
       let name = segmentName(this.options.instanceId, epochMinute(at), n);
-      while (existsSync(join(this.options.dir, name)) || existsSync(join(this.options.dir, `${name}.open`)) || existsSync(join(this.options.dir, "sent", name))) name = segmentName(this.options.instanceId, epochMinute(at), (n += 1));
-      writeFileSync(join(this.options.dir, name), `${JSON.stringify(row)}\n`, { mode: 0o600 });
+      while (this.fs.exists(join(this.options.dir, name)) || this.fs.exists(join(this.options.dir, `${name}.open`)) || this.fs.exists(join(this.options.dir, "sent", name))) name = segmentName(this.options.instanceId, epochMinute(at), (n += 1));
+      this.guard("write_dropped_row", () => this.fs.writeFile(join(this.options.dir, name), Buffer.from(`${JSON.stringify(row)}\n`, "utf8"), 0o600));
       this.droppedSegments += evicted;
       this.log({ event: "spool_evicted", segments: evicted, bytes: evictedBytes });
     }
     return evicted;
+  }
+
+  /** The segment's bytes, or null when it is gone (counted as a fault, never thrown). */
+  private readSegment(path: string): Buffer | null {
+    let bytes: Buffer | null = null;
+    this.guard("read_segment", () => {
+      bytes = Buffer.from(this.fs.readFile(path));
+    });
+    return bytes;
   }
 
   /** `sent/` and `quarantine/` entries older than their retention are deleted. */
@@ -323,15 +358,17 @@ export class SpoolUploader {
       ["quarantine", this.options.quarantineRetentionMs ?? QUARANTINE_RETENTION_MS],
     ] as const) {
       const dir = join(this.options.dir, sub);
-      for (const name of readdirSync(dir)) {
+      for (const name of this.fs.list(dir)) {
         const path = join(dir, name);
-        if (at - statSync(path).mtimeMs > retention) unlinkSync(path);
+        this.guard("sweep", () => {
+          if (at - this.fs.stat(path).mtimeMs > retention) this.fs.unlink(path);
+        });
       }
     }
   }
 
   private quarantine(name: string, reason: string, detail?: unknown): void {
-    renameSync(join(this.options.dir, name), join(this.options.dir, "quarantine", name));
+    this.guard("quarantine", () => this.fs.rename(join(this.options.dir, name), join(this.options.dir, "quarantine", name)));
     this.quarantinedSegments += 1;
     this.log({ event: "segment_quarantined", segment: name, reason, ...(detail !== undefined ? { detail } : {}) });
   }
@@ -369,7 +406,10 @@ export class SpoolUploader {
       for (const name of this.closedSegments()) {
         const path = join(this.options.dir, name);
         const instanceId = SEGMENT_NAME.exec(name)![1]!;
-        const bytes = readFileSync(path);
+        const read = this.readSegment(path);
+        // Taken away between the listing and the read (a sibling's eviction): nothing to upload, nothing lost here.
+        if (read === null) continue;
+        const bytes = read;
         if (bytes.length > SEGMENT_MAX_BYTES) {
           this.quarantine(name, "oversize", bytes.length);
           result.quarantined.push(name);
@@ -383,7 +423,7 @@ export class SpoolUploader {
         }
         if (inspection.rows.length === 0) {
           // Nothing to say (an empty or partial-only segment): acknowledged locally, never uploaded.
-          renameSync(path, join(this.options.dir, "sent", name));
+          this.guard("ack_segment", () => this.fs.rename(path, join(this.options.dir, "sent", name)));
           continue;
         }
         const decision = await this.grantFor(instanceId);
@@ -409,7 +449,7 @@ export class SpoolUploader {
           if (fresh.kind === "grant") outcome = await postSegment({ grant: fresh.grant, segment: name, bytes: payload, fetch: this.options.fetch, now: () => this.now() });
         }
         if (outcome.status === "ok") {
-          renameSync(path, join(this.options.dir, "sent", name));
+          this.guard("ack_segment", () => this.fs.rename(path, join(this.options.dir, "sent", name)));
           this.sentSegments += 1;
           this.lastUploadMs = this.now();
           this.lastError = null;

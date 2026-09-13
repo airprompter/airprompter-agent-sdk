@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Union
 
 from .._util import fsync_dir, iso_seconds, now_ms
+from ..ports import FsPort, fs_failure_code, fs_or_default
 
 LATENCY_BUCKET_EDGES_MS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 65536)
 SEGMENT_MAX_BYTES = 1024 * 1024
@@ -174,31 +175,70 @@ class MemorySink(SpoolSink):
 
 
 class DirectorySink(SpoolSink):
+    """Segments on disk, through an ``FsPort``. Never raises on the request path: a full disk, an I/O error or a
+    file a sibling process took away are counted on ``faults``, reported as a ``dropped`` row when writing works
+    again, and never surfaced to the caller as an exception (S2)."""
+
     kind = "directory"
-    def __init__(self, directory: str, instance_id: str, budget_bytes: int = HOST_SPOOL_BUDGET_BYTES):
+
+    def __init__(self, directory: str, instance_id: str, budget_bytes: int = HOST_SPOOL_BUDGET_BYTES, fs: Optional[FsPort] = None):
         self.dir = directory
         self._instance_id = instance_id
         self._budget = budget_bytes
+        self._fs = fs_or_default(fs)
         self._fd: Optional[int] = None
         self._open_path: Optional[str] = None
         self._planner = SegmentPlanner(instance_id)
         self._lock = threading.RLock()
-        os.makedirs(os.path.join(directory, "sent"), mode=0o700, exist_ok=True)
-        os.makedirs(os.path.join(directory, "quarantine"), mode=0o700, exist_ok=True)
-        self._recover_open_segments()
+        self.faults: dict[str, Any] = {"pendingRows": 0, "pendingBytes": 0, "byCode": {}, "last": None}
+        if self._guard("open_spool", lambda: (self._fs.mkdirp(os.path.join(directory, "sent"), 0o700), self._fs.mkdirp(os.path.join(directory, "quarantine"), 0o700))):
+            self._recover_open_segments()
+
+    def _guard(self, step: str, run: Any) -> bool:
+        """Run a filesystem step; a failure is counted by code and returns False. The sink never raises."""
+        try:
+            run()
+            return True
+        except OSError as error:
+            code = fs_failure_code(error)
+            self.faults["byCode"][code] = self.faults["byCode"].get(code, 0) + 1
+            self.faults["last"] = f"{step}: {code}"
+            return False
 
     def _recover_open_segments(self) -> None:
         """A writer that crashed left ``.open`` files; the same writer closes them on its next start (a partial last line is the daemon's to skip)."""
         prefix = f"seg-{self._instance_id}-"
-        for name in os.listdir(self.dir):
+        names: list[str] = []
+        self._guard("list_spool", lambda: names.extend(self._fs.list(self.dir)))
+        for name in names:
             if name.startswith(prefix) and name.endswith(".ndjson.open"):
                 path = os.path.join(self.dir, name)
-                fd = os.open(path, os.O_RDWR)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-                os.replace(path, path[: -len(".open")])
+
+                def recover(path: str = path) -> None:
+                    fd = self._fs.open(path, "r+")
+                    try:
+                        self._fs.fsync(fd)
+                    finally:
+                        self._fs.close(fd)
+                    self._fs.rename(path, path[: -len(".open")])
+
+                self._guard("recover_open_segment", recover)
+
+    def _lose(self, rows: int, byte_count: int) -> None:
+        self.faults["pendingRows"] += rows
+        self.faults["pendingBytes"] += byte_count
+
+    def _report_pending_loss(self, now_ms_: float) -> None:
+        """Rows lost to failures become one ``dropped`` row (rows counted as ``segments``, as the memory sink does)."""
+        if self.faults["pendingRows"] == 0 or self._fd is None:
+            return
+        line = _row_bytes(_dropped_row(self._instance_id, now_ms_, self.faults["pendingRows"], self.faults["pendingBytes"]))
+        fd = self._fd
+        if self._guard("write_dropped_row", lambda: self._fs.write(fd, line)):
+            self.faults["pendingRows"] = 0
+            self.faults["pendingBytes"] = 0
+        else:
+            self._close_open()
 
     def append(self, row: SpoolRow, now_ms_: float) -> None:
         line = _row_bytes(row)
@@ -206,14 +246,31 @@ class DirectorySink(SpoolSink):
             segment, rotated = self._planner.append(now_ms_, len(line))
             if rotated or self._fd is None:
                 self.flush(now_ms_)
-                # A name already on disk (a previous process of the same instance in the same minute) is skipped, never appended to.
-                name = segment
-                while os.path.exists(os.path.join(self.dir, name)) or os.path.exists(os.path.join(self.dir, f"{name}.open")):
-                    self._planner.n += 1
-                    name = segment_name(self._instance_id, self._planner.open_minute or 0, self._planner.n)
-                self._open_path = os.path.join(self.dir, f"{name}.open")
-                self._fd = os.open(self._open_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            os.write(self._fd, line)
+
+                def open_segment() -> None:
+                    # A name already on disk (a previous process of the same instance in the same minute) is skipped, never appended to.
+                    name = segment
+                    while self._fs.exists(os.path.join(self.dir, name)) or self._fs.exists(os.path.join(self.dir, f"{name}.open")):
+                        self._planner.n += 1
+                        name = segment_name(self._instance_id, self._planner.open_minute or 0, self._planner.n)
+                    open_path = os.path.join(self.dir, f"{name}.open")
+                    self._fd = self._fs.open(open_path, "a", 0o600)
+                    self._open_path = open_path
+
+                if not self._guard("open_segment", open_segment):
+                    self._fd = None
+                    self._open_path = None
+                    self._lose(1, len(line))
+                    return
+                self._report_pending_loss(now_ms_)
+                if self._fd is None:
+                    self._lose(1, len(line))
+                    return
+            fd = self._fd
+            if not self._guard("write_row", lambda: self._fs.write(fd, line)):
+                # What was written before this row is good; close the segment and count the row.
+                self._close_open()
+                self._lose(1, len(line))
 
     def flush(self, now_ms_: Optional[float] = None) -> None:
         with self._lock:
@@ -230,34 +287,51 @@ class DirectorySink(SpoolSink):
     def _close_open(self) -> None:
         if self._fd is None or not self._open_path:
             return
-        os.fsync(self._fd)
-        os.close(self._fd)
-        os.replace(self._open_path, self._open_path[: -len(".open")])
-        fsync_dir(self.dir)
+        fd = self._fd
+        open_path = self._open_path
         self._fd = None
         self._open_path = None
+        synced = self._guard("fsync_segment", lambda: self._fs.fsync(fd))
+        self._guard("close_segment", lambda: self._fs.close(fd))
+        # A segment that did not fsync is not closed: it stays ``.open`` for the next start to recover.
+        if synced:
+            self._guard("close_segment", lambda: self._fs.rename(open_path, open_path[: -len(".open")]))
+            self._guard("fsync_dir", lambda: fsync_dir(self.dir))
 
     def _enforce_budget(self) -> Optional[tuple[int, int]]:
-        """Over the host budget: evict the OLDEST closed, unsent segments and say how much went (spool-format.md)."""
-        sizes = [(name, os.path.getsize(os.path.join(self.dir, name))) for name in self.closed_segments()]
+        """Over the host budget: evict the OLDEST closed, unsent segments and say how much went. A file a sibling took away is skipped."""
+        sizes: list[tuple[str, int]] = []
+        for name in self.closed_segments():
+            self._guard("stat_segment", lambda name=name: sizes.append((name, self._fs.stat(os.path.join(self.dir, name))[0])))
         total = sum(size for _name, size in sizes)
         evicted = 0
         evicted_bytes = 0
         for name, size in sizes:
             if total <= self._budget:
                 break
-            os.remove(os.path.join(self.dir, name))
+            removed = self._guard("evict_segment", lambda name=name: self._fs.unlink(os.path.join(self.dir, name)))
             total -= size
+            if not removed:
+                continue
             evicted += 1
             evicted_bytes += size
         return (evicted, evicted_bytes) if evicted > 0 else None
 
     def closed_segments(self) -> list[str]:
-        return sorted(name for name in os.listdir(self.dir) if name.startswith("seg-") and name.endswith(".ndjson"))
+        names: list[str] = []
+        self._guard("list_spool", lambda: names.extend(self._fs.list(self.dir)))
+        return sorted(name for name in names if name.startswith("seg-") and name.endswith(".ndjson"))
 
     def depth(self) -> dict[str, int]:
         segments = self.closed_segments()
-        return {"segments": len(segments), "bytes": sum(os.path.getsize(os.path.join(self.dir, name)) for name in segments)}
+        total = 0
+        for name in segments:
+            def add(name: str = name) -> None:
+                nonlocal total
+                total += self._fs.stat(os.path.join(self.dir, name))[0]
+
+            self._guard("stat_segment", add)
+        return {"segments": len(segments), "bytes": total}
 
 
 @dataclass

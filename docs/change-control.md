@@ -9,6 +9,14 @@ directive rides the next manifest, and your hook receives it as
 `staged.unlockRequest`); it can never grant one. The recipes below are the
 hook's shapes. None of them tells AirPrompter which tool you use.
 
+The policy itself is yours too (S4): the first update a host verifies
+pins its apply policy in `store.json`; a later update from the console can
+make the host *wait for an unlock* but can never switch it back to
+*applying automatically* — that takes `airprompter policy set … auto` on
+the host (or `ap.setApplyPolicy("auto")`), an operator's act that is logged
+with who asked. The fleet view says "pinned on the host" while the
+console's setting is advisory there.
+
 The rule every recipe obeys: **resolve after `activate()` to go live;
 resolve or reject without it to leave the release staged.** A hook that
 throws leaves the release staged and says so in the log

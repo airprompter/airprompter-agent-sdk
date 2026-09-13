@@ -77,8 +77,11 @@ this order:
 | M10 | every present payload's SHA-256 equals its `contentHash` and its length its `byteLength` | `payload_hash_mismatch` |
 | M11 | when `requireCountersign` (or the target is locally configured to require it): every release the manifest can activate — the manifest's `releaseDigest` and each experiment arm's — carries a countersignature from a key in the **customer** root's `targets` role | `countersign_missing` |
 | M12 | …and each of those signatures verifies over the UTF-8 digest string | `countersign_invalid` |
+| M13 | every `directives[]` entry is of a kind the runtime honours — `disable` or `request_unlock` (S4; checked with M7/M8, before any payload is fetched) | `directive_unknown` |
 
-Only then does apply policy run (`auto` activates; `unlock_required` stages).
+Only then does apply policy run — and the policy is the host's, not the
+manifest's (see below): the manifest's `applyPolicy` pins the host on first
+use or tightens it, never loosens it.
 
 Notes:
 
@@ -155,3 +158,40 @@ retreat and a dial-down. Three rules:
 Together: a stale or pinned pointer costs at most one heartbeat interval
 of delay before the fleet sees what the origin has, and a runtime that can
 reach only the pointer expires honestly.
+
+## The apply policy is the customer's (S4)
+
+A manifest says `applyPolicy`, but a compromised or mis-edited control
+plane could say `auto` where Production was `unlock_required`, and the
+next verified release would go live with no local act. So the policy a
+host runs under is the host's, recorded in `store.json`
+(`applyPolicyPin`), and the manifest can only ever make it stricter:
+
+1. **Trust on first use.** The first manifest that verifies on a host pins
+   its `applyPolicy` (`source: "manifest"`, with the generation). Until
+   then nothing is pinned and nothing is served.
+2. **A manifest may tighten, never loosen.** A later manifest that says
+   `unlock_required` against a pinned `auto` tightens the pin (logged
+   `apply_policy_tightened`). One that says `auto` against a pinned
+   `unlock_required` changes nothing: the release stages, the runtime
+   logs `apply_policy_manifest_advisory` once per generation, and the
+   heartbeat reports `applyPolicy: { effective, source }` so the fleet
+   view can say the console's setting is advisory on that host.
+3. **Loosening is an operator's act.** `airprompter policy set … auto`
+   (host-wide through the daemon; `ap.setApplyPolicy("auto")` from a
+   process) rewrites the pin with `source: "operator"`, logged with who
+   asked. The next manifest that says `unlock_required` tightens it again
+   — rule 2 always holds.
+4. **The process's own `apply.policy` sits on top.** `unlock_required`
+   there makes every release wait whatever the pin says; `auto` there is
+   not a loosening.
+5. **The set of directive kinds honoured without a local act is closed.**
+   `disable` acts (a reduction: it only ever stops serving; a Freeze lands
+   on a pinned `unlock_required` host with no local act). `request_unlock`
+   asks and never grants. Any other kind refuses the whole manifest (M13,
+   `directive_unknown`) — a runtime never obeys a manifest by halves.
+
+Vectors: `sdk-typescript/test/policy.test.ts`, `sdk-python/tests/test_policy.py`,
+`cli/test/cli.test.ts` "S4", `cli/test/daemon.test.ts`, and
+`vectors/manifest-verify.json` "a directive of a kind the runtime does not
+honour".

@@ -160,6 +160,10 @@ class SlotStore:
         """Persist a newly accepted root document (the caller verified it)."""
         self._write({**self._file, "root": dict(root)})
 
+    def pin_apply_policy(self, *, value: str, source: str, generation: int, set_at: str) -> None:
+        """S4: record the apply policy this host holds — ``{"value", "source": "manifest" | "operator", "generation", "setAt"}``."""
+        self._write({**self._file, "applyPolicyPin": {"value": value, "source": source, "generation": generation, "setAt": set_at}})
+
     def stage(self, *, manifest: Mapping[str, Any], payloads: Mapping[str, bytes], force: bool = False) -> SlotName:
         """Stage a verified release into the inactive slot. Refuses a generation below the active one unless ``force`` (a forced downgrade is stamped on evidence)."""
         generation = manifest["payload"]["generation"]

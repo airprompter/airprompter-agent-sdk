@@ -23,7 +23,7 @@ import random as _random
 import re
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Mapping, Optional, Sequence, TypeVar, Union
 
 import httpx
@@ -96,7 +96,8 @@ class GoldenOptions:
 
 @dataclass
 class ApplyOptions:
-    #: Overrides the manifest's policy locally (the local side can be stricter, never looser).
+    #: A local policy this process applies on top of the host's pin (S4): ``"unlock_required"`` makes every release wait
+    #: whatever the manifest or the pin says; ``"auto"`` is not a loosening. Loosening a pinned host is an operator's act.
     policy: Optional[str] = None  # "auto" | "unlock_required"
     #: T9: ``"02:00-04:00 Europe/Berlin"`` (optionally ``"… mon,tue"``), a dict, or an UpdateWindow. A local window wins over the manifest's.
     window: Optional[Union[str, Mapping[str, Any], UpdateWindow]] = None
@@ -176,6 +177,8 @@ class AgentStatus:
     next_sync_at: Optional[str]
     #: T34: the last golden-set run before activation — counts only; None until one ran.
     golden: Optional[dict[str, Any]] = None
+    #: S4: the apply policy in force and where it comes from — {"effective", "source": local|pinned|operator|manifest, "manifestSaid"}.
+    apply_policy: dict[str, Any] = field(default_factory=lambda: {"effective": "auto", "source": "manifest", "manifestSaid": None})
 
 
 @dataclass(frozen=True)
@@ -298,6 +301,11 @@ class AirPrompterAgent:
         # T9: directives from the latest manifest whose envelope verified — honoured even when that manifest was left staged,
         # held back, or ignored as the generation already held. A Freeze reaches a fleet that never unlocks.
         self._standing_directives: Optional[tuple[int, list[Mapping[str, Any]]]] = None
+        #: S4: what the latest verified manifest asked for, and the generation whose advisory mismatch was already logged.
+        self._manifest_apply_policy: Optional[tuple[int, str]] = None
+        self._apply_policy_advisory_logged = 0
+        #: S4: an attached SDK reports the daemon's policy (its ``slot`` answer and ``policy`` events carry it).
+        self._daemon_apply_policy: Optional[dict[str, Any]] = None
         self._heartbeat_interval_seconds = min(3600, max(30, int(round(options.get("heartbeat_seconds") or 300))))
         self._last_heartbeat_ms: Optional[float] = None
         self._next_heartbeat_ms: Optional[float] = None
@@ -412,6 +420,7 @@ class AirPrompterAgent:
             self._source = "daemon"
             # S3: the daemon is the process that talks to the origin; its lease is the fleet's. The socket is not contact.
             self._daemon_lease_expires_at = client.last_lease_expires_at
+            self._daemon_apply_policy = client.last_apply_policy
         self._log({"event": "daemon_attached", "generation": self._active.generation, "daemon": client.hello.daemon})
 
         def on_event(event: dict[str, Any]) -> None:
@@ -422,6 +431,9 @@ class AirPrompterAgent:
             if event.get("event") == "lease":
                 expires = event.get("expiresAt")
                 self._daemon_lease_expires_at = expires if isinstance(expires, str) else None
+            # S4: the host's policy is the daemon's store; an operator's ``policy set`` reaches every attached SDK at once.
+            if event.get("event") == "policy" and isinstance(event.get("applyPolicy"), Mapping):
+                self._daemon_apply_policy = dict(event["applyPolicy"])
             if event.get("event") == "shutdown":
                 self._log({"event": "daemon_shutdown"})
 
@@ -450,6 +462,8 @@ class AirPrompterAgent:
             self._source = "daemon"
             if daemon.last_lease_expires_at is not None:
                 self._daemon_lease_expires_at = daemon.last_lease_expires_at
+            if daemon.last_apply_policy is not None:
+                self._daemon_apply_policy = daemon.last_apply_policy
             self._last_refusal = None
         if changed:
             self._emit_change()
@@ -610,10 +624,11 @@ class AirPrompterAgent:
     def _apply_policy(self, manifest: Mapping[str, Any]) -> str:
         """``auto`` activates. ``unlock_required`` stages, then: inside an open update window → activates now; the customer's
         ``on_staged`` hook may call ``activate()`` (a hook that raises or never activates leaves the release staged and says so
-        in the log); otherwise the window timer, an operator's ``unlock``, or the hook later. The local policy can only tighten."""
+        in the log); otherwise the window timer, an operator's ``unlock``, or the hook later. The policy is the host's (S4):
+        the pin in store.json, tightened by a manifest and never loosened by one, with this process's own ``apply.policy`` on top."""
         payload = manifest["payload"]
-        local = self._apply_options.policy
-        policy = "unlock_required" if local == "unlock_required" or payload.get("applyPolicy") == "unlock_required" else "auto"
+        self._take_apply_policy(payload)
+        policy = self._effective_apply_policy()["effective"]
         # T34: verified before activate — a staged release's golden sets run first; below the floor it stays staged.
         golden_options: Optional[GoldenOptions] = self._o.get("golden")
         if golden_options is not None and manifest_has_golden(manifest) and self._store is not None:
@@ -741,7 +756,7 @@ class AirPrompterAgent:
                 countersign_root=self._o.get("countersign_root"),
                 apply_policy=self._apply_policy,
                 on_refusal=on_refusal,
-                on_directives=self._take_directives,
+                on_directives=self._take_verified,
                 catalog=self._declared_models(),
                 on_model_unavailable=on_model_unavailable,
             )
@@ -777,6 +792,68 @@ class AirPrompterAgent:
         if models_option is None:
             return None
         return list(models_option) if isinstance(models_option, (list, tuple)) else list(models_option.keys())
+
+    def _take_verified(self, payload: Mapping[str, Any]) -> None:
+        """Every manifest whose envelope verified, before the pass decides anything: the policy pin, then the directives."""
+        self._take_apply_policy(payload)
+        self._take_directives(payload)
+
+    def _take_apply_policy(self, payload: Mapping[str, Any]) -> None:
+        """S4: the apply policy is the customer's. The first verified manifest pins the host's policy (trust-on-first-use); a
+        later manifest may tighten the pin (``auto`` → ``unlock_required``) and never loosen it — a manifest that says ``auto``
+        against a pinned ``unlock_required`` is advisory, logged once per generation, and reported on the heartbeat."""
+        store = self._store
+        if store is None:
+            return
+        generation = int(payload["generation"])
+        said = payload.get("applyPolicy", "auto")
+        if self._manifest_apply_policy is None or generation >= self._manifest_apply_policy[0]:
+            self._manifest_apply_policy = (generation, said)
+        pin = store.state.get("applyPolicyPin")
+        if not pin:
+            store.pin_apply_policy(value=said, source="manifest", generation=generation, set_at=self._now_iso())
+            self._log({"event": "apply_policy_pinned", "policy": said, "generation": generation})
+            return
+        if said == "unlock_required" and pin.get("value") == "auto":
+            store.pin_apply_policy(value="unlock_required", source="manifest", generation=generation, set_at=self._now_iso())
+            self._log({"event": "apply_policy_tightened", "from": pin.get("value"), "to": "unlock_required", "generation": generation, "previousSource": pin.get("source")})
+            return
+        if said == "auto" and pin.get("value") == "unlock_required" and self._apply_policy_advisory_logged < generation:
+            self._apply_policy_advisory_logged = generation
+            self._log({"event": "apply_policy_manifest_advisory", "manifestSaid": "auto", "pinned": "unlock_required", "pinnedBy": pin.get("source"), "generation": generation})
+
+    def _effective_apply_policy(self) -> dict[str, Any]:
+        """S4: the policy in force on this host and where it comes from (see ``AgentStatus.apply_policy``)."""
+        local = self._apply_options.policy
+        if self._daemon_socket:
+            return dict(self._daemon_apply_policy) if self._daemon_apply_policy else {"effective": local or "auto", "source": "local" if local else "manifest", "manifestSaid": None}
+        pin = self._store.state.get("applyPolicyPin") if self._store else None
+        manifest_said = self._manifest_apply_policy[1] if self._manifest_apply_policy else None
+        if local == "unlock_required":
+            return {"effective": "unlock_required", "source": "local", "manifestSaid": manifest_said}
+        if pin:
+            return {"effective": pin["value"], "source": "operator" if pin.get("source") == "operator" else "pinned", "manifestSaid": manifest_said}
+        return {"effective": local or manifest_said or "auto", "source": "local" if local else "manifest", "manifestSaid": manifest_said}
+
+    def set_apply_policy(self, value: str, *, by: Optional[str] = None) -> dict[str, Any]:
+        """S4: an operator's act on this host — the one way a pinned policy loosens. ``unlock_required`` tightens the pin by
+        hand; ``auto`` loosens it, and a later manifest that says ``unlock_required`` tightens it again. Logged; host-wide
+        through the daemon when attached. Never called by sync."""
+        if value not in ("auto", "unlock_required"):
+            raise ValueError("apply policy is auto or unlock_required")
+        daemon = self._daemon
+        if daemon is not None:
+            result = daemon.request("policy", {"value": value, **({"by": by} if by else {})})
+            if isinstance(result.get("applyPolicy"), Mapping):
+                self._daemon_apply_policy = dict(result["applyPolicy"])
+            return self._effective_apply_policy()
+        store = self._store
+        if store is None:
+            raise AgentStartError("no_verified_release", "no store to record the policy in")
+        before = store.state.get("applyPolicyPin") or None
+        store.pin_apply_policy(value=value, source="operator", generation=self._manifest_apply_policy[0] if self._manifest_apply_policy else 0, set_at=self._now_iso())
+        self._log({"event": "apply_policy_set", "policy": value, "previous": before.get("value") if before else None, "previousSource": before.get("source") if before else None, **({"by": by} if by else {})})
+        return self._effective_apply_policy()
 
     def _take_directives(self, payload: Mapping[str, Any]) -> None:
         """T9: a verified manifest's directives stand from the moment its envelope verifies; a Freeze is honoured before anything else."""
@@ -838,6 +915,8 @@ class AirPrompterAgent:
             "spool": {"depthSegments": status.spool["depth_segments"], "depthBytes": status.spool["depth_bytes"], "droppedSegments": 0, "quarantinedSegments": 0},
             "unlockRequestsSeen": [r["releaseDigest"] for r in status.unlock_requests][:8],
             "disabled": status.disabled,
+            # S4: what this host runs under, so the fleet view can say the console's setting is advisory here.
+            "applyPolicy": {"effective": status.apply_policy["effective"], "source": status.apply_policy["source"]},
         }
         if active_digest:
             body["activeReleaseDigest"] = active_digest
@@ -1328,6 +1407,7 @@ class AirPrompterAgent:
             consecutive_sync_failures=self._consecutive_sync_failures,
             next_sync_at=None if self._next_sync_ms is None or not self._timer.armed else iso_ms(self._next_sync_ms),
             golden=self._last_golden,
+            apply_policy=self._effective_apply_policy(),
         )
 
     @property

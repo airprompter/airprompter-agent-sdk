@@ -72,7 +72,13 @@ export async function apply(argv: string[], ctx: Context): Promise<number> {
   // The root the bundle carried was accepted against --root; the store remembers it for the runtime's next start.
   store.acceptRoot(report.trustedRoot);
   const slot = store.stage({ manifest: opened.contents.manifest, payloads, force });
-  const policy = opened.contents.manifest.payload.applyPolicy;
+  // S4: the policy is the host's — the bundle's value pins on first use or tightens the pin, never loosens it.
+  const said = opened.contents.manifest.payload.applyPolicy;
+  const pin = store.state.applyPolicyPin ?? null;
+  if (!pin) store.pinApplyPolicy({ value: said, source: "manifest", generation, setAt: new Date(now).toISOString() });
+  else if (said === "unlock_required" && pin.value === "auto") store.pinApplyPolicy({ value: "unlock_required", source: "manifest", generation, setAt: new Date(now).toISOString() });
+  const policy = store.state.applyPolicyPin!.value;
+  if (policy !== said) out.line(`note: the update file says ${said}; this host is pinned to ${policy} (${pin?.source === "operator" ? "set by an operator" : "from an earlier update"}) — airprompter policy set changes it`);
   // T34: verified before activate — with --golden the cases run after staging and before activation, as the runtime does;
   // below the floor the release stays staged and the exit says so, whatever the policy.
   let goldenMet = true;
@@ -88,6 +94,7 @@ export async function apply(argv: string[], ctx: Context): Promise<number> {
   out.field("generation", generation);
   out.field("previousGeneration", stored, "previous generation");
   out.field("policy", policy);
+  out.field("policySaid", said, "update file says");
   out.field("outcome", activate ? "activated" : "staged");
   out.field("forcedDowngrade", generation < stored, "forced downgrade");
   out.field("expired", opened.expired);

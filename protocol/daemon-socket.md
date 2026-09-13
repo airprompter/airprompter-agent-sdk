@@ -46,11 +46,12 @@ connection.
 | `op` | Result | Notes |
 |---|---|---|
 | `hello` | `daemon`, `protocol`, `agentId`, `target`, `instanceId`, `generation`, `stagedGeneration` | First message on a connection; the SDK checks `agentId`/`target` match what it was started with. |
-| `slot` | `slot`, `generation`, `signingKeyId`, `manifest`, `payloads[]`, `leaseExpiresAt` | The active, verified release: the manifest envelope and every referenced payload's bytes. Plaintext over the local socket — that is what the store's key protects at rest and the socket's mode protects in transit. `leaseExpiresAt` (S3) is the daemon's own lease — when its last contact with the origin runs out, or `null` before any — and an attached SDK adopts it: the socket is never contact with the registry. |
+| `slot` | `slot`, `generation`, `signingKeyId`, `manifest`, `payloads[]`, `leaseExpiresAt`, `applyPolicy` | The active, verified release: the manifest envelope and every referenced payload's bytes. Plaintext over the local socket — that is what the store's key protects at rest and the socket's mode protects in transit. `leaseExpiresAt` (S3) is the daemon's own lease — when its last contact with the origin runs out, or `null` before any — and an attached SDK adopts it: the socket is never contact with the registry. |
 | `status` | the daemon's status (see below) | |
 | `sync` | `outcome` | Run one sync pass now. |
 | `unlock` | `generation` or `null` | Activate the staged release for the whole host. |
 | `rollback` | `generation`, `forced` | Local rollback to the other slot for the whole host. |
+| `policy` (`value`, `by`?) | `applyPolicy` | S4: an operator sets the host's apply policy (`auto` / `unlock_required`) — the one way a pinned policy loosens. Logged `policy_set` with `by`; broadcast as a `policy` event. `applyPolicy` is `{ effective, source, manifestSaid }` as the status document carries it. |
 | `healthz` | `ok`, `generation`, `leaseExpired`, `lastSyncAt`, `spoolDepth`, `lastUploadAt`, `backoffUntil` | Also served as HTTP: a connection whose first line is `GET /healthz HTTP/1.x` gets a `200 application/json` (or `503` when nothing verified is active) and is closed. |
 | `upload` | `uploaded`, `quarantined`, `dropped`, `held` + the `upload` block below | Run one uploader pass now (an operator's nudge; the cadence is the grant's). `offline` when the daemon has no key. |
 
@@ -62,6 +63,7 @@ Anything else answers `{"ok":false,"error":"unknown_op"}`.
 |---|---|---|
 | `generation` | `generation`, `stagedGeneration` | The active or staged generation changed (sync, unlock, rollback). SDKs fetch `slot` again. |
 | `lease` | `expiresAt`, `lastContactAt` | S3: the daemon's contact with the origin renewed (a signed manifest fetched, or an authenticated answer). Attached SDKs adopt `expiresAt` as their lease; the unsigned edge pointer never triggers it. |
+| `policy` | `applyPolicy` | S4: an operator set the host's apply policy through the socket. Attached SDKs adopt it (their `status().applyPolicy`); the `slot` answer carries the same field for a fresh attach. |
 | `shutdown` | — | The daemon is stopping; SDKs keep serving what they hold and reconnect when it is back. |
 
 ## Status document
@@ -75,6 +77,7 @@ socket is present) report:
  "lastRefusal":null,"storageProtection":"file_key","signingKeyId":"…",
  "leaseExpiresAt":"…","leaseExpired":false,"lastContactAt":"…","lastSyncAt":"…","lastSyncOutcome":"unchanged",
  "consecutiveFailures":0,"nextSyncAt":"…","clients":2,
+ "applyPolicy":{"effective":"unlock_required","source":"pinned","manifestSaid":"auto"},
  "spool":{"depthSegments":3,"depthBytes":18234},
  "upload":{"lastUploadAt":"…","lastError":null,"backoffUntil":null,"attempt":0,"inFlight":false,
            "intervalSeconds":300,"nextPassAt":"…","sentSegments":41,"quarantinedSegments":1,"droppedSegments":0,

@@ -128,6 +128,15 @@ state directory defaults to the OS state directory (`$XDG_STATE_HOME`,
 `~/Library/Application Support`, `%LOCALAPPDATA%`); pass `--state-dir`
 to match what the runtime was started with.
 
+The apply policy is the host's (S4): the first update file `apply` verifies
+pins it in `store.json`; a later file may tighten it (`auto` →
+`unlock_required`) and never loosen it — `apply` says so when the file's
+value differs from the pin. `airprompter policy show` prints what is in
+force and where it came from; `airprompter policy set auto|unlock_required
+[--by …]` is the operator's act that loosens (or tightens by hand), logged,
+and host-wide through the daemon when one runs. Loosening is not an unlock:
+a release already staged still waits for `airprompter unlock`.
+
 `keygen` refuses to write a private key inside a git worktree unless
 `--allow-worktree`: the one way a key ends up in a repository is by
 being written next to the code.

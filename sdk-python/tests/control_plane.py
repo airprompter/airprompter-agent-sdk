@@ -176,7 +176,7 @@ class FakeControlPlane:
                 for key in ("protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"):
                     if key not in body:
                         return httpx.Response(400, json={"error": f"heartbeat: missing {key}"})
-                allowed = {"protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled"}
+                allowed = {"protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"}
                 for key in body:
                     if key not in allowed:
                         return httpx.Response(400, json={"error": f"heartbeat: unknown {key}"})

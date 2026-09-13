@@ -124,7 +124,11 @@ def test_edge_pointer_unlock_required_rollback_and_hold(state_dir):
     assert ap.status().last_sync_outcome == "held_back"
     plane.promote([triage, plane.slot(tag="support.reply", text="Reply thrice to {{name}}.", variables=[{"name": "name", "required": False, "trust": "operator"}], version_id="ver_reply_3")])
     ap.sync_now()
-    assert ap.generation == 3, "a newer generation ends the hold"
+    # S4: generation 2's unlock_required pinned this host; the console's auto on generation 3 is advisory, so it stages.
+    assert ap.status().last_sync_outcome == "staged", "a newer generation ends the hold"
+    assert ap.status().staged_generation == 3
+    assert ap.unlock() == {"generation": 3}
+    assert ap.generation == 3
     assert ap.status().forced_downgrade is True, "the downgrade stays on the record"
     ap.stop()
 

@@ -216,6 +216,7 @@ heartbeat_request = {
     "lease": {"expiresAt": "2026-09-12T11:00:00Z", "expired": False},
     "localRollback": {"active": False, "forced": False},
     "spool": {"depthSegments": 3, "depthBytes": 41210, "droppedSegments": 0, "quarantinedSegments": 0, "lastUploadAt": "2026-09-12T10:03:30Z"},
+    "applyPolicy": {"effective": "unlock_required", "source": "pinned"},
 }
 heartbeat_response = {
     "uploadGrant": {
@@ -258,6 +259,7 @@ refused = {
     "bundle.plaintext-without-contents.json": {"schema": "bundle", "reason": "a plaintext bundle carries its contents", "document": {**bundle_plain, "encryption": {"scheme": "none"}}},
     "heartbeat.request.with-prompt-text.json": {"schema": "heartbeat-request", "reason": "content-free by schema: no free-form members", "document": {**heartbeat_request, "lastPrompt": "You are..."}},
     "heartbeat.request.hostname-instance.json": {"schema": "heartbeat-request", "reason": "instanceId is random and opaque, never a hostname", "document": {**heartbeat_request, "instanceId": "web-01.acme.internal"}},
+    "heartbeat.request.policy-source-unknown.json": {"schema": "heartbeat-request", "reason": "the apply policy's source is a closed set (S4)", "document": {**heartbeat_request, "applyPolicy": {"effective": "auto", "source": "cloud"}}},
     "heartbeat.response.grant-too-large.json": {"schema": "heartbeat-response", "reason": "a grant never allows objects above 1 MiB", "document": {**heartbeat_response, "uploadGrant": {**heartbeat_response["uploadGrant"], "maxObjectBytes": 10485760}}},
     "heartbeat.response.http-grant.json": {"schema": "heartbeat-response", "reason": "grants are https only", "document": {**heartbeat_response, "uploadGrant": {**heartbeat_response["uploadGrant"], "url": "http://telemetry-ingest.example/"}}},
     "edge-pointer.generation-zero.json": {"schema": "edge-pointer", "reason": "the pointer exists only after the first promotion", "document": {**edge_pointer, "generation": 0}},

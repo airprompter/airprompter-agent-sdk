@@ -9,6 +9,7 @@ import { apply } from "./commands/apply.js";
 import { daemon } from "./commands/daemon.js";
 import { diff } from "./commands/diff.js";
 import { keygen } from "./commands/keygen.js";
+import { policy } from "./commands/policy.js";
 import { pull } from "./commands/pull.js";
 import { status } from "./commands/status.js";
 import { exportTelemetry, importTelemetry } from "./commands/telemetry.js";
@@ -23,6 +24,7 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   apply: { run: apply, summary: "Stage a bundle into the store and activate it per the environment's policy" },
   status: { run: status, summary: "Active and staged generation, lease, storage protection, spool depth, last upload" },
   unlock: { run: unlock, summary: "Make the staged release live on this host (the operator's unlock; --generation N to name it)" },
+  policy: { run: policy, summary: "Show or set the apply policy this host holds (an update may tighten it; only this loosens it)" },
   diff: { run: diff, summary: "What a bundle would change against the active release on this host" },
   keygen: { run: keygen, summary: "Generate a distribution or countersign keypair" },
   daemon: { run: daemon, summary: "airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket" },

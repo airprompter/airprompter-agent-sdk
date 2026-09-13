@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The apply policy is the customer's (S4, AIR-1972)
+- `trust-chain.md` M13: the directive kinds a runtime honours are a closed set (`disable`, `request_unlock`); any other kind refuses the whole manifest — `directive_unknown`, a new refusal code in `heartbeat.schema.json` — before a payload is fetched. Vectors in `vectors/manifest-verify.json` ("a directive of a kind the runtime does not honour…", "the two kinds the runtime honours verify"); the reference verifier checks it.
+- `heartbeat.schema.json` request: `applyPolicy { effective, source }` (optional, additive) — what the host runs under and where it comes from (`local` / `pinned` / `operator` / `manifest`), so the fleet view can say the console's setting is advisory on a pinned host. Example `heartbeat.request.json` carries it.
+- SDK (TypeScript and Python): `store.json` gains `applyPolicyPin { value, source, generation, setAt }`. The first verified manifest pins the host's policy (trust-on-first-use); a later manifest may tighten it (`apply_policy_tightened`) and never loosen it (`apply_policy_manifest_advisory`, once per generation); `setApplyPolicy(value, { by })` / `set_apply_policy` is the operator's act (`apply_policy_set`). `AgentStatus.applyPolicy`. The process's `apply.policy` only adds strictness.
+- CLI: `airprompter policy show | set auto|unlock_required [--by …]` (host-wide through the daemon when one runs); `airprompter apply` honours the pin (the update file's value pins or tightens, never loosens); `airprompter status` prints the pin. Daemon socket: `policy` op, `policy` event, `applyPolicy` on `slot` and `status`.
+- `trust-chain.md` › "The apply policy is the customer's"; threat-model rows; change-control.md.
+
 ### The pointer never extends trust (S3, AIR-1971)
 - `heartbeat.schema.json` response: `latestGeneration` (optional, additive) — the environment's current generation as the origin knows it. A runtime whose edge pointer says less marks the pointer behind, skips it on its next pass and fetches the signed manifest directly. Example `heartbeat.response.json` carries it.
 - Sync loop (TypeScript and Python): `pointer_unchanged` is a distinct outcome from `unchanged`. The edge pointer's silence never renews the lease; a signed manifest (activated / staged / held back / same generation) or the origin's authenticated answer (manifest `304`, heartbeat `200`) does. `syncOnce({ skipPointer })`.

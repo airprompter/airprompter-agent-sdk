@@ -97,6 +97,8 @@ export function verifyRootMetadata({ candidate, trusted, now }) {
 }
 
 const SUPPORTED_PROTOCOL_MAJORS = new Set([0]);
+/** M13 (S4): the directive kinds a runtime honours. */
+const DIRECTIVE_KINDS = new Set(["request_unlock", "disable"]);
 
 function referencedHashes(payload) {
   const hashes = new Map();
@@ -151,6 +153,10 @@ export function verifyManifest({
     return { ok: false, reason: "scope_mismatch" };
   }
   if (payload.generation < storedGeneration) return { ok: false, reason: "generation_rollback" };
+  // M13 (S4): the directive kinds a runtime honours are a closed set; an unknown one refuses the whole manifest.
+  if (!Array.isArray(payload.directives) || payload.directives.some((d) => !d || typeof d !== "object" || !DIRECTIVE_KINDS.has(d.kind))) {
+    return { ok: false, reason: "directive_unknown" };
+  }
 
   if (payloads) {
     for (const [hash, byteLength] of referencedHashes(payload)) {

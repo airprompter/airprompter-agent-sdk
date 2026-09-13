@@ -2,8 +2,9 @@
  * `airprompterd`: the socket side of `protocol/daemon-socket.md`. One
  * `AirPrompterAgent` in resident mode owns the store and the sync loop;
  * this server hands its verified release to attached SDK processes over a
- * 0600 local socket, forwards unlock / rollback / sync, pushes
- * `generation` events, and answers `GET /healthz` for probes.
+ * 0600 local socket, forwards unlock / rollback / sync / policy, pushes
+ * `generation`, `lease` and `policy` events, and answers `GET /healthz`
+ * for probes.
  */
 
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
@@ -41,6 +42,8 @@ export interface DaemonStatus {
   spool: { depthSegments: number; depthBytes: number };
   /** T26 P4: the uploader — null when the daemon has no key (offline: the spool is the export). */
   upload: UploaderStatus | null;
+  /** S4: the apply policy this host runs under and where it comes from. */
+  applyPolicy: { effective: "auto" | "unlock_required"; source: "local" | "pinned" | "operator" | "manifest"; manifestSaid: "auto" | "unlock_required" | null };
 }
 
 export interface DaemonServerOptions {
@@ -189,7 +192,7 @@ export class DaemonServer {
         const release = this.agent.release;
         if (!release) throw new Error("no_verified_release");
         // S3: the daemon's lease rides the slot answer — an attached SDK never counts this socket as contact with the origin.
-        return { slot: release.slot, generation: release.generation, signingKeyId: release.signingKeyId, manifest: release.manifest, payloads: [...release.payloads].map(([contentHash, bytes]) => ({ contentHash, bytes: Buffer.from(bytes).toString("base64url") })), leaseExpiresAt: status.leaseExpiresAt };
+        return { slot: release.slot, generation: release.generation, signingKeyId: release.signingKeyId, manifest: release.manifest, payloads: [...release.payloads].map(([contentHash, bytes]) => ({ contentHash, bytes: Buffer.from(bytes).toString("base64url") })), leaseExpiresAt: status.leaseExpiresAt, applyPolicy: status.applyPolicy };
       }
       case "status":
         return this.status() as unknown as Record<string, unknown>;
@@ -205,6 +208,16 @@ export class DaemonServer {
         const result = await this.agent.rollback();
         this.log({ event: "rollback", generation: result.generation, forced: result.forced });
         return { generation: result.generation, forced: result.forced };
+      }
+      case "policy": {
+        // S4: an operator's act on this host — the one way a pinned policy loosens. Every attached SDK hears it.
+        const value = request.value;
+        if (value !== "auto" && value !== "unlock_required") throw new Error("policy_invalid");
+        const by = typeof request.by === "string" ? request.by.slice(0, 64) : undefined;
+        const applyPolicy = await this.agent.setApplyPolicy(value, by ? { by } : {});
+        this.log({ event: "policy_set", policy: value, ...(by ? { by } : {}) });
+        this.broadcast({ event: "policy", applyPolicy });
+        return { applyPolicy };
       }
       case "healthz": {
         const upload = this.options.uploader?.status() ?? null;
@@ -251,6 +264,7 @@ export class DaemonServer {
       nextSyncAt: status.nextSyncAt,
       spool: status.spool,
       upload: this.options.uploader?.status() ?? null,
+      applyPolicy: status.applyPolicy,
     };
   }
 

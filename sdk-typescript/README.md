@@ -75,6 +75,16 @@ The local side can be stricter than the manifest
 (`apply.policy: "unlock_required"`), never looser. In `daemon` mode both
 calls act for the whole host.
 
+The policy is the host's, not the manifest's (S4). The first manifest a
+host verifies pins `applyPolicy` in `store.json`; a later manifest may
+tighten the pin (`auto` → `unlock_required`) and never loosen it — a
+console flipped back to `auto` is advisory on that host (logged once per
+generation, reported on the heartbeat so the fleet view says "pinned on
+the host"). Loosening is an operator's act: `airprompter policy set …
+auto` on the host, or `await ap.setApplyPolicy("auto", { by: "…" })`,
+logged with who asked. `ap.status().applyPolicy` says what is in force and
+where it came from (`local` / `pinned` / `operator`).
+
 Three things unlock a staged release, and only your side holds them:
 
 ```ts

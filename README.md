@@ -45,7 +45,7 @@ your application ──(render / wrap)──▶ SDK ──▶ encrypted slot sto
 
 - **Pull only.** Every connection is opened by your side over outbound HTTPS.
 - **Verified before staged.** Offline root of trust → signing key → signed manifest → content-addressed payloads → monotonic generation.
-- **You decide when it goes live.** `unlock_required` targets stage a release and activate only on your operator's command, in your update window, or through your change-control hook.
+- **You decide when it goes live.** `unlock_required` targets stage a release and activate only on your operator's command, in your update window, or through your change-control hook. The policy itself is yours too: a host pins it on first use, the console can tighten it and never loosen it, and only an operator on the host can loosen it (`airprompter policy set`).
 - **Content-free telemetry.** Minute windows of counts, latency histograms and token sums. No prompt text, no outputs, no end-user identifiers — by schema, not by policy.
 
 ## Protocol compatibility

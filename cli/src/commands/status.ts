@@ -75,6 +75,10 @@ export async function status(argv: string[], ctx: Context): Promise<number> {
   out.field("forcedDowngrade", state.forcedDowngrade === true, "forced downgrade");
   out.field("rootVersion", state.root?.signed.version ?? null, "root version");
   out.field("rootExpires", state.root?.signed.expires ?? null, "root expires");
+  // S4: the apply policy is the host's; this is what store.json holds, whatever the console says.
+  const pin = state.applyPolicyPin ?? null;
+  out.field("applyPolicyPin", pin, "apply policy");
+  out.line(pin ? `apply policy: ${pin.value} — ${pin.source === "operator" ? "set by an operator on this host" : `pinned from update ${pin.generation}; a later update may tighten it, never loosen it (airprompter policy set loosens)`}` : "apply policy: not pinned yet — the first verified update pins it");
 
   for (const [label, slot] of [["active", state.active], ["staged", state.staged]] as const) {
     if (!slot || (label === "staged" && slot === state.active)) continue;

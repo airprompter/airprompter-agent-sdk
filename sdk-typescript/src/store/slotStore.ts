@@ -24,7 +24,7 @@ import { join } from "node:path";
 
 import { sha256Prefixed } from "../protocol/canonicalJson.js";
 import { referencedPayloads, verifyManifest, type Verdict } from "../protocol/trust.js";
-import type { Manifest, RefusalCode, RootMetadata, Target } from "../protocol/types.js";
+import type { ApplyPolicy, Manifest, RefusalCode, RootMetadata, Target } from "../protocol/types.js";
 import type { KeyProvider, StorageProtection } from "./keyProvider.js";
 import { decryptPayload, encryptPayload, isPayloadDecryptError, payloadAad } from "./payloadCrypto.js";
 
@@ -50,7 +50,23 @@ export interface StoreFile {
   forcedDowngrade?: boolean;
   /** The generation a local rollback stepped down from: sync holds that generation (and older) back until the control plane moves past it. */
   heldBackBelow?: number;
+  /**
+   * S4: the apply policy this host holds. Trust-on-first-use from the first verified manifest; a later manifest may
+   * tighten it (`auto` → `unlock_required`), never loosen it; loosening is an operator's act (`airprompter policy set`)
+   * and is recorded as such. Absent until the first manifest verifies.
+   */
+  applyPolicyPin?: ApplyPolicyPin;
   updatedAt: string;
+}
+
+/** S4: what store.json says about the apply policy — the value, who set it, and when. */
+export interface ApplyPolicyPin {
+  value: ApplyPolicy;
+  /** `manifest`: pinned on first use or tightened by a signed manifest; `operator`: set by hand on this host. */
+  source: "manifest" | "operator";
+  /** The manifest generation that pinned or tightened it (0 for an operator's act before any manifest). */
+  generation: number;
+  setAt: string;
 }
 
 export interface LoadedSlot {
@@ -219,6 +235,11 @@ export class SlotStore {
   /** Persist a newly accepted root document (the caller verified it). */
   acceptRoot(root: RootMetadata): void {
     this.write({ ...this.file, root });
+  }
+
+  /** S4: record the apply policy this host holds (the caller decided it may change — see `AirPrompterAgent.takeApplyPolicy`). */
+  pinApplyPolicy(pin: ApplyPolicyPin): void {
+    this.write({ ...this.file, applyPolicyPin: pin });
   }
 
   /**

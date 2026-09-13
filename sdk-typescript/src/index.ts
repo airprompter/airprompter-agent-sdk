@@ -17,7 +17,7 @@ export type { Verdict, VerifyManifestInput } from "./protocol/trust.js";
 export type * from "./protocol/types.js";
 
 export { SlotStore, StoreError, isStoreError } from "./store/slotStore.js";
-export type { LoadedSlot, SlotName, StoreFile, StoreHooks } from "./store/slotStore.js";
+export type { ApplyPolicyPin, LoadedSlot, SlotName, StoreFile, StoreHooks } from "./store/slotStore.js";
 export { fileKey, customKeyProvider, wrapWithRawKey, unwrapWithRawKey } from "./store/keyProvider.js";
 export type { KeyProvider, StorageProtection } from "./store/keyProvider.js";
 export { encryptPayload, decryptPayload, payloadAad, PayloadDecryptError, isPayloadDecryptError } from "./store/payloadCrypto.js";
@@ -45,6 +45,7 @@ export type { ManagedStartOptions, ManagedRunOptions, ManagedRunResult, ManagedR
 export { classifyError, classifyResult, normalizeUsage, observeCall, type ObserveOptions, type ObserveTarget, type UsageNormalized } from "./telemetry/observe.js";
 export { CHECK_BOUNDS, checkRefusal, checksRefusals, patternRefusal, validateJsonSchema, valueAtPath, evaluateCheck, evaluateChecks, projectChecks, outputTextOf, estimateTokens, type DeclaredCheck, type CheckResult, type CheckOutcome } from "./checks/index.js";
 export type { OutputCheck } from "./protocol/types.js";
+export { DIRECTIVE_KINDS } from "./protocol/types.js";
 export { HOST_SPOOL_BUDGET_BYTES, SERVERLESS_BUFFER_BYTES, type DroppedRow } from "./spool/writer.js";
 export { SpoolUploader, validateSpoolRow, inspectSegment, postSegment, multipartBody, backoffDelayMs, UPLOAD_BACKOFF_BASE_MS, UPLOAD_BACKOFF_CAP_MS, GRANT_REFRESH_MARGIN_MS } from "./telemetry/uploader.js";
 export type { UploadGrant, GrantDecision, UploaderOptions, UploaderStatus, PassResult, PostOutcome, RowVerdict, SegmentInspection } from "./telemetry/uploader.js";

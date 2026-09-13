@@ -367,3 +367,75 @@ test("pull --tags-only writes the hosted catalogue with a run key: tags, variabl
   assert.equal(await run(["pull", ...scopeArgs, "--tags-only", "--base-url", "https://run.test", "--out", out, "--json"], bad.ctx), EXIT.refused);
   assert.equal(bad.json().reason, "unauthorized");
 });
+
+test("S4: the apply policy is the host's — apply pins on first use, a later update file may tighten and never loosen, `policy set` is the operator's act, status says which", async () => {
+  const { work, plane, rootPath, rootDocPath, stateDir } = setup();
+  const reply = plane.slot({ tag: "support.reply", text: "Reply to {{name}}", variables: [{ name: "name", required: false, trust: "operator" }] });
+  plane.promote([reply], { applyPolicy: "auto" });
+  const h = harness(plane, work);
+  const keys = ["--distribution-key", join(work, "keys", "prod.pub.json")];
+  const priv = ["--distribution-key", join(work, "keys", "prod.key.json")];
+  const store = ["--agent", scope.agentId, "--environment", scope.target, "--state-dir", stateDir];
+  await run(["keygen", "--purpose", "distribution", "--out", join(work, "keys", "prod")], h.ctx);
+  const b1 = join(work, "b1.apbundle");
+  assert.equal(await run(["pull", ...scopeArgs, "--root", rootDocPath, ...keys, "--out", b1], h.ctx), EXIT.ok);
+  h.reset();
+  // Nothing applied yet: nothing pinned.
+  assert.equal(await run(["policy", "show", ...store, "--json"], h.ctx), EXIT.ok);
+  assert.equal(h.json().applyPolicy, null);
+  h.reset();
+  assert.equal(await run(["apply", b1, ...scopeArgs, "--root", rootPath, ...priv, "--state-dir", stateDir, "--json"], h.ctx), EXIT.ok);
+  assert.deepEqual({ outcome: h.json().outcome, policy: h.json().policy, said: h.json().policySaid }, { outcome: "activated", policy: "auto", said: "auto" });
+  h.reset();
+  assert.equal(await run(["policy", "show", ...store, "--json"], h.ctx), EXIT.ok);
+  const pinned = h.json().applyPolicy as { value: string; source: string; generation: number };
+  assert.deepEqual({ value: pinned.value, source: pinned.source, generation: pinned.generation }, { value: "auto", source: "manifest", generation: 1 });
+  h.reset();
+
+  // The operator tightens this host by hand; the next update file says auto and stages anyway.
+  assert.equal(await run(["policy", "set", "unlock_required", ...store, "--by", "seth", "--json"], h.ctx), EXIT.ok);
+  assert.equal((h.json().applyPolicy as { source: string }).source, "operator");
+  h.reset();
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply warmly to {{name}}", versionId: "ver_reply_2", variables: [{ name: "name", required: false, trust: "operator" }] })], { applyPolicy: "auto" });
+  const b2 = join(work, "b2.apbundle");
+  assert.equal(await run(["pull", ...scopeArgs, "--root", rootDocPath, ...keys, "--out", b2], h.ctx), EXIT.ok);
+  h.reset();
+  assert.equal(await run(["apply", b2, ...scopeArgs, "--root", rootPath, ...priv, "--state-dir", stateDir, "--json"], h.ctx), EXIT.ok);
+  assert.deepEqual({ outcome: h.json().outcome, policy: h.json().policy, said: h.json().policySaid, generation: h.json().generation }, { outcome: "staged", policy: "unlock_required", said: "auto", generation: 2 });
+  h.reset();
+  assert.equal(await run(["apply", b2, ...scopeArgs, "--root", rootPath, ...priv, "--state-dir", stateDir], h.ctx), EXIT.ok);
+  assert.ok(h.stdout.some((l) => l.startsWith("note: the update file says auto; this host is pinned to unlock_required (set by an operator)")), h.stdout.join("\n"));
+  h.reset();
+  assert.equal(await run(["status", ...store, "--json"], h.ctx), EXIT.ok);
+  assert.equal(h.json().generation, 1, "still serving generation 1");
+  assert.equal((h.json().applyPolicyPin as { value: string }).value, "unlock_required");
+  h.reset();
+  assert.equal(await run(["status", ...store], h.ctx), EXIT.ok);
+  assert.ok(h.stdout.some((l) => l === "apply policy: unlock_required — set by an operator on this host"), h.stdout.join("\n"));
+  h.reset();
+
+  // Loosened by the operator: the staged release still needs its unlock (loosening is not an unlock); the next file applies.
+  assert.equal(await run(["policy", "set", "auto", ...store, "--json"], h.ctx), EXIT.ok);
+  h.reset();
+  assert.equal(await run(["status", ...store, "--json"], h.ctx), EXIT.ok);
+  assert.equal(h.json().stagedSlot, "B", "loosening did not activate what was staged");
+  h.reset();
+  assert.equal(await run(["unlock", ...store, "--json"], h.ctx), EXIT.ok);
+  assert.equal(h.json().generation, 2);
+  h.reset();
+  // An update file that says unlock_required tightens the pin again over the operator's auto.
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply thrice to {{name}}", versionId: "ver_reply_3", variables: [{ name: "name", required: false, trust: "operator" }] })], { applyPolicy: "unlock_required" });
+  const b3 = join(work, "b3.apbundle");
+  assert.equal(await run(["pull", ...scopeArgs, "--root", rootDocPath, ...keys, "--out", b3], h.ctx), EXIT.ok);
+  h.reset();
+  assert.equal(await run(["apply", b3, ...scopeArgs, "--root", rootPath, ...priv, "--state-dir", stateDir, "--json"], h.ctx), EXIT.ok);
+  assert.equal(h.json().outcome, "staged");
+  h.reset();
+  assert.equal(await run(["policy", "show", ...store, "--json"], h.ctx), EXIT.ok);
+  assert.deepEqual({ value: (h.json().applyPolicy as { value: string }).value, source: (h.json().applyPolicy as { source: string }).source }, { value: "unlock_required", source: "manifest" });
+  h.reset();
+  assert.equal(await run(["policy", "set", "sometimes", ...store], h.ctx), EXIT.usage);
+  assert.equal(await run(["policy", ...store], h.ctx), EXIT.usage);
+  assert.equal(h.all().includes("Reply"), false, "no command output carries prompt text");
+  rmSync(work, { recursive: true, force: true });
+});

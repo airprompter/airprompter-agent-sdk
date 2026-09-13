@@ -42,6 +42,8 @@ class FakeDaemon:
         self.target = target
         self.generation = plane.manifest["payload"]["generation"] if plane.manifest else 0
         self.staged_generation = None
+        #: S4: the host's apply policy as the daemon's store holds it; ``policy`` rewrites it and broadcasts.
+        self.apply_policy = {"effective": "auto", "source": "pinned", "manifestSaid": "auto"}
         self.ops: list[str] = []
         self._connections: list[socket.socket] = []
         self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -62,7 +64,7 @@ class FakeDaemon:
 
     def _slot(self) -> dict:
         manifest = self.plane.manifest
-        return {"slot": "A", "generation": self.generation, "signingKeyId": manifest["signatures"][0]["keyId"], "manifest": manifest, "payloads": [{"contentHash": h, "bytes": b64url_encode(b)} for h, b in self.plane.payloads.items()]}
+        return {"slot": "A", "generation": self.generation, "signingKeyId": manifest["signatures"][0]["keyId"], "manifest": manifest, "payloads": [{"contentHash": h, "bytes": b64url_encode(b)} for h, b in self.plane.payloads.items()], "applyPolicy": self.apply_policy}
 
     def _serve(self, conn: socket.socket) -> None:
         buffer = b""
@@ -94,6 +96,11 @@ class FakeDaemon:
                 elif op == "rollback":
                     self.generation -= 1
                     reply = {"generation": self.generation, "forced": True}
+                elif op == "policy":
+                    self.apply_policy = {"effective": message["value"], "source": "operator", "manifestSaid": self.apply_policy["manifestSaid"]}
+                    self.last_policy_by = message.get("by")
+                    reply = {"applyPolicy": self.apply_policy}
+                    self.emit({"event": "policy", "applyPolicy": self.apply_policy})
                 else:
                     conn.sendall((json.dumps({"id": message["id"], "ok": False, "error": "unknown_op"}) + "\n").encode("utf-8"))
                     continue
@@ -172,6 +179,13 @@ def test_daemon_attach_events_and_forwarded_ops(state_dir):
         assert ap.rollback() == {"generation": 2, "forced": True}
         ap.sync_now()
         assert "sync" in daemon.ops and "unlock" in daemon.ops and "rollback" in daemon.ops
+        # S4: the host's policy is the daemon's; the slot answer carried it, and the operator's act through the socket updates it.
+        assert ap.status().apply_policy == {"effective": "auto", "source": "pinned", "manifestSaid": "auto"}
+        assert ap.heartbeat_body()["applyPolicy"] == {"effective": "auto", "source": "pinned"}
+        assert ap.set_apply_policy("unlock_required", by="seth") == {"effective": "unlock_required", "source": "operator", "manifestSaid": "auto"}
+        assert daemon.last_policy_by == "seth"
+        assert "policy" in daemon.ops
+        assert _wait(lambda: ap.status().apply_policy["source"] == "operator")
         ap.stop()
     finally:
         daemon.stop()

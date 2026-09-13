@@ -20,6 +20,8 @@ from .._util import b64url_decode, b64url_encode, instant
 from .canonical_json import canonical_bytes, canonical_json, sha256_prefixed
 
 SUPPORTED_PROTOCOL_MAJORS = frozenset({0})
+#: S4: the directive kinds a runtime honours. `disable` acts without a local act; `request_unlock` only asks.
+DIRECTIVE_KINDS = frozenset({"request_unlock", "disable"})
 _SIGNATURE = re.compile(r"^[A-Za-z0-9_-]{86}$")
 
 
@@ -211,6 +213,10 @@ def verify_manifest(
         return Verdict(False, "scope_mismatch")
     if payload["generation"] < stored_generation:
         return Verdict(False, "generation_rollback")
+    # M13 (S4): the directive kinds a runtime honours are a closed set; one it does not know refuses the whole manifest.
+    directives = payload.get("directives")
+    if not isinstance(directives, list) or any(not isinstance(d, Mapping) or d.get("kind") not in DIRECTIVE_KINDS for d in directives):
+        return Verdict(False, "directive_unknown")
 
     if payloads is not None:
         for content_hash, byte_length in referenced_payloads(payload).items():

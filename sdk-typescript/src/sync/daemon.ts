@@ -36,6 +36,21 @@ export interface DaemonSlotResponse {
   payloads: Array<{ contentHash: string; bytes: string }>;
   /** S3: the daemon's lease — when its last contact with the origin runs out; null before any contact. */
   leaseExpiresAt?: string | null;
+  /** S4: the apply policy the daemon's host runs under (the store's pin, or the daemon's own local policy). */
+  applyPolicy?: DaemonApplyPolicy;
+}
+
+/** S4: what the daemon says about the host's apply policy; the same shape as `AgentStatus.applyPolicy`. */
+export interface DaemonApplyPolicy {
+  effective: "auto" | "unlock_required";
+  source: "local" | "pinned" | "operator" | "manifest";
+  manifestSaid: "auto" | "unlock_required" | null;
+}
+
+/** S4: an operator set the host's apply policy through the daemon (`airprompter policy set`); attached SDKs adopt it. */
+export interface DaemonPolicyEvent {
+  event: "policy";
+  applyPolicy: DaemonApplyPolicy;
 }
 
 /** S3: the daemon's contact with the origin renewed; attached SDKs adopt the lease. */
@@ -196,7 +211,7 @@ export class DaemonClient {
     });
   }
 
-  async slot(): Promise<LoadedSlot & { leaseExpiresAt: string | null }> {
+  async slot(): Promise<LoadedSlot & { leaseExpiresAt: string | null; applyPolicy: DaemonApplyPolicy | null }> {
     const response = (await this.request("slot")) as unknown as DaemonSlotResponse;
     return {
       slot: response.slot,
@@ -206,6 +221,7 @@ export class DaemonClient {
       payloads: new Map(response.payloads.map((entry) => [entry.contentHash, Buffer.from(entry.bytes, "base64url")])),
       // S3: the daemon's lease rides the slot answer; an older daemon says nothing and the SDK keeps what it had.
       leaseExpiresAt: typeof response.leaseExpiresAt === "string" ? response.leaseExpiresAt : null,
+      applyPolicy: response.applyPolicy && typeof response.applyPolicy === "object" && (response.applyPolicy.effective === "auto" || response.applyPolicy.effective === "unlock_required") ? response.applyPolicy : null,
     };
   }
 

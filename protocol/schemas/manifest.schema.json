@@ -200,7 +200,7 @@
       }
     },
     "directive": {
-      "description": "Signed, advisory instructions from the control plane. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
+      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act — a reduction, it only ever stops serving; `request_unlock` is a request the runtime surfaces and never grants. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
       "oneOf": [
         {
           "type": "object",

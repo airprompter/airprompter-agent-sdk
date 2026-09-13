@@ -158,25 +158,45 @@ test("two SDK processes attach to one daemon; one poll moves both; healthz answe
   assert.ok(status.daemon.rssBytes > 0);
   process.stdout.write(`[footprint] daemon rss ${(status.daemon.rssBytes / 1048576).toFixed(0)} MiB (node + tsx, not the executable)\n`);
 
+  // S4: the host's apply policy lives in the daemon's store; attached SDKs report it, and `policy set` through the CLI
+  // reaches every one of them at once. The next promotion then stages in the daemon and neither runtime moves.
+  assert.deepEqual(sdkA.status().applyPolicy, { effective: "auto", source: "pinned", manifestSaid: "auto" }, "pinned on first use by the daemon, adopted over the socket");
+  const policyLines: string[] = [];
+  assert.equal(await run(["policy", "set", "unlock_required", "--agent", scope.agentId, "--environment", scope.target, "--state-dir", stateDir, "--by", "seth", "--json"], { stdout: (l) => policyLines.push(l), stderr: () => {}, env: {}, cwd: work, now: () => Date.now(), fetch: null, isTTY: false }), EXIT.ok);
+  assert.equal((JSON.parse(policyLines[policyLines.length - 1]!) as { via: string }).via, "daemon");
+  await until(() => sdkA.status().applyPolicy.source === "operator" && sdkB.status().applyPolicy.source === "operator", "both runtimes heard the policy event");
+  assert.ok(events(daemon).some((e) => e.event === "policy_set" && e.policy === "unlock_required" && e.by === "seth"), "the daemon logged the operator's act");
+  plane.promote([plane.slot({ tag: "support.reply", text: "three {{name}}", versionId: "v3", variables: [{ name: "name", required: false, trust: "operator" }] })]);
+  await until(() => sdkA.status().stagedGeneration === 3, "the daemon staged generation 3 under the pinned policy");
+  assert.equal(sdkA.generation, 2, "the console's auto is advisory on this host");
+  assert.equal(sdkB.generation, 2);
+  assert.equal(await run(["unlock", "--agent", scope.agentId, "--environment", scope.target, "--state-dir", stateDir, "--json"], { stdout: () => {}, stderr: () => {}, env: {}, cwd: work, now: () => Date.now(), fetch: null, isTTY: false }), EXIT.ok);
+  await until(() => sdkA.generation === 3 && sdkB.generation === 3, "the operator's unlock moved both");
+  assert.equal(sdkB.prompt("support.reply").render({ name: "q" }).text, "three q");
+  // Back to auto for the rest of the case (the rollback below steps down from 3, the reconnect check expects 2 → keep the arithmetic below honest).
+  await sdkA.setApplyPolicy("auto");
+  await until(() => sdkB.status().applyPolicy.effective === "auto", "runtime B heard the loosening");
+
   // Rollback through one runtime is host-wide.
-  assert.deepEqual(await sdkA.rollback(), { generation: 1, forced: true });
-  await until(() => sdkB.generation === 1, "runtime B follows the rollback");
+  assert.deepEqual(await sdkA.rollback(), { generation: 2, forced: true });
+  await until(() => sdkB.generation === 2, "runtime B follows the rollback");
 
   // SIGKILL the daemon: the store is consistent, both runtimes keep serving, and reattach when it is back.
   daemon.child.kill("SIGKILL");
   await daemon.exited;
   await until(() => sdkA.status().daemon?.attached === false, "runtime A noticed");
-  assert.equal(sdkA.prompt("support.reply").render({ name: "z" }).text, "one z", "keeps serving what it holds");
+  assert.equal(sdkA.prompt("support.reply").render({ name: "z" }).text, "two z", "keeps serving what it holds");
   const store = await SlotStore.open({ stateDir, ...scope, keyProvider: (await import("../../sdk-typescript/src/store/keyProvider.js")).fileKey(join(SlotStore.path({ stateDir, ...scope }), "store.key")) });
-  assert.equal(store.state.generation, 1);
-  assert.equal(store.load(store.state.active!, { now: new Date().toISOString(), root: store.state.root, expectGeneration: 1 }).generation, 1);
+  assert.equal(store.state.generation, 2);
+  assert.equal(store.load(store.state.active!, { now: new Date().toISOString(), root: store.state.root, expectGeneration: 2 }).generation, 2);
+  assert.deepEqual({ value: store.state.applyPolicyPin?.value, source: store.state.applyPolicyPin?.source }, { value: "auto", source: "operator" }, "the pin is in the store the daemon owns");
   assert.ok(existsSync(socketPath), "the dead daemon left its socket file behind");
 
   daemon = startDaemon(args, env);
   await until(() => events(daemon).some((e) => e.event === "serving"), "restarted daemon serving");
   assert.ok(events(daemon).some((e) => e.event === "stale_socket_removed"), "the stale socket was reclaimed");
   await until(() => sdkA.status().daemon?.attached === true && sdkB.status().daemon?.attached === true, "both runtimes reattached");
-  assert.equal(sdkA.generation, 1);
+  assert.equal(sdkA.generation, 2);
 
   // A second daemon on the same store is refused.
   const second = startDaemon(args, env);

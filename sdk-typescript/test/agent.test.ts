@@ -121,7 +121,11 @@ test("a new generation is noticed through the edge pointer, only the changed pay
   assert.equal(ap.status().lastSyncOutcome, "held_back");
   plane.promote([triage!, plane.slot({ tag: "support.reply", text: "Reply thrice to {{name}}.", variables: [{ name: "name", required: false, trust: "operator" }], versionId: "ver_reply_3" })]);
   await ap.syncNow();
-  assert.equal(ap.generation, 3, "a newer generation ends the hold");
+  // S4: generation 2's unlock_required pinned this host; the console's auto on generation 3 is advisory, so it stages.
+  assert.equal(ap.status().lastSyncOutcome, "staged", "a newer generation ends the hold");
+  assert.equal(ap.status().stagedGeneration, 3);
+  assert.deepEqual(await ap.unlock(), { generation: 3 });
+  assert.equal(ap.generation, 3);
   assert.equal(ap.status().forcedDowngrade, true, "the downgrade stays on the record");
   await ap.stop();
   rmSync(stateDir, { recursive: true, force: true });

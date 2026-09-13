@@ -1,9 +1,9 @@
 {
   "schema": "heartbeat-request",
-  "reason": "instanceId is random and opaque, never a hostname",
+  "reason": "the apply policy's source is a closed set (S4)",
   "document": {
     "protocol": "0.2.5",
-    "instanceId": "web-01.acme.internal",
+    "instanceId": "inst_5f3c9a2b7e1d4c08",
     "sdk": {
       "name": "airprompterd",
       "version": "0.1.0",
@@ -47,8 +47,8 @@
       "lastUploadAt": "2026-09-12T10:03:30Z"
     },
     "applyPolicy": {
-      "effective": "unlock_required",
-      "source": "pinned"
+      "effective": "auto",
+      "source": "cloud"
     }
   }
 }

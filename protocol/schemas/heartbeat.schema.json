@@ -156,8 +156,36 @@
             "countersign_missing",
             "countersign_invalid",
             "schema_invalid",
+            "directive_unknown",
             "model_unavailable"
           ]
+        },
+        "applyPolicy": {
+          "description": "S4: the apply policy this host runs under and where it comes from. The policy is the customer's: the first verified manifest pins it (trust-on-first-use), a later manifest may tighten it and never loosen it, and only an operator's act on the host loosens it. `source` is `local` (the process's own setting), `pinned` (store.json, from a manifest), `operator` (set by hand on the host) or `manifest` (nothing pinned yet). When `effective` differs from the console's setting, the fleet view says the setting is advisory on that host.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "effective",
+            "source"
+          ],
+          "properties": {
+            "effective": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "unlock_required"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "local",
+                "pinned",
+                "operator",
+                "manifest"
+              ]
+            }
+          }
         },
         "unavailableModels": {
           "description": "With `refusal: model_unavailable` \u2014 the one local refusal after the chain verified \u2014 the required models this runtime cannot call (one per refusing slot at most).",

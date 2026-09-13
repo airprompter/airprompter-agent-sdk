@@ -8,7 +8,7 @@
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
 
 import { canonicalBytes, canonicalJson, sha256Prefixed } from "./canonicalJson.js";
-import type { Manifest, ManifestPayload, ManifestSlot, P256PrivateJwk, P256PublicJwk, RefusalCode, RootMetadata, RootMetadataSigned, Signature, Target } from "./types.js";
+import { DIRECTIVE_KINDS, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type Target } from "./types.js";
 
 export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([0]);
 
@@ -130,7 +130,7 @@ export interface VerifyManifestInput {
   requireCountersign?: boolean;
 }
 
-/** M1–M12. */
+/** M1–M13. */
 export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKeyId: string; generation: number }> {
   const { manifest, root } = input;
   const payload = manifest.payload;
@@ -151,6 +151,10 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
     return { ok: false, reason: "scope_mismatch" };
   }
   if (payload.generation < input.storedGeneration) return { ok: false, reason: "generation_rollback" };
+  // M13 (S4): the kinds a runtime honours are a closed set; one it does not know refuses the whole manifest before a byte is fetched.
+  if (!Array.isArray(payload.directives) || payload.directives.some((directive) => !directive || typeof directive !== "object" || !DIRECTIVE_KINDS.has((directive as { kind?: unknown }).kind as string))) {
+    return { ok: false, reason: "directive_unknown" };
+  }
 
   if (input.payloads) {
     for (const [hash, byteLength] of referencedPayloads(payload)) {

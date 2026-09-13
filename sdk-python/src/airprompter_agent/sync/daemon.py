@@ -18,7 +18,7 @@ import sys
 import tempfile
 import threading
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from .._util import b64url_decode
 from ..store.slot_store import LoadedSlot, SlotStore
@@ -62,6 +62,8 @@ def daemon_socket_path(*, state_dir: str, agent_id: str, target: str) -> str:
 class DaemonClient:
     #: S3: the lease the daemon reported on its last ``slot`` answer (``leaseExpiresAt``), or None.
     last_lease_expires_at: Optional[str] = None
+    #: S4: the apply policy the daemon reported on its last ``slot`` answer (``applyPolicy``), or None.
+    last_apply_policy: Optional[dict[str, Any]] = None
 
     def __init__(self, sock: socket.socket, hello: DaemonHello):
         self._socket = sock
@@ -202,6 +204,8 @@ class DaemonClient:
         # S3: the daemon's lease rides the slot answer; an older daemon says nothing and the SDK keeps what it had.
         lease = response.get("leaseExpiresAt")
         self.last_lease_expires_at = lease if isinstance(lease, str) else None
+        policy = response.get("applyPolicy")
+        self.last_apply_policy = dict(policy) if isinstance(policy, Mapping) and policy.get("effective") in ("auto", "unlock_required") else None
         return LoadedSlot(response["slot"], response["manifest"], int(response["generation"]), str(response.get("signingKeyId", "")), {entry["contentHash"]: b64url_decode(entry["bytes"]) for entry in response.get("payloads", [])})
 
     def on_event(self, listener: Callable[[dict[str, Any]], None]) -> Callable[[], None]:

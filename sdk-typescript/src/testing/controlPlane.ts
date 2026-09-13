@@ -266,7 +266,7 @@ export class FakeControlPlane {
           if (!(key in body)) return respond(400, JSON.stringify({ error: `heartbeat: missing ${key}` }));
         }
         for (const key of Object.keys(body)) {
-          if (!["protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
+          if (!["protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
         }
         this.heartbeats.push(body);
         const answer: Record<string, unknown> = { pollSeconds: 30, uploadIntervalSeconds: this.uploadIntervalSeconds, heartbeatIntervalSeconds: this.heartbeatIntervalSeconds, expiresAt: new Date(Date.now() + this.heartbeatIntervalSeconds * 3000).toISOString() };

@@ -19,7 +19,7 @@ import { bundlePayloadBytes, openBundle, type DistributionKey } from "./bundle/a
 import { assignArm } from "./protocol/assignment.js";
 import { orderedSteps } from "./protocol/assignment.js";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyRootMetadata } from "./protocol/trust.js";
-import type { Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target } from "./protocol/types.js";
+import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target } from "./protocol/types.js";
 import { mintRunRef, parseRunRef, type RunRefFacts } from "./render/runRef.js";
 import { renderTemplate, type Delimiters } from "./render/template.js";
 import { normalizeFeedback } from "./spool/feedback.js";
@@ -70,8 +70,12 @@ export interface StartOptions {
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */
   vendoredBundle?: { bundle: Bundle | string; distributionKey?: DistributionKey };
   apply?: {
-    /** Overrides the manifest's policy locally (the local side can be stricter, never looser). */
-    policy?: "auto" | "unlock_required";
+    /**
+     * A local policy this process always applies on top of the host's pin (S4): `unlock_required` here makes every
+     * release wait whatever the manifest or the pin says; `auto` here is not a loosening — the pin still governs.
+     * Loosening a pinned host is an operator's act: `airprompter policy set … auto` (or `ap.setApplyPolicy("auto")`).
+     */
+    policy?: ApplyPolicy;
     /**
      * T9: the update window — `"02:00-04:00 Europe/Berlin"` (optionally `"… mon,tue"`) or an object. A release
      * staged under unlock_required activates on its own inside it. A local window wins over the manifest's.
@@ -154,6 +158,13 @@ export interface AgentStatus {
   unlockRequests: Array<{ releaseDigest: string; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }>;
   /** T9: the update window in force (local, else the manifest's) and whether it is open now. */
   window: { source: "local" | "manifest"; open: boolean; opensAt: string; closesAt: string } | null;
+  /**
+   * S4: the apply policy this host runs under and where it comes from — `local` (this process's `apply.policy`),
+   * `pinned` (store.json, set on first use or tightened by a manifest), `operator` (set by hand on this host), or
+   * `manifest` (no pin yet: nothing verified). `manifestSaid` is what the latest verified manifest asked for; when it
+   * differs from `effective` the console's setting is advisory here.
+   */
+  applyPolicy: { effective: ApplyPolicy; source: "local" | "pinned" | "operator" | "manifest"; manifestSaid: ApplyPolicy | null };
   /** T9: the last heartbeat the server accepted, and when the next one goes out. */
   heartbeat: { lastAt: string | null; nextAt: string | null; intervalSeconds: number; lastRefusal: string | null };
   spool: { depthSegments: number; depthBytes: number };
@@ -234,6 +245,11 @@ export class AirPrompterAgent {
    * held back, or ignored as the generation already held. A Freeze reaches a fleet that never unlocks.
    */
   private standingDirectives: { generation: number; directives: Directive[] } | null = null;
+  /** S4: what the latest verified manifest asked for, and the generation whose advisory mismatch was already logged. */
+  private manifestApplyPolicy: { generation: number; value: ApplyPolicy } | null = null;
+  private applyPolicyAdvisoryLogged = 0;
+  /** S4: an attached SDK reports the daemon's policy (its `status` answer and `policy` events carry it). */
+  private daemonApplyPolicy: AgentStatus["applyPolicy"] | null = null;
   private windowTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatIntervalSeconds: number;
@@ -320,10 +336,11 @@ export class AirPrompterAgent {
   private async attachDaemon(client: DaemonClient): Promise<void> {
     this.daemon = client;
     this.daemonStagedGeneration = client.hello.stagedGeneration;
-    const { leaseExpiresAt, ...slot } = await client.slot();
+    const { leaseExpiresAt, applyPolicy, ...slot } = await client.slot();
     this.active = slot;
     this.source = "daemon";
     this.daemonLeaseExpiresAt = leaseExpiresAt;
+    this.daemonApplyPolicy = applyPolicy;
     this.log({ event: "daemon_attached", generation: this.active.generation, daemon: client.hello.daemon });
     client.onEvent((event) => {
       if (event.event === "generation") {
@@ -332,6 +349,8 @@ export class AirPrompterAgent {
       }
       // S3: the daemon is the process that talks to the origin; its contact is the fleet's lease.
       if (event.event === "lease") this.daemonLeaseExpiresAt = typeof event.expiresAt === "string" ? event.expiresAt : null;
+      // S4: the host's policy is the daemon's store; an operator's `policy set` reaches every attached SDK at once.
+      if (event.event === "policy" && event.applyPolicy && typeof event.applyPolicy === "object") this.daemonApplyPolicy = event.applyPolicy as AgentStatus["applyPolicy"];
       if (event.event === "shutdown") this.log({ event: "daemon_shutdown" });
     });
     client.onClose(() => {
@@ -347,11 +366,12 @@ export class AirPrompterAgent {
     if (this.daemonRefreshing) return this.daemonRefreshing;
     this.daemonRefreshing = (async () => {
       try {
-        const { leaseExpiresAt, ...slot } = await this.daemon!.slot();
+        const { leaseExpiresAt, applyPolicy, ...slot } = await this.daemon!.slot();
         const changed = slot.generation !== this.active?.generation;
         this.active = slot;
         this.source = "daemon";
         this.daemonLeaseExpiresAt = leaseExpiresAt ?? this.daemonLeaseExpiresAt;
+        this.daemonApplyPolicy = applyPolicy ?? this.daemonApplyPolicy;
         this.lastRefusal = null;
         if (changed) this.emitChange();
       } catch (error) {
@@ -517,11 +537,12 @@ export class AirPrompterAgent {
    * inside an open update window → activates now; the customer's `onStaged` hook may call
    * `activate()` (a hook that throws, rejects or never activates leaves the release staged and
    * says so in the log); otherwise the window timer, an operator's `unlock`, or the hook later.
-   * The local policy can only tighten the manifest's (`auto` never overrides `unlock_required`).
+   * The policy is the host's (S4): the pin in store.json, tightened by a manifest and never loosened by one, with this
+   * process's own `apply.policy` on top. The manifest's value only ever sets the pin on first use or tightens it.
    */
   private async applyPolicy(manifest: Manifest): Promise<ApplyPolicyDecision> {
-    const local = this.options.apply?.policy;
-    const policy = local === "unlock_required" || manifest.payload.applyPolicy === "unlock_required" ? "unlock_required" : "auto";
+    this.takeApplyPolicy(manifest.payload);
+    const policy = this.effectiveApplyPolicy().effective;
     // T34: verified before activate — a staged release's golden sets run first; below the floor it stays staged.
     if (this.options.golden && manifestHasGolden(manifest)) {
       const reports = await this.runGoldenFor(manifest, this.store!.state.staged ? this.store!.load(this.store!.state.staged, { now: this.nowIso(), root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null }).payloads : new Map(), this.options.golden.invoke, this.options.golden.concurrency);
@@ -643,7 +664,10 @@ export class AirPrompterAgent {
           this.lastRefusal = reason;
           this.log({ event: "sync_refused", reason, generation });
         },
-        onDirectives: (payload) => this.takeDirectives(payload),
+        onDirectives: (payload) => {
+          this.takeApplyPolicy(payload);
+          this.takeDirectives(payload);
+        },
       });
       this.etag = result.etag;
       this.edgeEtag = result.edgeEtag;
@@ -672,6 +696,66 @@ export class AirPrompterAgent {
       this.syncing = null;
     });
     return this.syncing;
+  }
+
+  /**
+   * S4: the apply policy is the customer's. The first verified manifest pins the host's policy (trust-on-first-use);
+   * a later manifest may tighten the pin (`auto` → `unlock_required`) and never loosen it — a manifest that says
+   * `auto` against a pinned `unlock_required` is advisory, logged once per generation, and reported on the heartbeat
+   * so the fleet view says "pinned on the host". Called for every manifest whose envelope verified, before the
+   * pass decides anything.
+   */
+  private takeApplyPolicy(payload: Manifest["payload"]): void {
+    const store = this.store;
+    if (!store) return;
+    if (!this.manifestApplyPolicy || payload.generation >= this.manifestApplyPolicy.generation) this.manifestApplyPolicy = { generation: payload.generation, value: payload.applyPolicy };
+    const pin = store.state.applyPolicyPin;
+    if (!pin) {
+      store.pinApplyPolicy({ value: payload.applyPolicy, source: "manifest", generation: payload.generation, setAt: this.nowIso() });
+      this.log({ event: "apply_policy_pinned", policy: payload.applyPolicy, generation: payload.generation });
+      return;
+    }
+    if (payload.applyPolicy === "unlock_required" && pin.value === "auto") {
+      store.pinApplyPolicy({ value: "unlock_required", source: "manifest", generation: payload.generation, setAt: this.nowIso() });
+      this.log({ event: "apply_policy_tightened", from: pin.value, to: "unlock_required", generation: payload.generation, previousSource: pin.source });
+      return;
+    }
+    if (payload.applyPolicy === "auto" && pin.value === "unlock_required" && this.applyPolicyAdvisoryLogged < payload.generation) {
+      this.applyPolicyAdvisoryLogged = payload.generation;
+      this.log({ event: "apply_policy_manifest_advisory", manifestSaid: "auto", pinned: "unlock_required", pinnedBy: pin.source, generation: payload.generation });
+    }
+  }
+
+  /** S4: the policy in force on this host and where it comes from (see `AgentStatus.applyPolicy`). */
+  private effectiveApplyPolicy(): AgentStatus["applyPolicy"] {
+    if (this.daemonSocket) return this.daemonApplyPolicy ?? { effective: this.options.apply?.policy ?? "auto", source: this.options.apply?.policy ? "local" : "manifest", manifestSaid: null };
+    const local = this.options.apply?.policy;
+    const pin = this.store?.state.applyPolicyPin ?? null;
+    const manifestSaid = this.manifestApplyPolicy?.value ?? null;
+    if (local === "unlock_required") return { effective: "unlock_required", source: "local", manifestSaid };
+    if (pin) return { effective: pin.value, source: pin.source === "operator" ? "operator" : "pinned", manifestSaid };
+    // Nothing verified yet: the manifest that arrives will pin; until then the local value (or `auto`) is what a start would apply.
+    return { effective: local ?? manifestSaid ?? "auto", source: local ? "local" : "manifest", manifestSaid };
+  }
+
+  /**
+   * S4: an operator's act on this host — the one way a pinned policy loosens. `unlock_required` tightens the pin by
+   * hand; `auto` loosens it, and a later manifest that says `unlock_required` tightens it again (a manifest may always
+   * tighten). Logged, and host-wide through the daemon when attached. Never called by sync.
+   */
+  async setApplyPolicy(value: ApplyPolicy, input: { by?: string } = {}): Promise<AgentStatus["applyPolicy"]> {
+    if (this.daemon) {
+      const result = (await this.daemon.request("policy", { value, ...(input.by ? { by: input.by } : {}) })) as { applyPolicy: AgentStatus["applyPolicy"] };
+      this.daemonApplyPolicy = result.applyPolicy;
+      return this.effectiveApplyPolicy();
+    }
+    const store = this.store;
+    if (!store) throw new AgentStartError("no_verified_release", "no store to record the policy in");
+    const before = store.state.applyPolicyPin ?? null;
+    store.pinApplyPolicy({ value, source: "operator", generation: this.manifestApplyPolicy?.generation ?? 0, setAt: this.nowIso() });
+    this.log({ event: "apply_policy_set", policy: value, previous: before?.value ?? null, previousSource: before?.source ?? null, ...(input.by ? { by: input.by } : {}) });
+    // A loosened policy with something already staged: the staged release waits for its own unlock; nothing activates here.
+    return this.effectiveApplyPolicy();
   }
 
   /** T9: a verified manifest's directives stand from the moment its envelope verifies; a Freeze is honoured before anything else. */
@@ -740,6 +824,8 @@ export class AirPrompterAgent {
       },
       unlockRequestsSeen: status.unlockRequests.map((r) => r.releaseDigest).slice(0, 8),
       disabled: status.disabled,
+      // S4: what this host runs under, so the fleet view can say "pinned on the host" when the console's setting is advisory here.
+      applyPolicy: { effective: status.applyPolicy.effective, source: status.applyPolicy.source },
     };
   }
 
@@ -1237,6 +1323,7 @@ export class AirPrompterAgent {
       forcedDowngrade: state?.forcedDowngrade === true,
       disabled: this.disabledNow(),
       unlockRequests: this.openUnlockRequests(manifest ?? null).map((d) => ({ releaseDigest: d.releaseDigest, requestedBy: d.requestedBy, requestedAt: d.requestedAt, expiresAt: d.expiresAt, ...(d.note !== undefined ? { note: d.note } : {}) })),
+      applyPolicy: this.effectiveApplyPolicy(),
       window: (() => {
         const governing = this.windowInForce(this.stagedManifest ?? this.active?.manifest ?? null);
         if (!governing) return null;

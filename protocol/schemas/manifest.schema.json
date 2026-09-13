@@ -196,11 +196,26 @@
           "pattern": "^[A-Za-z0-9_-]{22,86}$"
         },
         "subjectKey": { "type": "string", "enum": ["request", "instance"] },
-        "arms": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/$defs/arm" } }
+        "arms": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/$defs/arm" } },
+        "ramp": {
+          "description": "S9: the signed ramp plan. The runtime walks it on its own clock: the weights in force are the last step whose notBefore has passed (inclusive), else arms[].weightBps. Steps are strictly increasing, at least an hour apart, one weight per arm each summing to 10000 (assignment-hash.md › The ramp plan; refused as ramp_invalid). A customer on unlock_required unlocks the plan once; the cloud can only retreat (disable scope arm).",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["notBefore", "weightBps"],
+            "properties": {
+              "notBefore": { "$ref": "#/$defs/timestamp" },
+              "weightBps": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "type": "integer", "minimum": 0, "maximum": 10000 } }
+            }
+          }
+        }
       }
     },
     "directive": {
-      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act — a reduction, it only ever stops serving; `request_unlock` is a request the runtime surfaces and never grants. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
+      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act — a reduction, it only ever stops serving (scope agent / slot) or hands an arm's share back to the control (scope arm, S9: the retreat from a ramp); `request_unlock` is a request the runtime surfaces and never grants. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
       "oneOf": [
         {
           "type": "object",
@@ -221,13 +236,16 @@
           "required": ["kind", "scope", "issuedAt"],
           "properties": {
             "kind": { "const": "disable" },
-            "scope": { "type": "string", "enum": ["agent", "slot"] },
+            "scope": { "type": "string", "enum": ["agent", "slot", "arm"] },
             "tag": { "$ref": "#/$defs/slotTag" },
+            "arm": { "type": "string", "pattern": "^[a-z0-9_-]{1,32}$" },
             "issuedAt": { "$ref": "#/$defs/timestamp" },
             "reason": { "type": "string", "maxLength": 500 }
           },
-          "if": { "properties": { "scope": { "const": "slot" } } },
-          "then": { "required": ["tag"] }
+          "allOf": [
+            { "if": { "properties": { "scope": { "const": "slot" } } }, "then": { "required": ["tag"] } },
+            { "if": { "properties": { "scope": { "const": "arm" } } }, "then": { "required": ["arm"] } }
+          ]
         }
       ]
     },

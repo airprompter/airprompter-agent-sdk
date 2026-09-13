@@ -129,6 +129,12 @@ manifest_payload = {
             {"arm": "control", "weightBps": 9000, "releaseDigest": digest, "overrides": []},
             {"arm": "candidate", "weightBps": 1000, "releaseDigest": candidate_digest, "overrides": [candidate_triage]},
         ],
+        # S9: the signed ramp plan — the fleet walks it on its own clock; the customer unlocked it once.
+        "ramp": [
+            {"notBefore": "2026-09-13T02:00:00Z", "weightBps": [7500, 2500]},
+            {"notBefore": "2026-09-13T04:00:00Z", "weightBps": [5000, 5000]},
+            {"notBefore": "2026-09-13T08:00:00Z", "weightBps": [0, 10000]},
+        ],
     },
     "directives": [
         {"kind": "request_unlock", "releaseDigest": digest, "requestedBy": "usr_9b1c2d3e", "requestedAt": "2026-09-12T10:00:00Z", "expiresAt": "2026-09-13T10:00:00Z", "note": "Roll during tonight's window."}
@@ -252,6 +258,8 @@ refused = {
     "manifest.generation-zero.json": {"schema": "manifest", "reason": "generation starts at 1", "document": {**manifest, "payload": {**manifest_payload, "generation": 0}}},
     "manifest.uppercase-tag.json": {"schema": "manifest", "reason": "slot tags follow the tag grammar", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[0], "tag": "Support.Triage"}]}}},
     "manifest.slot-disable-without-tag.json": {"schema": "manifest", "reason": "a slot-scoped disable names the slot", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "slot", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
+    "manifest.arm-disable-without-arm.json": {"schema": "manifest", "reason": "an arm-scoped disable names the arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "arm", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
+    "manifest.ramp-step-one-weight.json": {"schema": "manifest", "reason": "a ramp step carries one weight per arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "experiment": {**manifest_payload["experiment"], "ramp": [{"notBefore": "2026-09-13T02:00:00Z", "weightBps": [10000]}]}}}},
     "key-set.wrong-curve.json": {"schema": "key-set", "reason": "only P-256 keys in this protocol major", "document": {**key_set, "signed": {**key_set["signed"], "keys": {key_root: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": {**jwk, "crv": "P-384"}}}}}},
     "key-set.non-thumbprint-key-id.json": {"schema": "key-set", "reason": "key ids are thumbprints, lowercase hex", "document": {**key_set, "signed": {**key_set["signed"], "keys": {**key_set["signed"]["keys"], "root-2026-09-prod": key_set["signed"]["keys"][key_root]}}}},
     "key-set.missing-targets-role.json": {"schema": "key-set", "reason": "root metadata always names the targets role", "document": {**key_set, "signed": {**key_set["signed"], "roles": {"root": key_set["signed"]["roles"]["root"]}}}},

@@ -157,6 +157,7 @@
             "countersign_invalid",
             "schema_invalid",
             "directive_unknown",
+            "ramp_invalid",
             "model_unavailable"
           ]
         },
@@ -273,7 +274,7 @@
           }
         },
         "disabled": {
-          "description": "What this instance is refusing to render under a disable directive (Freeze): the whole agent, or named slots.",
+          "description": "What this instance is refusing to render under a disable directive (Freeze): the whole agent, named slots, or (S9) named arms whose share went back to the control.",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -290,6 +291,14 @@
               "items": {
                 "type": "string",
                 "maxLength": 128
+              }
+            },
+            "arms": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9_-]{1,32}$"
               }
             }
           }

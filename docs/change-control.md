@@ -107,6 +107,20 @@ customer's; the runtime side is `countersignRoot` / `requireCountersign`
 at start, and the CLI's `verify` reports `countersign_missing` until the
 signature is present. The signing tool ships with T10.
 
+## 5b. A rollout is one unlock (S9)
+
+Under `unlock_required` a staged rollout used to be one unlock per step.
+Now the whole ramp rides the manifest as a signed plan — "5 % from 02:00,
+25 % from 03:00, 50 % from 05:00, everyone from 09:00" — and your side
+unlocks it **once**; every host walks it on its own clock with no
+check-in, an offline host included. The console shows the plan in those
+words at unlock; `ap.status().ramp` shows where a host is on it. If a
+window's checks fail, the scheduler **retreats** (`disable scope: "arm"`
+on the candidate): that is a reduction, so it lands without an unlock and
+everyone is back on the control within one heartbeat (S3). Moving share
+up outside the plan is a new plan — a new generation, which waits for
+your unlock like any release.
+
 ## 6. Freeze and rollback
 
 - **Freeze** (console): a signed `disable` directive rides the next

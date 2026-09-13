@@ -188,7 +188,7 @@ test("the pushable set is closed: a manifest with a directive kind this runtime 
   assert.equal(ap.heartbeatBody().refusal, "directive_unknown", "counted on the heartbeat");
   assert.equal(ap.generation, 2);
   assert.equal(ap.status().stagedGeneration, null, "nothing staged");
-  assert.deepEqual(ap.status().disabled, { agent: false, slots: [] }, "the disable beside the unknown kind was not obeyed");
+  assert.deepEqual(ap.status().disabled, { agent: false, slots: [], arms: [] }, "the disable beside the unknown kind was not obeyed");
   assert.equal(ap.prompt("support.reply").render({ name: "x" }).text, "Reply v1b to x");
   assert.ok(events.some((e) => e.event === "sync_refused" && e.reason === "directive_unknown" && e.generation === 3));
 
@@ -198,7 +198,7 @@ test("the pushable set is closed: a manifest with a directive kind this runtime 
   await ap.syncNow();
   assert.equal(ap.status().lastSyncOutcome, "staged", "the release itself still waits");
   assert.equal(ap.generation, 2);
-  assert.deepEqual(ap.status().disabled, { agent: true, slots: [] });
+  assert.deepEqual(ap.status().disabled, { agent: true, slots: [], arms: [] });
   assert.throws(() => ap.prompt("support.reply").render({ name: "x" }), (error: unknown) => error instanceof RenderRefusedError && error.reason === "disabled");
 
   // `request_unlock` asks; it never activates. The staged release is still staged after it arrives.
@@ -208,7 +208,7 @@ test("the pushable set is closed: a manifest with a directive kind this runtime 
   await ap.syncNow();
   assert.equal(ap.generation, 2, "a request is not an act");
   assert.equal(ap.status().unlockRequests.length, 1);
-  assert.deepEqual(ap.status().disabled, { agent: false, slots: [] }, "the newer manifest lifted the Freeze");
+  assert.deepEqual(ap.status().disabled, { agent: false, slots: [], arms: [] }, "the newer manifest lifted the Freeze");
   await ap.stop();
   rmSync(stateDir, { recursive: true, force: true });
 });

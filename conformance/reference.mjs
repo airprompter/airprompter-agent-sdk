@@ -171,3 +171,51 @@ export function orderedSteps(slotTag, steps) {
   });
   return sorted;
 }
+
+// ---------------------------------------------------------------------------
+// S9: the signed ramp plan (assignment-hash.md › The ramp plan)
+// ---------------------------------------------------------------------------
+
+export const RAMP_MIN_STEP_MS = 60 * 60 * 1000;
+export const RAMP_MAX_STEPS = 8;
+
+export function validateRamp(ramp, armCount) {
+  if (ramp === undefined) return;
+  if (!Array.isArray(ramp) || ramp.length < 1 || ramp.length > RAMP_MAX_STEPS) throw new AssignmentError("ramp_invalid");
+  let previous = null;
+  for (const step of ramp) {
+    if (!step || typeof step !== "object" || typeof step.notBefore !== "string" || !Array.isArray(step.weightBps)) throw new AssignmentError("ramp_invalid");
+    const at = Date.parse(step.notBefore);
+    if (!Number.isFinite(at)) throw new AssignmentError("ramp_invalid");
+    if (previous !== null && at - previous < RAMP_MIN_STEP_MS) throw new AssignmentError("ramp_invalid");
+    previous = at;
+    if (step.weightBps.length !== armCount) throw new AssignmentError("ramp_invalid");
+    let total = 0;
+    for (const weight of step.weightBps) {
+      if (!Number.isInteger(weight) || weight < 0) throw new AssignmentError("ramp_invalid");
+      total += weight;
+    }
+    if (total !== ASSIGNMENT_MODULUS) throw new AssignmentError("ramp_invalid");
+  }
+}
+
+export function rampWeightsAt(arms, ramp, nowMs) {
+  let weights = arms.map((arm) => arm.weightBps);
+  for (const step of ramp ?? []) if (Date.parse(step.notBefore) <= nowMs) weights = [...step.weightBps];
+  return weights;
+}
+
+export function effectiveArms({ arms, ramp, disabledArms, nowMs }) {
+  const weights = rampWeightsAt(arms, ramp, nowMs);
+  const disabled = disabledArms ?? new Set();
+  const firstLive = arms.findIndex((arm) => !disabled.has(arm.arm));
+  if (firstLive === -1) return null;
+  let reassigned = 0;
+  const effective = arms.map((arm, index) => {
+    if (!disabled.has(arm.arm)) return { ...arm, weightBps: weights[index] };
+    reassigned += weights[index];
+    return { ...arm, weightBps: 0 };
+  });
+  effective[firstLive] = { ...effective[firstLive], weightBps: effective[firstLive].weightBps + reassigned };
+  return effective;
+}

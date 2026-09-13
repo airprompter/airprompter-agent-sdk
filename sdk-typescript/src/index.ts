@@ -11,7 +11,7 @@ export { PROTOCOL_VERSION } from "./protocol/version.js";
 export type { DaemonHello, DaemonSlotResponse, DaemonGenerationEvent } from "./sync/daemon.js";
 
 export { canonicalJson, canonicalBytes, sha256Prefixed, CanonicalJsonError } from "./protocol/canonicalJson.js";
-export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, orderedSteps, AssignmentError, StepError, ASSIGNMENT_MODULUS } from "./protocol/assignment.js";
+export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, validateRamp, rampWeightsAt, effectiveArms, isAssignmentError, orderedSteps, AssignmentError, StepError, ASSIGNMENT_MODULUS, RAMP_MIN_STEP_MS, RAMP_MAX_STEPS } from "./protocol/assignment.js";
 export { keyThumbprint, publicJwkOf, signBytes, verifyBytes, trustedRootFromPinnedKey, verifyRootMetadata, verifyManifest, referencedPayloads, releaseDigest, releaseDigestInput, instant } from "./protocol/trust.js";
 export type { Verdict, VerifyManifestInput } from "./protocol/trust.js";
 export type * from "./protocol/types.js";

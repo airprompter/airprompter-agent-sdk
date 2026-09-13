@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature
 
 from .._util import b64url_decode, b64url_encode, instant
+from .assignment import AssignmentError, validate_ramp
 from .canonical_json import canonical_bytes, canonical_json, sha256_prefixed
 
 SUPPORTED_PROTOCOL_MAJORS = frozenset({0})
@@ -217,6 +218,15 @@ def verify_manifest(
     directives = payload.get("directives")
     if not isinstance(directives, list) or any(not isinstance(d, Mapping) or d.get("kind") not in DIRECTIVE_KINDS for d in directives):
         return Verdict(False, "directive_unknown")
+    # M14 (S9): a ramp plan, when present, is well-formed — a malformed one is refused whole rather than walked wrongly.
+    experiment = payload.get("experiment")
+    if isinstance(experiment, Mapping) and experiment.get("ramp") is not None:
+        try:
+            validate_ramp(experiment.get("ramp"), len(experiment.get("arms") or []))
+        except AssignmentError as error:
+            if error.reason == "ramp_invalid":
+                return Verdict(False, "ramp_invalid")
+            raise
 
     if payloads is not None:
         for content_hash, byte_length in referenced_payloads(payload).items():

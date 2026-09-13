@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The signed ramp plan (S9, AIR-1977) — protocol minor
+- `manifest.schema.json`: `experiment.ramp: [{ notBefore, weightBps[] }]` (optional, 1–8 steps); `disable` gains `scope: "arm"` with `arm`. trust-chain M14 `ramp_invalid` (also in the heartbeat's refusal enum); the heartbeat's `disabled` block gains `arms`. Example manifest carries a plan; refused examples for an arm-disable without its arm and a step with one weight.
+- `assignment-hash.md` › The ramp plan: the walk (the last step whose `notBefore` ≤ now, on the host's clock; steps ≥ 1 h apart; one weight per arm summing to 10000), the retreat (`disable scope: "arm"` hands an arm's share to the first live arm in manifest order; every arm disabled is a Freeze; an unknown arm changes nothing), no `reweight`. `vectors/ramp.json` from `tools/gen_ramp_vectors.py` (an independent implementation): the walk, two skewed hosts, the retreat, every refused plan; the conformance run mirrors it.
+- SDK (TypeScript and Python): `validateRamp` / `rampWeightsAt` / `effectiveArms` in the assignment module; the runtime walks the plan at every render with no check-in, `AgentStatus.ramp`, `disabled.arms`; the retreat is honoured from any verified envelope (S3/S4). Vectors `sdk-typescript/test/ramp.test.ts`, `sdk-python/tests/test_ramp.py`.
+- docs: trust-chain › "The ramp plan is what users will see", change-control › 5b, threat-model row.
+
 ### store.json joins the protocol with an N/N-1 rule (S8, AIR-1976)
 - `schemas/store.schema.json` + `store-format.md`: `store.json` is a cross-package contract. Format 2 adds `writer { name, version }` and carries the S4 `applyPolicyPin`; format 1 (0.2.0–0.2.5) is still read. A reader at format N accepts N and N-1, writes N, migrates an N-1 file forward on its first write (never on open — the rollback window), and refuses N+1 with `store_newer` naming the writer. Examples `store.v1.json` / `store.v2.json`; refused: a format-3 file, a format-2 file without its writer, a free-form member.
 - SDK (TypeScript and Python): `STORE_FORMAT_VERSION = 2`, `STORE_FORMATS_READ = {1, 2}`, `StoreError("store_newer", …, detail = the writer)`, `AgentStartError("store_newer")`; `StoreHooks.writer` — the SDK names itself, the daemon names itself through `sdk`, the CLI names itself. `SDK_VERSION` moves to `protocol/version.ts` (still exported from the package root).

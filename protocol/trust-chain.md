@@ -78,6 +78,7 @@ this order:
 | M11 | when `requireCountersign` (or the target is locally configured to require it): every release the manifest can activate — the manifest's `releaseDigest` and each experiment arm's — carries a countersignature from a key in the **customer** root's `targets` role | `countersign_missing` |
 | M12 | …and each of those signatures verifies over the UTF-8 digest string | `countersign_invalid` |
 | M13 | every `directives[]` entry is of a kind the runtime honours — `disable` or `request_unlock` (S4; checked with M7/M8, before any payload is fetched) | `directive_unknown` |
+| M14 | `experiment.ramp`, when present, is a well-formed plan — 1–8 steps, strictly increasing and ≥ 1 h apart, one integer weight per arm summing to 10000 (S9, assignment-hash.md › The ramp plan) | `ramp_invalid` |
 
 Only then does apply policy run — and the policy is the host's, not the
 manifest's (see below): the manifest's `applyPolicy` pins the host on first
@@ -158,6 +159,17 @@ retreat and a dial-down. Three rules:
 Together: a stale or pinned pointer costs at most one heartbeat interval
 of delay before the fleet sees what the origin has, and a runtime that can
 reach only the pointer expires honestly.
+
+## The ramp plan is what users will see (S9)
+
+`unlock_required` approves what users see. A rollout's weights therefore
+ride the signed manifest as a whole plan (`experiment.ramp`) that the
+customer unlocks once; the fleet walks it on its own clock, and the cloud
+can only retreat with `disable scope: "arm"` — a reduction in S4's sense,
+honoured from any verified envelope without a local act. An adjustment
+upward is a new plan and waits like any release. See assignment-hash.md ›
+The ramp plan; vectors `vectors/ramp.json`, `sdk-typescript/test/ramp.test.ts`,
+`sdk-python/tests/test_ramp.py`.
 
 ## The apply policy is the customer's (S4)
 

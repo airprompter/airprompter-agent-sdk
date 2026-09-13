@@ -252,7 +252,7 @@ def test_disable_directive_stamps_one_refusal(state_dir):
     plane.promote([triage, reply], directives=[{"kind": "disable", "scope": "slot", "tag": "support.reply", "issuedAt": iso_ms(instant("2026-09-12T00:00:00Z")), "reason": "Freeze"}])
     ap.sync_now()
     assert ap.generation == 2
-    assert ap.status().disabled == {"agent": False, "slots": ["support.reply"]}
+    assert ap.status().disabled == {"agent": False, "slots": ["support.reply"], "arms": []}
     with pytest.raises(RenderRefusedError) as refused:
         ap.prompt("support.reply").render()
     assert refused.value.reason == "disabled" and refused.value.tag == "support.reply"

@@ -20,6 +20,9 @@ import {
   sha256Prefixed,
   validateArms,
   decodeBase64Url,
+  effectiveArms,
+  rampWeightsAt,
+  validateRamp,
 } from "./reference.mjs";
 import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./trust.mjs";
 import { LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "./spool.mjs";
@@ -251,6 +254,46 @@ for (const r of as.refused) {
   try {
     assignArm({ salt: r.salt, subject: "user-1", arms: r.arms });
     fail(`refused: ${r.name}`, "assigned instead of refusing");
+  } catch (error) {
+    if (error instanceof AssignmentError && error.reason === r.reason) ok(`refused: ${r.name} → ${r.reason}`);
+    else fail(`refused: ${r.name}`, `expected ${r.reason}, got ${error.reason ?? error.message}`);
+  }
+}
+
+section("vectors: ramp plan (S9)");
+const rp = readJson(join(protocolDir, "vectors", "ramp.json"));
+for (const c of rp.cases) {
+  try {
+    validateRamp(c.ramp, c.arms.length);
+    const disabled = new Set(c.directives.filter((d) => d.kind === "disable" && d.scope === "arm").map((d) => d.arm));
+    const check = (nowText, expectedWeights, assignments, field) => {
+      const nowMs = Date.parse(nowText);
+      const weights = rampWeightsAt(c.arms, c.ramp, nowMs);
+      if (expectedWeights && weights.join() !== expectedWeights.join()) throw new Error(`weights at ${nowText}: ${weights.join()} ≠ ${expectedWeights.join()}`);
+      const arms = effectiveArms({ arms: c.arms, ramp: c.ramp, disabledArms: disabled, nowMs });
+      for (const entry of assignments) {
+        const result = assignArm({ salt: c.salt, subject: entry.subject, arms });
+        if (result.bucket !== entry.bucket || result.arm !== entry[field]) throw new Error(`${entry.subject}: ${result.arm}/${result.bucket} ≠ ${entry[field]}/${entry.bucket}`);
+      }
+    };
+    if (c.hosts) {
+      check(c.hosts.hostA.now, c.hosts.hostA.weightBps, c.expected.assignments, "hostA");
+      check(c.hosts.hostB.now, c.hosts.hostB.weightBps, c.expected.assignments, "hostB");
+      const disagreements = c.expected.assignments.filter((e) => e.hostA !== e.hostB).length;
+      if (disagreements !== c.expected.disagreements) throw new Error(`${disagreements} disagreements, expected ${c.expected.disagreements}`);
+      if (c.expected.assignments.some((e) => e.hostA === "candidate" && e.hostB === "control")) throw new Error("a subject moved from candidate back to control");
+    } else {
+      check(c.now, c.expected.weightBps, c.expected.assignments, "arm");
+    }
+    ok(c.name);
+  } catch (error) {
+    fail(c.name, error.message);
+  }
+}
+for (const r of rp.refused) {
+  try {
+    validateRamp(r.ramp, r.arms.length);
+    fail(`refused: ${r.name}`, "accepted instead of refusing");
   } catch (error) {
     if (error instanceof AssignmentError && error.reason === r.reason) ok(`refused: ${r.name} → ${r.reason}`);
     else fail(`refused: ${r.name}`, `expected ${r.reason}, got ${error.reason ?? error.message}`);

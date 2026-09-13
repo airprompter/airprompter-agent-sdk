@@ -171,14 +171,14 @@ test("a Freeze is honoured from a manifest the runtime leaves staged (directives
   await ap.syncNow();
   assert.equal(ap.generation, 1, "still on generation 1 — the frozen manifest was staged, not activated");
   assert.equal(ap.status().applyState, "awaiting_unlock");
-  assert.deepEqual(ap.status().disabled, { agent: true, slots: [] }, "…and yet the Freeze took effect");
+  assert.deepEqual(ap.status().disabled, { agent: true, slots: [], arms: [] }, "…and yet the Freeze took effect");
   assert.throws(() => ap.prompt("support.reply").render({}), (e: unknown) => e instanceof RenderRefusedError && e.reason === "disabled");
   await ap.heartbeatNow();
   assert.deepEqual(plane.heartbeats.at(-1)?.disabled, { agent: true, slots: [] });
   // Lifting the freeze: another generation, still unlock_required, no directive — serving resumes on the old release.
   plane.promote([triage!, reply!], { applyPolicy: "unlock_required" });
   await ap.syncNow();
-  assert.deepEqual(ap.status().disabled, { agent: false, slots: [] });
+  assert.deepEqual(ap.status().disabled, { agent: false, slots: [], arms: [] });
   assert.equal(ap.prompt("support.reply").render({}).generation, 1);
   await ap.stop();
   rmSync(stateDir, { recursive: true, force: true });

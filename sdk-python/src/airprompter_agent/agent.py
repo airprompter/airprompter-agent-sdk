@@ -32,7 +32,7 @@ import httpx
 from ._util import instant, iso_ms, now_ms, random_id
 from .apply.window import UpdateWindow, parse_window, window_state
 from .bundle.apbundle import DistributionKey, bundle_payload_bytes, open_bundle
-from .protocol.assignment import assign_arm, ordered_steps
+from .protocol.assignment import assign_arm, effective_arms, ordered_steps, ramp_weights_at
 from .protocol.trust import key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from .telemetry.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from .telemetry.wrap import WrapHooks, wrap_client
@@ -189,6 +189,8 @@ class AgentStatus:
     apply_policy: dict[str, Any] = field(default_factory=lambda: {"effective": "auto", "source": "manifest", "manifestSaid": None})
     #: S5: this process's own uploader (a resident host with no daemon); None when a daemon, a memory sink or ``upload=False`` owns the spool.
     upload: Optional[dict[str, Any]] = None
+    #: S9: the ramp plan as this host walks it — {"experimentId", "weightBps", "arms", "step", "nextStepAt", "plan"}; None without an experiment.
+    ramp: Optional[dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -991,10 +993,31 @@ class AirPrompterAgent:
         self._standing_directives = (payload["generation"], list(payload.get("directives", [])))
         after = self._disabled_now()
         if before != after:
-            self._log({"event": "disabled_by_directive" if after["agent"] or after["slots"] else "disable_lifted", "generation": payload["generation"], **after})
+            self._log({"event": "disabled_by_directive" if after["agent"] or after["slots"] or after.get("arms") else "disable_lifted", "generation": payload["generation"], **after})
         requests = self._open_unlock_requests(payload)
         if requests:
             self._log({"event": "unlock_requested", "generation": payload["generation"], "requests": [{"releaseDigest": r.get("releaseDigest"), "expiresAt": r.get("expiresAt"), "requestedBy": r.get("requestedBy")} for r in requests]})
+
+    def _ramp_status(self, manifest: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+        experiment = (manifest or {}).get("experiment")
+        if not experiment:
+            return None
+        arms = self._arms_now(manifest)
+        now_ms = self._now_ms()
+        plan = list(experiment.get("ramp") or [])
+        step = -1
+        for index, entry in enumerate(plan):
+            if instant(entry["notBefore"]) <= now_ms:
+                step = index
+        nxt = plan[step + 1] if step + 1 < len(plan) else None
+        return {
+            "experimentId": experiment["experimentId"],
+            "weightBps": [arm["weightBps"] for arm in arms] if arms else ramp_weights_at(experiment["arms"], experiment.get("ramp"), now_ms),
+            "arms": [arm["arm"] for arm in experiment["arms"]],
+            "step": step,
+            "nextStepAt": nxt["notBefore"] if nxt else None,
+            "plan": [{"notBefore": entry["notBefore"], "weightBps": list(entry["weightBps"])} for entry in plan],
+        }
 
     def _disabled_now(self) -> dict[str, Any]:
         """What is disabled right now: the standing directives when they are as new as the active manifest, else the active manifest's own."""
@@ -1002,7 +1025,7 @@ class AirPrompterAgent:
         standing = self._standing_directives
         if standing and (active is None or standing[0] >= active["generation"]):
             return self._disabled_from(standing[1])
-        return self._disabled_from(active.get("directives", [])) if active else {"agent": False, "slots": []}
+        return self._disabled_from(active.get("directives", [])) if active else {"agent": False, "slots": [], "arms": []}
 
     def _fetch_root(self, url: str) -> Optional[dict[str, Any]]:
         try:
@@ -1049,7 +1072,7 @@ class AirPrompterAgent:
                 **({"backoffUntil": status.upload["backoffUntil"]} if status.upload and status.upload.get("backoffUntil") else {}),
             },
             "unlockRequestsSeen": [r["releaseDigest"] for r in status.unlock_requests][:8],
-            "disabled": status.disabled,
+            "disabled": {"agent": status.disabled["agent"], "slots": status.disabled["slots"], **({"arms": status.disabled["arms"]} if status.disabled.get("arms") else {})},
             # S4: what this host runs under, so the fleet view can say the console's setting is advisory here.
             "applyPolicy": {"effective": status.apply_policy["effective"], "source": status.apply_policy["source"]},
         }
@@ -1292,15 +1315,24 @@ class AirPrompterAgent:
     @staticmethod
     def _disabled_from(directives: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         slots: list[str] = []
+        arms: list[str] = []
         agent = False
         for directive in directives:
             if directive.get("kind") != "disable":
                 continue
             if directive.get("scope") == "agent":
                 agent = True
+            elif directive.get("scope") == "arm" and directive.get("arm"):
+                arms.append(str(directive["arm"]))
             elif directive.get("tag"):
                 slots.append(str(directive["tag"]))
-        return {"agent": agent, "slots": slots}
+        return {"agent": agent, "slots": slots, "arms": arms}
+
+    def _arms_now(self, payload: Mapping[str, Any]) -> list[dict[str, Any]] | None:
+        """S9: the arms as they stand now — the signed plan walked on this host's clock, then any disabled arm's share handed to the
+        control. None when every arm is disabled (then the agent is, in effect, frozen for that tag)."""
+        experiment = payload["experiment"]
+        return effective_arms(arms=experiment["arms"], ramp=experiment.get("ramp"), disabled_arms=self._disabled_by(payload)["arms"], now_ms=self._now_ms())
 
     def _lease_expires_at(self) -> Optional[str]:
         if self._active is None:
@@ -1349,7 +1381,12 @@ class AirPrompterAgent:
         if not experiment:
             return slot, "none", None
         subject_value = self._own_instance_id if experiment.get("subjectKey") == "instance" or subject is None else subject
-        assigned = assign_arm(salt=experiment["salt"], subject=subject_value, arms=experiment["arms"])
+        # S9: the arms as the plan says now, on this host's clock; a disabled arm's share is the control's. Every arm disabled is a Freeze.
+        arms = self._arms_now(payload)
+        if arms is None:
+            self._stamp_refusal("disabled", active.generation, tag)
+            raise RenderRefusedError("disabled", tag, active.generation)
+        assigned = assign_arm(salt=experiment["salt"], subject=subject_value, arms=arms)
         override = next((entry for entry in assigned.arm.get("overrides", []) if entry["tag"] == tag), None)
         return (override or slot), str(assigned.arm["arm"]), assigned.bucket
 
@@ -1638,6 +1675,7 @@ class AirPrompterAgent:
             golden=self._last_golden,
             apply_policy=self._effective_apply_policy(),
             upload=self._uploader.status() if self._uploader is not None else None,
+            ramp=self._ramp_status(manifest),
         )
 
     @property

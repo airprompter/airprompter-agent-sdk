@@ -16,10 +16,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "./bundle/apbundle.js";
-import { assignArm } from "./protocol/assignment.js";
-import { orderedSteps } from "./protocol/assignment.js";
+import { assignArm, effectiveArms, orderedSteps, rampWeightsAt } from "./protocol/assignment.js";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./protocol/trust.js";
-import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target } from "./protocol/types.js";
+import type { ApplyPolicy, Bundle, Directive, ExperimentArm, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target } from "./protocol/types.js";
 import { mintRunRef, parseRunRef, type RunRefFacts } from "./render/runRef.js";
 import { renderTemplate, type Delimiters } from "./render/template.js";
 import { normalizeFeedback } from "./spool/feedback.js";
@@ -165,8 +164,13 @@ export interface AgentStatus {
   onLeaseExpiry: "degrade" | "halt" | null;
   lastContactAt: string | null;
   forcedDowngrade: boolean;
-  /** Emergency disable from the manifest (§6.5): the whole agent, or named slots. */
-  disabled: { agent: boolean; slots: string[] };
+  /** Emergency disable from the manifest (§6.5): the whole agent, named slots, or (S9) named arms whose share went back to the control. */
+  disabled: { agent: boolean; slots: string[]; arms: string[] };
+  /**
+   * S9: the ramp plan as this host walks it — the weights in force now (after any disabled arm's share went to the control),
+   * the step in force (0-based index into `ramp`, or -1 before the first / with no plan), and the next step's instant.
+   */
+  ramp: { experimentId: string; weightBps: number[]; arms: string[]; step: number; nextStepAt: string | null; plan: Array<{ notBefore: string; weightBps: number[] }> } | null;
   /** Open (unexpired) unlock requests carried by the latest verified manifest, for operator tooling. */
   unlockRequests: Array<{ releaseDigest: string; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }>;
   /** T9: the update window in force (local, else the manifest's) and whether it is open now. */
@@ -908,16 +912,16 @@ export class AirPrompterAgent {
     const before = this.disabledNow();
     this.standingDirectives = { generation: payload.generation, directives: [...payload.directives] };
     const after = this.disabledNow();
-    if (before.agent !== after.agent || before.slots.join(",") !== after.slots.join(",")) this.log({ event: after.agent || after.slots.length ? "disabled_by_directive" : "disable_lifted", generation: payload.generation, ...after });
+    if (before.agent !== after.agent || before.slots.join(",") !== after.slots.join(",") || before.arms.join(",") !== after.arms.join(",")) this.log({ event: after.agent || after.slots.length || after.arms.length ? "disabled_by_directive" : "disable_lifted", generation: payload.generation, ...after });
     const requests = this.openUnlockRequests(payload);
     if (requests.length) this.log({ event: "unlock_requested", generation: payload.generation, requests: requests.map((r) => ({ releaseDigest: r.releaseDigest, expiresAt: r.expiresAt, requestedBy: r.requestedBy })) });
   }
 
   /** What is disabled right now: the standing directives when they are as new as the active manifest, else the active manifest's own. */
-  private disabledNow(): { agent: boolean; slots: string[] } {
+  private disabledNow(): { agent: boolean; slots: string[]; arms: string[] } {
     const active = this.active?.manifest.payload ?? null;
     if (this.standingDirectives && (!active || this.standingDirectives.generation >= active.generation)) return this.disabledFrom(this.standingDirectives.directives);
-    return active ? this.disabledFrom(active.directives) : { agent: false, slots: [] };
+    return active ? this.disabledFrom(active.directives) : { agent: false, slots: [], arms: [] };
   }
 
   // ---------------------------------------------------------------------------
@@ -967,7 +971,7 @@ export class AirPrompterAgent {
         ...(report?.backoffUntil ? { backoffUntil: report.backoffUntil } : {}),
       },
       unlockRequestsSeen: status.unlockRequests.map((r) => r.releaseDigest).slice(0, 8),
-      disabled: status.disabled,
+      disabled: { agent: status.disabled.agent, slots: status.disabled.slots, ...(status.disabled.arms.length ? { arms: status.disabled.arms } : {}) },
       // S4: what this host runs under, so the fleet view can say "pinned on the host" when the console's setting is advisory here.
       applyPolicy: { effective: status.applyPolicy.effective, source: status.applyPolicy.source },
     };
@@ -1182,21 +1186,32 @@ export class AirPrompterAgent {
     this.spool.refusal({ at: this.nowIso(), reason, generation, tag }, this.nowMs());
   }
 
-  private disabledBy(payload: Manifest["payload"]): { agent: boolean; slots: string[] } {
+  private disabledBy(payload: Manifest["payload"]): { agent: boolean; slots: string[]; arms: string[] } {
     // The standing directives (from the latest verified manifest) win when they are as new as this one.
     if (this.standingDirectives && this.standingDirectives.generation >= payload.generation) return this.disabledFrom(this.standingDirectives.directives);
     return this.disabledFrom(payload.directives);
   }
 
-  private disabledFrom(directives: readonly Directive[]): { agent: boolean; slots: string[] } {
+  private disabledFrom(directives: readonly Directive[]): { agent: boolean; slots: string[]; arms: string[] } {
     const slots: string[] = [];
+    const arms: string[] = [];
     let agent = false;
     for (const directive of directives) {
       if (directive.kind !== "disable") continue;
       if (directive.scope === "agent") agent = true;
+      else if (directive.scope === "arm" && directive.arm) arms.push(directive.arm);
       else if (directive.tag) slots.push(directive.tag);
     }
-    return { agent, slots };
+    return { agent, slots, arms };
+  }
+
+  /**
+   * S9: the arms as they stand now — the signed plan walked on this host's clock, then any disabled arm's share handed to the
+   * control. Null when every arm is disabled (then the agent is, in effect, frozen for that tag).
+   */
+  private armsNow(payload: Manifest["payload"]): ExperimentArm[] | null {
+    const experiment = payload.experiment!;
+    return effectiveArms({ arms: experiment.arms, ramp: experiment.ramp, disabledArms: new Set(this.disabledBy(payload).arms), nowMs: this.nowMs() });
   }
 
   private leaseExpiresAt(): string | null {
@@ -1243,7 +1258,13 @@ export class AirPrompterAgent {
     if (!slot) throw new Error(`no slot ${tag} on generation ${active.generation}`);
     if (!payload.experiment) return { slot, arm: "none", bucket: null };
     const subjectValue = payload.experiment.subjectKey === "instance" || subject === undefined ? this.ownInstanceId : subject;
-    const assigned = assignArm({ salt: payload.experiment.salt, subject: subjectValue, arms: payload.experiment.arms });
+    // S9: the arms as the plan says now, on this host's clock; a disabled arm's share is the control's. Every arm disabled is a Freeze.
+    const arms = this.armsNow(payload);
+    if (!arms) {
+      this.stampRefusal("disabled", active.generation, tag);
+      throw new RenderRefusedError("disabled", tag, active.generation);
+    }
+    const assigned = assignArm({ salt: payload.experiment.salt, subject: subjectValue, arms });
     const override = assigned.arm.overrides.find((entry) => entry.tag === tag);
     if (override) slot = override;
     return { slot, arm: assigned.arm.arm, bucket: assigned.bucket };
@@ -1474,6 +1495,17 @@ export class AirPrompterAgent {
       lastContactAt: this.lastContactMs === null ? null : new Date(this.lastContactMs).toISOString(),
       forcedDowngrade: state?.forcedDowngrade === true,
       disabled: this.disabledNow(),
+      ramp: (() => {
+        const experiment = manifest?.experiment;
+        if (!experiment) return null;
+        const arms = this.armsNow(manifest!);
+        const nowMs = this.nowMs();
+        const plan = experiment.ramp ?? [];
+        let step = -1;
+        for (let i = 0; i < plan.length; i += 1) if (instant(plan[i]!.notBefore) <= nowMs) step = i;
+        const next = plan[step + 1] ?? null;
+        return { experimentId: experiment.experimentId, weightBps: arms ? arms.map((arm) => arm.weightBps) : rampWeightsAt(experiment.arms, experiment.ramp, nowMs), arms: experiment.arms.map((arm) => arm.arm), step, nextStepAt: next ? next.notBefore : null, plan: plan.map((entry) => ({ notBefore: entry.notBefore, weightBps: [...entry.weightBps] })) };
+      })(),
       unlockRequests: this.openUnlockRequests(manifest ?? null).map((d) => ({ releaseDigest: d.releaseDigest, requestedBy: d.requestedBy, requestedAt: d.requestedAt, expiresAt: d.expiresAt, ...(d.note !== undefined ? { note: d.note } : {}) })),
       applyPolicy: this.effectiveApplyPolicy(),
       window: (() => {

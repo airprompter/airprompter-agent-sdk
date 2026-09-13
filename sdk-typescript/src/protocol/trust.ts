@@ -7,6 +7,7 @@
 
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
 
+import { isAssignmentError, validateRamp } from "./assignment.js";
 import { canonicalBytes, canonicalJson, sha256Prefixed } from "./canonicalJson.js";
 import { DIRECTIVE_KINDS, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type Target } from "./types.js";
 
@@ -130,7 +131,7 @@ export interface VerifyManifestInput {
   requireCountersign?: boolean;
 }
 
-/** M1–M13. */
+/** M1–M14. */
 export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKeyId: string; generation: number }> {
   const { manifest, root } = input;
   const payload = manifest.payload;
@@ -154,6 +155,15 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
   // M13 (S4): the kinds a runtime honours are a closed set; one it does not know refuses the whole manifest before a byte is fetched.
   if (!Array.isArray(payload.directives) || payload.directives.some((directive) => !directive || typeof directive !== "object" || !DIRECTIVE_KINDS.has((directive as { kind?: unknown }).kind as string))) {
     return { ok: false, reason: "directive_unknown" };
+  }
+  // M14 (S9): a ramp plan, when present, is well-formed — a malformed one is refused whole rather than walked wrongly.
+  if (payload.experiment?.ramp !== undefined) {
+    try {
+      validateRamp(payload.experiment.ramp, payload.experiment.arms.length);
+    } catch (error) {
+      if (isAssignmentError(error) && error.reason === "ramp_invalid") return { ok: false, reason: "ramp_invalid" };
+      throw error;
+    }
   }
 
   if (input.payloads) {

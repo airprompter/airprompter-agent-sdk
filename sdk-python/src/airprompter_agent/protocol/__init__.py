@@ -1,6 +1,6 @@
 """The protocol's pure functions: canonical JSON, sticky assignment, step ordering, the trust chain."""
 
-from .assignment import ASSIGNMENT_MODULUS, Assignment, AssignmentError, StepError, arm_for_bucket, assign_arm, bucket_from_hash, ordered_steps, subject_hash, validate_arms
+from .assignment import ASSIGNMENT_MODULUS, RAMP_MAX_STEPS, RAMP_MIN_STEP_MS, Assignment, AssignmentError, StepError, arm_for_bucket, assign_arm, bucket_from_hash, effective_arms, ordered_steps, ramp_weights_at, subject_hash, validate_arms, validate_ramp
 from .canonical_json import UNDEFINED, CanonicalJsonError, canonical_bytes, canonical_json, sha256_prefixed
 from .trust import (
     SUPPORTED_PROTOCOL_MAJORS,
@@ -25,6 +25,11 @@ __all__ = [
     "StepError",
     "arm_for_bucket",
     "assign_arm",
+    "effective_arms",
+    "ramp_weights_at",
+    "validate_ramp",
+    "RAMP_MAX_STEPS",
+    "RAMP_MIN_STEP_MS",
     "bucket_from_hash",
     "ordered_steps",
     "subject_hash",

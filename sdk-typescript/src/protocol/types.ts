@@ -65,16 +65,28 @@ export interface ExperimentArm {
   overrides: ManifestSlot[];
 }
 
+/** S9: one step of the signed ramp plan — from `notBefore` (inclusive, the host's clock) these are the arms' weights, in manifest order. */
+export interface RampStep {
+  notBefore: string;
+  weightBps: number[];
+}
+
 export interface Experiment {
   experimentId: string;
   salt: string;
   subjectKey: "request" | "instance";
   arms: ExperimentArm[];
+  /**
+   * S9: the signed ramp plan (assignment-hash.md › The ramp plan). The runtime walks it on its own clock — no check-in
+   * needed: the weights in force are the last step whose `notBefore` has passed, else `arms[].weightBps`. Steps are
+   * strictly increasing and at least an hour apart; each carries one weight per arm summing to 10000.
+   */
+  ramp?: RampStep[];
 }
 
 export type Directive =
   | { kind: "request_unlock"; releaseDigest: Sha256; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }
-  | { kind: "disable"; scope: "agent" | "slot"; tag?: string; issuedAt: string; reason?: string };
+  | { kind: "disable"; scope: "agent" | "slot" | "arm"; tag?: string; arm?: string; issuedAt: string; reason?: string };
 
 /**
  * S4: the set of directive kinds a runtime honours is closed. `disable` is the one kind that acts without a
@@ -209,5 +221,7 @@ export type RefusalCode =
   | "schema_invalid"
   /** S4: a directive of a kind this runtime does not honour — the manifest is refused whole, never partly obeyed. */
   | "directive_unknown"
+  /** S9: the ramp plan is malformed (order, spacing, a weight per arm, sums) — refused whole before a byte is fetched. */
+  | "ramp_invalid"
   /** The chain verified; a slot's required model is not in this runtime's declared catalog (T15). */
   | "model_unavailable";

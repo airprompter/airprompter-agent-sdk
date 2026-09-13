@@ -176,7 +176,7 @@ def test_freeze_honoured_from_a_staged_manifest(state_dir):
     ap.sync_now()
     assert ap.generation == 1, "still on generation 1 — the frozen manifest was staged, not activated"
     assert ap.status().apply_state == "awaiting_unlock"
-    assert ap.status().disabled == {"agent": True, "slots": []}, "…and yet the Freeze took effect"
+    assert ap.status().disabled == {"agent": True, "slots": [], "arms": []}, "…and yet the Freeze took effect"
     with pytest.raises(RenderRefusedError) as frozen:
         ap.prompt("support.reply").render()
     assert frozen.value.reason == "disabled"
@@ -184,7 +184,7 @@ def test_freeze_honoured_from_a_staged_manifest(state_dir):
     assert plane.heartbeats[-1]["disabled"] == {"agent": True, "slots": []}
     plane.promote([triage, reply], apply_policy="unlock_required")
     ap.sync_now()
-    assert ap.status().disabled == {"agent": False, "slots": []}
+    assert ap.status().disabled == {"agent": False, "slots": [], "arms": []}
     assert ap.prompt("support.reply").render().generation == 1
     ap.stop()
 

@@ -284,7 +284,7 @@ test("a disable directive stops rendering the slot (or the agent) and stamps one
   plane.promote([triage!, reply!], { directives: [{ kind: "disable", scope: "slot", tag: "support.reply", issuedAt: new Date().toISOString(), reason: "Freeze" }] });
   await ap.syncNow();
   assert.equal(ap.generation, 2);
-  assert.deepEqual(ap.status().disabled, { agent: false, slots: ["support.reply"] });
+  assert.deepEqual(ap.status().disabled, { agent: false, slots: ["support.reply"], arms: [] });
   assert.throws(() => ap.prompt("support.reply").render({}), (e: unknown) => e instanceof RenderRefusedError && e.reason === "disabled" && e.tag === "support.reply");
   assert.throws(() => ap.prompt("support.reply").render({}), RenderRefusedError);
   assert.equal(ap.prompt("support.triage").render({ team: "a", ticket: "b" }).generation, 2, "other slots keep serving");

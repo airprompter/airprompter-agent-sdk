@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "./bundle/apbundle.js";
 import { assignArm } from "./protocol/assignment.js";
 import { orderedSteps } from "./protocol/assignment.js";
-import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyRootMetadata } from "./protocol/trust.js";
+import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./protocol/trust.js";
 import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target } from "./protocol/types.js";
 import { mintRunRef, parseRunRef, type RunRefFacts } from "./render/runRef.js";
 import { renderTemplate, type Delimiters } from "./render/template.js";
@@ -431,7 +431,95 @@ export class AirPrompterAgent {
     this.timer.unref?.();
   }
 
-  /** Store first (active slot, then the other), then the vendored bundle, then refuse. Zero network. */
+  /**
+   * The vendored bundle at boot (S7). With nothing verified on the host it is the tier-3 fallback: staged through the store
+   * and activated, whatever its generation. With a store already serving, a bundle is an UPDATE like any other: one whose
+   * generation is above what the host holds is verified through the same chain as OTA and staged, and the host's apply
+   * policy decides (the S4 pin: `auto` activates, `unlock_required` stages for the unlock, the window, the hook); one at
+   * the held generation changes nothing; one BELOW it — a `git revert` to an older bundle — is refused and says so: a
+   * rollback is `airprompter rollback`, never an older bundle. A bundle past its `notAfter` is refused as an update (the
+   * store's release is fine) and applied only as the fallback, lease-expired. Never throws.
+   */
+  private async takeVendoredBundle(now: string, verifyOptions: { now: string; root: RootMetadata; countersignRoot: RootMetadata | null; requireCountersign?: boolean }): Promise<void> {
+    const store = this.store!;
+    let contents: ReturnType<typeof openBundle>;
+    try {
+      const bundle = typeof this.options.vendoredBundle!.bundle === "string" ? (JSON.parse(readFileSync(this.options.vendoredBundle!.bundle, "utf8")) as Bundle) : this.options.vendoredBundle!.bundle;
+      contents = openBundle(bundle, { agentId: this.options.agentId, target: this.options.target }, this.options.vendoredBundle!.distributionKey);
+    } catch (error) {
+      this.log({ event: "vendored_bundle_unusable", reason: (error as Error).message });
+      return;
+    }
+    const generation = contents.manifest.payload.generation;
+    const daysLeft = Math.floor((instant(contents.notAfter) - instant(now)) / 86_400_000);
+    if (this.active) {
+      const held = Math.max(store.state.generation, this.stagedManifest?.payload.generation ?? 0);
+      if (generation === held) return;
+      if (generation < held) {
+        // The sentence a git customer sees on a revert: refused, and what to do instead.
+        this.log({ event: "vendored_bundle_refused", reason: "generation_rollback", bundleGeneration: generation, heldGeneration: held, message: `the vendored bundle is generation ${generation}; this host holds ${held}. A bundle never moves a host backwards — a rollback is \`airprompter rollback\`, never an older bundle.` });
+        this.lastRefusal = "generation_rollback";
+        return;
+      }
+      const heldBackBelow = store.state.heldBackBelow;
+      if (heldBackBelow !== undefined && generation <= heldBackBelow) {
+        this.log({ event: "vendored_bundle_held_back", bundleGeneration: generation, heldBackBelow });
+        return;
+      }
+      if (daysLeft < 0) {
+        this.log({ event: "vendored_bundle_refused", reason: "expired", bundleGeneration: generation, notAfter: contents.notAfter });
+        return;
+      }
+    } else {
+      this.bundleNotAfter = contents.notAfter;
+      if (daysLeft < 0) this.log({ event: "vendored_bundle_past_not_after", notAfter: contents.notAfter });
+      else if (daysLeft < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS) this.log({ event: "vendored_bundle_expiring_soon", notAfter: contents.notAfter, daysLeft });
+    }
+    try {
+      const rootVerdict = verifyRootMetadata({ candidate: contents.keySet, trusted: this.trustedRoot, now });
+      if (rootVerdict.ok) {
+        this.trustedRoot = contents.keySet;
+        store.acceptRoot(contents.keySet);
+      }
+      const payloads = bundlePayloadBytes(contents);
+      if (this.active) {
+        // An update: the same chain as OTA — signatures, scope, anti-rollback, every payload's hash — before a byte is staged.
+        const verdict = verifyManifest({ manifest: contents.manifest, root: this.trustedRoot, now, scope: { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target }, storedGeneration: store.state.generation, payloads, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) });
+        if (!verdict.ok) {
+          this.log({ event: "vendored_bundle_refused", reason: verdict.reason, bundleGeneration: generation });
+          this.lastRefusal = verdict.reason;
+          return;
+        }
+        this.takeApplyPolicy(contents.manifest.payload);
+        this.takeDirectives(contents.manifest.payload);
+        store.stage({ manifest: contents.manifest, payloads });
+        const decision = await this.applyPolicy(contents.manifest);
+        if (decision === "staged") {
+          this.log({ event: "vendored_bundle_staged", generation });
+          return;
+        }
+        if (decision === "activated") {
+          const slot = store.activate();
+          this.active = store.load(slot, { ...verifyOptions, root: this.trustedRoot });
+          this.stagedManifest = null;
+        }
+        this.source = "store";
+        this.lastRefusal = null;
+        this.log({ event: "vendored_bundle_activated", generation: this.active.generation });
+        return;
+      }
+      // Stage through the store so the bundle's release becomes the encrypted A slot: the same verification path as OTA.
+      store.stage({ manifest: contents.manifest, payloads });
+      const slot = store.activate();
+      this.active = store.load(slot, { ...verifyOptions, root: this.trustedRoot });
+      this.source = "vendored_bundle";
+      this.log({ event: "vendored_bundle_applied", generation: this.active.generation });
+    } catch (error) {
+      this.log({ event: "vendored_bundle_unusable", reason: (error as Error).message });
+    }
+  }
+
+  /** Store first (active slot, then the other), then the vendored bundle (S7: an update when newer, the fallback when nothing is held), then refuse. Zero network. */
   private async boot(): Promise<void> {
     if (!this.store) throw new AgentStartError("no_verified_release", "boot without a store");
     const now = this.nowIso();
@@ -461,29 +549,7 @@ export class AirPrompterAgent {
         store.discardStaged();
       }
     }
-    if (!this.active && this.options.vendoredBundle) {
-      try {
-        const bundle = typeof this.options.vendoredBundle.bundle === "string" ? (JSON.parse(readFileSync(this.options.vendoredBundle.bundle, "utf8")) as Bundle) : this.options.vendoredBundle.bundle;
-        const contents = openBundle(bundle, { agentId: this.options.agentId, target: this.options.target }, this.options.vendoredBundle.distributionKey);
-        this.bundleNotAfter = contents.notAfter;
-        const daysLeft = Math.floor((instant(contents.notAfter) - instant(now)) / 86_400_000);
-        if (daysLeft < 0) this.log({ event: "vendored_bundle_past_not_after", notAfter: contents.notAfter });
-        else if (daysLeft < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS) this.log({ event: "vendored_bundle_expiring_soon", notAfter: contents.notAfter, daysLeft });
-        const rootVerdict = verifyRootMetadata({ candidate: contents.keySet, trusted: this.trustedRoot, now });
-        if (rootVerdict.ok) {
-          this.trustedRoot = contents.keySet;
-          store.acceptRoot(contents.keySet);
-        }
-        // Stage through the store so the bundle's release becomes the encrypted A slot: the same verification path as OTA.
-        store.stage({ manifest: contents.manifest, payloads: bundlePayloadBytes(contents) });
-        const slot = store.activate();
-        this.active = store.load(slot, { ...verifyOptions, root: this.trustedRoot });
-        this.source = "vendored_bundle";
-        this.log({ event: "vendored_bundle_applied", generation: this.active.generation });
-      } catch (error) {
-        this.log({ event: "vendored_bundle_unusable", reason: (error as Error).message });
-      }
-    }
+    if (this.options.vendoredBundle) await this.takeVendoredBundle(now, verifyOptions);
     if (!this.active && this.client) {
       // Nothing verified locally: one synchronous sync before serving is the only time the SDK waits on the network.
       await this.syncNow();

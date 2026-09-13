@@ -33,7 +33,7 @@ from ._util import instant, iso_ms, now_ms, random_id
 from .apply.window import UpdateWindow, parse_window, window_state
 from .bundle.apbundle import DistributionKey, bundle_payload_bytes, open_bundle
 from .protocol.assignment import assign_arm, ordered_steps
-from .protocol.trust import key_thumbprint, trusted_root_from_pinned_key, verify_root_metadata
+from .protocol.trust import key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from .telemetry.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from .telemetry.wrap import WrapHooks, wrap_client
 from .render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
@@ -516,8 +516,88 @@ class AirPrompterAgent:
     def _verify_options(self, now: str) -> dict[str, Any]:
         return {"now": now, "root": self._trusted_root, "countersign_root": self._o.get("countersign_root"), "require_countersign": self._o.get("require_countersign")}
 
+    def _take_vendored_bundle(self, now: str) -> None:
+        """The vendored bundle at boot (S7). With nothing verified on the host it is the tier-3 fallback: staged through the store
+        and activated, whatever its generation. With a store already serving, a bundle is an UPDATE like any other: one whose
+        generation is above what the host holds is verified through the same chain as OTA and staged, and the host's apply
+        policy decides (the S4 pin); one at the held generation changes nothing; one BELOW it — a ``git revert`` to an older
+        bundle — is refused and says so: a rollback is ``airprompter rollback``, never an older bundle. A bundle past its
+        ``notAfter`` is refused as an update and applied only as the fallback. Never raises."""
+        store = self._store
+        vendored: VendoredBundle = self._o["vendored_bundle"]
+        assert store is not None
+        try:
+            if isinstance(vendored.bundle, str):
+                with open(vendored.bundle, encoding="utf-8") as f:
+                    bundle = json.load(f)
+            else:
+                bundle = vendored.bundle
+            contents = open_bundle(bundle, {"agentId": self._o["agent_id"], "target": self._o["target"]}, vendored.distribution_key)
+        except Exception as error:  # noqa: BLE001
+            self._log({"event": "vendored_bundle_unusable", "reason": str(error)})
+            return
+        generation = int(contents["manifest"]["payload"]["generation"])
+        days_left = (instant(contents["notAfter"]) - instant(now)) // 86_400_000
+        if self._active is not None:
+            held = max(int(store.state.get("generation", 0)), int(self._staged_manifest["payload"]["generation"]) if self._staged_manifest else 0)
+            if generation == held:
+                return
+            if generation < held:
+                self._log({"event": "vendored_bundle_refused", "reason": "generation_rollback", "bundleGeneration": generation, "heldGeneration": held, "message": f"the vendored bundle is generation {generation}; this host holds {held}. A bundle never moves a host backwards — a rollback is `airprompter rollback`, never an older bundle."})
+                self._last_refusal = "generation_rollback"
+                return
+            held_back = store.state.get("heldBackBelow")
+            if held_back is not None and generation <= int(held_back):
+                self._log({"event": "vendored_bundle_held_back", "bundleGeneration": generation, "heldBackBelow": held_back})
+                return
+            if days_left < 0:
+                self._log({"event": "vendored_bundle_refused", "reason": "expired", "bundleGeneration": generation, "notAfter": contents["notAfter"]})
+                return
+        else:
+            self._bundle_not_after = contents["notAfter"]
+            if days_left < 0:
+                self._log({"event": "vendored_bundle_past_not_after", "notAfter": contents["notAfter"]})
+            elif days_left < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS:
+                self._log({"event": "vendored_bundle_expiring_soon", "notAfter": contents["notAfter"], "daysLeft": days_left})
+        try:
+            verdict = verify_root_metadata(candidate=contents["keySet"], trusted=self._trusted_root, now=now)
+            if verdict.ok:
+                self._trusted_root = contents["keySet"]
+                store.accept_root(contents["keySet"])
+            payloads = bundle_payload_bytes(contents)
+            if self._active is not None:
+                # An update: the same chain as OTA — signatures, scope, anti-rollback, every payload's hash — before a byte is staged.
+                scope = {"organizationId": self._o["organization_id"], "agentId": self._o["agent_id"], "target": self._o["target"]}
+                full = verify_manifest(manifest=contents["manifest"], root=self._trusted_root, now=now, scope=scope, stored_generation=int(store.state.get("generation", 0)), payloads=payloads, countersign_root=self._o.get("countersign_root"), require_countersign=self._o.get("require_countersign"))
+                if not full.ok:
+                    self._log({"event": "vendored_bundle_refused", "reason": full.reason, "bundleGeneration": generation})
+                    self._last_refusal = full.reason
+                    return
+                self._take_verified(contents["manifest"]["payload"])
+                store.stage(manifest=contents["manifest"], payloads=payloads)
+                decision = self._apply_policy(contents["manifest"])
+                if decision == "staged":
+                    self._log({"event": "vendored_bundle_staged", "generation": generation})
+                    return
+                if decision == "activated":
+                    slot = store.activate()
+                    self._active = store.load(slot, **self._verify_options(now))
+                    self._staged_manifest = None
+                self._source = "store"
+                self._last_refusal = None
+                self._log({"event": "vendored_bundle_activated", "generation": self._active.generation})
+                return
+            # Stage through the store so the bundle's release becomes the encrypted A slot: the same verification path as OTA.
+            store.stage(manifest=contents["manifest"], payloads=payloads)
+            slot = store.activate()
+            self._active = store.load(slot, **self._verify_options(now))
+            self._source = "vendored_bundle"
+            self._log({"event": "vendored_bundle_applied", "generation": self._active.generation})
+        except Exception as error:  # noqa: BLE001
+            self._log({"event": "vendored_bundle_unusable", "reason": str(error)})
+
     def _boot(self) -> None:
-        """Store first (active slot, then the other), then the vendored bundle, then refuse. Zero network."""
+        """Store first (active slot, then the other), then the vendored bundle (S7: an update when newer, the fallback when nothing is held), then refuse. Zero network."""
         store = self._store
         if store is None:
             raise AgentStartError("no_verified_release", "boot without a store")
@@ -547,33 +627,8 @@ class AirPrompterAgent:
             except Exception as error:  # noqa: BLE001
                 self._log({"event": "staged_slot_unusable", "slot": staged, "reason": str(error)})
                 store.discard_staged()
-        vendored: Optional[VendoredBundle] = self._o.get("vendored_bundle")
-        if self._active is None and vendored is not None:
-            try:
-                if isinstance(vendored.bundle, str):
-                    with open(vendored.bundle, encoding="utf-8") as f:
-                        bundle = json.load(f)
-                else:
-                    bundle = vendored.bundle
-                contents = open_bundle(bundle, {"agentId": self._o["agent_id"], "target": self._o["target"]}, vendored.distribution_key)
-                self._bundle_not_after = contents["notAfter"]
-                days_left = (instant(contents["notAfter"]) - instant(now)) // 86_400_000
-                if days_left < 0:
-                    self._log({"event": "vendored_bundle_past_not_after", "notAfter": contents["notAfter"]})
-                elif days_left < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS:
-                    self._log({"event": "vendored_bundle_expiring_soon", "notAfter": contents["notAfter"], "daysLeft": days_left})
-                verdict = verify_root_metadata(candidate=contents["keySet"], trusted=self._trusted_root, now=now)
-                if verdict.ok:
-                    self._trusted_root = contents["keySet"]
-                    store.accept_root(contents["keySet"])
-                # Stage through the store so the bundle's release becomes the encrypted A slot: the same verification path as OTA.
-                store.stage(manifest=contents["manifest"], payloads=bundle_payload_bytes(contents))
-                slot = store.activate()
-                self._active = store.load(slot, **self._verify_options(now))
-                self._source = "vendored_bundle"
-                self._log({"event": "vendored_bundle_applied", "generation": self._active.generation})
-            except Exception as error:  # noqa: BLE001
-                self._log({"event": "vendored_bundle_unusable", "reason": str(error)})
+        if self._o.get("vendored_bundle") is not None:
+            self._take_vendored_bundle(now)
         if self._active is None and self._client is not None:
             # Nothing verified locally: one synchronous sync before serving is the only time the SDK waits on the network.
             self.sync_now()

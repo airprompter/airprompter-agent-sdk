@@ -9,7 +9,7 @@ airprompter pull     Fetch and verify the current release; write an encrypted .a
 airprompter verify   Run the verification chain on a bundle or a state directory and print the reasons
 airprompter apply    Stage a bundle into the store and activate it per the environment's policy
 airprompter status   Active and staged generation, lease, storage protection, spool depth, last upload
-airprompter diff     What a bundle would change against the active release on this host
+airprompter diff     What a bundle would change against the active release on this host, or against another bundle (--against)
 airprompter keygen   Generate a distribution or countersign keypair
 airprompter daemon   airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket
 airprompter export-telemetry   Pack the spool's unsent segments into one file for a host that never calls home
@@ -91,6 +91,13 @@ AIRPROMPTER_AGENT_KEY=… airprompter pull \
 AIRPROMPTER_AGENT_KEY=… airprompter pull --check --max-behind 2 \
   --org org_… --agent agt_… --environment prod --out airprompter.bundle.apbundle
 ```
+
+`airprompter diff <new.apbundle> --against <old.apbundle>` compares two
+update files with no store — the pull request's before and after — slot
+by slot (versions, models, variable contracts, steps, policy, lease), and
+names a bundle that goes backwards in generation (`direction: backward`,
+a printed warning), because every host refuses one. `docs/change-control.md`
+› 7 is the CI recipe.
 
 `pull` writes `<out>.meta.json` beside the bundle: generation, release
 digest, timestamps, encryption scheme and recipient key id — nothing

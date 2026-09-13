@@ -44,9 +44,19 @@ variable the slot did not declare throws.
 1. The store is read before any network call. The active slot is
    verified (signatures, hashes, generation counter, expiry); if it does
    not verify, the other slot is tried.
-2. With nothing verified in the store, a vendored `.apbundle`
-   (`vendoredBundle`) is opened, verified the same way, and staged
-   through the store.
+2. A vendored `.apbundle` (`vendoredBundle`) — committed beside the code
+   or read from a column — is opened and verified the same way. With
+   nothing verified in the store it is staged and activated, whatever its
+   generation (the fallback). With a store already serving it is an
+   **update** (S7): a newer generation goes through the same chain as OTA
+   and is staged, and the host's apply policy decides — `auto` activates
+   it, `unlock_required` stages it for the unlock, the window or the hook;
+   the held generation changes nothing; an OLDER one (a `git revert`) is
+   refused, logged `vendored_bundle_refused` with the sentence, and the
+   host keeps serving what it holds — a rollback is `airprompter
+   rollback`, never an older bundle. Every process that reads a bundle
+   from a database column holds the distribution key, so keep that column
+   as private as the key.
 3. With still nothing, one synchronous sync runs — the only time the SDK
    waits on the network. If that fails too, `start()` throws
    `AgentStartError("no_verified_release")`. Serving an unverified release

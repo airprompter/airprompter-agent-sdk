@@ -120,6 +120,41 @@ signature is present. The signing tool ships with T10.
   promoted. A server-side rollback is a **new** generation pointing at an
   older release, so anti-rollback never blocks it.
 
+## 7. Bundles in git (the pull request is the review)
+
+A team that vendors the release beside the code gets change control from
+the repository itself (S7). CI pulls the current release into the bundle
+and opens a pull request; the reviewer reads what changed, never the
+prompt text; on merge, every host stages the new bundle at its next start
+and the host's own apply policy decides; a revert is refused.
+
+```bash
+# CI, on a schedule: refresh the vendored bundle and open a PR when it moved
+AIRPROMPTER_AGENT_KEY=… airprompter pull --org org_… --agent agt_… --environment prod \
+  --root ./airprompter-root.jwk.json --root-url https://<edge>/roots/prod/root.json \
+  --distribution-key ./prod.pub.json --out airprompter.bundle.apbundle
+git diff --quiet -- airprompter.bundle.apbundle || gh pr create --title "AirPrompter release" --body "$(
+  airprompter diff airprompter.bundle.apbundle --against "$(git show origin/main:airprompter.bundle.apbundle > /tmp/main.apbundle && echo /tmp/main.apbundle)" \
+    --org org_… --agent agt_… --environment prod --distribution-key ./prod.key.json
+)"
+
+# the PR check: a bundle that goes backwards is named as such (the runtime would refuse it on every host)
+airprompter diff airprompter.bundle.apbundle --against /tmp/main.apbundle --org … --agent … --environment prod --json | jq -e '.direction != "backward"'
+```
+
+What the runtime does with the merged bundle: at its next start it opens
+and verifies it through the same chain as OTA; a newer generation is
+**staged** and the host's apply policy decides (`auto` activates it,
+`unlock_required` stages it for `airprompter unlock`, the update window,
+or the `onStaged` hook — the recipes above apply unchanged); the held
+generation changes nothing; an older one — `git revert` — is refused with
+`vendored_bundle_refused: generation_rollback` and the sentence *a
+rollback is `airprompter rollback`, never an older bundle*; the host keeps
+serving what it holds and its heartbeat says `refused`. `airprompter
+apply` of an older file says the same. A bundle stored in a database
+column behaves identically — and every reader of that column holds the
+distribution key, so the column is as sensitive as the key.
+
 ## What the heartbeat tells AirPrompter
 
 `applyState` (`active`, `staged`, `awaiting_unlock`,

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Vendored bundles at boot and in git (S7, AIR-1975)
+- SDK (TypeScript and Python): with a store already serving, a vendored bundle whose generation is above the host's is verified through the same chain as OTA and staged, and the host's apply policy decides (`vendored_bundle_staged` / `vendored_bundle_activated`); the held generation changes nothing; an older one is refused with `vendored_bundle_refused: generation_rollback` and the sentence naming `airprompter rollback`; a tampered or expired newer one is refused. With nothing held the bundle is the fallback as before.
+- CLI: `airprompter diff <bundle> --against <other>` compares two update files with no store and names a backward one; `airprompter apply` of an older file says the sentence and carries `bundleGeneration` / `heldGeneration`.
+- docs/change-control.md › 7 "Bundles in git" (the CI recipe; readers of a bundle in a database column hold the distribution key). Vectors: `sdk-typescript/test/vendored.test.ts`, `sdk-python/tests/test_vendored.py`, `cli/test/cli.test.ts`. No wire change.
+
 ### The disk budget is a published invariant (S6, AIR-1974)
 - `spool-format.md` draft 2: `tree ≤ budget + (writers × 1 MiB open) + quarantine cap + exported cap`. Acknowledged segments are deleted on `2xx` (no `sent/`; `.last-upload` stamps the last one); `quarantine/` and `exported/` are capped at 10 MiB each, oldest first; an `.open` segment untouched for an hour is closed as abandoned and uploaded; `instanceId` is per process (the store's id stays store.json's identity) and the `runRef` key is derived from the store's id, so run references parse across a host's workers.
 - Daemon socket: `hello.storeId` (additive). Uploader status: `tree`, `reclaimedSegments`, `capEvictedFiles`; `SpoolUploader.tree()` / `bound(writers)`. The runtime closes a passed minute's windows on a spool timer (`SpoolWriter.closeStaleWindows`).

@@ -311,6 +311,18 @@ test("refusals: a tampered payload, a foreign signing key, another target, plain
   dev.reset();
   assert.equal(await run(["apply", plain, ...devArgs, "--root", devRootDoc, "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.refused);
   assert.equal(dev.json().reason, "generation_rollback");
+  // S7: the sentence a git customer sees on a revert names what to do instead.
+  assert.deepEqual({ bundleGeneration: dev.json().bundleGeneration, heldGeneration: dev.json().heldGeneration }, { bundleGeneration: 1, heldGeneration: 2 });
+  assert.match(String(dev.json().error), /a rollback is `airprompter rollback`, never an older bundle/);
+  dev.reset();
+  // S7: two update files compared for a pull request, no store: forward is a diff, backward is named as such.
+  assert.equal(await run(["diff", plain2, ...devArgs, "--against", plain, "--json"], dev.ctx), EXIT.ok);
+  assert.equal(dev.json().direction, "forward");
+  assert.deepEqual((dev.json().from as { generation: number }).generation, 1);
+  assert.deepEqual((dev.json().slots as Array<{ tag: string; change: string }>).map((c) => [c.tag, c.change]), [["a.b", "changed"]]);
+  dev.reset();
+  assert.equal(await run(["diff", plain, ...devArgs, "--against", plain2], dev.ctx), EXIT.ok);
+  assert.ok(dev.stdout.some((l) => l.startsWith("warning:") && l.includes("behind") && l.includes("airprompter rollback")), dev.stdout.join("\n"));
   dev.reset();
   assert.equal(await run(["apply", plain, ...devArgs, "--root", devRootDoc, "--state-dir", join(work, "dev-state"), "--force", "--json"], dev.ctx), EXIT.ok);
   assert.equal(dev.json().forcedDowngrade, true);

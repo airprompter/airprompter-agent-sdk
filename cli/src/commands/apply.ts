@@ -59,7 +59,11 @@ export async function apply(argv: string[], ctx: Context): Promise<number> {
   const stored = store.state.generation;
   const payloads = payloadsOf(opened.contents);
   const report = verifyChain({ manifest: opened.contents.manifest, keySet: opened.contents.keySet, payloads, root, scope, now, storedGeneration: force ? 0 : stored });
-  if (!report.ok) throw new CliError(EXIT.refused, `refused at ${report.step}: ${report.reason}`, { step: report.step, reason: report.reason, root: report.root });
+  if (!report.ok) {
+    // S7: the sentence a git customer sees on a revert — what happened, and what to do instead.
+    if (report.reason === "generation_rollback") throw new CliError(EXIT.refused, `refused: the update file is generation ${opened.contents.manifest.payload.generation}; this host holds ${stored}. A bundle never moves a host backwards — a rollback is \`airprompter rollback\`, never an older bundle (--force stamps a forced downgrade on evidence instead).`, { step: report.step, reason: report.reason, root: report.root, bundleGeneration: opened.contents.manifest.payload.generation, heldGeneration: stored });
+    throw new CliError(EXIT.refused, `refused at ${report.step}: ${report.reason}`, { step: report.step, reason: report.reason, root: report.root });
+  }
   const generation = opened.contents.manifest.payload.generation;
   if (generation === stored && store.state.active) {
     out.field("generation", generation);

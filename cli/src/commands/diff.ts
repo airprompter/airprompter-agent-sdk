@@ -3,6 +3,13 @@
  * host, slot by slot — versions, models, variable contracts, workflow
  * steps, experiment, directives, policy and lease. Identities and counts
  * only; the prompt text itself is never printed by this tool.
+ *
+ * `airprompter diff <bundle> --against <other.apbundle>` (S7): the same
+ * comparison between two update files and no store — what a pull request
+ * that replaces the committed bundle changes, for review in CI. Both files
+ * are verified (scope, and the distribution key when sealed) before they
+ * are compared; a bundle that goes BACKWARDS in generation is named as
+ * such, because merging it would be refused on every host.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -18,6 +25,7 @@ export const DIFF_OPTIONS: OptionSpec = {
   ...SCOPE_OPTIONS,
   ...STORE_OPTIONS,
   "distribution-key": { type: "string", help: "Distribution PRIVATE key file (.key.json) for an encrypted bundle" },
+  against: { type: "string", help: "Compare against this update file instead of the host's store (a pull request review; no store needed)" },
   ...COMMON_OPTIONS,
 };
 
@@ -85,7 +93,7 @@ export function diffManifests(from: Manifest | null, to: Manifest): { slots: Slo
 export async function diff(argv: string[], ctx: Context): Promise<number> {
   const parsed = parse(argv, DIFF_OPTIONS);
   if (flag(parsed, "help") || parsed.positionals.length !== 1) {
-    ctx.stdout(helpFor("diff", "<bundle.apbundle> --org … --agent … --environment … [--state-dir …]", DIFF_OPTIONS));
+    ctx.stdout(helpFor("diff", "<bundle.apbundle> --org … --agent … --environment … [--state-dir … | --against <other.apbundle>]", DIFF_OPTIONS));
     return flag(parsed, "help") ? EXIT.ok : EXIT.usage;
   }
   const out = new Output(ctx, flag(parsed, "json"));
@@ -100,19 +108,34 @@ export async function diff(argv: string[], ctx: Context): Promise<number> {
   } catch (error) {
     throw refused(`bundle: ${(error as Error).message}`, { reason: (error as { code?: string }).code ?? "malformed" });
   }
-  let store;
-  try {
-    store = await openStore(parsed, ctx, scope);
-  } catch (error) {
-    if (isStoreError(error)) throw refused(`store: ${error.message}`, { reason: error.code });
-    throw error;
-  }
   let current: Manifest | null = null;
-  if (store.state.active) {
+  const againstPath = str(parsed, "against");
+  if (againstPath !== undefined) {
+    // S7: two update files, no store — the pull request's before and after.
+    if (!existsSync(againstPath)) throw usage(`${againstPath} does not exist`);
     try {
-      current = store.load(store.state.active, { now, root: store.state.root, expectGeneration: store.state.generation }).manifest;
+      current = openBundleFile(JSON.parse(readFileSync(againstPath, "utf8")) as Bundle, scope, keyPath ? loadDistributionPrivateKey(keyPath) : undefined, now).contents.manifest;
     } catch (error) {
-      out.line(`active slot does not verify (${(error as Error).message}); diffing against nothing`);
+      throw refused(`against: ${(error as Error).message}`, { reason: (error as { code?: string }).code ?? "malformed" });
+    }
+    const from = current.payload.generation;
+    const to = opened.contents.manifest.payload.generation;
+    out.set("direction", to > from ? "forward" : to === from ? "same" : "backward");
+    if (to < from) out.line(`warning: ${path} is generation ${to}, behind ${againstPath} at ${from} — every host refuses a bundle that moves it backwards (a rollback is \`airprompter rollback\`, never an older bundle)`);
+  } else {
+    let store;
+    try {
+      store = await openStore(parsed, ctx, scope);
+    } catch (error) {
+      if (isStoreError(error)) throw refused(`store: ${error.message}`, { reason: error.code });
+      throw error;
+    }
+    if (store.state.active) {
+      try {
+        current = store.load(store.state.active, { now, root: store.state.root, expectGeneration: store.state.generation }).manifest;
+      } catch (error) {
+        out.line(`active slot does not verify (${(error as Error).message}); diffing against nothing`);
+      }
     }
   }
   const result = diffManifests(current, opened.contents.manifest);

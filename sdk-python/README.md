@@ -62,9 +62,17 @@ update-window timers on daemon threads.
 1. The store is read before any network call. The active slot is
    verified (signatures, hashes, generation counter, expiry); if it does
    not verify, the other slot is tried.
-2. With nothing verified in the store, a vendored `.apbundle`
-   (`vendored_bundle=`) is opened, verified the same way, and staged
-   through the store.
+2. A vendored `.apbundle` (`vendored_bundle=`) — committed beside the code
+   or read from a column — is opened and verified the same way. With
+   nothing verified in the store it is staged and activated, whatever its
+   generation (the fallback). With a store already serving it is an
+   **update** (S7): a newer generation goes through the same chain as OTA
+   and is staged, and the host's apply policy decides; the held
+   generation changes nothing; an OLDER one (a `git revert`) is refused
+   with the sentence and the host keeps serving what it holds — a
+   rollback is `airprompter rollback`, never an older bundle. Every
+   process that reads a bundle from a database column holds the
+   distribution key, so keep that column as private as the key.
 3. With still nothing, one synchronous sync runs — the only time the SDK
    waits on the network. If that fails too, `start()` raises
    `AgentStartError("no_verified_release")`. Serving an unverified release

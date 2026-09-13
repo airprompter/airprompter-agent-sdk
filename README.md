@@ -27,6 +27,7 @@ content, or make bytes live on a locked runtime.
 | [`protocol/compatible-endpoints.md`](protocol/compatible-endpoints.md) | Hosted mode without any SDK of ours: the OpenAI and Anthropic SDKs pointed at `…/v1/agents/{agentId}/{openai\|anthropic}` with `model: "slot:<tag>"` — the mapping, what is refused, the answer shapes. |
 | [`cli/`](cli/) | `airprompter` — `pull`, `verify`, `apply`, `status`, `diff`, `unlock`, `rollback`, `keygen`, `export-telemetry`, `import-telemetry`, and `airprompter daemon` (`airprompterd`). Shipped as signed single-file executables for macOS, Linux and Windows. |
 | [`conformance/`](conformance/) | Runner that executes `protocol/vectors` against every SDK. The hosted service runs the same vectors. |
+| [`docs/`](docs/) | Customer documentation over the contract: the [threat model as written](docs/threat-model.md) with every claim mapped to a row and a vector, [key handling](docs/key-handling.md), [change-control recipes](docs/change-control.md), the [spool contract and OpenTelemetry mapping](docs/telemetry.md), and the conformance suite read as narrative. Link-checked in CI. |
 | [`deploy/`](deploy/) | systemd unit, launchd plist, Windows service wrapper, Docker sidecar and Kubernetes DaemonSet manifests for the daemon. |
 | [`examples/`](examples/) | A Python worker, and [`spool-writer/`](examples/spool-writer/) — telemetry windows written to the spool **without** the SDK, in TypeScript and Python, for teams instrumenting the provider SDKs themselves (checked by the conformance runner). |
 

@@ -16,5 +16,8 @@ does **not** defend against a process running as the same user, against
 the memory of the rendering process, or against a host attacker who also
 holds the key-encryption key — nothing on the vendor's side can protect
 bytes from the process that renders them, and we do not claim otherwise.
-Telemetry is content-free by schema. The full threat model is published
-with the AirPrompter Team Agents design.
+Telemetry is content-free by schema. The full threat model, reproduced
+verbatim from the AirPrompter Team Agents design with every claim mapped
+to the row that bounds it and the vector that proves it, is
+[docs/threat-model.md](docs/threat-model.md); the keys and their custody
+are [docs/key-handling.md](docs/key-handling.md).

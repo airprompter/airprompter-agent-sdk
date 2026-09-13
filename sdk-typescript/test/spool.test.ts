@@ -4,7 +4,7 @@
  * the feedback catalogue), then the filesystem rules the vectors cannot
  * express: 0600 files, `.open` until fsync + rename, recovery of a crashed
  * writer's segment, rotation on disk at the minute and at 1 MiB, and the
- * `sent/` + `quarantine/` layout the daemon expects.
+ * `quarantine/` + `exported/` layout the uploader expects (S6: nothing acknowledged is kept, so no sent/).
  */
 
 import assert from "node:assert/strict";
@@ -67,10 +67,10 @@ test("feedback.json: the catalogue normaliser", () => {
 const T0 = Date.parse("2026-09-12T14:03:10Z");
 const observation: Observation = { tag: "a.b", versionId: "v1", arm: "none", model: "m", status: "ok", latencyMs: 10 };
 
-test("on disk: 0600 files, .open until closed, sent/ and quarantine/ present, a segment per minute, no plaintext-bearing field", () => {
+test("on disk: 0600 files, .open until closed, quarantine/ and exported/ present, a segment per minute, no plaintext-bearing field", () => {
   const dir = mkdtempSync(join(tmpdir(), "ap-spool-"));
   const sink = new DirectorySink(dir, "i-testinstance");
-  assert.deepEqual(readdirSync(dir).sort(), ["quarantine", "sent"]);
+  assert.deepEqual(readdirSync(dir).sort(), ["exported", "quarantine"]);
   const writer = new SpoolWriter(sink, { instanceId: "i-testinstance", instanceClass: "resident", sdk: "t/0" });
   writer.observe(observation, T0);
   writer.observe(observation, T0 + 60_000); // the minute turned: closes the first window into the first segment

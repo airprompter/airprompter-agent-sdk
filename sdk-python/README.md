@@ -90,6 +90,11 @@ generation is held back until it moves past the one you left. The local
 side can be stricter than the manifest (`apply={"policy": "unlock_required"}`),
 never looser. In `daemon` mode both calls act for the whole host.
 
+Every process is its own instance (S6): `ap.instance_id` is minted at
+start, never the store's; N workers are N instances in the fleet view and
+N writers into one spool. `run_ref`s parse across workers because their key
+is the store's.
+
 The policy is the host's, not the manifest's (S4). The first manifest a
 host verifies pins `applyPolicy` in `store.json`; a later manifest may
 tighten the pin (`auto` → `unlock_required`) and never loosen it — a

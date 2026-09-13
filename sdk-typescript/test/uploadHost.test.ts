@@ -66,7 +66,7 @@ test("no daemon, grant present: a resident host uploads its own closed segments 
     const pass = await ap.uploadNow();
     assert.deepEqual(pass, { uploaded: 1, quarantined: 0, dropped: 0, held: false });
     assert.equal(unsent(stateDir).length, 0, "acknowledged: gone from the spool");
-    assert.equal(readdirSync(join(spoolDir(stateDir), "sent")).length, 1);
+    assert.equal(existsSync(join(spoolDir(stateDir), "sent")), false, "S6: deleted on ack, nothing parked");
     assert.equal(plane.uploads.length, 1);
     assert.ok(plane.uploads[0]!.startsWith(prefix(ap.instanceId)), "under this runtime's own prefix");
     assert.ok(plane.grants.every((g) => g.instanceId === ap.instanceId), "the only grant ever asked for is this runtime's own");
@@ -152,7 +152,6 @@ test("telemetry.upload: false leaves the spool alone (a daemon or an operator's 
   off.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 1 });
   off.spool.closeWindows(clock.ms);
   assert.equal(unsent(stateDir).length, 1, "the segment stays for whoever owns the spool");
-  assert.ok(!existsSync(join(spoolDir(stateDir), "sent")) || readdirSync(join(spoolDir(stateDir), "sent")).length === 0);
   await off.stop();
   const memory = await host(plane, stateDir, clock, { sink: "memory" });
   assert.equal(memory.status().upload, null, "a memory sink has nothing to sweep; flushTelemetry() is its path");

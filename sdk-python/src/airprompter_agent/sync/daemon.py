@@ -37,6 +37,8 @@ class DaemonHello:
     instance_id: str
     generation: int
     staged_generation: Optional[int]
+    #: S6: the store's id — the seed of the runRef key every process on the host shares. An older daemon omits it.
+    store_id: Optional[str] = None
 
 
 class DaemonError(Exception):
@@ -108,7 +110,7 @@ class DaemonClient:
         if hello.get("agentId") != agent_id or hello.get("target") != target:
             client.close()
             raise DaemonError("scope_mismatch", f"daemon serves {hello.get('agentId')}/{hello.get('target')}, this runtime is {agent_id}/{target}")
-        client.hello = DaemonHello(str(hello.get("daemon", "")), str(hello.get("protocol", "")), agent_id, target, str(hello.get("instanceId", "")), int(hello.get("generation", 0)), hello.get("stagedGeneration"))
+        client.hello = DaemonHello(str(hello.get("daemon", "")), str(hello.get("protocol", "")), agent_id, target, str(hello.get("instanceId", "")), int(hello.get("generation", 0)), hello.get("stagedGeneration"), str(hello["storeId"]) if isinstance(hello.get("storeId"), str) else None)
         return client
 
     def _attach(self) -> None:

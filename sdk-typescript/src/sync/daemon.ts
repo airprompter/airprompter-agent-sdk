@@ -24,6 +24,8 @@ export interface DaemonHello {
   agentId: string;
   target: Target;
   instanceId: string;
+  /** S6: the store's id — the seed of the runRef key every process on the host shares. An older daemon omits it. */
+  storeId?: string;
   generation: number;
   stagedGeneration: number | null;
 }

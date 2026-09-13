@@ -439,3 +439,22 @@ test("S4: the apply policy is the host's — apply pins on first use, a later up
   assert.equal(h.all().includes("Reply"), false, "no command output carries prompt text");
   rmSync(work, { recursive: true, force: true });
 });
+
+test("S6: telemetry verify --budget --sink-absent is the customer's proof — the tree ends under the published bound, the dropped row names the bytes, and the invariant is printed", async () => {
+  const work = mkdtempSync(join(tmpdir(), "ap-cli-"));
+  const h = harness(null, work);
+  assert.equal(await run(["telemetry", "verify", "--budget", "4096", "--sink-absent", "--quarantine-cap", "2048", "--json"], h.ctx), EXIT.ok);
+  const report = h.json() as { holds: boolean; checks: Record<string, boolean>; droppedRow: { type: string; segments: number; bytes: number }; evicted: { segments: number; bytes: number }; after: { closedBytes: number; totalBytes: number; quarantineBytes: number }; boundBytes: number };
+  assert.equal(report.holds, true);
+  assert.deepEqual(Object.values(report.checks).every(Boolean), true, JSON.stringify(report.checks));
+  assert.ok(report.after.closedBytes <= 4096 && report.after.totalBytes <= report.boundBytes && report.after.quarantineBytes <= 2048);
+  assert.deepEqual({ type: report.droppedRow.type, segments: report.droppedRow.segments, bytes: report.droppedRow.bytes }, { type: "dropped", segments: report.evicted.segments, bytes: report.evicted.bytes });
+  h.reset();
+  assert.equal(await run(["telemetry", "verify", "--budget", "4096", "--sink-absent"], h.ctx), EXIT.ok);
+  assert.ok(h.stdout.some((l) => /^invariant: tree \d+ B ≤ \d+ B \(budget 4096 \+ 2 × 1048576 open \+ quarantine cap 10485760 \+ exported cap 10485760\) — holds$/.test(l)), h.stdout.join("\n"));
+  h.reset();
+  assert.equal(await run(["telemetry", "verify", "--budget", "4096"], h.ctx), EXIT.usage, "the sink-absent case is the one the budget exists for");
+  assert.equal(await run(["telemetry", "verify", "--budget", "12", "--sink-absent"], h.ctx), EXIT.usage);
+  assert.equal(await run(["telemetry", "prove"], h.ctx), EXIT.usage);
+  rmSync(work, { recursive: true, force: true });
+});

@@ -65,6 +65,12 @@ new releases; with no daemon on the host the runtime syncs in-process
 exactly as `resident`), `offline` (no `apiKey`: serve the store or the
 bundle, never call home).
 
+Every process is its own instance (S6): `ap.instanceId` is minted at
+start, never the store's; N workers are N instances in the fleet view and
+N writers into one spool. `runRef`s parse across workers because their key
+is the store's. The spool's disk use is bounded by a published invariant
+(`docs/telemetry.md` › The disk budget is an invariant).
+
 A resident host with no daemon uploads its own spool (S5): the same
 uploader the daemon runs, in-process, on a timer off the request path,
 under the runtime's own grant; past the budget the oldest segments are

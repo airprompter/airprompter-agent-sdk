@@ -227,7 +227,7 @@ export class DirectorySink implements SpoolSink {
     this.fs = fs;
     this.planner = new SegmentPlanner(instanceId);
     this.guard("open_spool", () => {
-      this.fs.mkdirp(join(dir, "sent"), 0o700);
+      this.fs.mkdirp(join(dir, "exported"), 0o700);
       this.fs.mkdirp(join(dir, "quarantine"), 0o700);
     });
     this.recoverOpenSegments();
@@ -471,6 +471,11 @@ export class SpoolWriter {
     this.open.clear();
     this.openMinute = null;
     this.sink.flush(nowMs);
+  }
+
+  /** S6: close the windows of a minute that has passed (and the segment with them) without touching the current minute — the runtime's spool timer calls this, so an idle writer never leaves the last minute of a burst parked in an `.open` file. */
+  closeStaleWindows(nowMs: number): void {
+    if (this.openMinute !== null && this.openMinute !== minuteOf(nowMs)) this.closeWindows(nowMs);
   }
 
   get openWindowCount(): number {

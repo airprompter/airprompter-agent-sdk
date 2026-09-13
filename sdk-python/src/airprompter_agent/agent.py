@@ -271,7 +271,7 @@ class PromptHandle:
 
 
 class AirPrompterAgent:
-    def __init__(self, options: dict[str, Any], store: Optional[SlotStore], trusted_root: Mapping[str, Any], own_instance_id: str, spool_dir: str):
+    def __init__(self, options: dict[str, Any], store: Optional[SlotStore], trusted_root: Mapping[str, Any], own_instance_id: str, spool_dir: str, run_ref_seed: Optional[str] = None):
         self._o = options
         self._store = store
         self._trusted_root: Mapping[str, Any] = trusted_root
@@ -326,6 +326,8 @@ class AirPrompterAgent:
         self._upload_interval_seconds = 300
         self._upload_retry_after_ms: Optional[float] = None
         self._uploader: Optional[SpoolUploader] = None
+        #: S6: closes the windows of a minute that has passed, so an idle writer never parks a burst's last minute in an ``.open`` file.
+        self._spool_timer = _Timer()
         self._flush_lock = threading.Lock()
         self._flush_segment_n = 0
         self._last_flush_minute: Optional[int] = None
@@ -333,7 +335,9 @@ class AirPrompterAgent:
         self._local_window: Optional[UpdateWindow] = parse_window(self._apply_options.window) if self._apply_options.window else None
         self._stamped_refusals: set[str] = set()
         self._stopped = False
-        self._run_ref_key = hmac.new(own_instance_id.encode("utf-8"), b"runRef", hashlib.sha256).digest()
+        # S6: the runRef key is derived from the STORE's id, which every process on the host shares, so a run_ref minted by one
+        # worker parses in another; in daemon mode the daemon's hello names it.
+        self._run_ref_key = hmac.new((run_ref_seed or own_instance_id).encode("utf-8"), b"runRef", hashlib.sha256).digest()
         # T33: the last renders by text hash, so a wrapped client can tell which slot a call is.
         self._renders = RenderRegistry()
         serverless = self._sync_options.mode == "on_invoke"
@@ -405,9 +409,10 @@ class AirPrompterAgent:
             client = DaemonClient.connect(socket_path=socket_path, agent_id=agent_id, target=target, sdk=_USER_AGENT)
             if client:
                 store_dir = SlotStore.path(state_dir=resolved_state_dir, agent_id=agent_id, target=target)
-                agent = cls(options, None, pinned_root, cls.new_instance_id(), os.path.join(store_dir, "spool", "telemetry"))
+                agent = cls(options, None, pinned_root, cls.new_instance_id(), os.path.join(store_dir, "spool", "telemetry"), client.hello.store_id or client.hello.instance_id)
                 agent._daemon_socket = socket_path
                 agent._attach_daemon(client)
+                agent._schedule_spool_close()
                 return agent
             if logger:
                 logger({"sdk": SDK_NAME, "agentId": agent_id, "target": target, "event": "daemon_absent", "socketPath": socket_path})
@@ -424,7 +429,9 @@ class AirPrompterAgent:
         stored = store.state.get("root")
         now_iso = iso_ms(now() if now else now_ms())
         trusted = stored if stored and verify_root_metadata(candidate=stored, trusted=pinned_root, now=now_iso).ok else pinned_root
-        agent = cls(options, store, trusted, store.instance_id, os.path.join(store.dir, "spool", "telemetry"))
+        # S6: the instance id is the PROCESS's, never the store's — N workers on one host are N instances in the fleet view, and
+        # their same-minute windows keep distinct keys at ingest (the store's own id stays store.json's identity).
+        agent = cls(options, store, trusted, cls.new_instance_id(), os.path.join(store.dir, "spool", "telemetry"), store.instance_id)
         agent._boot()
         return agent
 
@@ -577,7 +584,22 @@ class AirPrompterAgent:
             # The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
             threading.Thread(target=self._first_heartbeat, name="airprompter-heartbeat", daemon=True).start()
             self._start_uploader()
+        self._schedule_spool_close()
         self._schedule_window_unlock()
+
+    def _schedule_spool_close(self) -> None:
+        """S6: once a minute, the windows of the minute that passed are written and the open segment closed — never the current minute."""
+        self._spool_timer.cancel()
+        if self._stopped or self._sync_options.mode == "on_invoke":
+            return
+
+        def tick() -> None:
+            try:
+                self.spool.close_stale_windows(self._now_ms())
+            finally:
+                self._schedule_spool_close()
+
+        self._spool_timer.thread = self._arm(60.0, tick)
 
     def _start_uploader(self) -> None:
         """S5: the daemon is an optimisation, never a requirement — a resident host with no daemon uploads its own spool. The same
@@ -1600,6 +1622,7 @@ class AirPrompterAgent:
         self._stopped = True
         self._timer.cancel()
         self._window_timer.cancel()
+        self._spool_timer.cancel()
         self._heartbeat_timer.cancel()
         if self._uploader is not None:
             self._uploader.stop()

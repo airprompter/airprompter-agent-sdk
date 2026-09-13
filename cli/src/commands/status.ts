@@ -5,12 +5,13 @@
  * corrupted host shows as such here before a runtime finds out.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { instant } from "../../../sdk-typescript/src/protocol/trust.js";
 import { isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
 import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/src/sync/daemon.js";
+import { LAST_UPLOAD_MARKER } from "../../../sdk-typescript/src/telemetry/uploader.js";
 import { CLI_VERSION } from "../version.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { summarizeManifest } from "../chain.js";
@@ -41,11 +42,12 @@ function spoolDepth(dir: string): { segments: number; bytes: number; openSegment
   return { segments, bytes, openSegments };
 }
 
-function lastUpload(sentDir: string): string | null {
-  if (!existsSync(sentDir)) return null;
-  let newest = 0;
-  for (const name of readdirSync(sentDir)) newest = Math.max(newest, statSync(join(sentDir, name)).mtimeMs);
-  return newest ? new Date(newest).toISOString() : null;
+/** S6: acknowledged segments are deleted; the uploader stamps its last acknowledged upload in one marker file instead. */
+function lastUpload(spoolDir: string): string | null {
+  const marker = join(spoolDir, LAST_UPLOAD_MARKER);
+  if (!existsSync(marker)) return null;
+  const stamped = readFileSync(marker, "utf8").trim();
+  return stamped && Number.isFinite(Date.parse(stamped)) ? stamped : new Date(statSync(marker).mtimeMs).toISOString();
 }
 
 export async function status(argv: string[], ctx: Context): Promise<number> {
@@ -103,7 +105,7 @@ export async function status(argv: string[], ctx: Context): Promise<number> {
   const spoolDir = join(store.dir, "spool", "telemetry");
   const depth = spoolDepth(spoolDir);
   out.field("spool", depth, "spool");
-  out.field("lastUpload", lastUpload(join(spoolDir, "sent")), "last upload");
+  out.field("lastUpload", lastUpload(spoolDir), "last upload");
 
   // A daemon on this host knows what the store cannot: last sync, backoff, attached clients.
   const socketPath = str(parsed, "socket") ?? daemonSocketPath({ stateDir: str(parsed, "state-dir") ?? defaultStateDir(ctx), agentId: scope.agentId, target: scope.target });

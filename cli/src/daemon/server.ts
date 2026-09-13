@@ -187,7 +187,7 @@ export class DaemonServer {
     switch (op) {
       case "hello":
         this.log({ event: "client_attached", sdk: typeof request.sdk === "string" ? request.sdk.slice(0, 64) : null, clients: this.clients.size });
-        return { daemon: `airprompter-cli/${this.options.version}`, protocol: this.options.protocol, agentId: this.options.agentId, target: this.options.target, instanceId: status.instanceId, generation: status.generation, stagedGeneration: status.stagedGeneration };
+        return { daemon: `airprompter-cli/${this.options.version}`, protocol: this.options.protocol, agentId: this.options.agentId, target: this.options.target, instanceId: status.instanceId, storeId: this.agent.storeInstanceId ?? status.instanceId, generation: status.generation, stagedGeneration: status.stagedGeneration };
       case "slot": {
         const release = this.agent.release;
         if (!release) throw new Error("no_verified_release");

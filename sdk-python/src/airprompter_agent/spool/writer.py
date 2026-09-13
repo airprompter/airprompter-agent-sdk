@@ -191,7 +191,7 @@ class DirectorySink(SpoolSink):
         self._planner = SegmentPlanner(instance_id)
         self._lock = threading.RLock()
         self.faults: dict[str, Any] = {"pendingRows": 0, "pendingBytes": 0, "byCode": {}, "last": None}
-        if self._guard("open_spool", lambda: (self._fs.mkdirp(os.path.join(directory, "sent"), 0o700), self._fs.mkdirp(os.path.join(directory, "quarantine"), 0o700))):
+        if self._guard("open_spool", lambda: (self._fs.mkdirp(os.path.join(directory, "exported"), 0o700), self._fs.mkdirp(os.path.join(directory, "quarantine"), 0o700))):
             self._recover_open_segments()
 
     def _guard(self, step: str, run: Any) -> bool:
@@ -437,6 +437,14 @@ class SpoolWriter:
             self._open.clear()
             self._open_minute = None
             self._sink.flush(at_ms)
+
+    def close_stale_windows(self, at_ms: float) -> None:
+        """S6: close the windows of a minute that has passed (and the segment with them) without touching the current minute — the
+        runtime's spool timer calls this, so an idle writer never leaves the last minute of a burst parked in an ``.open`` file."""
+        with self._lock:
+            stale = self._open_minute is not None and self._open_minute != minute_of(at_ms)
+        if stale:
+            self.close_windows(at_ms)
 
     @property
     def open_window_count(self) -> int:

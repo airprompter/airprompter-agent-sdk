@@ -98,7 +98,7 @@ def _segments(directory):
 def test_on_disk_layout_and_minute_segments(tmp_path):
     directory = str(tmp_path)
     sink = DirectorySink(directory, "i-testinstance")
-    assert sorted(os.listdir(directory)) == ["quarantine", "sent"]
+    assert sorted(os.listdir(directory)) == ["exported", "quarantine"]
     writer = SpoolWriter(sink, IDENTITY)
     writer.observe(OBSERVATION, T0)
     writer.observe(OBSERVATION, T0 + 60_000)  # the minute turned: closes the first window into the first segment

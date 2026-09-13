@@ -8,8 +8,8 @@ line in your own logger. If a file is in the spool and matches the schema,
 the open-source SDKs: their responses carry tokens and timing, and a few
 lines of code turn those into a window row here.
 
-Status: **draft 1** — matches design decision D52/D66. Breaking changes bump
-`protocol` major.
+Status: **draft 2** — matches design decision D52/D66 and S6 (the disk
+budget as a published invariant). Breaking changes bump `protocol` major.
 
 ## Location and permissions
 
@@ -31,16 +31,46 @@ Status: **draft 1** — matches design decision D52/D66. Breaking changes bump
 - **Append-only NDJSON**, UTF-8, one JSON object per line, `\n` terminated.
 - A segment is *open* while its writer holds it; writers **close** a segment
   by `fsync` + rename to drop the trailing `.open` suffix
-  (`seg-…ndjson.open` → `seg-…ndjson`). The daemon never reads `.open`
-  files. A writer that crashes leaves an `.open` file; on its next start the
-  same writer closes it (partial last line discarded).
+  (`seg-…ndjson.open` → `seg-…ndjson`). The uploader never reads `.open`
+  files. A writer that crashes leaves an `.open` file; an `.open` file
+  untouched for **one hour** has no writer behind it (a live writer closes
+  every minute it has traffic, and its stale minute within one on the
+  runtime's spool timer) and the uploader closes it — the partial last
+  line is skipped at inspection, the rest uploads and counts against the
+  budget like any segment (S6).
 - Rotate when the minute changes or the file reaches **1 MiB**.
 - Names are unique per `(instanceId, epochMinute, n)`; the object key in S3
   is derived from the file name, which is what makes retries idempotent.
 - Disk budget per host: 100 MiB by default. When exceeded, the writer (or
-  the daemon, on a shared host) evicts the **oldest unsent** segments and
+  the uploader, on a shared host) evicts the **oldest unsent** segments and
   writes the count and bytes as a `dropped` row — its own small closed
   segment, at once — so the loss is reported, never silent.
+- **The budget is an invariant over the whole tree (S6):**
+
+  ```
+  tree ≤ budget + (writers × 1 MiB open) + quarantine cap + exported cap
+  ```
+
+  Closed unsent segments are the budget (100 MiB). Each live writer holds
+  at most one open segment of at most 1 MiB. `quarantine/` (segments that
+  failed the contract) and `exported/` (segments an offline host packed
+  into a carrier file) are each capped at **10 MiB**, oldest first, and
+  `quarantine/` is also swept after 24 h. Nothing acknowledged is kept:
+  a segment is **deleted on `2xx`** — its object key is its file name, so a
+  lost response replays to the same key. There is no `sent/`. The
+  uploader stamps its last acknowledged upload in `.last-upload` (one
+  timestamp) for `airprompter status` on a host without a daemon.
+  `airprompter telemetry verify --budget <bytes> --sink-absent` runs this
+  case on your own machine, over a filling in-memory filesystem with no
+  registry, and prints the eviction, the `dropped` row and the bound.
+- **`instanceId` is per process (S6).** Every runtime start mints its own
+  id; the store's own id in `store.json` is the store's identity, never a
+  writer's. Eight workers on one host are eight instances in the fleet
+  view, write eight segment series into one spool, and their same-minute
+  windows keep distinct keys at ingest (a shared id would replace one
+  worker's window with another's). The `runRef` key is derived from the
+  **store's** id, so a run reference minted by one worker parses in any
+  other on the host; a daemon names it in `hello.storeId`.
 - Serverless hosts keep a **256 KiB** memory buffer instead of a directory
   and flush at invocation end; past the buffer the oldest rows are evicted
   and one `dropped` row (rows counted as `segments`) closes the flush.
@@ -148,7 +178,7 @@ Heartbeat with the Agent key returns a presigned S3 POST grant (≤ 15 min,
 prefix `org/{org}/agent/{agent}/{target}/{instance}/`, ≤ 1 MiB, NDJSON,
 SSE-KMS, grant id) plus `uploadIntervalSeconds`. Closed segments are POSTed
 to S3 under the grant with exponential backoff and full jitter (1 s → 5 min),
-one in flight per host; acknowledged segments move to `sent/`. A refused
+one in flight per host; acknowledged segments are deleted (S6). A refused
 grant is the throttle. Nothing AirPrompter runs is in the write path.
 
 A grant is per **instance prefix**, and the ingest processor quarantines a

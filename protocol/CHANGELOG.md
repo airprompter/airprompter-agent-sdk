@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### The disk budget is a published invariant (S6, AIR-1974)
+- `spool-format.md` draft 2: `tree ≤ budget + (writers × 1 MiB open) + quarantine cap + exported cap`. Acknowledged segments are deleted on `2xx` (no `sent/`; `.last-upload` stamps the last one); `quarantine/` and `exported/` are capped at 10 MiB each, oldest first; an `.open` segment untouched for an hour is closed as abandoned and uploaded; `instanceId` is per process (the store's id stays store.json's identity) and the `runRef` key is derived from the store's id, so run references parse across a host's workers.
+- Daemon socket: `hello.storeId` (additive). Uploader status: `tree`, `reclaimedSegments`, `capEvictedFiles`; `SpoolUploader.tree()` / `bound(writers)`. The runtime closes a passed minute's windows on a spool timer (`SpoolWriter.closeStaleWindows`).
+- CLI: `airprompter telemetry verify --budget <bytes> --sink-absent [--writers N] [--quarantine-cap <bytes>]` — the customer's proof, exit 0 when the invariant holds; `status` reads `.last-upload`; `export-telemetry` holds `exported/` under its cap.
+- Vectors: `sdk-typescript/test/budgetInvariant.test.ts`, `sdk-python/tests/test_budget_invariant.py`, `cli/test/cli.test.ts` "S6". No wire change to manifests or heartbeats.
+
 ### Telemetry without a daemon (S5, AIR-1973)
 - SDK (TypeScript and Python): a resident host with no daemon runs the spool uploader in-process — the same `SpoolUploader` the daemon runs, on a timer off the request path, under the runtime's own grant; past the budget the oldest segments are dropped and counted. `AgentStatus.upload`, `uploadNow()` / `upload_now()`, `telemetry.upload: false` / `TelemetryOptions(upload=False)`. The daemon starts its runtime with the uploader off and keeps running the host's own.
 - Serverless: `invoke()` flushes the invocation's rows before it returns; `telemetry.flush: "background"` / `TelemetryOptions(flush="background")` is the documented opt-out.

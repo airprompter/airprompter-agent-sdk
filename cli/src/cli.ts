@@ -13,6 +13,7 @@ import { policy } from "./commands/policy.js";
 import { pull } from "./commands/pull.js";
 import { status } from "./commands/status.js";
 import { exportTelemetry, importTelemetry } from "./commands/telemetry.js";
+import { telemetryVerify } from "./commands/telemetryVerify.js";
 import { unlock } from "./commands/unlock.js";
 import { verify } from "./commands/verify.js";
 import { CliError, EXIT, type Context, isCliError } from "./io.js";
@@ -30,7 +31,14 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   daemon: { run: daemon, summary: "airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket" },
   "export-telemetry": { run: exportTelemetry, summary: "Pack the spool's unsent segments into one file for a host that never calls home" },
   "import-telemetry": { run: importTelemetry, summary: "Upload an exported telemetry file through the grant path on a connected host (idempotent)" },
+  telemetry: { run: telemetry, summary: "telemetry verify --budget <bytes> --sink-absent: prove the spool's disk budget is an invariant, on this machine, with no registry" },
 };
+
+async function telemetry(argv: string[], ctx: Context): Promise<number> {
+  const [verb, ...rest] = argv;
+  if (verb === "verify") return telemetryVerify(rest, ctx);
+  throw new CliError(EXIT.usage, `telemetry takes "verify" (telemetry verify --budget <bytes> --sink-absent)`);
+}
 
 export function help(): string {
   const width = Math.max(...Object.keys(COMMANDS).map((name) => name.length)) + 2;

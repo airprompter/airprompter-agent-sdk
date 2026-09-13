@@ -266,6 +266,8 @@ export class AirPrompterAgent {
   /** S4: an attached SDK reports the daemon's policy (its `status` answer and `policy` events carry it). */
   private daemonApplyPolicy: AgentStatus["applyPolicy"] | null = null;
   private windowTimer: ReturnType<typeof setTimeout> | null = null;
+  /** S6: closes the windows of a minute that has passed, so an idle writer never parks a burst's last minute in an `.open` file. */
+  private spoolTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatIntervalSeconds: number;
   private lastHeartbeatMs: number | null = null;
@@ -297,12 +299,18 @@ export class AirPrompterAgent {
     /** This process's own store; null when attached to the host daemon, which holds the store and its key. */
     private readonly store: SlotStore | null,
     trustedRoot: RootMetadata,
-    /** The writer identity: the store's instanceId, or a fresh one per daemon-attached process. */
+    /** The writer identity (S6): this PROCESS's own id, fresh at every start; never a hostname, never the store's. */
     private readonly ownInstanceId: string,
     private readonly spoolDir: string,
+    /**
+     * S6: what the runRef key is derived from — the STORE's id (store.json), which every process on the host shares, so a
+     * runRef minted by one worker parses in another (feedback lands wherever the request lands). In daemon mode the daemon's
+     * `hello` names it.
+     */
+    runRefSeed: string = ownInstanceId,
   ) {
     this.trustedRoot = trustedRoot;
-    this.runRefKey = createHmac("sha256", Buffer.from(ownInstanceId, "utf8")).update("runRef").digest();
+    this.runRefKey = createHmac("sha256", Buffer.from(runRefSeed, "utf8")).update("runRef").digest();
     this.localWindow = options.apply?.window ? parseWindow(options.apply.window) : null;
     this.heartbeatIntervalSeconds = Math.min(3600, Math.max(30, Math.round(options.heartbeatSeconds ?? 300)));
     const serverless = (options.sync?.mode ?? "resident") === "on_invoke";
@@ -323,9 +331,10 @@ export class AirPrompterAgent {
       const client = await DaemonClient.connect({ socketPath, agentId: options.agentId, target: options.target, sdk: `${SDK_NAME}/${SDK_VERSION}` });
       if (client) {
         const storeDir = SlotStore.path({ stateDir, agentId: options.agentId, target: options.target });
-        const agent = new AirPrompterAgent(options, null, pinnedRoot, AirPrompterAgent.newInstanceId(), join(storeDir, "spool", "telemetry"));
+        const agent = new AirPrompterAgent(options, null, pinnedRoot, AirPrompterAgent.newInstanceId(), join(storeDir, "spool", "telemetry"), client.hello.storeId ?? client.hello.instanceId);
         agent.daemonSocket = socketPath;
         await agent.attachDaemon(client);
+        agent.startSpoolTimer();
         return agent;
       }
       options.logger?.({ sdk: SDK_NAME, agentId: options.agentId, target: options.target, event: "daemon_absent", socketPath });
@@ -344,7 +353,9 @@ export class AirPrompterAgent {
     // The stored root (accepted on an earlier run) is trusted only if it still verifies against the pinned key.
     const stored = store.state.root;
     const trusted = stored && verifyRootMetadata({ candidate: stored, trusted: pinned, now: new Date(options.now?.() ?? Date.now()).toISOString() }).ok ? stored : pinned;
-    const agent = new AirPrompterAgent(options, store, trusted, store.instanceId, join(store.dir, "spool", "telemetry"));
+    // S6: the instance id is the PROCESS's, never the store's — N workers on one host are N instances in the fleet view, and
+    // their same-minute windows keep distinct keys at ingest (the store's own id stays store.json's identity).
+    const agent = new AirPrompterAgent(options, store, trusted, AirPrompterAgent.newInstanceId(), join(store.dir, "spool", "telemetry"), store.instanceId);
     await agent.boot();
     return agent;
   }
@@ -484,7 +495,15 @@ export class AirPrompterAgent {
       void this.heartbeatNow().finally(() => this.scheduleHeartbeat());
       this.startUploader();
     }
+    this.startSpoolTimer();
     this.scheduleWindowUnlock();
+  }
+
+  /** S6: once a minute, the windows of the minute that passed are written and the open segment closed — off the request path, never the current minute. */
+  private startSpoolTimer(): void {
+    if (this.spoolTimer || (this.options.sync?.mode ?? "resident") === "on_invoke") return;
+    this.spoolTimer = setInterval(() => this.spool.closeStaleWindows(this.nowMs()), 60_000);
+    this.spoolTimer.unref?.();
   }
 
   /**
@@ -1430,6 +1449,8 @@ export class AirPrompterAgent {
     this.timer = null;
     if (this.windowTimer) clearTimeout(this.windowTimer);
     this.windowTimer = null;
+    if (this.spoolTimer) clearInterval(this.spoolTimer);
+    this.spoolTimer = null;
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = null;
     if (this.heartbeating) await this.heartbeating;
@@ -1445,9 +1466,14 @@ export class AirPrompterAgent {
     this.spool.closeWindows(this.nowMs());
   }
 
-  /** The runtime's own random id (the store's, or a fresh one per daemon-attached process; never a hostname). */
+  /** The runtime's own random id — this process's, fresh at every start (S6); never a hostname, never the store's. */
   get instanceId(): string {
     return this.ownInstanceId;
+  }
+
+  /** S6: the store's id (store.json), shared by every process on the host; null when attached to a daemon. */
+  get storeInstanceId(): string | null {
+    return this.store?.instanceId ?? null;
   }
 
   static thumbprint(jwk: P256PublicJwk): string {

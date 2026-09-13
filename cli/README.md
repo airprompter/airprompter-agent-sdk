@@ -45,8 +45,9 @@ processes', and any third-party writer's — is checked line by line
 against the spool contract (a failing segment is quarantined whole, never
 sent), then POSTed straight to S3 under a presigned grant the daemon's
 heartbeat obtains **per writer** (a grant covers one instance prefix; the
-heartbeat names the writer). Acknowledged segments move to `sent/`,
-swept after a day; failures back off with full jitter (1 s → 5 min); a
+heartbeat names the writer). Acknowledged segments are deleted (S6 — the
+key is the file name, a replay is idempotent; `.last-upload` stamps the
+last one); failures back off with full jitter (1 s → 5 min); a
 hold from the grant issuer is honoured for exactly `retryAfterSeconds`;
 over the host budget (`--spool-budget-bytes`, 100 MiB) the oldest unsent
 segments go and the loss is reported as a `dropped` row. Passes run every
@@ -127,6 +128,16 @@ only counts are printed (`protocol/golden-sets.md`). A generation below the stor
 state directory defaults to the OS state directory (`$XDG_STATE_HOME`,
 `~/Library/Application Support`, `%LOCALAPPDATA%`); pass `--state-dir`
 to match what the runtime was started with.
+
+`airprompter telemetry verify --budget <bytes> --sink-absent` (S6) is the
+proof that the spool cannot fill the disk: on a filling in-memory
+filesystem with no registry behind it, two writers write past the budget,
+a third crashed mid-open an hour ago, a fourth is live, and a buggy
+third-party writer overfilled `quarantine/`; one pass has to leave the tree
+under `budget + writers × 1 MiB + quarantine cap + exported cap` and say
+what it evicted in one `dropped` row with the right byte count. It prints
+the tree before and after, the eviction, the row, the bound and each check;
+exit 0 when the invariant holds (`--json` for the same as one document).
 
 The apply policy is the host's (S4): the first update file `apply` verifies
 pins it in `store.json`; a later file may tighten it (`auto` →

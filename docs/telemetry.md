@@ -19,7 +19,7 @@ runtime itself, on a host that runs none.
 | Latency | 16 fixed bucket edges every writer uses | `schemas/latency-buckets.json`; `vectors/spool.json` 32 values |
 | Feedback | `outcomes[signal] = {n, sum}` from the declared catalogue only; `goldenPass` is the runtime's own | `schemas/feedback-signals.schema.json`; `vectors/feedback.json` |
 | Never in the spool | prompt text, model output, end-user identifiers, stack traces, application error messages — no field exists for them; unknown fields are dropped and unknown rows quarantined at ingest | [What must never be in the spool](../protocol/spool-format.md#what-must-never-be-in-the-spool) |
-| Upload | heartbeat → presigned S3 POST grant (≤ 15 min, ≤ 1 MiB, the instance's own prefix); backoff with full jitter; acknowledged segments to `sent/`; a refused grant is the throttle | [Upload](../protocol/spool-format.md#upload-for-reference-implemented-by-the-daemon); `sdk-typescript/test/uploader.test.ts` |
+| Upload | heartbeat → presigned S3 POST grant (≤ 15 min, ≤ 1 MiB, the instance's own prefix); backoff with full jitter; acknowledged segments deleted (S6); a refused grant is the throttle | [Upload](../protocol/spool-format.md#upload-for-reference-implemented-by-the-daemon); `sdk-typescript/test/uploader.test.ts` |
 | Offline | `airprompter export-telemetry` / `import-telemetry` carry the spool as one file, idempotent by key | [The spool over a file](../protocol/spool-format.md#the-spool-over-a-file-t16) |
 | Third-party writers | `examples/spool-writer/` (TypeScript and Python, dependency-free) pass the same vectors | [Writing to the spool without our SDK](../protocol/spool-format.md#writing-to-the-spool-without-our-sdk) |
 
@@ -102,6 +102,35 @@ reaches the host. Vectors: `sdk-typescript/test/uploadHost.test.ts`,
 `sdk-python/tests/test_upload_host.py` (grant present; no grant, budget,
 a grant lapsing mid-run; `upload: false`; the awaited flush and the
 opt-out).
+
+## The disk budget is an invariant (S6)
+
+What the spool can hold on a host is bounded, and the bound is published:
+
+```
+tree ≤ budget + (writers × 1 MiB open) + quarantine cap + exported cap
+```
+
+The budget (100 MiB by default) is closed, unsent segments — the only
+thing that grows with traffic when the registry is away. Each live writer
+holds at most one open segment of at most 1 MiB, and an `.open` file
+untouched for an hour is closed by the uploader as abandoned. `quarantine/`
+and `exported/` are capped at 10 MiB each, oldest first. Nothing
+acknowledged is kept: a segment is deleted on `2xx` (the object key is its
+file name, so a lost response replays to the same key). Every runtime
+process is its own instance — eight workers are eight writers into one
+spool and eight instances in the fleet view, never one — and a run
+reference minted by one worker parses in another because the key is the
+store's, not the process's.
+
+`airprompter telemetry verify --budget <bytes> --sink-absent` runs the
+case on your machine (a filling in-memory filesystem, no registry): two
+writers past the budget, a crash mid-open, a live writer, an overfilled
+quarantine; it prints the tree before and after, the eviction, the
+`dropped` row and the bound, and exits 0 when the invariant holds. The
+same cases are the vectors both SDKs run
+(`sdk-typescript/test/budgetInvariant.test.ts`,
+`sdk-python/tests/test_budget_invariant.py`).
 
 ## What a spool row can and cannot tell an observer
 

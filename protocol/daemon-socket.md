@@ -32,7 +32,7 @@ and `error`. The daemon may also send **events** (no `id`) at any time.
 
 ```
 → {"id":"1","op":"hello","sdk":"agent-sdk-ts/0.1.0"}
-← {"id":"1","ok":true,"daemon":"airprompter-cli/0.1.0","protocol":"0.2.5","agentId":"agt_…","target":"prod","instanceId":"i-…","generation":41,"stagedGeneration":null}
+← {"id":"1","ok":true,"daemon":"airprompter-cli/0.1.0","protocol":"0.2.5","agentId":"agt_…","target":"prod","instanceId":"i-…","storeId":"i-…","generation":41,"stagedGeneration":null}
 → {"id":"2","op":"slot"}
 ← {"id":"2","ok":true,"slot":"A","generation":41,"signingKeyId":"…","manifest":{…},"payloads":[{"contentHash":"sha256:…","bytes":"<base64url>"}]}
 ← {"event":"generation","generation":42,"stagedGeneration":null}
@@ -45,7 +45,7 @@ connection.
 
 | `op` | Result | Notes |
 |---|---|---|
-| `hello` | `daemon`, `protocol`, `agentId`, `target`, `instanceId`, `generation`, `stagedGeneration` | First message on a connection; the SDK checks `agentId`/`target` match what it was started with. |
+| `hello` | `daemon`, `protocol`, `agentId`, `target`, `instanceId`, `storeId`, `generation`, `stagedGeneration` | First message on a connection; the SDK checks `agentId`/`target` match what it was started with. `storeId` (S6) is the store's own id — the seed of the `runRef` key every process on the host shares; the SDK falls back to `instanceId` when an older daemon omits it. |
 | `slot` | `slot`, `generation`, `signingKeyId`, `manifest`, `payloads[]`, `leaseExpiresAt`, `applyPolicy` | The active, verified release: the manifest envelope and every referenced payload's bytes. Plaintext over the local socket — that is what the store's key protects at rest and the socket's mode protects in transit. `leaseExpiresAt` (S3) is the daemon's own lease — when its last contact with the origin runs out, or `null` before any — and an attached SDK adopts it: the socket is never contact with the registry. |
 | `status` | the daemon's status (see below) | |
 | `sync` | `outcome` | Run one sync pass now. |
@@ -94,10 +94,13 @@ The daemon uploads **every** closed segment in `spool/telemetry/`, from
 its own writer, from the SDK processes attached to it, and from any third
 party that writes the spool contract (`spool-format.md`):
 
-1. Sweep `sent/` and `quarantine/` past 24 h; enforce the host budget
+1. Sweep `quarantine/` past 24 h; hold `quarantine/` and `exported/`
+   under their byte caps (oldest first); close any `.open` segment
+   untouched for an hour (its writer is gone); enforce the host budget
    across all writers (oldest unsent segments first; the loss is one
    `dropped` row under the daemon's own `instanceId`, written as its own
-   segment and uploaded like any other).
+   segment and uploaded like any other). S6: `spool-format.md` › the
+   invariant.
 2. For each closed segment, oldest first: every line must be a
    `spool-rows` row and its `instanceId` must be the one in the file
    name (the prefix the object will land under is authoritative at
@@ -115,7 +118,8 @@ party that writes the spool contract (`spool-format.md`):
    reported once its last segment is gone.
 4. POST the segment as the presigned form (`fields` verbatim, then
    `key = keyPrefix + segment name`, `Content-Type`, `file`). `2xx` →
-   `sent/`. A `403` naming an expired policy → one fresh grant, one
+   the segment is deleted (S6; the key is the file name, a replay is
+   idempotent) and `.last-upload` stamped. A `403` naming an expired policy → one fresh grant, one
    retry. A hold (`retryAfterSeconds`, no grant) → wait exactly that
    long. Anything else → exponential backoff with full jitter, 1 s base,
    5 min cap, one segment in flight per host, then stop the pass.

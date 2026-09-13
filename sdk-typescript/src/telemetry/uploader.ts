@@ -4,9 +4,19 @@
  * row contract, quarantined when they do not fit, and POSTed straight to S3
  * under the heartbeat's presigned grant — one in flight per host, oldest
  * first, exponential backoff with full jitter (1 s → 5 min), acknowledged
- * segments moved to `sent/`, `sent/` and `quarantine/` swept after 24 h,
- * the host budget enforced across writers with the loss written as a
- * `dropped` row. Nothing here reads a row for anything but its shape.
+ * segments DELETED (S6: S3 keys are idempotent, a lost response is a
+ * replay, nothing needs keeping), `quarantine/` and `exported/` capped in
+ * bytes and swept by age, abandoned `.open` files reclaimed, the host
+ * budget enforced across writers with the loss written as a `dropped` row.
+ * Nothing here reads a row for anything but its shape.
+ *
+ * S6 — the disk budget is a published invariant (spool-format.md draft 2):
+ *
+ *   tree ≤ budget + (writers × 1 MiB open) + quarantine cap + exported cap
+ *
+ * Closed unsent segments are the budget; each live writer holds at most one
+ * open segment of at most 1 MiB; quarantine/ and exported/ hold at most
+ * their caps; nothing else is ever parked under the spool.
  *
  * A grant is per INSTANCE prefix (`org/{org}/agent/{agent}/{target}/{instance}/`)
  * and the ingest processor holds every row to the prefix it arrived under,
@@ -25,11 +35,18 @@ import type { FetchLike } from "../sync/client.js";
 
 export const UPLOAD_BACKOFF_BASE_MS = 1000;
 export const UPLOAD_BACKOFF_CAP_MS = 5 * 60 * 1000;
-export const SENT_RETENTION_MS = 24 * 60 * 60 * 1000;
 export const QUARANTINE_RETENTION_MS = 24 * 60 * 60 * 1000;
+/** S6: `quarantine/` and `exported/` are capped in bytes, oldest first — a buggy third-party writer cannot fill the disk through quarantine. */
+export const QUARANTINE_CAP_BYTES = 10 * 1024 * 1024;
+export const EXPORTED_CAP_BYTES = 10 * 1024 * 1024;
+/** S6: an `.open` segment untouched this long has no writer behind it (a live one closes every minute it has traffic, and its stale windows within one); it is closed and uploaded like any other. */
+export const OPEN_SEGMENT_RECLAIM_MS = 60 * 60 * 1000;
+/** S6: the uploader stamps its last acknowledged upload here (mtime), so `airprompter status` can say it without a daemon. */
+export const LAST_UPLOAD_MARKER = ".last-upload";
 /** A grant is refreshed this long before its `expiresAt`, so an upload never starts on one about to lapse. */
 export const GRANT_REFRESH_MARGIN_MS = 60 * 1000;
 export const SEGMENT_NAME = /^seg-([A-Za-z0-9._~-]{8,64})-(\d+)-(\d+)\.ndjson$/;
+export const OPEN_SEGMENT_NAME = /^seg-([A-Za-z0-9._~-]{8,64})-(\d+)-(\d+)\.ndjson\.open$/;
 
 /** The heartbeat's `uploadGrant` (protocol heartbeat.schema.json). */
 export interface UploadGrant {
@@ -217,8 +234,12 @@ export interface UploaderOptions {
   random?: () => number;
   logger?: (event: Record<string, unknown>) => void;
   budgetBytes?: number;
-  sentRetentionMs?: number;
   quarantineRetentionMs?: number;
+  /** S6: byte caps on `quarantine/` and `exported/` (10 MiB each by default), oldest first. */
+  quarantineCapBytes?: number;
+  exportedCapBytes?: number;
+  /** S6: how long an `.open` segment may sit untouched before it is closed as abandoned (1 h by default). */
+  openReclaimMs?: number;
   /** The cadence between passes when no grant has said otherwise (the grant's `uploadIntervalSeconds` wins). */
   intervalSeconds?: number;
 }
@@ -237,6 +258,11 @@ export interface UploaderStatus {
   /** Live grants by writer instance and when each lapses. */
   grants: Array<{ instanceId: string; expiresAt: string }>;
   depth: { segments: number; bytes: number };
+  /** S6: the invariant's other terms — open segments (one per live writer, ≤ 1 MiB each), quarantine/ and exported/ bytes — and the whole tree. */
+  tree: { openSegments: number; openBytes: number; quarantineBytes: number; exportedBytes: number; totalBytes: number };
+  /** S6: abandoned `.open` segments closed by the sweep, and quarantined / exported files evicted past their caps. */
+  reclaimedSegments: number;
+  capEvictedFiles: number;
 }
 
 export interface PassResult {
@@ -258,6 +284,8 @@ export class SpoolUploader {
   private sentSegments = 0;
   private quarantinedSegments = 0;
   private droppedSegments = 0;
+  private reclaimedSegments = 0;
+  private capEvictedFiles = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
 
@@ -268,8 +296,8 @@ export class SpoolUploader {
   constructor(private readonly options: UploaderOptions) {
     this.intervalSeconds = options.intervalSeconds ?? 300;
     this.fs = options.fs ?? nodeFs;
-    this.fs.mkdirp(join(options.dir, "sent"), 0o700);
     this.fs.mkdirp(join(options.dir, "quarantine"), 0o700);
+    this.fs.mkdirp(join(options.dir, "exported"), 0o700);
   }
 
   /** Run a filesystem step; a failure is counted by code and returns false (a segment a sibling took away is not an error). */
@@ -312,6 +340,38 @@ export class SpoolUploader {
     return { segments: segments.length, bytes };
   }
 
+  /** Bytes under one subdirectory (files only), oldest-first names beside it. */
+  private dirBytes(sub: string): { names: string[]; bytes: number } {
+    const dir = join(this.options.dir, sub);
+    let names: string[] = [];
+    this.guard("list_dir", () => void (names = this.fs.list(dir).sort()));
+    let bytes = 0;
+    for (const name of names) this.guard("stat_file", () => void (bytes += this.fs.stat(join(dir, name)).size));
+    return { names, bytes };
+  }
+
+  /** S6: the invariant's terms as they stand — what a host actually has parked under the spool. */
+  tree(): UploaderStatus["tree"] {
+    const closed = this.depth();
+    let openSegments = 0;
+    let openBytes = 0;
+    let names: string[] = [];
+    this.guard("list_spool", () => void (names = this.fs.list(this.options.dir)));
+    for (const name of names) {
+      if (!OPEN_SEGMENT_NAME.test(name)) continue;
+      openSegments += 1;
+      this.guard("stat_open", () => void (openBytes += this.fs.stat(join(this.options.dir, name)).size));
+    }
+    const quarantineBytes = this.dirBytes("quarantine").bytes;
+    const exportedBytes = this.dirBytes("exported").bytes;
+    return { openSegments, openBytes, quarantineBytes, exportedBytes, totalBytes: closed.bytes + openBytes + quarantineBytes + exportedBytes };
+  }
+
+  /** S6: the published bound for this uploader's settings — `budget + writers × 1 MiB + quarantine cap + exported cap`. */
+  bound(writers: number): number {
+    return (this.options.budgetBytes ?? HOST_SPOOL_BUDGET_BYTES) + writers * SEGMENT_MAX_BYTES + (this.options.quarantineCapBytes ?? QUARANTINE_CAP_BYTES) + (this.options.exportedCapBytes ?? EXPORTED_CAP_BYTES);
+  }
+
   /** Attached SDK processes and the daemon both write here; over the host budget the OLDEST unsent segments go and the loss is one `dropped` row under the daemon's own id. */
   enforceBudget(): number {
     const budget = this.options.budgetBytes ?? HOST_SPOOL_BUDGET_BYTES;
@@ -333,7 +393,7 @@ export class SpoolUploader {
       const row = { type: "dropped", v: 1, at: new Date(at).toISOString().replace(/\.\d{3}Z$/, "Z"), instanceId: this.options.instanceId, segments: evicted, bytes: evictedBytes };
       let n = 0;
       let name = segmentName(this.options.instanceId, epochMinute(at), n);
-      while (this.fs.exists(join(this.options.dir, name)) || this.fs.exists(join(this.options.dir, `${name}.open`)) || this.fs.exists(join(this.options.dir, "sent", name))) name = segmentName(this.options.instanceId, epochMinute(at), (n += 1));
+      while (this.fs.exists(join(this.options.dir, name)) || this.fs.exists(join(this.options.dir, `${name}.open`))) name = segmentName(this.options.instanceId, epochMinute(at), (n += 1));
       this.guard("write_dropped_row", () => this.fs.writeFile(join(this.options.dir, name), Buffer.from(`${JSON.stringify(row)}\n`, "utf8"), 0o600));
       this.droppedSegments += evicted;
       this.log({ event: "spool_evicted", segments: evicted, bytes: evictedBytes });
@@ -350,20 +410,49 @@ export class SpoolUploader {
     return bytes;
   }
 
-  /** `sent/` and `quarantine/` entries older than their retention are deleted. */
+  /**
+   * S6: `quarantine/` entries older than their retention are deleted; `quarantine/` and `exported/` are held under their
+   * byte caps, oldest first; an `.open` segment untouched past the reclaim age has no writer behind it and is closed so it
+   * uploads (a partial last line is skipped at inspection) and counts against the budget like any other.
+   */
   sweep(): void {
     const at = this.now();
-    for (const [sub, retention] of [
-      ["sent", this.options.sentRetentionMs ?? SENT_RETENTION_MS],
-      ["quarantine", this.options.quarantineRetentionMs ?? QUARANTINE_RETENTION_MS],
+    const quarantine = join(this.options.dir, "quarantine");
+    for (const name of this.fs.list(quarantine)) {
+      const path = join(quarantine, name);
+      this.guard("sweep", () => {
+        if (at - this.fs.stat(path).mtimeMs > (this.options.quarantineRetentionMs ?? QUARANTINE_RETENTION_MS)) this.fs.unlink(path);
+      });
+    }
+    for (const [sub, cap] of [
+      ["quarantine", this.options.quarantineCapBytes ?? QUARANTINE_CAP_BYTES],
+      ["exported", this.options.exportedCapBytes ?? EXPORTED_CAP_BYTES],
     ] as const) {
-      const dir = join(this.options.dir, sub);
-      for (const name of this.fs.list(dir)) {
-        const path = join(dir, name);
-        this.guard("sweep", () => {
-          if (at - this.fs.stat(path).mtimeMs > retention) this.fs.unlink(path);
-        });
+      const listed = this.dirBytes(sub);
+      let total = listed.bytes;
+      for (const name of listed.names) {
+        if (total <= cap) break;
+        const path = join(this.options.dir, sub, name);
+        let size = 0;
+        this.guard("stat_file", () => void (size = this.fs.stat(path).size));
+        if (this.guard("cap_evict", () => this.fs.unlink(path))) {
+          this.capEvictedFiles += 1;
+          this.log({ event: "cap_evicted", dir: sub, file: name, bytes: size });
+        }
+        total -= size;
       }
+    }
+    let names: string[] = [];
+    this.guard("list_spool", () => void (names = this.fs.list(this.options.dir)));
+    for (const name of names) {
+      if (!OPEN_SEGMENT_NAME.test(name)) continue;
+      const path = join(this.options.dir, name);
+      this.guard("reclaim_open", () => {
+        if (at - this.fs.stat(path).mtimeMs <= (this.options.openReclaimMs ?? OPEN_SEGMENT_RECLAIM_MS)) return;
+        this.fs.rename(path, path.slice(0, -".open".length));
+        this.reclaimedSegments += 1;
+        this.log({ event: "open_segment_reclaimed", segment: name.slice(0, -".open".length) });
+      });
     }
   }
 
@@ -423,7 +512,7 @@ export class SpoolUploader {
         }
         if (inspection.rows.length === 0) {
           // Nothing to say (an empty or partial-only segment): acknowledged locally, never uploaded.
-          this.guard("ack_segment", () => this.fs.rename(path, join(this.options.dir, "sent", name)));
+          this.guard("ack_segment", () => this.fs.unlink(path));
           continue;
         }
         const decision = await this.grantFor(instanceId);
@@ -449,7 +538,9 @@ export class SpoolUploader {
           if (fresh.kind === "grant") outcome = await postSegment({ grant: fresh.grant, segment: name, bytes: payload, fetch: this.options.fetch, now: () => this.now() });
         }
         if (outcome.status === "ok") {
-          this.guard("ack_segment", () => this.fs.rename(path, join(this.options.dir, "sent", name)));
+          // S6: delete on ack. The object key is the file name, so a lost response replays to the same key; nothing is kept here.
+          this.guard("ack_segment", () => this.fs.unlink(path));
+          this.guard("stamp_upload", () => this.fs.writeFile(join(this.options.dir, LAST_UPLOAD_MARKER), Buffer.from(`${new Date(this.now()).toISOString()}\n`, "utf8"), 0o600));
           this.sentSegments += 1;
           this.lastUploadMs = this.now();
           this.lastError = null;
@@ -524,6 +615,9 @@ export class SpoolUploader {
       droppedSegments: this.droppedSegments,
       grants: [...this.grants].map(([instanceId, grant]) => ({ instanceId, expiresAt: grant.expiresAt })),
       depth: this.depth(),
+      tree: this.tree(),
+      reclaimedSegments: this.reclaimedSegments,
+      capEvictedFiles: this.capEvictedFiles,
     };
   }
 }

@@ -26,7 +26,7 @@ import { dirname, join } from "node:path";
 
 import { SlotStore } from "../../../sdk-typescript/src/store/slotStore.js";
 import { SyncClient } from "../../../sdk-typescript/src/sync/client.js";
-import { inspectSegment, postSegment, SEGMENT_NAME, type UploadGrant } from "../../../sdk-typescript/src/telemetry/uploader.js";
+import { EXPORTED_CAP_BYTES, inspectSegment, postSegment, SEGMENT_NAME, type UploadGrant } from "../../../sdk-typescript/src/telemetry/uploader.js";
 import { PROTOCOL_VERSION } from "../../../sdk-typescript/src/agent.js";
 import { CLI_VERSION } from "../version.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
@@ -124,6 +124,16 @@ export async function exportTelemetry(argv: string[], ctx: Context): Promise<num
         unlinkSync(path);
         swept += 1;
       }
+    }
+    // S6: exported/ is one term of the spool's disk invariant — held under its byte cap, oldest first, whatever its age.
+    const kept = readdirSync(exported).filter((name) => SEGMENT_NAME.test(name)).sort();
+    let total = kept.reduce((sum, name) => sum + statSync(join(exported, name)).size, 0);
+    for (const name of kept) {
+      if (total <= EXPORTED_CAP_BYTES) break;
+      const size = statSync(join(exported, name)).size;
+      unlinkSync(join(exported, name));
+      total -= size;
+      swept += 1;
     }
   }
   out.field("out", target);

@@ -94,7 +94,8 @@ def test_no_daemon_grant_present_uploads_own_segments(state_dir):
         assert len(unsent(state_dir)) == 1
         assert ap.upload_now() == {"uploaded": 1, "quarantined": 0, "dropped": 0, "held": False}
         assert unsent(state_dir) == [], "acknowledged: gone from the spool"
-        assert len(os.listdir(os.path.join(spool_dir(state_dir), "sent"))) == 1
+        assert not os.path.exists(os.path.join(spool_dir(state_dir), "sent")), "S6: deleted on ack, nothing parked"
+        assert os.path.exists(os.path.join(spool_dir(state_dir), ".last-upload"))
         assert len(plane.uploads) == 1 and plane.uploads[0].startswith(prefix(ap.instance_id))
         assert all(g["instanceId"] == ap.instance_id for g in plane.grants), "the only grant ever asked for is this runtime's own"
         rows = [json.loads(line) for line in plane.objects[plane.uploads[0]].decode("utf-8").strip().split("\n")]

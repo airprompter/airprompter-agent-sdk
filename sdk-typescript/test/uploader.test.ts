@@ -5,14 +5,14 @@
  * instance's row); the presigned POST body; full-jitter backoff bounds;
  * then the uploader on a directory two writers and a stranger wrote into:
  * one grant per writer prefix, the malformed third-party segment
- * quarantined, acknowledged segments in sent/, a replay after a lost
+ * quarantined, acknowledged segments deleted (S6), a replay after a lost
  * response writing the same key once, a hold honoured, an expired grant
  * refreshed, a failure backing off, the host budget evicting oldest-first
  * with a dropped row, and the serverless flush under the runtime's own grant.
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -20,7 +20,7 @@ import test from "node:test";
 import { AirPrompterAgent } from "../src/agent.js";
 import { publicJwkOf } from "../src/protocol/trust.js";
 import { epochMinute, segmentName, type SpoolRow } from "../src/spool/writer.js";
-import { backoffDelayMs, inspectSegment, multipartBody, postSegment, SpoolUploader, UPLOAD_BACKOFF_CAP_MS, validateSpoolRow, type GrantDecision, type UploadGrant } from "../src/telemetry/uploader.js";
+import { backoffDelayMs, inspectSegment, multipartBody, postSegment, SEGMENT_NAME, SpoolUploader, UPLOAD_BACKOFF_CAP_MS, validateSpoolRow, type GrantDecision, type UploadGrant } from "../src/telemetry/uploader.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));
@@ -129,7 +129,7 @@ function harness(options: { budgetBytes?: number; grantFor?: (instanceId: string
   return { dir, plane, uploader, clock, requests, events };
 }
 
-test("two writers and a stranger: one grant per writer prefix, the malformed third-party segment quarantined, acknowledged segments in sent/, a replay writes one key", async () => {
+test("two writers and a stranger: one grant per writer prefix, the malformed third-party segment quarantined, acknowledged segments deleted (S6), a replay writes one key", async () => {
   const h = harness();
   try {
     const m0 = "2026-09-12T14:03:00Z";
@@ -149,10 +149,12 @@ test("two writers and a stranger: one grant per writer prefix, the malformed thi
       [`org/org_1/agent/agt_1/prod/${WRITER_A}/${a0}`, `org/org_1/agent/agt_1/prod/${WRITER_B}/${b0}`, `org/org_1/agent/agt_1/prod/${WRITER_A}/${a1}`],
       "each segment lands under its own writer's prefix",
     );
-    assert.deepEqual(readdirSync(join(h.dir, "sent")).sort(), [a0, a1, b0].sort());
+    // S6: delete on ack — nothing acknowledged stays on the host; the last upload is stamped for a status read without a daemon.
+    assert.equal(existsSync(join(h.dir, "sent")), false, "no sent/ directory any more");
     assert.deepEqual(readdirSync(join(h.dir, "quarantine")), [stranger]);
     assert.deepEqual(readdirSync(h.dir).filter((n) => n.startsWith("seg-")), [`${segmentName(WRITER_A, epochMinute(T0 + 120_000), 0)}.open`]);
-    assert.equal(h.plane.objects.get(`org/org_1/agent/agt_1/prod/${WRITER_B}/${b0}`)!.toString("utf8"), readFileSync(join(h.dir, "sent", b0), "utf8"), "the bytes S3 holds are the segment's");
+    assert.equal(readFileSync(join(h.dir, ".last-upload"), "utf8").trim(), new Date(T0).toISOString());
+    assert.equal(h.plane.objects.get(`org/org_1/agent/agt_1/prod/${WRITER_B}/${b0}`)!.toString("utf8"), [JSON.stringify(windowRow(WRITER_B, m0)), JSON.stringify({ type: "refusal", v: 1, at: m0, instanceId: WRITER_B, reason: "disabled", generation: 1, tag: null })].join("\n") + "\n", "the bytes S3 holds are the segment's");
     const status = h.uploader.status();
     assert.equal(status.sentSegments, 3);
     assert.equal(status.quarantinedSegments, 1);
@@ -161,7 +163,7 @@ test("two writers and a stranger: one grant per writer prefix, the malformed thi
     assert.deepEqual(status.grants.map((g) => g.instanceId).sort(), [WRITER_A, WRITER_B]);
     assert.equal(h.events.some((e) => JSON.stringify(e).includes("helpful assistant")), false, "the quarantine log names the line and the field, never the value");
     // Replay: the same segment again (a lost response) is the same key, once.
-    writeFileSync(join(h.dir, a0), readFileSync(join(h.dir, "sent", a0)));
+    writeFileSync(join(h.dir, a0), h.plane.objects.get(`org/org_1/agent/agt_1/prod/${WRITER_A}/${a0}`)!);
     await h.uploader.runOnce();
     assert.equal(h.plane.objects.size, 3, "S3 PUT is idempotent by key");
     assert.equal(h.plane.uploads.length, 4);
@@ -170,7 +172,7 @@ test("two writers and a stranger: one grant per writer prefix, the malformed thi
   }
 });
 
-test("a hold is honoured until retryAfter; an expired grant is refreshed once; a failing bucket backs off with full jitter; sent/ is swept after 24 h", async () => {
+test("a hold is honoured until retryAfter; an expired grant is refreshed once; a failing bucket backs off with full jitter; quarantine/ is swept after 24 h", async () => {
   const h = harness();
   try {
     const name = writeSegment(h.dir, WRITER_A, T0, 0, [JSON.stringify(windowRow(WRITER_A, "2026-09-12T14:03:00Z"))]);
@@ -214,15 +216,14 @@ test("a hold is honoured until retryAfter; an expired grant is refreshed once; a
     assert.deepEqual(result.uploaded, [third]);
     assert.equal(h.uploader.status().attempt, 0, "a success resets the backoff");
 
-    // sent/ is swept after 24 h; quarantine/ too.
+    // quarantine/ is swept after 24 h (S6: acknowledged segments were deleted on ack; there is no sent/ to sweep).
     mkdirSync(join(h.dir, "quarantine"), { recursive: true });
     writeFileSync(join(h.dir, "quarantine", "seg-i-thirdparty0000-1-0.ndjson"), "x\n");
-    assert.equal(readdirSync(join(h.dir, "sent")).length, 3);
-    // The sweep reads mtimes: age every acknowledged and quarantined file past a day.
+    assert.equal(readdirSync(h.dir).filter((n) => SEGMENT_NAME.test(n)).length, 0, "everything acknowledged is gone");
+    // The sweep reads mtimes: age the quarantined file past a day.
     const old = new Date(h.clock.ms - 25 * 60 * 60 * 1000);
-    for (const sub of ["sent", "quarantine"]) for (const name of readdirSync(join(h.dir, sub))) utimesSync(join(h.dir, sub, name), old, old);
+    for (const name of readdirSync(join(h.dir, "quarantine"))) utimesSync(join(h.dir, "quarantine", name), old, old);
     await h.uploader.runOnce();
-    assert.deepEqual(readdirSync(join(h.dir, "sent")), []);
     assert.deepEqual(readdirSync(join(h.dir, "quarantine")), []);
   } finally {
     rmSync(h.dir, { recursive: true, force: true });
@@ -237,11 +238,13 @@ test("the host budget across writers: the oldest unsent segments go first and th
     assert.ok(each * 3 > 900 && each * 2 <= 900, `segment ${each} bytes`);
     const result = await h.uploader.runOnce();
     assert.equal(result.dropped, 3, "three oldest evicted to fit two under 900 bytes");
-    const droppedSegment = readdirSync(join(h.dir, "sent")).find((n) => n.startsWith("seg-i-daemon00000000-"));
-    assert.ok(droppedSegment, "the dropped row was written as the daemon's own segment and uploaded");
-    const row = JSON.parse(readFileSync(join(h.dir, "sent", droppedSegment!), "utf8").trim()) as { type: string; segments: number; bytes: number; instanceId: string };
+    const droppedKey = h.plane.uploads.find((k) => k.includes("/i-daemon00000000/seg-i-daemon00000000-"));
+    assert.ok(droppedKey, "the dropped row was written as the daemon's own segment and uploaded");
+    const droppedSegment = droppedKey!.slice(droppedKey!.lastIndexOf("/") + 1);
+    const row = JSON.parse(h.plane.objects.get(droppedKey!)!.toString("utf8").trim()) as { type: string; segments: number; bytes: number; instanceId: string };
     assert.deepEqual({ type: row.type, segments: row.segments, bytes: row.bytes, instanceId: row.instanceId }, { type: "dropped", segments: 3, bytes: each * 3, instanceId: "i-daemon00000000" });
-    assert.deepEqual(result.uploaded.sort(), [names[3]!, names[4]!, droppedSegment!].sort());
+    assert.deepEqual(result.uploaded.sort(), [names[3]!, names[4]!, droppedSegment].sort());
+    assert.equal(existsSync(join(h.dir, droppedSegment)), false, "S6: the dropped row's segment is deleted on ack like any other");
     assert.ok(h.plane.uploads.some((k) => k.startsWith("org/org_1/agent/agt_1/prod/i-daemon00000000/")));
     assert.equal(h.uploader.status().droppedSegments, 3);
   } finally {

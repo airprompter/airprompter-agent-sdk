@@ -8,6 +8,8 @@ dev dependencies are present (CI installs them; locally it skips otherwise).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import shutil
@@ -39,7 +41,8 @@ def test_store_written_by_typescript_opens_here():
         ap = AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target="prod", state_dir=state_dir, root={"pinned": expected["pinnedRoot"]})
         try:
             assert ap.generation == expected["generation"]
-            assert ap.instance_id == expected["instanceId"], "the store's instance id is the runtime's"
+            assert ap.instance_id != expected["instanceId"], "S6: the process's id is its own, never the store's"
+            assert ap._run_ref_key == hmac.new(expected["instanceId"].encode("utf-8"), b"runRef", hashlib.sha256).digest(), "the runRef key is the store's, shared by every process on the host"
             assert ap.status().signing_key_id == expected["signingKeyId"]
             assert ap.status().storage_protection == "file_key"
             assert ap.manifest["payload"]["releaseDigest"] == expected["releaseDigest"]

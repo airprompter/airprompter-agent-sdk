@@ -35,11 +35,18 @@ from ..spool.writer import HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEG
 
 UPLOAD_BACKOFF_BASE_MS = 1000
 UPLOAD_BACKOFF_CAP_MS = 5 * 60 * 1000
-SENT_RETENTION_MS = 24 * 60 * 60 * 1000
 QUARANTINE_RETENTION_MS = 24 * 60 * 60 * 1000
+#: S6: ``quarantine/`` and ``exported/`` are capped in bytes, oldest first — a buggy third-party writer cannot fill the disk through quarantine.
+QUARANTINE_CAP_BYTES = 10 * 1024 * 1024
+EXPORTED_CAP_BYTES = 10 * 1024 * 1024
+#: S6: an ``.open`` segment untouched this long has no writer behind it; it is closed and uploaded like any other.
+OPEN_SEGMENT_RECLAIM_MS = 60 * 60 * 1000
+#: S6: the uploader stamps its last acknowledged upload here, so ``airprompter status`` can say it without a daemon.
+LAST_UPLOAD_MARKER = ".last-upload"
 #: A grant is refreshed this long before its ``expiresAt``, so an upload never starts on one about to lapse.
 GRANT_REFRESH_MARGIN_MS = 60 * 1000
 SEGMENT_NAME = re.compile(r"^seg-([A-Za-z0-9._~-]{8,64})-(\d+)-(\d+)\.ndjson$")
+OPEN_SEGMENT_NAME = re.compile(r"^seg-([A-Za-z0-9._~-]{8,64})-(\d+)-(\d+)\.ndjson\.open$")
 
 # ---------------------------------------------------------------------------
 # Row validation: the spool contract, structurally
@@ -300,8 +307,10 @@ class SpoolUploader:
         rand: Optional[Callable[[], float]] = None,
         logger: Optional[Callable[[dict[str, Any]], None]] = None,
         budget_bytes: Optional[int] = None,
-        sent_retention_ms: Optional[int] = None,
         quarantine_retention_ms: Optional[int] = None,
+        quarantine_cap_bytes: Optional[int] = None,
+        exported_cap_bytes: Optional[int] = None,
+        open_reclaim_ms: Optional[int] = None,
         interval_seconds: int = 300,
     ):
         self.dir = directory
@@ -313,8 +322,12 @@ class SpoolUploader:
         self._rand = rand or _random.random
         self._logger = logger
         self.budget_bytes = budget_bytes
-        self._sent_retention_ms = sent_retention_ms if sent_retention_ms is not None else SENT_RETENTION_MS
         self._quarantine_retention_ms = quarantine_retention_ms if quarantine_retention_ms is not None else QUARANTINE_RETENTION_MS
+        self.quarantine_cap_bytes = quarantine_cap_bytes if quarantine_cap_bytes is not None else QUARANTINE_CAP_BYTES
+        self.exported_cap_bytes = exported_cap_bytes if exported_cap_bytes is not None else EXPORTED_CAP_BYTES
+        self._open_reclaim_ms = open_reclaim_ms if open_reclaim_ms is not None else OPEN_SEGMENT_RECLAIM_MS
+        self._reclaimed_segments = 0
+        self._cap_evicted_files = 0
         self._interval_seconds = interval_seconds
         self._grants: dict[str, UploadGrant] = {}
         self._last_upload_ms: Optional[float] = None
@@ -330,8 +343,8 @@ class SpoolUploader:
         self._stopped = False
         #: Filesystem failures by code — a sweep that could not stat, an evict that found the file gone (S2).
         self.fs_faults: dict[str, int] = {}
-        self._fs.mkdirp(os.path.join(directory, "sent"), 0o700)
         self._fs.mkdirp(os.path.join(directory, "quarantine"), 0o700)
+        self._fs.mkdirp(os.path.join(directory, "exported"), 0o700)
 
     # ------------------------------------------------------------------ plumbing
 
@@ -374,6 +387,42 @@ class SpoolUploader:
             self._guard("stat_segment", stat)
         return {"segments": len(segments), "bytes": total}
 
+    def _dir_bytes(self, sub: str) -> tuple[list[str], int]:
+        """Files under one subdirectory, oldest-first by name, and their bytes."""
+        directory = os.path.join(self.dir, sub)
+        names: list[str] = []
+        self._guard("list_dir", lambda: names.extend(sorted(self._fs.list(directory))))
+        total = 0
+        for name in names:
+            def stat(name: str = name) -> None:
+                nonlocal total
+                total += self._fs.stat(os.path.join(directory, name))[0]
+            self._guard("stat_file", stat)
+        return names, total
+
+    def tree(self) -> dict[str, int]:
+        """S6: the invariant's terms as they stand — what a host actually has parked under the spool."""
+        closed = self.depth()
+        open_segments = 0
+        open_bytes = 0
+        names: list[str] = []
+        self._guard("list_spool", lambda: names.extend(self._fs.list(self.dir)))
+        for name in names:
+            if not OPEN_SEGMENT_NAME.match(name):
+                continue
+            open_segments += 1
+            def stat(name: str = name) -> None:
+                nonlocal open_bytes
+                open_bytes += self._fs.stat(os.path.join(self.dir, name))[0]
+            self._guard("stat_open", stat)
+        quarantine_bytes = self._dir_bytes("quarantine")[1]
+        exported_bytes = self._dir_bytes("exported")[1]
+        return {"openSegments": open_segments, "openBytes": open_bytes, "quarantineBytes": quarantine_bytes, "exportedBytes": exported_bytes, "totalBytes": closed["bytes"] + open_bytes + quarantine_bytes + exported_bytes}
+
+    def bound(self, writers: int) -> int:
+        """S6: the published bound for this uploader's settings — ``budget + writers × 1 MiB + quarantine cap + exported cap``."""
+        return (self.budget_bytes if self.budget_bytes is not None else HOST_SPOOL_BUDGET_BYTES) + writers * SEGMENT_MAX_BYTES + self.quarantine_cap_bytes + self.exported_cap_bytes
+
     def enforce_budget(self) -> int:
         """Over the host budget the OLDEST unsent segments go and the loss is one ``dropped`` row under this uploader's own id."""
         budget = self.budget_bytes if self.budget_bytes is not None else HOST_SPOOL_BUDGET_BYTES
@@ -399,7 +448,7 @@ class SpoolUploader:
             row = {"type": "dropped", "v": 1, "at": re.sub(r"\.\d{3}Z$", "Z", iso_ms(at)), "instanceId": self.instance_id, "segments": evicted, "bytes": evicted_bytes}
             n = 0
             name = segment_name(self.instance_id, epoch_minute(at), n)
-            while self._fs.exists(os.path.join(self.dir, name)) or self._fs.exists(os.path.join(self.dir, f"{name}.open")) or self._fs.exists(os.path.join(self.dir, "sent", name)):
+            while self._fs.exists(os.path.join(self.dir, name)) or self._fs.exists(os.path.join(self.dir, f"{name}.open")):
                 n += 1
                 name = segment_name(self.instance_id, epoch_minute(at), n)
             self._guard("write_dropped_row", lambda: self._fs.write_file(os.path.join(self.dir, name), (json.dumps(row, separators=(",", ":")) + "\n").encode("utf-8"), 0o600))
@@ -413,18 +462,49 @@ class SpoolUploader:
         return data[0] if data else None
 
     def sweep(self) -> None:
-        """``sent/`` and ``quarantine/`` entries older than their retention are deleted."""
+        """S6: ``quarantine/`` entries older than their retention are deleted; ``quarantine/`` and ``exported/`` are held under their
+        byte caps, oldest first; an ``.open`` segment untouched past the reclaim age has no writer behind it and is closed so it
+        uploads (a partial last line is skipped at inspection) and counts against the budget like any other."""
         at = self._now()
-        for sub, retention in (("sent", self._sent_retention_ms), ("quarantine", self._quarantine_retention_ms)):
-            directory = os.path.join(self.dir, sub)
-            for name in self._fs.list(directory):
-                path = os.path.join(directory, name)
+        quarantine = os.path.join(self.dir, "quarantine")
+        for name in self._fs.list(quarantine):
+            path = os.path.join(quarantine, name)
 
-                def step(path: str = path) -> None:
-                    if at - self._fs.stat(path)[1] > retention:
-                        self._fs.unlink(path)
+            def step(path: str = path) -> None:
+                if at - self._fs.stat(path)[1] > self._quarantine_retention_ms:
+                    self._fs.unlink(path)
 
-                self._guard("sweep", step)
+            self._guard("sweep", step)
+        for sub, cap in (("quarantine", self.quarantine_cap_bytes), ("exported", self.exported_cap_bytes)):
+            names, total = self._dir_bytes(sub)
+            for name in names:
+                if total <= cap:
+                    break
+                path = os.path.join(self.dir, sub, name)
+                size = 0
+                try:
+                    size = self._fs.stat(path)[0]
+                except Exception:  # noqa: BLE001
+                    pass
+                if self._guard("cap_evict", lambda path=path: self._fs.unlink(path)):
+                    self._cap_evicted_files += 1
+                    self._log({"event": "cap_evicted", "dir": sub, "file": name, "bytes": size})
+                total -= size
+        names: list[str] = []
+        self._guard("list_spool", lambda: names.extend(self._fs.list(self.dir)))
+        for name in names:
+            if not OPEN_SEGMENT_NAME.match(name):
+                continue
+            path = os.path.join(self.dir, name)
+
+            def reclaim(path: str = path, name: str = name) -> None:
+                if at - self._fs.stat(path)[1] <= self._open_reclaim_ms:
+                    return
+                self._fs.rename(path, path[: -len(".open")])
+                self._reclaimed_segments += 1
+                self._log({"event": "open_segment_reclaimed", "segment": name[: -len(".open")]})
+
+            self._guard("reclaim_open", reclaim)
 
     def _quarantine(self, name: str, reason: str, detail: Any = None) -> None:
         self._guard("quarantine", lambda: self._fs.rename(os.path.join(self.dir, name), os.path.join(self.dir, "quarantine", name)))
@@ -478,7 +558,7 @@ class SpoolUploader:
                     continue
                 if not inspection.rows:
                     # Nothing to say (an empty or partial-only segment): acknowledged locally, never uploaded.
-                    self._guard("ack_segment", lambda: self._fs.rename(path, os.path.join(self.dir, "sent", name)))
+                    self._guard("ack_segment", lambda: self._fs.unlink(path))
                     continue
                 decision = self._grant_for(instance_id)
                 if decision.kind == "hold":
@@ -502,7 +582,9 @@ class SpoolUploader:
                     if fresh.kind == "grant" and fresh.grant is not None:
                         outcome = post_segment(grant=fresh.grant, segment=name, data=payload, transport=self._transport, now_ms=self._now)
                 if outcome.status == "ok":
-                    self._guard("ack_segment", lambda: self._fs.rename(path, os.path.join(self.dir, "sent", name)))
+                    # S6: delete on ack. The object key is the file name, so a lost response replays to the same key; nothing is kept here.
+                    self._guard("ack_segment", lambda: self._fs.unlink(path))
+                    self._guard("stamp_upload", lambda: self._fs.write_file(os.path.join(self.dir, LAST_UPLOAD_MARKER), (iso_ms(self._now()) + "\n").encode("utf-8"), 0o600))
                     self._sent_segments += 1
                     self._last_upload_ms = self._now()
                     self._last_error = None
@@ -581,5 +663,8 @@ class SpoolUploader:
             "droppedSegments": self._dropped_segments,
             "grants": [{"instanceId": instance_id, "expiresAt": grant.expires_at} for instance_id, grant in self._grants.items()],
             "depth": self.depth(),
+            "tree": self.tree(),
+            "reclaimedSegments": self._reclaimed_segments,
+            "capEvictedFiles": self._cap_evicted_files,
         }
 

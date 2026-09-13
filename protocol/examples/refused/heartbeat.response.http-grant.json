@@ -19,6 +19,7 @@
     },
     "uploadIntervalSeconds": 60,
     "pollSeconds": 30,
-    "edgePointerUrl": "https://edge.airprompter.com/g/BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU/generation.json"
+    "edgePointerUrl": "https://edge.airprompter.com/g/BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU/generation.json",
+    "latestGeneration": 42
   }
 }

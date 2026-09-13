@@ -236,6 +236,8 @@ heartbeat_response = {
     "uploadIntervalSeconds": 60,
     "pollSeconds": 30,
     "edgePointerUrl": "https://edge.airprompter.com/g/" + b64url(bytes([5] * 32)) + "/generation.json",
+    # S3: the origin's generation rides the authenticated answer; a pointer that says less is behind.
+    "latestGeneration": 42,
 }
 heartbeat_throttled = {"pollSeconds": 120, "uploadIntervalSeconds": 600, "retryAfterSeconds": 300}
 edge_pointer = {"generation": 42, "releaseDigest": digest, "leaseSeconds": 3600, "issuedAt": "2026-09-12T10:00:00Z"}

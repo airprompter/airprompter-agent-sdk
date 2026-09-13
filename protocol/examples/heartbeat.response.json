@@ -17,5 +17,5 @@
   "uploadIntervalSeconds": 60,
   "pollSeconds": 30,
   "edgePointerUrl": "https://edge.airprompter.com/g/BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU/generation.json",
-  "latestGeneration": 41
+  "latestGeneration": 42
 }

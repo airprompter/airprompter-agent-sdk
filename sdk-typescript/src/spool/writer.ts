@@ -128,9 +128,15 @@ export class SegmentPlanner {
 
 /** Where rows go: a directory of segments, or memory (serverless). */
 export interface SpoolSink {
+  /** What the sink is, as data: `"directory"` (segments on disk) or `"memory"` (the serverless buffer). Never branch on the class. */
+  readonly kind: "directory" | "memory" | (string & {});
   append(row: SpoolRow, nowMs: number): void;
   /** Close the open segment (or return the buffered rows). */
   flush(nowMs: number): void;
+  /** A buffered sink hands its rows back for the host's uploader (invocation end); absent on a sink that persists them. */
+  drain?(nowMs: number): SpoolRow[];
+  /** A persisting sink reports what waits on disk; absent on a buffered sink. */
+  depth?(): { segments: number; bytes: number };
 }
 
 /**
@@ -141,6 +147,7 @@ export interface SpoolSink {
  * bytes lost, so an over-chatty invocation is reported, never silent.
  */
 export class MemorySink implements SpoolSink {
+  readonly kind = "memory" as const;
   readonly rows: SpoolRow[] = [];
   private bytes = 0;
   private droppedRows = 0;
@@ -181,6 +188,7 @@ export class MemorySink implements SpoolSink {
 }
 
 export class DirectorySink implements SpoolSink {
+  readonly kind = "directory" as const;
   private fd: number | null = null;
   private openPath: string | null = null;
   private readonly planner: SegmentPlanner;

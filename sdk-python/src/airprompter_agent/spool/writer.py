@@ -111,7 +111,9 @@ class SegmentPlanner:
 
 
 class SpoolSink:
-    """Where rows go: a directory of segments, or memory (serverless)."""
+    """Where rows go: a directory of segments, or memory (serverless). `kind` says which, as data; never branch on the class."""
+
+    kind: str = "custom"
 
     def append(self, row: SpoolRow, now_ms_: float) -> None:  # pragma: no cover - interface
         raise NotImplementedError
@@ -125,6 +127,7 @@ def _dropped_row(instance_id: str, at_ms: float, segments: int, byte_count: int)
 
 
 class MemorySink(SpoolSink):
+    kind = "memory"
     """The serverless buffer: rows in memory up to ``budget_bytes`` (256 KiB by default). When a row would push past the
     budget the OLDEST rows are evicted and counted; the next drain (invocation end) hands back the surviving rows
     followed by one ``dropped`` row carrying the count and the bytes lost, so an over-chatty invocation is reported, never silent."""
@@ -171,6 +174,7 @@ class MemorySink(SpoolSink):
 
 
 class DirectorySink(SpoolSink):
+    kind = "directory"
     def __init__(self, directory: str, instance_id: str, budget_bytes: int = HOST_SPOOL_BUDGET_BYTES):
         self.dir = directory
         self._instance_id = instance_id

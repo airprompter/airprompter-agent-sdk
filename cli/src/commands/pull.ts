@@ -20,7 +20,7 @@ import { dirname } from "node:path";
 import { createEncryptedBundle, createPlaintextBundle, distributionKeyId } from "../../../sdk-typescript/src/bundle/apbundle.js";
 import { referencedPayloads } from "../../../sdk-typescript/src/protocol/trust.js";
 import type { BundleContents, RootMetadata } from "../../../sdk-typescript/src/protocol/types.js";
-import { ManagedAgent, ManagedRunError } from "../../../sdk-typescript/src/managed/client.js";
+import { ManagedAgent, isManagedRunError } from "../../../sdk-typescript/src/managed/client.js";
 import { SyncClient } from "../../../sdk-typescript/src/sync/client.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { summarizeManifest, verifyChain } from "../chain.js";
@@ -80,7 +80,7 @@ export async function pull(argv: string[], ctx: Context): Promise<number> {
     try {
       agent = await ManagedAgent.start({ agentId: scope.agentId, target: scope.target, apiKey, baseUrl: str(parsed, "base-url") ?? "https://api.airprompter.com", fetch: ctx.fetch as never, userAgent: `airprompter-cli/${CLI_VERSION}` });
     } catch (error) {
-      if (error instanceof ManagedRunError) throw refused(`the run key was not accepted for the catalogue (${error.code}${error.detail ? `: ${error.detail}` : ""})`, { reason: error.code });
+      if (isManagedRunError(error)) throw refused(`the run key was not accepted for the catalogue (${error.code}${error.detail ? `: ${error.detail}` : ""})`, { reason: error.code });
       throw error;
     }
     const catalogue = agent.slots;

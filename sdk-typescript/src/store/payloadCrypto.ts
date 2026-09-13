@@ -8,6 +8,7 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { errorNamed } from "../protocol/errors.js";
 
 export function payloadAad(input: { agentId: string; target: string; generation: number; contentHash: string }): Buffer {
   return Buffer.from(`${input.agentId}\u0000${input.target}\u0000${input.generation}\u0000${input.contentHash}`, "utf8");
@@ -23,10 +24,16 @@ export function encryptPayload(dek: Uint8Array, plaintext: Uint8Array, aad: Uint
 }
 
 export class PayloadDecryptError extends Error {
+  readonly code = "payload_decrypt_failed" as const;
   constructor() {
     super("payload does not decrypt under this store's key and slot (moved, swapped, or tampered)");
     this.name = "PayloadDecryptError";
   }
+}
+
+/** `PayloadDecryptError` by name and code — true across duplicated package copies. */
+export function isPayloadDecryptError(error: unknown): error is PayloadDecryptError {
+  return errorNamed(error, "PayloadDecryptError");
 }
 
 export function decryptPayload(dek: Uint8Array, sealed: Uint8Array, aad: Uint8Array): Buffer {

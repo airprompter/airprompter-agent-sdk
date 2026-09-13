@@ -99,7 +99,7 @@ test("on stage the runtime runs the set before deciding: below the floor the rel
 
   // Generation 2 carries a golden set; one case fails → staged, not activated, even under auto.
   const slot = goldenSlot(plane, SET);
-  assert.notEqual(releaseDigest([slot]), releaseDigest([{ ...slot, goldenSet: undefined } as ManifestSlot]), "the reference is in the digest");
+  assert.notEqual(releaseDigest([slot]), releaseDigest([{ ...slot, goldenSet: undefined } as unknown as ManifestSlot]), "the reference is in the digest");
   answers = { ...answers, "no-guarantee": "Refund guaranteed!" };
   plane.promote([slot]);
   await ap.syncNow();

@@ -9,7 +9,7 @@
  * change ticket names exactly what went live.
  */
 
-import { StoreError } from "../../../sdk-typescript/src/store/slotStore.js";
+import { isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
 import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/src/sync/daemon.js";
 import { CLI_VERSION } from "../version.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
@@ -62,7 +62,7 @@ export async function unlock(argv: string[], ctx: Context): Promise<number> {
   try {
     store = await openStore(parsed, ctx, scope);
   } catch (error) {
-    if (error instanceof StoreError) throw refused(`store: ${error.message}`, { reason: error.code });
+    if (isStoreError(error)) throw refused(`store: ${error.message}`, { reason: error.code });
     throw error;
   }
   const state = store.state;

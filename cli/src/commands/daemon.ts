@@ -8,7 +8,7 @@
 
 import { join } from "node:path";
 
-import { AirPrompterAgent, AgentStartError, SDK_NAME, SDK_VERSION } from "../../../sdk-typescript/src/agent.js";
+import { AirPrompterAgent, isAgentStartError, SDK_NAME, SDK_VERSION } from "../../../sdk-typescript/src/agent.js";
 import { daemonSocketPath } from "../../../sdk-typescript/src/sync/daemon.js";
 import { SlotStore } from "../../../sdk-typescript/src/store/slotStore.js";
 import { SpoolUploader } from "../../../sdk-typescript/src/telemetry/uploader.js";
@@ -76,7 +76,7 @@ export async function daemon(argv: string[], ctx: Context): Promise<number> {
     });
   } catch (error) {
     // A store whose key cannot be obtained, or nothing verified anywhere: the daemon does not listen.
-    if (error instanceof AgentStartError) throw refused(`not serving: ${error.message}`, { reason: error.code });
+    if (isAgentStartError(error)) throw refused(`not serving: ${error.message}`, { reason: error.code });
     throw error;
   }
   // T26 P4: the uploader — every writer's closed segments, validated, under one grant per writer prefix (the daemon's

@@ -10,6 +10,7 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
+import { errorNamed } from "./protocol/errors.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -23,7 +24,7 @@ import { renderTemplate, type Delimiters } from "./render/template.js";
 import { normalizeFeedback } from "./spool/feedback.js";
 import { DirectorySink, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "./spool/writer.js";
 import { fileKey, type KeyProvider, type StorageProtection } from "./store/keyProvider.js";
-import { SlotStore, StoreError, type LoadedSlot } from "./store/slotStore.js";
+import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "./store/slotStore.js";
 import { observeCall, type ObserveOptions } from "./telemetry/observe.js";
 import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "./wrap/attribution.js";
 import { wrapClient, type WrapHooks } from "./wrap/client.js";
@@ -191,6 +192,11 @@ export class AgentStartError extends Error {
   }
 }
 
+/** `AgentStartError` by name and code — true across duplicated package copies. */
+export function isAgentStartError(error: unknown): error is AgentStartError {
+  return errorNamed<AgentStartError["code"]>(error, "AgentStartError");
+}
+
 export class AirPrompterAgent {
   private active: LoadedSlot | null = null;
   private source: ReleaseSource = "store";
@@ -289,7 +295,7 @@ export class AirPrompterAgent {
     try {
       store = await SlotStore.open({ stateDir, agentId: options.agentId, target: options.target, keyProvider });
     } catch (error) {
-      if (error instanceof StoreError && (error.code === "kek_unavailable" || error.code === "store_corrupt")) throw new AgentStartError(error.code, error.message);
+      if (isStoreError(error) && (error.code === "kek_unavailable" || error.code === "store_corrupt")) throw new AgentStartError(error.code, error.message);
       throw error;
     }
     const pinned = pinnedRoot;
@@ -798,7 +804,8 @@ export class AirPrompterAgent {
    * buffer the sink's own eviction reports the loss. Never throws; returns what happened.
    */
   async flushTelemetry(): Promise<{ status: "uploaded"; segment: string; rows: number } | { status: "nothing" } | { status: "held"; reason: string; rows: number }> {
-    if (!(this.sink instanceof MemorySink)) return { status: "nothing" };
+    // Capability, not class: a buffered sink is one that can hand its rows back (another copy of this package counts too).
+    if (typeof this.sink.drain !== "function") return { status: "nothing" };
     const rows = this.sink.drain(this.nowMs());
     if (rows.length === 0) return { status: "nothing" };
     const requeue = () => {
@@ -846,7 +853,7 @@ export class AirPrompterAgent {
       this.spool.closeWindows(this.nowMs());
       void this.syncNow();
       // D25 on serverless: the invocation's rows go out under the runtime's own grant; a failure keeps them for the next one.
-      if (this.client && this.sink instanceof MemorySink) void this.flushTelemetry();
+      if (this.client && typeof this.sink.drain === "function") void this.flushTelemetry();
     }
   }
 
@@ -1169,7 +1176,7 @@ export class AirPrompterAgent {
     const state = this.store?.state ?? null;
     const manifest = this.active?.manifest.payload;
     const leaseExpiresAt = this.leaseExpiresAt();
-    const depth = this.sink instanceof DirectorySink ? this.sink.depth() : { segments: 0, bytes: 0 };
+    const depth = this.sink.depth?.() ?? { segments: 0, bytes: 0 };
     return {
       instanceId: this.ownInstanceId,
       generation: this.active?.generation ?? 0,
@@ -1249,7 +1256,7 @@ export class AirPrompterAgent {
 
   /** The memory sink's rows on serverless hosts (the host's uploader takes them at invocation end); a `dropped` row closes an over-budget invocation. */
   drainMemorySink(): unknown[] {
-    return this.sink instanceof MemorySink ? this.sink.drain(this.nowMs()) : [];
+    return this.sink.drain?.(this.nowMs()) ?? [];
   }
 
   static newInstanceId(): string {

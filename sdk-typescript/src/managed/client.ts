@@ -13,6 +13,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { errorNamed } from "../protocol/errors.js";
 
 import { subjectHash as saltedSubjectHash } from "../protocol/assignment.js";
 
@@ -126,6 +127,11 @@ export class ManagedRunError extends Error {
     super(`${code} (${status}): ${message}`);
     this.name = "ManagedRunError";
   }
+}
+
+/** `ManagedRunError` by name and code — true across duplicated package copies. */
+export function isManagedRunError(error: unknown): error is ManagedRunError {
+  return errorNamed<ManagedRefusalCode>(error, "ManagedRunError");
 }
 
 /** The stream: deltas as they arrive, then the assembled result. */

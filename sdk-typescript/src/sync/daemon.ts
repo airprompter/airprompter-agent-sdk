@@ -6,6 +6,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { errorNamed } from "../protocol/errors.js";
 import { existsSync, statSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -41,14 +42,21 @@ export interface DaemonGenerationEvent {
   stagedGeneration: number | null;
 }
 
+export type DaemonErrorCode = "absent" | "not_owner" | "scope_mismatch" | "refused" | "protocol" | "closed";
+
 export class DaemonError extends Error {
   constructor(
-    readonly code: "absent" | "not_owner" | "scope_mismatch" | "refused" | "protocol" | "closed",
+    readonly code: DaemonErrorCode,
     message: string,
   ) {
     super(message);
     this.name = "DaemonError";
   }
+}
+
+/** `DaemonError` by name and code — true across duplicated package copies. */
+export function isDaemonError(error: unknown): error is DaemonError {
+  return errorNamed<DaemonErrorCode>(error, "DaemonError");
 }
 
 /** Unix socket paths are capped (104 bytes on macOS, 108 on Linux); longer store paths use the per-user runtime directory. */
@@ -113,7 +121,7 @@ export class DaemonClient {
       hello = (await client.request("hello", { sdk: input.sdk })) as unknown as DaemonHello;
     } catch (error) {
       client.close();
-      throw error instanceof DaemonError ? error : new DaemonError("protocol", (error as Error).message);
+      throw isDaemonError(error) ? error : new DaemonError("protocol", (error as Error).message);
     }
     if (hello.agentId !== input.agentId || hello.target !== input.target) {
       client.close();

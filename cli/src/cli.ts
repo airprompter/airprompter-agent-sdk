@@ -14,7 +14,7 @@ import { status } from "./commands/status.js";
 import { exportTelemetry, importTelemetry } from "./commands/telemetry.js";
 import { unlock } from "./commands/unlock.js";
 import { verify } from "./commands/verify.js";
-import { CliError, EXIT, type Context } from "./io.js";
+import { CliError, EXIT, type Context, isCliError } from "./io.js";
 import { CLI_VERSION } from "./version.js";
 
 const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<number>; summary: string }> = {
@@ -65,7 +65,7 @@ export async function run(argv: string[], ctx: Context): Promise<number> {
   try {
     return await entry.run(rest, ctx);
   } catch (error) {
-    if (error instanceof CliError) {
+    if (isCliError(error)) {
       if (json) ctx.stdout(JSON.stringify({ ok: false, error: error.message, exitCode: error.exitCode, ...(error.detail ?? {}) }));
       ctx.stderr(`${error.exitCode === EXIT.usage ? "usage" : "refused"}: ${error.message}`);
       return error.exitCode;

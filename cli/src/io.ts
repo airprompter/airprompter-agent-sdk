@@ -5,6 +5,7 @@
  */
 
 import type { FetchLike } from "../../sdk-typescript/src/sync/client.js";
+import { errorNamed } from "../../sdk-typescript/src/protocol/errors.js";
 
 /** Exit codes are the CI contract: scripts branch on them, never on text. */
 export const EXIT = {
@@ -17,6 +18,8 @@ export const EXIT = {
 } as const;
 
 export class CliError extends Error {
+  /** Identity as data (see `isCliError`); the exit code is the meaning. */
+  readonly code = "cli" as const;
   constructor(
     readonly exitCode: number,
     message: string,
@@ -25,6 +28,11 @@ export class CliError extends Error {
     super(message);
     this.name = "CliError";
   }
+}
+
+/** `CliError` by name and code — the CLI links the SDK by path today and by package tomorrow; neither may rely on the class. */
+export function isCliError(error: unknown): error is CliError {
+  return errorNamed(error, "CliError") && typeof (error as { exitCode?: unknown }).exitCode === "number";
 }
 
 export const usage = (message: string): CliError => new CliError(EXIT.usage, message);

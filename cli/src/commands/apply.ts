@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
 import type { Bundle } from "../../../sdk-typescript/src/protocol/types.js";
-import { StoreError } from "../../../sdk-typescript/src/store/slotStore.js";
+import { isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { EXPIRY_WARNING_DAYS, openBundleFile, payloadsOf, verifyChain } from "../chain.js";
 import { GOLDEN_OPTIONS, goldenInvokeOf, runGoldenSets } from "../golden.js";
@@ -52,7 +52,7 @@ export async function apply(argv: string[], ctx: Context): Promise<number> {
   try {
     store = await openStore(parsed, ctx, scope);
   } catch (error) {
-    if (error instanceof StoreError) throw refused(`store: ${error.message}`, { reason: error.code });
+    if (isStoreError(error)) throw refused(`store: ${error.message}`, { reason: error.code });
     throw error;
   }
   const force = flag(parsed, "force");

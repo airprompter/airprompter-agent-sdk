@@ -235,7 +235,7 @@ const done = await stream.result;
 const flow = ap.workflow("onboarding.flow", { subject: userId });
 for (const { stepId } of flow.steps) await flow.step(stepId, vars);
 
-try { await ap.run(…); } catch (e) { if (e instanceof ManagedRunError) e.code; /* typed refusal, e.status, e.retryAfterSeconds */ }
+try { await ap.run(…); } catch (e) { if (isManagedRunError(e)) e.code; /* typed refusal, e.status, e.retryAfterSeconds */ }
 ```
 
 Every run streams under the hood (the edge closes a silent connection at
@@ -260,6 +260,19 @@ writes the same catalogue for build steps.
 | `src/sync/` | `SyncClient` (edge pointer, manifest with ETag, payloads by hash), `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `DaemonClient` (the socket side of `protocol/daemon-socket.md`) |
 
 Every file in `protocol/vectors/` runs through these modules in `test/`.
+
+### Error identity is data, never the class
+
+A lockfile can hold two copies of this package (a sibling package pinning a
+different patch; a bundler duplicating a chunk), and an error thrown by one
+copy is not `instanceof` the class from the other. Every SDK error therefore
+sets `name` and carries a `code`, and the guards read those: `isStoreError`,
+`isDaemonError`, `isAgentStartError`, `isManagedRunError`,
+`isPayloadDecryptError`, and `errorNamed(error, name)` for your own checks.
+Sinks say what they are with `kind` (`"directory"` | `"memory"`) and what
+they can do with optional `drain()` / `depth()`; the runtime branches on
+those, never on `instanceof MemorySink`. `test/discriminants.test.ts` pins
+the rule on every source file, the CLI's included.
 
 ## What the SDK refuses to do
 

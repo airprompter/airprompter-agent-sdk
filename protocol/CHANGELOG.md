@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### SDK — error and sink identity as data (S1, AIR-1969)
+- TypeScript: every SDK error sets `name` and carries a `code`; `isStoreError`, `isDaemonError`, `isAgentStartError`, `isManagedRunError`, `isPayloadDecryptError` and `errorNamed` replace `instanceof`, so an error from a duplicated copy of the package is still recognised. `SpoolSink` gains `kind` and optional `drain()` / `depth()`; the runtime branches on those. `PayloadDecryptError` gains `code: "payload_decrypt_failed"`. A source pin refuses `instanceof` on any SDK class in the SDK and the CLI.
+- Python: `SpoolSink.kind` (`"memory"` / `"directory"`, `"custom"` on the base); the runtime reads `drain` / `depth` by capability.
+- No wire change; vectors unchanged.
+
 - **Golden sets before activation and the customer-side judge** (AIR-1964,
   T34, 5-D / D63): golden-sets.md. A manifest slot (or arm override) may
   carry `goldenSet: { setId, cases, contentHash, byteLength, minPassBps }`

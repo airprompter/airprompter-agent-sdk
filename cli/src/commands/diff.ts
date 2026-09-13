@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
 import type { Bundle, Manifest, ManifestSlot } from "../../../sdk-typescript/src/protocol/types.js";
-import { StoreError } from "../../../sdk-typescript/src/store/slotStore.js";
+import { isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { openBundleFile } from "../chain.js";
 import { EXIT, Output, refused, usage, type Context } from "../io.js";
@@ -104,7 +104,7 @@ export async function diff(argv: string[], ctx: Context): Promise<number> {
   try {
     store = await openStore(parsed, ctx, scope);
   } catch (error) {
-    if (error instanceof StoreError) throw refused(`store: ${error.message}`, { reason: error.code });
+    if (isStoreError(error)) throw refused(`store: ${error.message}`, { reason: error.code });
     throw error;
   }
   let current: Manifest | null = null;

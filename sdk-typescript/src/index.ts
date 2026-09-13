@@ -1,8 +1,9 @@
 export { parseGoldenSet, runGoldenSet, goldenReportsMeet, passBpsOf, GoldenSetError, GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, type GoldenSet, type GoldenCase, type GoldenInvoke, type GoldenInvocation, type GoldenReport, type GoldenCaseResult } from "./golden/index.js";
 export { JUDGE_RUBRICS, PROTECTION_CRITERIA, judgePrompt, parseJudgeReply, rubricFromPrompt, judgeSignalsOf, type JudgeRubric, type JudgeResult } from "./judge/index.js";
-export { AirPrompterAgent, AgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION } from "./agent.js";
+export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION } from "./agent.js";
 export type { AgentStatus, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange } from "./agent.js";
-export { DaemonClient, DaemonError, daemonSocketPath, DAEMON_MAX_LINE_BYTES } from "./sync/daemon.js";
+export { DaemonClient, DaemonError, isDaemonError, daemonSocketPath, DAEMON_MAX_LINE_BYTES } from "./sync/daemon.js";
+export { errorNamed } from "./protocol/errors.js";
 export type { DaemonHello, DaemonSlotResponse, DaemonGenerationEvent } from "./sync/daemon.js";
 
 export { canonicalJson, canonicalBytes, sha256Prefixed, CanonicalJsonError } from "./protocol/canonicalJson.js";
@@ -11,11 +12,11 @@ export { keyThumbprint, publicJwkOf, signBytes, verifyBytes, trustedRootFromPinn
 export type { Verdict, VerifyManifestInput } from "./protocol/trust.js";
 export type * from "./protocol/types.js";
 
-export { SlotStore, StoreError } from "./store/slotStore.js";
+export { SlotStore, StoreError, isStoreError } from "./store/slotStore.js";
 export type { LoadedSlot, SlotName, StoreFile, StoreHooks } from "./store/slotStore.js";
 export { fileKey, customKeyProvider, wrapWithRawKey, unwrapWithRawKey } from "./store/keyProvider.js";
 export type { KeyProvider, StorageProtection } from "./store/keyProvider.js";
-export { encryptPayload, decryptPayload, payloadAad, PayloadDecryptError } from "./store/payloadCrypto.js";
+export { encryptPayload, decryptPayload, payloadAad, PayloadDecryptError, isPayloadDecryptError } from "./store/payloadCrypto.js";
 
 export { createPlaintextBundle, createEncryptedBundle, openBundle, bundlePayloadBytes, distributionKeyId, BundleError, APBUNDLE_INFO } from "./bundle/apbundle.js";
 export type { DistributionKey } from "./bundle/apbundle.js";
@@ -35,7 +36,7 @@ export { syncOnce, jitteredDelayMs } from "./sync/loop.js";
 export type { SyncPassInput, SyncPassOutput, SyncPassResult, ApplyPolicyDecision } from "./sync/loop.js";
 export { normalizeFeedback, type NormalizedFeedback, type FeedbackRejection } from "./spool/feedback.js";
 
-export { ManagedAgent, ManagedRunError, parseSse, MANAGED_SDK_USER_AGENT } from "./managed/client.js";
+export { ManagedAgent, ManagedRunError, isManagedRunError, parseSse, MANAGED_SDK_USER_AGENT } from "./managed/client.js";
 export type { ManagedStartOptions, ManagedRunOptions, ManagedRunResult, ManagedRunStream, ManagedCatalogue, ManagedSlot, ManagedRefusalCode, ManagedFetchLike, ManagedTarget } from "./managed/client.js";
 export { classifyError, classifyResult, normalizeUsage, observeCall, type ObserveOptions, type ObserveTarget, type UsageNormalized } from "./telemetry/observe.js";
 export { CHECK_BOUNDS, checkRefusal, checksRefusals, patternRefusal, validateJsonSchema, valueAtPath, evaluateCheck, evaluateChecks, projectChecks, outputTextOf, estimateTokens, type DeclaredCheck, type CheckResult, type CheckOutcome } from "./checks/index.js";

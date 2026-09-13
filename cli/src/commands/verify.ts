@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 import type { Bundle } from "../../../sdk-typescript/src/protocol/types.js";
-import { SlotStore, StoreError } from "../../../sdk-typescript/src/store/slotStore.js";
+import { SlotStore, isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
 import { fileKey } from "../../../sdk-typescript/src/store/keyProvider.js";
 import { join } from "node:path";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
@@ -65,7 +65,7 @@ export async function verify(argv: string[], ctx: Context): Promise<number> {
     try {
       store = await SlotStore.open({ stateDir: path, agentId: scope.agentId, target: scope.target, keyProvider: fileKey(join(SlotStore.path({ stateDir: path, agentId: scope.agentId, target: scope.target }), "store.key")) });
     } catch (error) {
-      if (error instanceof StoreError) throw refused(`store: ${error.message}`, { reason: error.code });
+      if (isStoreError(error)) throw refused(`store: ${error.message}`, { reason: error.code });
       throw error;
     }
     const state = store.state;
@@ -90,7 +90,7 @@ export async function verify(argv: string[], ctx: Context): Promise<number> {
         }
       } catch (error) {
         allOk = false;
-        const reason = error instanceof StoreError ? `${error.code}${error.detail ? `/${error.detail}` : ""}` : (error as Error).message;
+        const reason = isStoreError(error) ? `${error.code}${error.detail ? `/${error.detail}` : ""}` : (error as Error).message;
         results[label] = { slot, ok: false, reason };
         out.line(`${label} slot ${slot}: REFUSED (${reason})`);
       }

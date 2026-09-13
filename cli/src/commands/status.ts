@@ -9,7 +9,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { instant } from "../../../sdk-typescript/src/protocol/trust.js";
-import { StoreError } from "../../../sdk-typescript/src/store/slotStore.js";
+import { isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
 import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/src/sync/daemon.js";
 import { CLI_VERSION } from "../version.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
@@ -60,7 +60,7 @@ export async function status(argv: string[], ctx: Context): Promise<number> {
   try {
     store = await openStore(parsed, ctx, scope);
   } catch (error) {
-    if (error instanceof StoreError) throw refused(`store: ${error.message}`, { reason: error.code });
+    if (isStoreError(error)) throw refused(`store: ${error.message}`, { reason: error.code });
     throw error;
   }
   const state = store.state;
@@ -89,7 +89,7 @@ export async function status(argv: string[], ctx: Context): Promise<number> {
         if (summary.directives.length) out.line(`directives: ${summary.directives.map((d) => `${d.kind}${d.scope ? ` ${d.scope}` : ""}${d.tag ? ` ${d.tag}` : ""}`).join(", ")}`);
       }
     } catch (error) {
-      const reason = error instanceof StoreError ? `${error.code}${error.detail ? `/${error.detail}` : ""}` : (error as Error).message;
+      const reason = isStoreError(error) ? `${error.code}${error.detail ? `/${error.detail}` : ""}` : (error as Error).message;
       out.set(label, { slot, verified: false, reason });
       out.line(`${label}: slot ${slot} does not verify (${reason})`);
     }

@@ -1251,7 +1251,8 @@ class AirPrompterAgent:
         state = self._store.state if self._store else None
         manifest = self._active.manifest["payload"] if self._active else None
         lease_expires_at = self._lease_expires_at()
-        depth = self._sink.depth() if isinstance(self._sink, DirectorySink) else {"segments": 0, "bytes": 0}
+        depth_of = getattr(self._sink, "depth", None)
+        depth = depth_of() if callable(depth_of) else {"segments": 0, "bytes": 0}
         if self._staged_manifest is not None or (self._daemon_socket and self._daemon_staged_generation is not None):
             apply_state = "awaiting_unlock"
         elif self._last_refusal:
@@ -1324,7 +1325,8 @@ class AirPrompterAgent:
 
     def drain_memory_sink(self) -> list[dict[str, Any]]:
         """The memory sink's rows on serverless hosts (the host's uploader takes them at invocation end); a ``dropped`` row closes an over-budget invocation."""
-        return self._sink.drain(self._now_ms()) if isinstance(self._sink, MemorySink) else []
+        drain = getattr(self._sink, "drain", None)
+        return drain(self._now_ms()) if callable(drain) else []
 
     def refusal_row(self, *, at: str, reason: str, generation: int, tag: Optional[str]) -> None:
         self.spool.refusal(at=at, reason=reason, generation=generation, tag=tag, at_ms=self._now_ms())

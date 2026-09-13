@@ -17,6 +17,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { errorNamed } from "../protocol/errors.js";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -24,7 +25,7 @@ import { sha256Prefixed } from "../protocol/canonicalJson.js";
 import { referencedPayloads, verifyManifest, type Verdict } from "../protocol/trust.js";
 import type { Manifest, RefusalCode, RootMetadata, Target } from "../protocol/types.js";
 import type { KeyProvider, StorageProtection } from "./keyProvider.js";
-import { decryptPayload, encryptPayload, payloadAad, PayloadDecryptError } from "./payloadCrypto.js";
+import { decryptPayload, encryptPayload, isPayloadDecryptError, payloadAad } from "./payloadCrypto.js";
 
 export type SlotName = "A" | "B";
 
@@ -60,15 +61,22 @@ export interface LoadedSlot {
   payloads: Map<string, Buffer>;
 }
 
+export type StoreErrorCode = "kek_unavailable" | "store_corrupt" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged";
+
 export class StoreError extends Error {
   constructor(
-    readonly code: "kek_unavailable" | "store_corrupt" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged",
+    readonly code: StoreErrorCode,
     message: string,
     readonly detail?: RefusalCode | string,
   ) {
     super(message);
     this.name = "StoreError";
   }
+}
+
+/** `StoreError` by name and code — true for one thrown by another copy of this package too. */
+export function isStoreError(error: unknown): error is StoreError {
+  return errorNamed<StoreErrorCode>(error, "StoreError");
 }
 
 const otherSlot = (slot: SlotName): SlotName => (slot === "A" ? "B" : "A");
@@ -290,7 +298,7 @@ export class SlotStore {
       try {
         payloads.set(hash, decryptPayload(this.dek, readFileSync(path), payloadAad({ agentId: this.file.agentId, target: this.file.target, generation, contentHash: hash })));
       } catch (error) {
-        if (error instanceof PayloadDecryptError) throw new StoreError("slot_corrupt", `payload ${hash} does not decrypt for this slot`, "payload_hash_mismatch");
+        if (isPayloadDecryptError(error)) throw new StoreError("slot_corrupt", `payload ${hash} does not decrypt for this slot`, "payload_hash_mismatch");
         throw error;
       }
     }

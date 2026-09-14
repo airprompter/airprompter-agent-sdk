@@ -27,6 +27,7 @@ import {
 import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./trust.mjs";
 import { LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "./spool.mjs";
 import { checksRefusals, evaluateChecks, patternRefusal, projectChecks } from "./checks.mjs";
+import { spoolRowsToOtlp } from "./otel.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const protocolDir = join(here, "..", "protocol");
@@ -422,6 +423,25 @@ for (const c of ck.patterns) {
   const got = patternRefusal(c.pattern);
   if (got === c.refusal) ok(`checks: pattern ${JSON.stringify(c.pattern).slice(0, 40)} → ${c.refusal ?? "accepted"}`);
   else fail(`checks: pattern ${JSON.stringify(c.pattern).slice(0, 40)}`, `got ${got}, expected ${c.refusal}`);
+}
+
+// ---------------------------------------------------------------------------
+section("vectors: OpenTelemetry mapping (S13, docs/telemetry.md)");
+const otel = readJson(join(protocolDir, "vectors", "otel-mapping.json"));
+const protocolVersion = readFileSync(join(protocolDir, "VERSION"), "utf8").trim();
+if (otel.protocol !== protocolVersion) fail("otel-mapping.json protocol", `${otel.protocol} vs ${protocolVersion}`);
+if (sameJson(otel.explicitBoundsSeconds, LATENCY_BUCKET_EDGES_MS.slice(0, -1).map((e) => e / 1000))) ok("otel: the histogram's bounds are the spool's buckets in seconds, the last bucket the overflow");
+else fail("otel: the histogram's bounds are the spool's buckets in seconds", JSON.stringify(otel.explicitBoundsSeconds));
+for (const c of otel.cases) {
+  const got = spoolRowsToOtlp(c.rows, { resource: c.resource });
+  if (sameJson(got, c.expected)) ok(`otel: ${c.name}`);
+  else fail(`otel: ${c.name}`, `the reference's request differs from the vector`);
+  // Nothing in the request is prompt text or an end-user identifier: every attribute key is from the documented set.
+  const keys = new Set(JSON.stringify(got).match(/"key":"([^"]+)"/g)?.map((m) => m.slice(7, -1)) ?? []);
+  const allowed = new Set(["service.instance.id", "airprompter.instance.class", "telemetry.sdk.name", "telemetry.sdk.version", "gen_ai.request.model", "airprompter.prompt.tag", "airprompter.prompt.version", "airprompter.prompt.arm", "airprompter.status", "airprompter.usage.source", "error.type", "gen_ai.token.type", "airprompter.check.outcome", "airprompter.feedback.signal", "airprompter.refusal.reason", "airprompter.generation", ...Object.keys(c.resource)]);
+  const strangers = [...keys].filter((k) => !allowed.has(k));
+  if (strangers.length === 0) ok(`otel: ${c.name} — every attribute key is a documented one`);
+  else fail(`otel: ${c.name} — every attribute key is a documented one`, strangers.join(", "));
 }
 for (const c of ck.declarations) {
   const got = checksRefusals(c.checks);

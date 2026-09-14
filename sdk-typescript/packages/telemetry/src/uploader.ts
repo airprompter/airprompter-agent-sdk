@@ -31,7 +31,7 @@ import { fsFailureCode, type FsPort } from "@airprompter/agent-core";
 import { join } from "node:path";
 
 import { HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epochMinute, segmentName, type ErrorClass, type SpoolRow } from "./spool/writer.js";
-import type { FetchLike } from "@airprompter/agent-core";
+import type { FetchLike, UploadSink } from "@airprompter/agent-core";
 
 export const UPLOAD_BACKOFF_BASE_MS = 1000;
 export const UPLOAD_BACKOFF_CAP_MS = 5 * 60 * 1000;
@@ -225,9 +225,14 @@ export interface UploaderOptions {
   dir: string;
   /** The daemon's own instance id: `dropped` rows written by the budget sweep name it. */
   instanceId: string;
-  /** A grant for one writer's prefix — the heartbeat carrying that writer's instance id. */
-  grantFor: (instanceId: string) => Promise<GrantDecision>;
-  fetch: FetchLike;
+  /** A grant for one writer's prefix — the heartbeat carrying that writer's instance id (AirPrompter's sink). */
+  grantFor?: (instanceId: string) => Promise<GrantDecision>;
+  fetch?: FetchLike;
+  /**
+   * S13: where validated segments go. Absent: AirPrompter's sink over `grantFor` + `fetch`. The OpenTelemetry bridge
+   * (`@airprompter/otel-bridge`) or a customer's own sink takes the same segments with no AirPrompter grant at all.
+   */
+  sink?: UploadSink;
   now?: () => number;
   /** The filesystem (S2): the Node port by default; a fake that fills, fails or loses files in tests. */
   fs?: FsPort;
@@ -245,6 +250,8 @@ export interface UploaderOptions {
 }
 
 export interface UploaderStatus {
+  /** S13: which sink the segments go to. */
+  sink: string;
   lastUploadAt: string | null;
   lastError: string | null;
   backoffUntil: string | null;
@@ -272,8 +279,49 @@ export interface PassResult {
   held: boolean;
 }
 
+/**
+ * AirPrompter's sink: one grant per writer prefix (the daemon's heartbeat carrying that writer's instance id), a PUT of
+ * exactly the whole lines to the customer's own prefix; a grant that lapsed between the check and the bucket's clock is
+ * refreshed once. `onGrant` lets the uploader take the grant's cadence.
+ */
+export function airprompterUploadSink(input: { grantFor: (instanceId: string) => Promise<GrantDecision>; fetch: FetchLike; now?: () => number; onGrant?: (decision: Extract<GrantDecision, { kind: "grant" }>) => void }): UploadSink & { readonly grants: Map<string, UploadGrant> } {
+  const now = input.now ?? (() => Date.now());
+  const grants = new Map<string, UploadGrant>();
+  const grantFor = async (instanceId: string): Promise<GrantDecision> => {
+    const held = grants.get(instanceId);
+    if (held && Date.parse(held.expiresAt) - GRANT_REFRESH_MARGIN_MS > now()) return { kind: "grant", grant: held };
+    grants.delete(instanceId);
+    const decision = await input.grantFor(instanceId);
+    if (decision.kind === "grant") {
+      grants.set(instanceId, decision.grant);
+      input.onGrant?.(decision);
+    }
+    return decision;
+  };
+  return {
+    kind: "airprompter",
+    grants,
+    status: () => ({ grants: [...grants].map(([instanceId, grant]) => ({ instanceId, expiresAt: grant.expiresAt })) }),
+    async ship(segment) {
+      const decision = await grantFor(segment.instanceId);
+      if (decision.kind === "hold") return { status: "hold", retryAfterMs: decision.retryAfterSeconds * 1000, ...(decision.reason !== undefined ? { reason: decision.reason } : {}) };
+      if (decision.kind === "unavailable") return { status: "failed", reason: `grant:${decision.reason}` };
+      let outcome = await postSegment({ grant: decision.grant, segment: segment.segment, bytes: segment.bytes, fetch: input.fetch, now });
+      if (outcome.status === "refused" && outcome.expired) {
+        // The grant lapsed between the check and the bucket's clock: one fresh grant, one more try.
+        grants.delete(segment.instanceId);
+        const fresh = await grantFor(segment.instanceId);
+        if (fresh.kind === "grant") outcome = await postSegment({ grant: fresh.grant, segment: segment.segment, bytes: segment.bytes, fetch: input.fetch, now });
+      }
+      if (outcome.status === "ok") return { status: "ok" };
+      if (outcome.status === "too_large") return { status: "too_large", bytes: outcome.bytes };
+      return { status: "failed", reason: outcome.status === "refused" ? `http_${outcome.httpStatus}` : `network:${outcome.reason}` };
+    },
+  };
+}
+
 export class SpoolUploader {
-  private readonly grants = new Map<string, UploadGrant>();
+  private readonly sink: UploadSink;
   private lastUploadMs: number | null = null;
   private lastError: string | null = null;
   private backoffUntilMs: number | null = null;
@@ -296,6 +344,18 @@ export class SpoolUploader {
   constructor(private readonly options: UploaderOptions) {
     this.intervalSeconds = options.intervalSeconds ?? 300;
     this.fs = options.fs ?? nodeFs;
+    if (options.sink) this.sink = options.sink;
+    else {
+      if (!options.grantFor || !options.fetch) throw new Error("SpoolUploader: a sink, or grantFor + fetch for AirPrompter's, is required");
+      this.sink = airprompterUploadSink({
+        grantFor: options.grantFor,
+        fetch: options.fetch,
+        now: () => this.now(),
+        onGrant: (decision) => {
+          if (decision.uploadIntervalSeconds && decision.uploadIntervalSeconds >= 1) this.intervalSeconds = decision.uploadIntervalSeconds;
+        },
+      });
+    }
     this.fs.mkdirp(join(options.dir, "quarantine"), 0o700);
     this.fs.mkdirp(join(options.dir, "exported"), 0o700);
   }
@@ -462,18 +522,6 @@ export class SpoolUploader {
     this.log({ event: "segment_quarantined", segment: name, reason, ...(detail !== undefined ? { detail } : {}) });
   }
 
-  private async grantFor(instanceId: string): Promise<GrantDecision> {
-    const held = this.grants.get(instanceId);
-    if (held && Date.parse(held.expiresAt) - GRANT_REFRESH_MARGIN_MS > this.now()) return { kind: "grant", grant: held };
-    this.grants.delete(instanceId);
-    const decision = await this.options.grantFor(instanceId);
-    if (decision.kind === "grant") {
-      this.grants.set(instanceId, decision.grant);
-      if (decision.uploadIntervalSeconds && decision.uploadIntervalSeconds >= 1) this.intervalSeconds = decision.uploadIntervalSeconds;
-    }
-    return decision;
-  }
-
   /** One pass: sweep, budget, then each closed segment oldest first — validate, grant, POST, move — until the spool is empty, a hold, or a failure. Never throws. */
   runOnce(): Promise<PassResult> {
     if (this.inFlight) return this.inFlight;
@@ -515,27 +563,23 @@ export class SpoolUploader {
           this.guard("ack_segment", () => this.fs.unlink(path));
           continue;
         }
-        const decision = await this.grantFor(instanceId);
-        if (decision.kind === "hold") {
-          this.backoffUntilMs = this.now() + decision.retryAfterSeconds * 1000;
-          this.lastError = `hold:${decision.reason ?? "retry_after"}`;
-          this.log({ event: "upload_held", retryAfterSeconds: decision.retryAfterSeconds, reason: decision.reason ?? null });
-          result.held = true;
-          return result;
-        }
-        if (decision.kind === "unavailable") {
-          this.fail(`grant:${decision.reason}`);
-          result.held = true;
-          return result;
-        }
-        // The partial tail (a crashed writer's last line) is not sent: the bytes posted are exactly the whole lines.
+        // The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines.
         const payload = inspection.partialTail ? Buffer.from(bytes.subarray(0, bytes.lastIndexOf(0x0a) + 1)) : bytes;
-        let outcome = await postSegment({ grant: decision.grant, segment: name, bytes: payload, fetch: this.options.fetch, now: () => this.now() });
-        if (outcome.status === "refused" && outcome.expired) {
-          // The grant lapsed between the check and the bucket's clock: one fresh grant, one more try.
-          this.grants.delete(instanceId);
-          const fresh = await this.grantFor(instanceId);
-          if (fresh.kind === "grant") outcome = await postSegment({ grant: fresh.grant, segment: name, bytes: payload, fetch: this.options.fetch, now: () => this.now() });
+        const outcome = await this.sink.ship({ instanceId, segment: name, rows: inspection.rows, bytes: payload });
+        if (outcome.status === "hold") {
+          this.backoffUntilMs = this.now() + outcome.retryAfterMs;
+          this.lastError = `hold:${outcome.reason ?? "retry_after"}`;
+          this.log({ event: "upload_held", retryAfterSeconds: Math.round(outcome.retryAfterMs / 1000), reason: outcome.reason ?? null });
+          result.held = true;
+          return result;
+        }
+        if (outcome.status === "dropped") {
+          // S13: the sink gave this segment up for good (the bridge's drop-and-count): deleted, counted, never silent.
+          this.guard("drop_segment", () => this.fs.unlink(path));
+          this.droppedSegments += 1;
+          result.dropped += 1;
+          this.log({ event: "segment_dropped_by_sink", segment: name, sink: this.sink.kind, reason: outcome.reason });
+          continue;
         }
         if (outcome.status === "ok") {
           // S6: delete on ack. The object key is the file name, so a lost response replays to the same key; nothing is kept here.
@@ -554,7 +598,7 @@ export class SpoolUploader {
           result.quarantined.push(name);
           continue;
         }
-        this.fail(outcome.status === "refused" ? `http_${outcome.httpStatus}` : `network:${outcome.reason}`);
+        this.fail(outcome.reason);
         result.held = true;
         return result;
       }
@@ -613,7 +657,8 @@ export class SpoolUploader {
       sentSegments: this.sentSegments,
       quarantinedSegments: this.quarantinedSegments,
       droppedSegments: this.droppedSegments,
-      grants: [...this.grants].map(([instanceId, grant]) => ({ instanceId, expiresAt: grant.expiresAt })),
+      sink: this.sink.kind,
+      grants: ((this.sink.status?.() as { grants?: Array<{ instanceId: string; expiresAt: string }> } | undefined)?.grants ?? []),
       depth: this.depth(),
       tree: this.tree(),
       reclaimedSegments: this.reclaimedSegments,

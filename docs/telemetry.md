@@ -27,27 +27,96 @@ runtime itself, on a host that runs none.
 
 Window fields follow the OpenTelemetry GenAI semantic conventions where one
 exists, so an OTLP exporter is a renaming, not a redesign. This is the
-mapping the protocol pins; it is repeated here so a platform team can read
-it without the format:
+mapping the protocol pins (`protocol/vectors/otel-mapping.json`, S13) and
+the bridge ships; it is repeated here so a platform team can read it
+without the format:
 
-| Window field | OTel GenAI attribute / metric | Note |
+| Window field | OTel metric / attribute | Note |
 |---|---|---|
-| `model` | `gen_ai.request.model` | as the provider names it |
-| `tokens.input` | `gen_ai.usage.input_tokens` | uncached; OpenAI's `cached_tokens` are split out |
-| `tokens.cachedInput` | `gen_ai.usage.cache_read.input_tokens` | proposed convention |
-| `tokens.output` | `gen_ai.usage.output_tokens` | |
-| `latencyMs` (buckets + sum) | `gen_ai.client.operation.duration` | histogram; OTel's unit is seconds, the spool's is milliseconds |
-| `errorClass` | `error.type` | one of the fixed error classes |
-| `status` | derived: `error.type` present | |
-| `count` | the histogram's count | a window with no runs (feedback-only, a golden run) has `count: 0` |
-| `checks.passed` / `checks.failed` | custom counters `airprompter.checks.passed` / `.failed` | declared output checks (`checks.md`) |
-| `outcomes.<signal>.{n,sum}` | custom `airprompter.feedback.<signal>` (n, sum) | the declared catalogue; `goldenPass` from a golden-set run |
-| `tag`, `versionId`, `arm` | `airprompter.prompt.tag`, `.version`, `.arm` | custom attributes; the arm is `none` outside a rollout |
-| `sdk` | `telemetry.sdk.name` / `telemetry.sdk.version` | a **dimension at ingest**, so a misreporting writer is isolated |
-| `instanceId`, `instanceClass` | `service.instance.id`; `airprompter.instance.class` | random, persisted; `resident` or `ephemeral` |
+| `model` | attribute `gen_ai.request.model` | as the provider names it |
+| `latencyMs` (buckets + sum), `count` | histogram `gen_ai.client.operation.duration` (unit `s`) | the spool's fixed buckets as `explicitBounds` in seconds, the last bucket as overflow; a window with no runs (feedback-only, a golden run) has `count: 0` |
+| `tokens.input` / `.cachedInput` / `.output` | sum `airprompter.tokens` by `gen_ai.token.type` = `input` / `cached_input` / `output` | `input` is uncached; OpenAI's `cached_tokens` are split out |
+| `errorClass` | attribute `error.type` | one of the fixed error classes; absent on `ok` |
+| `status`, `usageSource` | attributes `airprompter.status`, `airprompter.usage.source` | `reported` / `estimated` / `unavailable` |
+| `checks.passed` / `checks.failed` | sum `airprompter.checks` by `airprompter.check.outcome` | declared output checks (`checks.md`) |
+| `outcomes.<signal>.{n,sum}` | sums `airprompter.feedback.count` (monotonic) and `airprompter.feedback.sum` (not) by `airprompter.feedback.signal` | the declared catalogue; a rate is sum / count; `goldenPass` from a golden-set run |
+| `tag`, `versionId`, `arm` | attributes `airprompter.prompt.tag`, `.version`, `.arm` | the arm is `none` outside a rollout |
+| `sdk` | resource `telemetry.sdk.name` / `telemetry.sdk.version` | a **dimension at ingest**, so a misreporting writer is isolated |
+| `instanceId`, `instanceClass` | resource `service.instance.id`; `airprompter.instance.class` | random, persisted; `resident` or `ephemeral` |
+| `refusal` row | sum `airprompter.refusals` by `airprompter.refusal.reason`, `airprompter.generation` (+ `.prompt.tag`) | a render refused |
+| `dropped` row | sums `airprompter.spool.dropped_segments`, `airprompter.spool.dropped_bytes` | the budget's loss, reported |
 
-A `runRef` (the content-free receipt `render()` returns) is what your
-own traces correlate on; it never enters a window.
+Every sum is delta temporality; a window's points carry the minute's start
+and end as `startTimeUnixNano` / `timeUnixNano`. A `runRef` (the
+content-free receipt `render()` returns) is what your own traces correlate
+on; it never enters a window.
+
+## Exporting to OpenTelemetry (S13)
+
+A team that already runs an OpenTelemetry collector will not run a second
+sidecar holding an Agent key. The bridge makes the spool an OTLP exporter:
+every validated segment becomes one OTLP/HTTP JSON
+`ExportMetricsServiceRequest` — the table above, exactly — and goes to the
+collector, **never to AirPrompter**. No grant is requested, no key is
+needed; a host with a vendored bundle and no network to AirPrompter still
+exports. The uploader keeps owning the spool (the sweep, the budget, the
+quarantine, delete on ack); the bridge only maps and sends. It is its own
+package, `@airprompter/otel-bridge` (`airprompter_agent_telemetry.otel` in
+Python), depending on core alone; the facade never pulls it in.
+
+Three ways to run it:
+
+```sh
+# The daemon, for every writer on the host — no AIRPROMPTER_AGENT_KEY at all:
+airprompterd --org … --agent … --environment prod --root root.jwk.json \
+  --upload-sink otlp --otlp-endpoint http://localhost:4318/v1/metrics \
+  --otlp-header 'authorization=$OTEL_TOKEN' --otlp-resource service.name=support-bot
+```
+
+```ts
+// In-process, the facade:
+import { otlpUploadSink } from "@airprompter/otel-bridge";
+const ap = await AirPrompterAgent.start({ ..., telemetry: { uploadSink: otlpUploadSink({ endpoint: "http://localhost:4318/v1/metrics", resource: { "service.name": "support-bot" } }) } });
+```
+
+```python
+from airprompter_agent_telemetry.otel import OtlpUploadSink
+ap = AirPrompterAgent.start(..., telemetry=TelemetryOptions(upload_sink=OtlpUploadSink(endpoint="http://localhost:4318/v1/metrics", resource={"service.name": "support-bot"})))
+```
+
+The rules, each a vector:
+
+- **Drop and count on a collector's refusal.** A collector that answers
+  4xx or 5xx has decided: the segment is deleted, counted (`droppedSegments`
+  in `status`, `segment_dropped_by_sink` in the log with the sink and the
+  reason), and the next segment is tried — a spool that fills behind a
+  misconfigured collector is the worse outcome. A `429` / `503` with
+  `Retry-After` is a hold for that long, the segment kept. A collector that
+  **never answered** (connection refused, a timeout — a restart mid-pass)
+  has not decided: the segment is kept under the uploader's backoff and the
+  budget (the S6 invariant bounds it), so a blip does not wipe a backlog.
+- **Nothing here reads a prompt.** The attribute keys are the closed set in
+  the table; the rows carry no text and no variable value.
+- **Headers from the environment.** `--otlp-header 'name=$VAR'` (quoted, so
+  the shell leaves it) takes the value from the daemon's environment, never
+  from argv, so a hosted collector's token does not appear in a process
+  list; an unset variable is a usage error, never an empty header.
+- **Exporter-pluggable.** The built-in exporter is OTLP/HTTP with the JSON
+  encoding over `fetch` / httpx and needs no OpenTelemetry dependency. The
+  sink takes any `exporter` — `@opentelemetry/exporter-metrics-otlp-proto`
+  or `-grpc` wrapped in a few lines, or your own — so the protobuf and gRPC
+  paths need no code in the SDK.
+- **A sink is a port.** `UploadSink` (`@airprompter/agent-core`) is what
+  `SpoolUploader` ships to: `ship(segment) → ok | hold | failed | dropped |
+  too_large`. AirPrompter's sink and the bridge are the two that ship;
+  yours takes the same validated segments (`sink:` on the uploader,
+  `telemetry.uploadSink` on the facade).
+
+Vectors: `protocol/vectors/otel-mapping.json` (generated by
+`protocol/tools/gen_otel_vectors.py` from this prose; both SDKs reproduce it
+byte for byte and `conformance/run.mjs` checks the attribute set),
+`sdk-typescript/test/otelBridge.test.ts`, `sdk-python/tests/test_otel_bridge.py`,
+`cli/test/otelDaemon.test.ts` (the daemon against a collector with no key).
 
 ## What the writer does when the disk says no
 

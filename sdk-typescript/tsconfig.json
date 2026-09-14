@@ -24,6 +24,9 @@
       ],
       "@airprompter/agent-sdk/testing": [
         "packages/sdk/src/testing.ts"
+      ],
+      "@airprompter/otel-bridge": [
+        "packages/otel-bridge/src/index.ts"
       ]
     }
   },

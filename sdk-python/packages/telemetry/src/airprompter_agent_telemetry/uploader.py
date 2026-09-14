@@ -31,6 +31,7 @@ import httpx
 
 from airprompter_agent_core._util import instant, iso_ms
 from airprompter_agent_core.ports import FsPort, OsFs, fs_failure_code
+from airprompter_agent_core.telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 from .spool.writer import HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epoch_minute, segment_name
 
 UPLOAD_BACKOFF_BASE_MS = 1000
@@ -294,13 +295,62 @@ class PassResult:
     held: bool = False
 
 
+class AirPrompterUploadSink:
+    """AirPrompter's sink (S13): one grant per writer prefix (the daemon's heartbeat carrying that writer's instance id), a
+    POST of exactly the whole lines to the customer's own prefix. A lapsed grant is replaced once; a throttled heartbeat is
+    a hold; a refused or unreachable bucket is a failure under backoff, the segment kept."""
+
+    kind = "airprompter"
+
+    def __init__(self, *, grant_for: Callable[[str], GrantDecision], transport: Optional[httpx.BaseTransport] = None, now_ms: Optional[Callable[[], float]] = None, on_grant: Optional[Callable[[GrantDecision], None]] = None):
+        self._grant_for_writer = grant_for
+        self._transport = transport
+        self._now_ms = now_ms or (lambda: time.time() * 1000)
+        self._on_grant = on_grant
+        self.grants: dict[str, UploadGrant] = {}
+
+    def status(self) -> dict[str, Any]:
+        return {"grants": [{"instanceId": instance_id, "expiresAt": grant.expires_at} for instance_id, grant in self.grants.items()]}
+
+    def grant_for(self, instance_id: str) -> GrantDecision:
+        held = self.grants.get(instance_id)
+        if held is not None and instant(held.expires_at) - GRANT_REFRESH_MARGIN_MS > self._now_ms():
+            return GrantDecision("grant", grant=held)
+        self.grants.pop(instance_id, None)
+        decision = self._grant_for_writer(instance_id)
+        if decision.kind == "grant" and decision.grant is not None:
+            self.grants[instance_id] = decision.grant
+            if self._on_grant is not None:
+                self._on_grant(decision)
+        return decision
+
+    def ship(self, segment: UploadSegment) -> UploadOutcome:
+        decision = self.grant_for(segment.instance_id)
+        if decision.kind == "hold":
+            return UploadOutcome("hold", reason=decision.reason, retry_after_ms=int(decision.retry_after_seconds or 900) * 1000)
+        if decision.kind != "grant" or decision.grant is None:
+            return UploadOutcome("failed", reason=f"grant:{decision.reason}")
+        outcome = post_segment(grant=decision.grant, segment=segment.segment, data=segment.data, transport=self._transport, now_ms=self._now_ms)
+        if outcome.status == "refused" and outcome.expired:
+            # The grant lapsed between the check and the bucket's clock: one fresh grant, one more try.
+            self.grants.pop(segment.instance_id, None)
+            fresh = self.grant_for(segment.instance_id)
+            if fresh.kind == "grant" and fresh.grant is not None:
+                outcome = post_segment(grant=fresh.grant, segment=segment.segment, data=segment.data, transport=self._transport, now_ms=self._now_ms)
+        if outcome.status == "ok":
+            return UploadOutcome("ok")
+        if outcome.status == "too_large":
+            return UploadOutcome("too_large", byte_count=outcome.byte_count)
+        return UploadOutcome("failed", reason=f"http_{outcome.http_status}" if outcome.status == "refused" else f"network:{outcome.reason}")
+
+
 class SpoolUploader:
     def __init__(
         self,
         *,
         directory: str,
         instance_id: str,
-        grant_for: Callable[[str], GrantDecision],
+        grant_for: Optional[Callable[[str], GrantDecision]] = None,
         transport: Optional[httpx.BaseTransport] = None,
         now_ms: Optional[Callable[[], float]] = None,
         fs: Optional[FsPort] = None,
@@ -312,11 +362,10 @@ class SpoolUploader:
         exported_cap_bytes: Optional[int] = None,
         open_reclaim_ms: Optional[int] = None,
         interval_seconds: int = 300,
+        sink: Optional[UploadSink] = None,
     ):
         self.dir = directory
         self.instance_id = instance_id
-        self._grant_for_writer = grant_for
-        self._transport = transport
         self._now_ms = now_ms
         self._fs: FsPort = fs or OsFs()
         self._rand = rand or _random.random
@@ -329,7 +378,18 @@ class SpoolUploader:
         self._reclaimed_segments = 0
         self._cap_evicted_files = 0
         self._interval_seconds = interval_seconds
-        self._grants: dict[str, UploadGrant] = {}
+        # S13: where validated segments go. AirPrompter's sink unless the caller brings one (the OpenTelemetry bridge, their own).
+        if sink is not None:
+            self._sink: UploadSink = sink
+        else:
+            if grant_for is None:
+                raise ValueError("SpoolUploader: a sink, or grant_for for AirPrompter's, is required")
+
+            def on_grant(decision: GrantDecision) -> None:
+                if decision.upload_interval_seconds and decision.upload_interval_seconds >= 1:
+                    self._interval_seconds = int(decision.upload_interval_seconds)
+
+            self._sink = AirPrompterUploadSink(grant_for=grant_for, transport=transport, now_ms=self._now, on_grant=on_grant)
         self._last_upload_ms: Optional[float] = None
         self._last_error: Optional[str] = None
         self._backoff_until_ms: Optional[float] = None
@@ -511,17 +571,9 @@ class SpoolUploader:
         self._quarantined_segments += 1
         self._log({"event": "segment_quarantined", "segment": name, "reason": reason, **({"detail": detail} if detail is not None else {})})
 
-    def _grant_for(self, instance_id: str) -> GrantDecision:
-        held = self._grants.get(instance_id)
-        if held is not None and instant(held.expires_at) - GRANT_REFRESH_MARGIN_MS > self._now():
-            return GrantDecision("grant", grant=held)
-        self._grants.pop(instance_id, None)
-        decision = self._grant_for_writer(instance_id)
-        if decision.kind == "grant" and decision.grant is not None:
-            self._grants[instance_id] = decision.grant
-            if decision.upload_interval_seconds and decision.upload_interval_seconds >= 1:
-                self._interval_seconds = int(decision.upload_interval_seconds)
-        return decision
+    @property
+    def sink(self) -> UploadSink:
+        return self._sink
 
     # ------------------------------------------------------------------ the pass
 
@@ -560,27 +612,23 @@ class SpoolUploader:
                     # Nothing to say (an empty or partial-only segment): acknowledged locally, never uploaded.
                     self._guard("ack_segment", lambda: self._fs.unlink(path))
                     continue
-                decision = self._grant_for(instance_id)
-                if decision.kind == "hold":
-                    retry = int(decision.retry_after_seconds or 900)
-                    self._backoff_until_ms = self._now() + retry * 1000
-                    self._last_error = f"hold:{decision.reason or 'retry_after'}"
-                    self._log({"event": "upload_held", "retryAfterSeconds": retry, "reason": decision.reason})
-                    result.held = True
-                    return result
-                if decision.kind != "grant" or decision.grant is None:
-                    self._fail(f"grant:{decision.reason}")
-                    result.held = True
-                    return result
-                # The partial tail (a crashed writer's last line) is not sent: the bytes posted are exactly the whole lines.
+                # The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines.
                 payload = data[: data.rfind(b"\n") + 1] if inspection.partial_tail else data
-                outcome = post_segment(grant=decision.grant, segment=name, data=payload, transport=self._transport, now_ms=self._now)
-                if outcome.status == "refused" and outcome.expired:
-                    # The grant lapsed between the check and the bucket's clock: one fresh grant, one more try.
-                    self._grants.pop(instance_id, None)
-                    fresh = self._grant_for(instance_id)
-                    if fresh.kind == "grant" and fresh.grant is not None:
-                        outcome = post_segment(grant=fresh.grant, segment=name, data=payload, transport=self._transport, now_ms=self._now)
+                outcome = self._sink.ship(UploadSegment(instance_id=instance_id, segment=name, rows=inspection.rows, data=payload))
+                if outcome.status == "hold":
+                    retry_ms = int(outcome.retry_after_ms or 900_000)
+                    self._backoff_until_ms = self._now() + retry_ms
+                    self._last_error = f"hold:{outcome.reason or 'retry_after'}"
+                    self._log({"event": "upload_held", "retryAfterSeconds": round(retry_ms / 1000), "reason": outcome.reason})
+                    result.held = True
+                    return result
+                if outcome.status == "dropped":
+                    # S13: the sink gave this segment up for good (the bridge's drop-and-count): deleted, counted, never silent.
+                    self._guard("drop_segment", lambda: self._fs.unlink(path))
+                    self._dropped_segments += 1
+                    result.dropped += 1
+                    self._log({"event": "segment_dropped_by_sink", "segment": name, "sink": self._sink.kind, "reason": outcome.reason})
+                    continue
                 if outcome.status == "ok":
                     # S6: delete on ack. The object key is the file name, so a lost response replays to the same key; nothing is kept here.
                     self._guard("ack_segment", lambda: self._fs.unlink(path))
@@ -596,7 +644,7 @@ class SpoolUploader:
                     self._quarantine(name, "oversize", outcome.byte_count)
                     result.quarantined.append(name)
                     continue
-                self._fail(f"http_{outcome.http_status}" if outcome.status == "refused" else f"network:{outcome.reason}")
+                self._fail(outcome.reason or "failed")
                 result.held = True
                 return result
             return result
@@ -661,7 +709,8 @@ class SpoolUploader:
             "sentSegments": self._sent_segments,
             "quarantinedSegments": self._quarantined_segments,
             "droppedSegments": self._dropped_segments,
-            "grants": [{"instanceId": instance_id, "expiresAt": grant.expires_at} for instance_id, grant in self._grants.items()],
+            "sink": self._sink.kind,
+            "grants": list(sink_status(self._sink).get("grants") or []),
             "depth": self.depth(),
             "tree": self.tree(),
             "reclaimedSegments": self._reclaimed_segments,

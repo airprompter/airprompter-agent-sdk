@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "@airprompter/agent-core";
 import { rampWeightsAt } from "@airprompter/agent-core";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
-import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target } from "@airprompter/agent-core";
+import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target, UploadSink } from "@airprompter/agent-core";
 import { parseRunRef } from "@airprompter/agent-core";
 import type { Delimiters } from "@airprompter/agent-core";
 import { normalizeFeedback } from "@airprompter/agent-core";
@@ -106,6 +106,12 @@ export interface StartOptions {
      * operator's `airprompter export-telemetry`; the budget still holds and `dropped` rows still count.
      */
     upload?: boolean;
+    /**
+     * S13: where the uploader ships validated segments. Absent: AirPrompter's sink (a grant per writer, a PUT to your
+     * prefix). `otlpUploadSink(...)` from `@airprompter/otel-bridge` sends the windows to your OpenTelemetry collector
+     * instead — no grant is ever requested — and a customer's own sink takes the same segments.
+     */
+    uploadSink?: UploadSink;
     /**
      * S5: serverless (`on_invoke`) — `invoke()` waits for the invocation's rows to land before it returns
      * (`"await"`, the default: one POST under the runtime's own grant, never more than the buffer). `"background"`
@@ -559,6 +565,9 @@ export class AirPrompterAgent {
       // The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
       void this.heartbeatNow().finally(() => this.scheduleHeartbeat());
       this.startUploader();
+    } else if (this.options.telemetry?.uploadSink && (this.options.sync?.mode ?? "resident") === "resident") {
+      // S13: a resident host with no client (offline, a vendored bundle) still ships its spool to the customer's own sink.
+      this.startUploader();
     }
     this.startSpoolTimer();
     this.scheduleWindowUnlock();
@@ -579,15 +588,21 @@ export class AirPrompterAgent {
    * here ever blocks a render.
    */
   private startUploader(): void {
-    if (this.uploader || !this.client || !this.store) return;
+    // S13: a sink of the customer's own (the OpenTelemetry bridge) needs no client and no grant: it runs offline too.
+    const customSink = this.options.telemetry?.uploadSink;
+    if (this.uploader || (!customSink && !this.client) || !this.store) return;
     if (this.options.telemetry?.upload === false) return;
     // A memory sink has no directory to sweep; `flushTelemetry()` is its path.
     if (typeof this.sink.drain === "function") return;
     const uploader = new SpoolUploader({
       dir: this.spoolDir,
       instanceId: this.ownInstanceId,
-      grantFor: (instanceId) => this.requestUploadGrant({ instanceId, instanceClass: this.options.telemetry?.instanceClass ?? "resident" }),
-      fetch: this.options.fetch ?? (globalThis.fetch as unknown as FetchLike),
+      ...(customSink
+        ? { sink: customSink }
+        : {
+            grantFor: (instanceId: string) => this.requestUploadGrant({ instanceId, instanceClass: this.options.telemetry?.instanceClass ?? "resident" }),
+            fetch: this.options.fetch ?? (globalThis.fetch as unknown as FetchLike),
+          }),
       now: () => this.nowMs(),
       ...(this.options.fs ? { fs: this.options.fs } : {}),
       ...(this.options.random ? { random: this.options.random } : {}),
@@ -601,7 +616,7 @@ export class AirPrompterAgent {
       return { droppedSegments: s.droppedSegments, quarantinedSegments: s.quarantinedSegments, lastUploadAt: s.lastUploadAt, backoffUntil: s.backoffUntil };
     };
     uploader.start();
-    this.log({ event: "uploader_started", intervalSeconds: this.uploadIntervalSeconds });
+    this.log({ event: "uploader_started", intervalSeconds: this.uploadIntervalSeconds, sink: uploader.status().sink });
   }
 
   /** S5: one upload pass now (tests and operators); `null` when this process runs no uploader. Never throws. */

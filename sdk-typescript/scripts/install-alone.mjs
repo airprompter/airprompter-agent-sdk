@@ -22,6 +22,7 @@ const FLOWS = {
   sync: { with: ["core", "sync"], esm: 'import { SlotStore, syncOnce, fileKey } from "@airprompter/agent-sync"; if (![SlotStore, syncOnce, fileKey].every((f) => typeof f === "function")) throw new Error("sync surface");', cjs: 'const s = require("@airprompter/agent-sync"); if (typeof s.SlotStore !== "function") throw new Error("sync cjs");' },
   runtime: { with: ["core", "runtime"], esm: 'import { ReleaseResolver, wrapClient, ManagedAgent } from "@airprompter/agent-runtime"; if (![ReleaseResolver, wrapClient, ManagedAgent].every((f) => typeof f === "function")) throw new Error("runtime surface");', cjs: 'const r = require("@airprompter/agent-runtime"); if (typeof r.ReleaseResolver !== "function") throw new Error("runtime cjs");' },
   telemetry: { with: ["core", "telemetry"], esm: 'import { SpoolWriter, DirectorySink, SpoolUploader } from "@airprompter/agent-telemetry"; if (![SpoolWriter, DirectorySink, SpoolUploader].every((f) => typeof f === "function")) throw new Error("telemetry surface");', cjs: 'const t = require("@airprompter/agent-telemetry"); if (typeof t.SpoolWriter !== "function") throw new Error("telemetry cjs");' },
+  "otel-bridge": { with: ["core", "otel-bridge"], esm: 'import { otlpUploadSink, spoolRowsToOtlp } from "@airprompter/otel-bridge"; if (![otlpUploadSink, spoolRowsToOtlp].every((f) => typeof f === "function")) throw new Error("otel-bridge surface");', cjs: 'const o = require("@airprompter/otel-bridge"); if (typeof o.otlpUploadSink !== "function") throw new Error("otel-bridge cjs");' },
   sdk: { with: ["core", "sync", "runtime", "telemetry", "sdk"], esm: 'import { AirPrompterAgent, SlotStore, ReleaseResolver, SpoolWriter, verifyManifest } from "@airprompter/agent-sdk"; import { FakeControlPlane } from "@airprompter/agent-sdk/testing"; if (![AirPrompterAgent, SlotStore, ReleaseResolver, SpoolWriter, verifyManifest, FakeControlPlane].every((f) => typeof f === "function")) throw new Error("sdk surface");', cjs: 'const a = require("@airprompter/agent-sdk"); if (typeof a.AirPrompterAgent !== "function") throw new Error("sdk cjs");' },
 };
 
@@ -42,7 +43,7 @@ try {
     writeFileSync(join(project, "cjs.cjs"), flow.cjs);
     execFileSync("node", ["esm.mjs"], { cwd: project, stdio: "inherit" });
     execFileSync("node", ["cjs.cjs"], { cwd: project, stdio: "inherit" });
-    console.log(`install-alone: @airprompter/agent-${name} with [${flow.with.join(", ")}] — ESM and CJS import clean`);
+    console.log(`install-alone: ${name === "otel-bridge" ? "@airprompter/otel-bridge" : `@airprompter/agent-${name}`} with [${flow.with.join(", ")}] — ESM and CJS import clean`);
   }
 } finally {
   rmSync(work, { recursive: true, force: true });

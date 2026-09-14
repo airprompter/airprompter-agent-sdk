@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "..");
-const LAYER = { core: 0, sync: 1, runtime: 1, telemetry: 1, sdk: 2 };
+const LAYER = { core: 0, sync: 1, runtime: 1, telemetry: 1, "otel-bridge": 1, sdk: 2 };
 const PACKAGES = Object.keys(LAYER);
 
 function walk(dir, out = []) {
@@ -50,11 +50,12 @@ function specifiersOf(file) {
 function targetOf(spec, fromFile) {
   const barrel = /^@airprompter\/agent-([a-z]+)(\/testing)?$/.exec(spec);
   if (barrel) return { pkg: barrel[1], via: "barrel" };
+  if (spec === "@airprompter/otel-bridge") return { pkg: "otel-bridge", via: "barrel" };
   if (spec.startsWith("@airprompter/")) return { pkg: null, via: "unknown-barrel" };
   if (spec.startsWith(".")) {
     const abs = resolve(fromFile, "..", spec);
     const rel = relative(root, abs).split(sep).join("/");
-    const m = /^packages\/([a-z]+)\/src\//.exec(rel);
+    const m = /^packages\/([a-z-]+)\/src\//.exec(rel);
     if (m) return { pkg: m[1], via: "relative" };
     return { pkg: null, via: "outside" };
   }
@@ -84,7 +85,7 @@ for (const pkg of PACKAGES) {
       }
       edges.push([pkg, target.pkg]);
       if (target.via === "relative") {
-        offenders.push(`${shown}:${line}: reaches into ${target.pkg} by path (${spec}); import @airprompter/agent-${target.pkg}`);
+        offenders.push(`${shown}:${line}: reaches into ${target.pkg} by path (${spec}); import ${target.pkg === "otel-bridge" ? "@airprompter/otel-bridge" : `@airprompter/agent-${target.pkg}`}`);
         continue;
       }
       if (!(target.pkg in LAYER)) {

@@ -43,4 +43,5 @@ export type { FetchLike, ManifestFetch, SyncClientOptions } from "./control/clie
 
 export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "./telemetry/rows.js";
 export type { Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "./telemetry/rows.js";
+export type { UploadSink, UploadSegment, UploadOutcome } from "./telemetry/uploadSink.js";
 export { normalizeFeedback, BOOLEAN_SIGNALS, UNIT_SIGNALS, COUNT_SIGNALS, RUNTIME_SIGNALS, CATALOGUE, OUTCOME_NAME, type NormalizedFeedback, type FeedbackRejection } from "./telemetry/feedback.js";

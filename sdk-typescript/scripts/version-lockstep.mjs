@@ -9,7 +9,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const PACKAGES = ["core", "sync", "runtime", "telemetry", "sdk"];
+const PACKAGES = ["core", "sync", "runtime", "telemetry", "otel-bridge", "sdk"];
 const args = process.argv.slice(2);
 const set = args.includes("--set") ? args[args.indexOf("--set") + 1] : null;
 const expect = args.includes("--expect") ? args[args.indexOf("--expect") + 1] : null;
@@ -23,7 +23,7 @@ if (set) {
   for (const name of PACKAGES) {
     const manifest = read(manifestPath(name));
     manifest.version = set;
-    for (const dep of Object.keys(manifest.dependencies ?? {})) if (dep.startsWith("@airprompter/agent-")) manifest.dependencies[dep] = set;
+    for (const dep of Object.keys(manifest.dependencies ?? {})) if (dep.startsWith("@airprompter/")) manifest.dependencies[dep] = set;
     write(manifestPath(name), manifest);
   }
   const workspace = read(join(root, "package.json"));
@@ -38,7 +38,7 @@ for (const name of PACKAGES) {
   const manifest = read(manifestPath(name));
   versions.set(name, manifest.version);
   for (const [dep, range] of Object.entries(manifest.dependencies ?? {})) {
-    if (!dep.startsWith("@airprompter/agent-")) continue;
+    if (!dep.startsWith("@airprompter/")) continue;
     if (range !== manifest.version) problems.push(`${name} pins ${dep}@${range}; the lockstep version is ${manifest.version}`);
   }
 }

@@ -22,16 +22,21 @@ from .spool.writer import (
     minute_of,
     segment_name,
 )
-from .uploader import GrantDecision, PassResult, SpoolUploader, UploadGrant, backoff_delay_ms, inspect_segment, post_segment, validate_spool_row
+from .otel import OTLP_SCOPE_NAME, ExportResult, OtlpUploadSink, http_json_exporter, otlp_attribute, spool_rows_to_otlp
+from .uploader import AirPrompterUploadSink, GrantDecision, PassResult, SpoolUploader, UploadGrant, backoff_delay_ms, inspect_segment, post_segment, validate_spool_row
 
 __all__ = [
+    "AirPrompterUploadSink",
     "DirectorySink",
     "ERROR_CLASSES",
+    "ExportResult",
     "GrantDecision",
     "HOST_SPOOL_BUDGET_BYTES",
     "LATENCY_BUCKET_EDGES_MS",
     "MemorySink",
+    "OTLP_SCOPE_NAME",
     "Observation",
+    "OtlpUploadSink",
     "PassResult",
     "SEGMENT_MAX_BYTES",
     "SERVERLESS_BUFFER_BYTES",
@@ -44,10 +49,13 @@ __all__ = [
     "WriterIdentity",
     "backoff_delay_ms",
     "epoch_minute",
+    "http_json_exporter",
     "inspect_segment",
     "latency_bucket_index",
     "minute_of",
+    "otlp_attribute",
     "post_segment",
     "segment_name",
+    "spool_rows_to_otlp",
     "validate_spool_row",
 ]

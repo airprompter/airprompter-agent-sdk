@@ -120,6 +120,10 @@ class TelemetryOptions:
     #: S5: a resident host with no daemon uploads its own spool — the same uploader the daemon runs, in-process, on a timer
     #: off the request path, under this runtime's own grant. ``False`` leaves the spool for a daemon or an operator's export.
     upload: bool = True
+    #: S13: where the uploader ships validated segments. ``None``: AirPrompter's sink (a grant per writer, a PUT to your prefix).
+    #: ``OtlpUploadSink(...)`` from ``airprompter_agent_telemetry.otel`` sends the windows to your OpenTelemetry collector
+    #: instead — no grant is ever requested — and a customer's own sink takes the same segments.
+    upload_sink: Optional[Any] = None
     #: S5: serverless — ``invoke()`` flushes the invocation's rows before it returns (``"await"``, the default). ``"background"``
     #: hands the flush to a thread; a platform that freezes the process at the response loses rows in flight, silently.
     flush: str = "await"
@@ -620,6 +624,9 @@ class AirPrompterAgent:
             # The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
             threading.Thread(target=self._first_heartbeat, name="airprompter-heartbeat", daemon=True).start()
             self._start_uploader()
+        elif self._client is None and self._sync_options.mode == "resident" and self._telemetry.upload_sink is not None:
+            # S13: offline (no key) with a sink of the customer's own: the windows still leave, to their collector.
+            self._start_uploader()
         self._schedule_spool_close()
         self._schedule_window_unlock()
 
@@ -641,14 +648,16 @@ class AirPrompterAgent:
         """S5: the daemon is an optimisation, never a requirement — a resident host with no daemon uploads its own spool. The same
         uploader the daemon runs, in-process, on a timer off the request path: closed segments go out under this runtime's own
         grant, a failed pass backs off, and past the budget the oldest unsent segments are dropped and counted. Never blocks a render."""
-        if self._uploader is not None or self._client is None or self._store is None or not self._telemetry.upload:
+        # S13: a sink of the customer's own (the OpenTelemetry bridge) needs no client and no grant: it runs offline too.
+        custom_sink = self._telemetry.upload_sink
+        if self._uploader is not None or (custom_sink is None and self._client is None) or self._store is None or not self._telemetry.upload:
             return
         if callable(getattr(self._sink, "drain", None)):
             return  # a memory sink has no directory to sweep; flush_telemetry() is its path
         uploader = SpoolUploader(
             directory=self._spool_dir,
             instance_id=self._own_instance_id,
-            grant_for=lambda instance_id: self.request_upload_grant(instance_id=instance_id, instance_class=self._telemetry.instance_class or "resident"),
+            **({"sink": custom_sink} if custom_sink is not None else {"grant_for": lambda instance_id: self.request_upload_grant(instance_id=instance_id, instance_class=self._telemetry.instance_class or "resident")}),
             transport=self._o.get("transport"),
             now_ms=self._now_ms,
             rand=self._rand,
@@ -658,7 +667,7 @@ class AirPrompterAgent:
         )
         self._uploader = uploader
         uploader.start()
-        self._log({"event": "uploader_started", "intervalSeconds": self._upload_interval_seconds})
+        self._log({"event": "uploader_started", "intervalSeconds": self._upload_interval_seconds, "sink": uploader.sink.kind})
 
     def upload_now(self) -> Optional[dict[str, Any]]:
         """S5: one upload pass now (tests and operators); ``None`` when this process runs no uploader. Never raises."""

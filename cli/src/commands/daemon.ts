@@ -12,6 +12,8 @@ import { AirPrompterAgent, isAgentStartError, SDK_NAME, SDK_VERSION } from "../.
 import { daemonSocketPath } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
 import { SlotStore } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
 import { SpoolUploader } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
+import { otlpUploadSink } from "../../../sdk-typescript/packages/otel-bridge/src/sink.js";
+import type { UploadSink } from "../../../sdk-typescript/packages/core/src/telemetry/uploadSink.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { DaemonServer } from "../daemon/server.js";
 import { EXIT, refused, usage, type Context } from "../io.js";
@@ -31,9 +33,38 @@ export const DAEMON_OPTIONS: OptionSpec = {
   "upload-interval-seconds": { type: "string", help: "Spool upload cadence until a grant says otherwise (default 300)" },
   "spool-budget-bytes": { type: "string", help: "Host budget for unsent segments across every writer (default 100 MiB); the oldest go first and the loss is reported" },
   "no-upload": { type: "boolean", help: "Serve and sync only; leave the spool on disk (airprompter export-telemetry packs it)" },
+  "upload-sink": { type: "string", help: "Where segments go: airprompter (default; a grant per writer) or otlp (your OpenTelemetry collector; no grant, no key needed)" },
+  "otlp-endpoint": { type: "string", help: "With --upload-sink otlp: the collector's OTLP/HTTP metrics URL, e.g. http://localhost:4318/v1/metrics" },
+  "otlp-header": { type: "string", multiple: true, help: "With --upload-sink otlp: a header on every export, name=value (repeatable; a secret comes from the environment as 'name=$VAR', quoted so the shell leaves it)" },
+  "otlp-resource": { type: "string", multiple: true, help: "With --upload-sink otlp: a resource attribute, key=value (repeatable), e.g. service.name=support-bot" },
   "exit-after": { type: "string", help: "Seconds to run before exiting (tests and smoke checks)" },
   ...COMMON_OPTIONS,
 };
+
+/** S13: the OpenTelemetry bridge from the command line — endpoint, headers (a value may name an env var), resource. */
+function otlpSinkFromArgs(parsed: ReturnType<typeof parse>, ctx: Context): UploadSink {
+  const endpoint = str(parsed, "otlp-endpoint");
+  if (!endpoint) throw usage("--upload-sink otlp needs --otlp-endpoint (the collector's OTLP/HTTP metrics URL)");
+  const headers: Record<string, string> = {};
+  for (const raw of (parsed.values["otlp-header"] as string[] | undefined) ?? []) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0) throw usage(`--otlp-header: "${raw}" is not name=value`);
+    const value = raw.slice(eq + 1);
+    if (value.startsWith("$")) {
+      // Quote it in the shell ('authorization=$OTEL_TOKEN') so the token never reaches argv; unset is an error, not an empty header.
+      const fromEnv = ctx.env[value.slice(1)];
+      if (fromEnv === undefined || fromEnv === "") throw usage(`--otlp-header ${raw.slice(0, eq)}=${value}: ${value.slice(1)} is not set in the environment`);
+      headers[raw.slice(0, eq)] = fromEnv;
+    } else headers[raw.slice(0, eq)] = value;
+  }
+  const resource: Record<string, string> = {};
+  for (const raw of (parsed.values["otlp-resource"] as string[] | undefined) ?? []) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0) throw usage(`--otlp-resource: "${raw}" is not key=value`);
+    resource[raw.slice(0, eq)] = raw.slice(eq + 1);
+  }
+  return otlpUploadSink({ endpoint, headers, resource, fetch: ctx.fetch ?? (globalThis.fetch as unknown as NonNullable<typeof ctx.fetch>), now: ctx.now, sdkVersion: CLI_VERSION });
+}
 
 export async function daemon(argv: string[], ctx: Context): Promise<number> {
   const parsed = parse(argv, DAEMON_OPTIONS);
@@ -55,9 +86,12 @@ export async function daemon(argv: string[], ctx: Context): Promise<number> {
   const spoolBudgetBytes = str(parsed, "spool-budget-bytes") !== undefined ? Number(str(parsed, "spool-budget-bytes")) : undefined;
   if (spoolBudgetBytes !== undefined && (!Number.isFinite(spoolBudgetBytes) || spoolBudgetBytes < 1024 * 1024)) throw usage("--spool-budget-bytes must be at least 1048576");
   const socketPath = str(parsed, "socket") ?? daemonSocketPath({ stateDir, agentId: scope.agentId, target: scope.target });
+  const uploadSinkKind = str(parsed, "upload-sink") ?? "airprompter";
+  if (uploadSinkKind !== "airprompter" && uploadSinkKind !== "otlp") throw usage("--upload-sink must be airprompter or otlp");
+  const otlpSink = uploadSinkKind === "otlp" ? otlpSinkFromArgs(parsed, ctx) : null;
   const json = flag(parsed, "json");
   const log = (event: Record<string, unknown>) => ctx.stderr(json ? JSON.stringify({ at: new Date(ctx.now()).toISOString(), ...event }) : `${new Date(ctx.now()).toISOString()} ${event.event ?? "log"} ${Object.entries(event).filter(([k]) => k !== "event" && k !== "sdk" && k !== "agentId" && k !== "target").map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(" ")}`);
-  if (!apiKey) log({ event: "offline", reason: `${apiKeyEnv} is not set: serving the store, never calling home` });
+  if (!apiKey) log({ event: "offline", reason: `${apiKeyEnv} is not set: serving the store, never calling home${otlpSink ? "; telemetry goes to the OpenTelemetry collector" : ""}` });
 
   let agent: AirPrompterAgent;
   try {
@@ -84,13 +118,18 @@ export async function daemon(argv: string[], ctx: Context): Promise<number> {
   // T26 P4: the uploader — every writer's closed segments, validated, under one grant per writer prefix (the daemon's
   // heartbeat carrying that writer's instance id). Without a key there is nothing to ask a grant of: the spool stays.
   const storeDir = SlotStore.path({ stateDir, agentId: scope.agentId, target: scope.target });
+  // S13: with --upload-sink otlp the daemon needs no key to ship telemetry — the collector is the customer's.
   const uploader =
-    apiKey && !flag(parsed, "no-upload")
+    (otlpSink || apiKey) && !flag(parsed, "no-upload")
       ? new SpoolUploader({
           dir: join(storeDir, "spool", "telemetry"),
           instanceId: agent.instanceId,
-          grantFor: (instanceId) => agent.requestUploadGrant({ instanceId, instanceClass: "resident" }),
-          fetch: ctx.fetch ?? (globalThis.fetch as unknown as NonNullable<typeof ctx.fetch>),
+          ...(otlpSink
+            ? { sink: otlpSink }
+            : {
+                grantFor: (instanceId: string) => agent.requestUploadGrant({ instanceId, instanceClass: "resident" }),
+                fetch: ctx.fetch ?? (globalThis.fetch as unknown as NonNullable<typeof ctx.fetch>),
+              }),
           now: ctx.now,
           logger: log,
           intervalSeconds: uploadIntervalSeconds,
@@ -111,7 +150,7 @@ export async function daemon(argv: string[], ctx: Context): Promise<number> {
     throw refused((error as Error).message, { reason: "socket_unavailable" });
   }
   if (uploader) uploader.start();
-  log({ event: "serving", generation: agent.generation, store: storeDir, sdk: `${SDK_NAME}/${SDK_VERSION}`, upload: uploader ? `every ${uploadIntervalSeconds}s until a grant says otherwise` : "off" });
+  log({ event: "serving", generation: agent.generation, store: storeDir, sdk: `${SDK_NAME}/${SDK_VERSION}`, upload: uploader ? `${uploader.status().sink}: every ${uploadIntervalSeconds}s${otlpSink ? "" : " until a grant says otherwise"}` : "off" });
 
   const exitAfter = str(parsed, "exit-after");
   await new Promise<void>((resolve) => {

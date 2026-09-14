@@ -53,6 +53,7 @@ from .render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
 from .render.template import Delimiters, MissingVariableError, UnknownVariableError, render_template, xml_delimiters
 from .telemetry.feedback import NormalizedFeedback, normalize_feedback
 from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
+from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
 PROTOCOL_VERSION = "0.2.5"
 SDK_VERSION = "0.1.0"
@@ -105,6 +106,9 @@ __all__ = [
     "SystemClock",
     "UNDEFINED",
     "UnknownVariableError",
+    "UploadOutcome",
+    "UploadSegment",
+    "UploadSink",
     "Verdict",
     "X25519KeyPair",
     "arm_for_bucket",
@@ -155,6 +159,7 @@ __all__ = [
     "run_golden_set",
     "sha256_prefixed",
     "sign_bytes",
+    "sink_status",
     "subject_hash",
     "trusted_root_from_pinned_key",
     "validate_arms",

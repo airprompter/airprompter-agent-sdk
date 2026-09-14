@@ -11,6 +11,7 @@ export { SpoolWriter, DirectorySink, MemorySink, SegmentPlanner, segmentName, SE
 export type { SpoolSink, SinkFaults } from "./spool/writer.js";
 export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "@airprompter/agent-core";
 export type { Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "@airprompter/agent-core";
+export type { UploadSink, UploadSegment, UploadOutcome } from "@airprompter/agent-core";
 
-export { SpoolUploader, validateSpoolRow, inspectSegment, postSegment, multipartBody, backoffDelayMs, UPLOAD_BACKOFF_BASE_MS, UPLOAD_BACKOFF_CAP_MS, GRANT_REFRESH_MARGIN_MS, LAST_UPLOAD_MARKER, QUARANTINE_CAP_BYTES, QUARANTINE_RETENTION_MS, EXPORTED_CAP_BYTES, OPEN_SEGMENT_RECLAIM_MS, SEGMENT_NAME, OPEN_SEGMENT_NAME } from "./uploader.js";
+export { SpoolUploader, airprompterUploadSink, validateSpoolRow, inspectSegment, postSegment, multipartBody, backoffDelayMs, UPLOAD_BACKOFF_BASE_MS, UPLOAD_BACKOFF_CAP_MS, GRANT_REFRESH_MARGIN_MS, LAST_UPLOAD_MARKER, QUARANTINE_CAP_BYTES, QUARANTINE_RETENTION_MS, EXPORTED_CAP_BYTES, OPEN_SEGMENT_RECLAIM_MS, SEGMENT_NAME, OPEN_SEGMENT_NAME } from "./uploader.js";
 export type { UploadGrant, GrantDecision, UploaderOptions, UploaderStatus, PassResult, PostOutcome, RowVerdict, SegmentInspection } from "./uploader.js";

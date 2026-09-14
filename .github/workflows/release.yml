@@ -5,12 +5,13 @@
 #   protocol/vX.Y.Z        protocol tag — CI conformance only (ci.yml); the
 #                          protocol is consumed by pinning the tag, not by a
 #                          package.
-#   sdk-typescript/vX.Y.Z  npm publish of the five packages (core, sync,
-#                          runtime, telemetry, sdk) from one tag, in
-#                          dependency order, each with provenance (OIDC; no
-#                          npm token in the repository — trusted publishing
-#                          on npmjs.com must be configured for every
-#                          @airprompter/agent-* package).
+#   sdk-typescript/vX.Y.Z  npm publish of the six packages (core, sync,
+#                          runtime, telemetry, otel-bridge, sdk) from one
+#                          tag, in dependency order, each with provenance
+#                          (OIDC; no npm token in the repository — trusted
+#                          publishing on npmjs.com must be configured for
+#                          every @airprompter/agent-* package and
+#                          @airprompter/otel-bridge).
 #   sdk-python/vX.Y.Z      PyPI trusted publishing of the five distributions
 #                          (airprompter-agent-core, -sync, -runtime,
 #                          -telemetry, airprompter-agent) from one tag.
@@ -104,6 +105,8 @@ jobs:
           for name in core sync runtime telemetry sdk; do
             npm publish --provenance --access public --workspace "@airprompter/agent-$name"
           done
+          # S13: the bridge is optional and pins core; it goes out after core, whatever its position.
+          npm publish --provenance --access public --workspace "@airprompter/otel-bridge"
         working-directory: sdk-typescript
       - uses: softprops/action-gh-release@v2
         with:

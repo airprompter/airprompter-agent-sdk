@@ -37,6 +37,9 @@
       ],
       "@airprompter/agent-sdk": [
         "../sdk-typescript/packages/sdk/src/index.ts"
+      ],
+      "@airprompter/otel-bridge": [
+        "../sdk-typescript/packages/otel-bridge/src/index.ts"
       ]
     }
   },

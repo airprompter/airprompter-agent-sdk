@@ -17,6 +17,10 @@ const writer = new SpoolWriter(new DirectorySink(spoolDir, instanceId), { instan
 writer.observe({ tag, versionId, arm, model, status: "ok", latencyMs, tokens: { input, output } }, Date.now());
 ```
 
+`SpoolUploader` ships to an `UploadSink`: AirPrompter's by default, or one
+you pass (`sink:`) — `@airprompter/otel-bridge` sends the windows to your
+OpenTelemetry collector with no grant and no key.
+
 This package never imports the sync or the runtime package.
 
 One of five packages released in lockstep — `@airprompter/agent-core`, `-sync`,

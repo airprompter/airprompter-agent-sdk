@@ -32,7 +32,7 @@ import { MemorySink, SpoolWriter } from "../packages/telemetry/src/spool/writer.
 
 const root = process.cwd();
 const scope = { organizationId: "org_1", agentId: "agt_split", target: "prod" as const };
-const PACKAGES = ["core", "sync", "runtime", "telemetry", "sdk"] as const;
+const PACKAGES = ["core", "sync", "runtime", "telemetry", "otel-bridge", "sdk"] as const;
 
 function ensureBuilt(): void {
   if (!existsSync(join(root, "packages", "sdk", "dist", "esm", "index.js"))) execFileSync(process.execPath, [join(root, "scripts", "build.mjs")], { stdio: "ignore" });
@@ -47,7 +47,7 @@ test("S10: the direction is core → clients → sdk → binary; the edge set is
   const clean = lint(["--json"]);
   assert.equal(clean.status, 0, clean.stderr);
   const { edges } = JSON.parse(clean.stdout.slice(0, clean.stdout.lastIndexOf("}") + 1)) as { edges: string[] };
-  assert.deepEqual(edges, ["cli→core", "cli→runtime", "cli→sdk", "cli→sync", "cli→telemetry", "runtime→core", "sdk→core", "sdk→runtime", "sdk→sync", "sdk→telemetry", "sync→core", "telemetry→core"], "the clients never import each other; core imports nothing of ours");
+  assert.deepEqual(edges, ["cli→core", "cli→otel-bridge", "cli→runtime", "cli→sdk", "cli→sync", "cli→telemetry", "otel-bridge→core", "runtime→core", "sdk→core", "sdk→runtime", "sdk→sync", "sdk→telemetry", "sync→core", "telemetry→core"], "the clients never import each other; core imports nothing of ours; the bridge is a client of core alone");
   const probe = join(root, "packages", "telemetry", "src", "_lintProbe.ts");
   writeFileSync(probe, 'import { SlotStore } from "@airprompter/agent-sync";\nexport const probe = typeof SlotStore;\n');
   try {
@@ -173,14 +173,15 @@ test("S10: the five packages carry one version, exact-pinned siblings, the locks
   assert.equal(versions.size, 1, "one version");
   const version = [...versions][0]!;
   for (const name of PACKAGES) {
-    assert.equal(manifests[name]!.name, `@airprompter/agent-${name}`);
+    assert.equal(manifests[name]!.name, name === "otel-bridge" ? "@airprompter/otel-bridge" : `@airprompter/agent-${name}`);
     for (const [dep, range] of Object.entries(manifests[name]!.dependencies ?? {})) {
       assert.match(dep, /^@airprompter\/agent-(core|sync|runtime|telemetry)$/, `${name} depends only on siblings below it`);
       assert.equal(range, version, `${name} → ${dep} is exact-pinned to the lockstep version`);
     }
   }
   assert.deepEqual(Object.keys(manifests.core!.dependencies ?? {}), []);
-  assert.deepEqual(Object.keys(manifests.sdk!.dependencies ?? {}).sort(), ["@airprompter/agent-core", "@airprompter/agent-runtime", "@airprompter/agent-sync", "@airprompter/agent-telemetry"]);
+  assert.deepEqual(Object.keys(manifests.sdk!.dependencies ?? {}).sort(), ["@airprompter/agent-core", "@airprompter/agent-runtime", "@airprompter/agent-sync", "@airprompter/agent-telemetry"], "the facade never pulls the bridge in: a collector is optional");
+  assert.deepEqual(Object.keys(manifests["otel-bridge"]!.dependencies ?? {}), ["@airprompter/agent-core"]);
   ensureBuilt();
   const sizes = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "size-budget.mjs"), "--json"], { encoding: "utf8" })) as Record<string, { bytes: number; budget: number }>;
   for (const name of PACKAGES) {

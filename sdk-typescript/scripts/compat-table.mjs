@@ -55,7 +55,7 @@ const START = "<!-- compat-table:start -->";
 const END = "<!-- compat-table:end -->";
 
 function splice(path, body) {
-  const text = readFileSync(path, "utf8");
+  const text = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
   const start = text.indexOf(START);
   const end = text.indexOf(END);
   if (start === -1 || end === -1) throw new Error(`${path}: no compat-table markers`);
@@ -68,8 +68,8 @@ let stale = false;
 for (const path of targets) {
   const next = splice(path, body);
   const current = readFileSync(path, "utf8");
-  // The Node major in the footer is environment; a check compares everything else.
-  const strip = (s) => s.replace(/\(Node \d+\)/g, "(Node N)");
+  // The Node major in the footer is environment, and a Windows checkout may carry CRLF; a check compares everything else.
+  const strip = (s) => s.replace(/\r\n/g, "\n").replace(/\(Node \d+\)/g, "(Node N)");
   if (strip(next) !== strip(current)) {
     stale = true;
     if (!process.argv.includes("--check")) writeFileSync(path, next);

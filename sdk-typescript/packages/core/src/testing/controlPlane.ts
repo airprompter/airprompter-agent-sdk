@@ -54,8 +54,8 @@ export interface SlotSpec {
 }
 
 export class FakeControlPlane {
-  readonly rootKey = newKey();
-  readonly signingKey = newKey();
+  readonly rootKey: P256PrivateJwk;
+  readonly signingKey: P256PrivateJwk;
   readonly root: RootMetadata;
   readonly payloads = new Map<string, Buffer>();
   readonly requests: string[] = [];
@@ -64,10 +64,17 @@ export class FakeControlPlane {
   edgeEtag = 0;
   requireCountersign = false;
 
+  /**
+   * Fresh keys by default (a test). `airprompter dev` (S12) hands in the keys it persisted, so the root a customer
+   * pinned yesterday still verifies today's generations.
+   */
   constructor(
     readonly scope: { organizationId: string; agentId: string; target: Target },
     readonly apiKey = "apa_live_testkey",
+    keys: { rootKey?: P256PrivateJwk; signingKey?: P256PrivateJwk } = {},
   ) {
+    this.rootKey = keys.rootKey ?? newKey();
+    this.signingKey = keys.signingKey ?? newKey();
     this.root = rootDocument({ rootKey: this.rootKey, signingKeys: [this.signingKey], environment: scope.target });
   }
 
@@ -296,8 +303,8 @@ export class FakeControlPlane {
   }
 }
 
-/** The fake behind a real HTTP listener, for daemons and CLIs that run as their own process. */
-export async function serveOverHttp(plane: FakeControlPlane): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+/** The fake behind a real HTTP listener, for daemons and CLIs that run as their own process — and `airprompter dev` (S12). */
+export async function serveOverHttp(plane: FakeControlPlane, listen: { host?: string; port?: number } = {}): Promise<{ baseUrl: string; close: () => Promise<void> }> {
   const { createServer } = await import("node:http");
   const fetchImpl = plane.fetch();
   const server = createServer((request, response) => {
@@ -315,7 +322,14 @@ export async function serveOverHttp(plane: FakeControlPlane): Promise<{ baseUrl:
       response.end(answer);
     })();
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const host = listen.host ?? "127.0.0.1";
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(listen.port ?? 0, host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
   const address = server.address() as { port: number };
-  return { baseUrl: `http://127.0.0.1:${address.port}`, close: () => new Promise((resolve) => server.close(() => resolve())) };
+  return { baseUrl: `http://${host.includes(":") ? `[${host}]` : host}:${address.port}`, close: () => new Promise((resolve) => server.close(() => resolve())) };
 }

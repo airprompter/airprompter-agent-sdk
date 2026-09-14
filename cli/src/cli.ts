@@ -7,6 +7,7 @@
 
 import { apply } from "./commands/apply.js";
 import { daemon } from "./commands/daemon.js";
+import { dev } from "./commands/dev.js";
 import { diff } from "./commands/diff.js";
 import { importPrompts } from "./commands/importPrompts.js";
 import { login } from "./commands/login.js";
@@ -34,6 +35,7 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   "export-telemetry": { run: exportTelemetry, summary: "Pack the spool's unsent segments into one file for a host that never calls home" },
   "import-telemetry": { run: importTelemetry, summary: "Upload an exported telemetry file through the grant path on a connected host (idempotent)" },
   telemetry: { run: telemetry, summary: "telemetry verify --budget <bytes> --sink-absent: prove the spool's disk budget is an invariant, on this machine, with no registry" },
+  dev: { run: dev, summary: "Serve a directory of prompts as a registry over the protocol's routes (dev key, dev root, hot reload; --daemon serves the host's SDKs too)" },
   login: { run: login, summary: "Sign in as a workspace member and print the session token the write commands read (never an API key)" },
   import: { run: importPrompts, summary: "A directory, a JSON/CSV export or a SQL query result becomes workspace prompts with reviewable versions; re-runs are idempotent (--dry-run plans)" },
 };

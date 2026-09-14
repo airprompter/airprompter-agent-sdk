@@ -209,6 +209,14 @@ jobs:
         # rule that the Agent key never comes from argv.
         run: node scripts/smoke.mjs "dist/${{ matrix.artifact }}"
         working-directory: cli
+      - name: Live conformance against airprompter dev (S12)
+        # The built executable serves the fixture directory; the runner exercises
+        # every route with the protocol's schemas and trust chain.
+        shell: bash
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix ../conformance
+          node scripts/live-conformance.mjs "dist/${{ matrix.artifact }}"
+        working-directory: cli
       - name: Size
         shell: bash
         run: ls -l "cli/dist/${{ matrix.artifact }}" | awk '{ printf "%s %.1f MiB\n", $NF, $5/1048576 }'

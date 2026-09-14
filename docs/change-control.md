@@ -169,6 +169,47 @@ apply` of an older file says the same. A bundle stored in a database
 column behaves identically — and every reader of that column holds the
 distribution key, so the column is as sensitive as the key.
 
+## 8. Live sync while you edit (`airprompter dev`, S12)
+
+A team whose prompts live in git wants the runtime to follow the working
+tree, not a release. `airprompter dev ./prompts` serves the directory as a
+registry over the protocol's own routes — the manifest, the payloads, the
+heartbeat, the catalogue, the edge pointer and the root — signed with a
+dev key under a dev root it makes once and keeps beside the prompts
+(`.airprompter-dev/keys.json`, mode 0600; `root.pub.json` is what a client
+pins). Every save that changes the release is a new generation; an
+unchanged save is not; a file that does not parse is reported and the last
+good generation keeps serving. An SDK, a daemon or the CLI syncs from it
+exactly as from the hosted service, and the same chain applies: a manifest
+signed here never verifies against a production root.
+
+```bash
+airprompter dev ./prompts --port 4180                # generation 1; every save is generation + 1
+AIRPROMPTER_AGENT_KEY=apa_dev_local node app.js       # the SDK: baseUrl http://127.0.0.1:4180, root ./prompts/.airprompter-dev/root.pub.json
+airprompter dev ./prompts --apply-policy unlock_required --daemon
+```
+
+Change control is honoured on the laptop too: with `release.json`'s
+`applyPolicy: "unlock_required"` (or `--apply-policy`), every generation is
+staged by the clients and waits for `airprompter unlock` on the host, the
+update window or the hook — the same flow as production, so a team can
+rehearse its recipe before a release carries it. With `--daemon`, an
+embedded `airprompterd` attached to the server serves the host's SDKs over
+the local socket, and every promotion reaches them as a `generation`
+event within one poll (S3). A file's front matter names the slot's
+`model:`, `variables:` (`name!` required, `name?` end-user text — fenced
+exactly as in production; without the line every `{{placeholder}}` is an
+optional operator variable) and `version:`; `release.json` carries the
+manifest's policy, lease, window, experiment and directives.
+
+The same server is the **conformance target**: `node conformance/live.mjs
+--base-url … --root … --api-key …` exercises a running registry — `dev`,
+Hangar (a self-hosted registry), or the hosted service with a real key —
+with the protocol's schemas and trust chain: every route's status, ETag
+and refusal, the manifest verified against the root the caller pins, every
+payload fetched and hashed, the heartbeat's answer. CI runs it against
+`airprompter dev` on every push; the hosted service is checked the same way.
+
 ## What the heartbeat tells AirPrompter
 
 `applyState` (`active`, `staged`, `awaiting_unlock`,

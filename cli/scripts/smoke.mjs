@@ -33,7 +33,7 @@ try {
   check("--version exits 0 and prints a version", version.code === 0 && /^\d+\.\d+\.\d+/.test(version.stdout.trim()), `${version.code}: ${version.stdout}${version.stderr}`);
 
   const help = run(["--help"]);
-  check("--help lists every command", help.code === 0 && ["pull", "verify", "apply", "status", "diff", "keygen"].every((c) => help.stdout.includes(`  ${c}`)));
+  check("--help lists every command", help.code === 0 && ["pull", "verify", "apply", "status", "diff", "keygen", "dev", "login", "import"].every((c) => help.stdout.includes(`  ${c}`)));
 
   const none = run([]);
   check("no command exits 2 (usage)", none.code === 2);

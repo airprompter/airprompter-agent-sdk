@@ -77,6 +77,22 @@ Kubernetes are in [`../deploy/`](../deploy/); the wire format is
   models, variable names and counts. The bundle on disk is ciphertext
   unless you asked for `--plaintext` on `dev`.
 
+## Live sync while you edit (`dev`)
+
+`airprompter dev ./prompts` serves a directory of prompt files as a registry
+over the protocol's routes — a dev key, a dev root kept beside the prompts,
+every save a generation, `unlock_required` honoured locally, `--daemon` for
+the host's SDKs — and it is the conformance target `conformance/live.mjs`
+exercises beside the hosted service. The recipe is
+[`../docs/change-control.md` §8](../docs/change-control.md#8-live-sync-while-you-edit-airprompter-dev-s12).
+
+```bash
+airprompter dev ./prompts --port 4180
+AIRPROMPTER_AGENT_KEY=apa_dev_local airprompter pull --org org_dev --agent agt_dev --environment dev \
+  --root ./prompts/.airprompter-dev/root.pub.json --base-url http://127.0.0.1:4180 --out ./release.apbundle --plaintext
+node ../conformance/live.mjs --base-url http://127.0.0.1:4180 --root ./prompts/.airprompter-dev/root.pub.json --api-key apa_dev_local
+```
+
 ## Bringing your prompts in (`import`)
 
 The other direction: a directory of prompt files, a JSON or CSV export, or

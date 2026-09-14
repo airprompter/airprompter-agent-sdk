@@ -7,11 +7,12 @@
 //
 //   node conformance/harness.mjs --adapter conformance/adapters/agent-sdk.mjs
 
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dist = (pkg) => join(here, "..", "..", "sdk-typescript", "packages", pkg, "dist", "esm", "index.js");
+// A file URL, not a path: Windows's `D:\…` is not an import specifier.
+const dist = (pkg) => pathToFileURL(join(here, "..", "..", "sdk-typescript", "packages", pkg, "dist", "esm", "index.js")).href;
 
 const core = await import(dist("core"));
 const telemetry = await import(dist("telemetry"));

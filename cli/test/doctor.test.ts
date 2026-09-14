@@ -106,15 +106,18 @@ test("doctor: a synced host is healthy; no store, a wrong key, a full spool, a s
     assert.match(doc.checks.find((c) => c.name === "quarantine")!.remedy!, /telemetry validate/);
 
     // A stale daemon socket (a file where the socket should be): the daemon check fails and says to restart it.
-    const socketPath = daemonSocketPath({ stateDir, ...scope });
-    mkdirSync(join(socketPath, ".."), { recursive: true });
-    writeFileSync(socketPath, "");
-    h = harness(plane, work);
-    assert.equal(await run(["doctor", ...scopeArgs, "--state-dir", stateDir, "--base-url", "https://api.test", "--json"], h.ctx), EXIT.refused);
-    doc = h.doc();
-    assert.equal(level(doc.checks, "daemon"), "fail");
-    assert.match(doc.checks.find((c) => c.name === "daemon")!.remedy!, /restart airprompterd/);
-    rmSync(socketPath);
+    // (Windows names a pipe, not a file: nothing to plant; the daemon suite skips there too.)
+    if (process.platform !== "win32") {
+      const socketPath = daemonSocketPath({ stateDir, ...scope });
+      mkdirSync(join(socketPath, ".."), { recursive: true });
+      writeFileSync(socketPath, "");
+      h = harness(plane, work);
+      assert.equal(await run(["doctor", ...scopeArgs, "--state-dir", stateDir, "--base-url", "https://api.test", "--json"], h.ctx), EXIT.refused);
+      doc = h.doc();
+      assert.equal(level(doc.checks, "daemon"), "fail");
+      assert.match(doc.checks.find((c) => c.name === "daemon")!.remedy!, /restart airprompterd/);
+      rmSync(socketPath);
+    }
 
     // A root file that is not there.
     h = harness(plane, work);

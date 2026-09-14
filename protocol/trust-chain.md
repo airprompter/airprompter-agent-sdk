@@ -197,13 +197,30 @@ host runs under is the host's, recorded in `store.json`
 4. **The process's own `apply.policy` sits on top.** `unlock_required`
    there makes every release wait whatever the pin says; `auto` there is
    not a loosening.
-5. **The set of directive kinds honoured without a local act is closed.**
-   `disable` acts (a reduction: it only ever stops serving; a Freeze lands
-   on a pinned `unlock_required` host with no local act). `request_unlock`
-   asks and never grants. Any other kind refuses the whole manifest (M13,
-   `directive_unknown`) — a runtime never obeys a manifest by halves.
+5. **The set of directive kinds honoured without a local act is closed —
+   the reduction set.** `disable` acts, in three scopes: the agent (every
+   slot stops serving), a slot (`tag`), an arm (`scope: "arm"`, the arm's
+   share goes back to the control). Each only ever stops or shrinks what
+   users see; a Freeze lands on a pinned `unlock_required` host with no
+   local act. There is no reweight, no activation and no loosening in the
+   set. `request_unlock` asks and never grants. Any other kind refuses the
+   whole manifest (M13, `directive_unknown`) — a runtime never obeys a
+   manifest by halves.
 
 Vectors: `sdk-typescript/test/policy.test.ts`, `sdk-python/tests/test_policy.py`,
 `cli/test/cli.test.ts` "S4", `cli/test/daemon.test.ts`, and
 `vectors/manifest-verify.json` "a directive of a kind the runtime does not
 honour".
+
+## Where each rule is implemented (S10, S15)
+
+| Rule | Package |
+|---|---|
+| Signed bytes, root metadata, manifest rules M1–M14, rotation, countersign | `@airprompter/agent-core` · `airprompter_agent_core.protocol` (no I/O) |
+| The pointer never extends trust | the client in core (`edgePointer`), the loop in `@airprompter/agent-sync` and the facade `@airprompter/agent-sdk` (the lease renews only on a signed manifest or an authenticated origin answer) |
+| The ramp plan is what users will see | the maths in core (`rampWeightsAt`, `effectiveArms`), the walk in `@airprompter/agent-runtime` (`ReleaseResolver`) |
+| The apply policy is the customer's | `store.json` and the pin in `@airprompter/agent-sync` (`SlotStore`); the operator's `policy set` in the CLI |
+| The reduction set | M13 in core; `disable` honoured at render in runtime |
+
+Every SDK's vectors run through the published harness
+(`@airprompter/protocol-conformance`, S14) against these packages.

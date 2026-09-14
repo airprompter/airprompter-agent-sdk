@@ -17,6 +17,16 @@ the host (or `ap.setApplyPolicy("auto")`), an operator's act that is logged
 with who asked. The fleet view says "pinned on the host" while the
 console's setting is advisory there.
 
+**What an unlock approves** (S9, S15): *what users see* — the versions,
+the models and, for a rollout, the whole ramp plan carried in the signed
+manifest. Nothing outside that plan changes what users see without another
+unlock. What the console can still do on its own is *reduce*: disable the
+agent, a slot or an arm (the arm's share goes back to the control). It
+cannot reweight, activate, or loosen the host's policy. The policy pin, the
+apply windows and `unlock` live in `@airprompter/agent-sync`
+(`airprompter_agent_sync`) and the CLI; the ramp is walked by
+`@airprompter/agent-runtime`.
+
 The rule every recipe obeys: **resolve after `activate()` to go live;
 resolve or reject without it to leave the release staged.** A hook that
 throws leaves the release staged and says so in the log

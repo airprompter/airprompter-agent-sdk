@@ -10,10 +10,10 @@ import re
 
 import pytest
 
-from airprompter_agent.bundle.apbundle import BundleError, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle, DistributionKey
-from airprompter_agent.bundle.hpke import AEAD_AES_128_GCM, AEAD_AES_256_GCM, X25519KeyPair, decap, encap, generate_x25519_key_pair, key_schedule, open_, open_from, seal, seal_to, x25519_private_key_from_raw
-from airprompter_agent.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
-from airprompter_agent.render.template import Delimiters, MissingVariableError, UnknownVariableError, render_template, xml_delimiters
+from airprompter_agent_core.bundle.apbundle import BundleError, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle, DistributionKey
+from airprompter_agent_core.bundle.hpke import AEAD_AES_128_GCM, AEAD_AES_256_GCM, X25519KeyPair, decap, encap, generate_x25519_key_pair, key_schedule, open_, open_from, seal, seal_to, x25519_private_key_from_raw
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
+from airprompter_agent_core.render.template import Delimiters, MissingVariableError, UnknownVariableError, render_template, xml_delimiters
 
 VARIABLES = [
     {"name": "team", "required": True, "trust": "operator"},

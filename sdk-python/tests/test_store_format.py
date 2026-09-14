@@ -9,11 +9,11 @@ import tempfile
 import pytest
 
 from airprompter_agent import AirPrompterAgent
-from airprompter_agent._util import b64url_encode
+from airprompter_agent_core._util import b64url_encode
 from airprompter_agent.agent import SDK_VERSION, AgentStartError
-from airprompter_agent.protocol.trust import public_jwk_of
-from airprompter_agent.store.key_provider import file_key
-from airprompter_agent.store.slot_store import STORE_FORMAT_VERSION, STORE_FORMATS_READ, SlotStore, StoreError, StoreHooks
+from airprompter_agent_core.protocol.trust import public_jwk_of
+from airprompter_agent_sync.store.key_provider import file_key
+from airprompter_agent_sync.store.slot_store import STORE_FORMAT_VERSION, STORE_FORMATS_READ, SlotStore, StoreError, StoreHooks
 
 from .control_plane import FakeControlPlane
 

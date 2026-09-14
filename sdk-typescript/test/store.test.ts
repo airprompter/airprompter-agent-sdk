@@ -11,8 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { customKeyProvider, fileKey, unwrapWithRawKey, wrapWithRawKey } from "../src/store/keyProvider.js";
-import { SlotStore, StoreError } from "../src/store/slotStore.js";
+import { customKeyProvider, fileKey, unwrapWithRawKey, wrapWithRawKey } from "../packages/sync/src/store/keyProvider.js";
+import { SlotStore, StoreError } from "../packages/sync/src/store/slotStore.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const NOW = () => new Date().toISOString();

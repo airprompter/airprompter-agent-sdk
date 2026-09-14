@@ -17,11 +17,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { createEncryptedBundle, createPlaintextBundle, distributionKeyId } from "../../../sdk-typescript/src/bundle/apbundle.js";
-import { referencedPayloads } from "../../../sdk-typescript/src/protocol/trust.js";
-import type { BundleContents, RootMetadata } from "../../../sdk-typescript/src/protocol/types.js";
-import { ManagedAgent, isManagedRunError } from "../../../sdk-typescript/src/managed/client.js";
-import { SyncClient } from "../../../sdk-typescript/src/sync/client.js";
+import { createEncryptedBundle, createPlaintextBundle, distributionKeyId } from "../../../sdk-typescript/packages/core/src/bundle/apbundle.js";
+import { referencedPayloads } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
+import type { BundleContents, RootMetadata } from "../../../sdk-typescript/packages/core/src/protocol/types.js";
+import { ManagedAgent, isManagedRunError } from "../../../sdk-typescript/packages/runtime/src/managed/client.js";
+import { SyncClient } from "../../../sdk-typescript/packages/core/src/control/client.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { summarizeManifest, verifyChain } from "../chain.js";
 import { CliError, EXIT, Output, refused, requireOption, usage, type Context } from "../io.js";

@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist/esm",
+    "rootDir": "src",
+    "composite": true,
+    "tsBuildInfoFile": "dist/esm/.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../core/tsconfig.esm.json"
+    },
+    {
+      "path": "../sync/tsconfig.esm.json"
+    },
+    {
+      "path": "../runtime/tsconfig.esm.json"
+    },
+    {
+      "path": "../telemetry/tsconfig.esm.json"
+    }
+  ]
+}

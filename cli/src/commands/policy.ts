@@ -8,8 +8,8 @@
  * `policy set auto|unlock_required` records the operator's choice.
  */
 
-import { isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
-import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/src/sync/daemon.js";
+import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
 import { CLI_VERSION } from "../version.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { CliError, EXIT, Output, refused, type Context } from "../io.js";

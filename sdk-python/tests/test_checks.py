@@ -10,8 +10,8 @@ import tempfile
 
 import pytest
 
-from airprompter_agent.checks import checks_refusals, evaluate_checks, pattern_refusal, project_checks
-from airprompter_agent.protocol.trust import release_digest
+from airprompter_agent_core.checks import checks_refusals, evaluate_checks, pattern_refusal, project_checks
+from airprompter_agent_core.protocol.trust import release_digest
 
 from .control_plane import FakeControlPlane
 from .test_agent import SCOPE, start

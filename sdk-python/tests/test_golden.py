@@ -11,8 +11,8 @@ import tempfile
 import pytest
 
 from airprompter_agent import GoldenOptions, JUDGE_RUBRICS, GoldenSetError, JudgeRubric, judge_prompt, parse_golden_set, parse_judge_reply, pass_bps_of, rubric_from_prompt, run_golden_set
-from airprompter_agent.protocol.canonical_json import canonical_bytes, sha256_prefixed
-from airprompter_agent.protocol.trust import release_digest
+from airprompter_agent_core.protocol.canonical_json import canonical_bytes, sha256_prefixed
+from airprompter_agent_core.protocol.trust import release_digest
 
 from .control_plane import FakeControlPlane
 from .test_agent import SCOPE, start

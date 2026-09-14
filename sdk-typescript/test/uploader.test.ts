@@ -17,10 +17,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent } from "../src/agent.js";
-import { publicJwkOf } from "../src/protocol/trust.js";
-import { epochMinute, segmentName, type SpoolRow } from "../src/spool/writer.js";
-import { backoffDelayMs, inspectSegment, multipartBody, postSegment, SEGMENT_NAME, SpoolUploader, UPLOAD_BACKOFF_CAP_MS, validateSpoolRow, type GrantDecision, type UploadGrant } from "../src/telemetry/uploader.js";
+import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
+import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
+import { epochMinute, segmentName, type SpoolRow } from "../packages/telemetry/src/spool/writer.js";
+import { backoffDelayMs, inspectSegment, multipartBody, postSegment, SEGMENT_NAME, SpoolUploader, UPLOAD_BACKOFF_CAP_MS, validateSpoolRow, type GrantDecision, type UploadGrant } from "../packages/telemetry/src/uploader.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));

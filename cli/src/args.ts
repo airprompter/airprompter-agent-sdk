@@ -2,10 +2,10 @@
 
 import { parseArgs } from "node:util";
 
-import { fileKey } from "../../sdk-typescript/src/store/keyProvider.js";
+import { fileKey } from "../../sdk-typescript/packages/sync/src/store/keyProvider.js";
 import { CLI_VERSION } from "./version.js";
-import { SlotStore } from "../../sdk-typescript/src/store/slotStore.js";
-import type { Target } from "../../sdk-typescript/src/protocol/types.js";
+import { SlotStore } from "../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import type { Target } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import { join } from "node:path";
 import type { Scope } from "./chain.js";
 import { requireOption, usage, type Context } from "./io.js";

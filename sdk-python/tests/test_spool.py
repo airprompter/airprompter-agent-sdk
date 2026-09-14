@@ -13,9 +13,9 @@ import json
 import os
 import sys
 
-from airprompter_agent._util import instant, iso_ms
-from airprompter_agent.spool.feedback import normalize_feedback
-from airprompter_agent.spool.writer import (
+from airprompter_agent_core._util import instant, iso_ms
+from airprompter_agent_core.telemetry.feedback import normalize_feedback
+from airprompter_agent_telemetry.spool.writer import (
     LATENCY_BUCKET_EDGES_MS,
     SEGMENT_MAX_BYTES,
     DirectorySink,

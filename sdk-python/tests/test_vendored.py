@@ -7,10 +7,10 @@ import tempfile
 import pytest
 
 from airprompter_agent import AirPrompterAgent
-from airprompter_agent._util import b64url_decode, b64url_encode, instant, iso_ms
+from airprompter_agent_core._util import b64url_decode, b64url_encode, instant, iso_ms
 from airprompter_agent.agent import SyncOptions
-from airprompter_agent.bundle.apbundle import create_plaintext_bundle
-from airprompter_agent.protocol.trust import public_jwk_of
+from airprompter_agent_core.bundle.apbundle import create_plaintext_bundle
+from airprompter_agent_core.protocol.trust import public_jwk_of
 
 from .control_plane import FakeControlPlane
 

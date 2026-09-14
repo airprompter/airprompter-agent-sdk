@@ -20,12 +20,12 @@ import { createHash, generateKeyPairSync, type KeyObject } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import type { DistributionKey } from "../../sdk-typescript/src/bundle/apbundle.js";
-import { distributionKeyId } from "../../sdk-typescript/src/bundle/apbundle.js";
-import { generateX25519KeyPair, x25519PrivateKeyFromRaw } from "../../sdk-typescript/src/bundle/hpke.js";
-import { canonicalJson } from "../../sdk-typescript/src/protocol/canonicalJson.js";
-import { keyThumbprint, trustedRootFromPinnedKey } from "../../sdk-typescript/src/protocol/trust.js";
-import type { P256PrivateJwk, P256PublicJwk, RootMetadata, Target } from "../../sdk-typescript/src/protocol/types.js";
+import type { DistributionKey } from "../../sdk-typescript/packages/core/src/bundle/apbundle.js";
+import { distributionKeyId } from "../../sdk-typescript/packages/core/src/bundle/apbundle.js";
+import { generateX25519KeyPair, x25519PrivateKeyFromRaw } from "../../sdk-typescript/packages/core/src/bundle/hpke.js";
+import { canonicalJson } from "../../sdk-typescript/packages/core/src/protocol/canonicalJson.js";
+import { keyThumbprint, trustedRootFromPinnedKey } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
+import type { P256PrivateJwk, P256PublicJwk, RootMetadata, Target } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import { refused, usage } from "./io.js";
 
 export interface DistributionPrivateFile {

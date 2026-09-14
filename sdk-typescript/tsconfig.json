@@ -1,26 +1,35 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": [
-      "ES2022"
-    ],
-    "types": [
-      "node"
-    ],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "noImplicitOverride": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "declaration": true,
-    "sourceMap": true,
-    "resolveJsonModule": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@airprompter/agent-core": [
+        "packages/core/src/index.ts"
+      ],
+      "@airprompter/agent-sync": [
+        "packages/sync/src/index.ts"
+      ],
+      "@airprompter/agent-runtime": [
+        "packages/runtime/src/index.ts"
+      ],
+      "@airprompter/agent-telemetry": [
+        "packages/telemetry/src/index.ts"
+      ],
+      "@airprompter/agent-sdk": [
+        "packages/sdk/src/index.ts"
+      ],
+      "@airprompter/agent-core/testing": [
+        "packages/core/src/testing/index.ts"
+      ],
+      "@airprompter/agent-sdk/testing": [
+        "packages/sdk/src/testing.ts"
+      ]
+    }
   },
   "include": [
-    "src/**/*.ts",
-    "test/**/*.ts"
+    "packages/*/src/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts"
   ]
 }

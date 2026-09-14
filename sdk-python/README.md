@@ -15,6 +15,44 @@ store one SDK wrote is a store the other (and the host daemon) opens.
 pip install airprompter-agent            # + [openai] [anthropic] [litellm] [kms] [vault] [keyring]
 ```
 
+## Packages
+
+Install what you use. The SDK is five distributions released in lockstep
+(one version; the facade exact-pins its siblings), mirroring the
+TypeScript packages one for one:
+
+| Distribution | Import package | Install it alone when | Depends on |
+| --- | --- | --- | --- |
+| `airprompter-agent-core` | `airprompter_agent_core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane client, the port protocols. Nothing here opens a file, a socket or a thread at import. The CI kit is `airprompter_agent_core.testing`. | — |
+| `airprompter-agent-sync` | `airprompter_agent_sync` | Your CI pulls and verifies releases (`sync_once`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, `DaemonClient`). Key providers are its extras: `[kms]`, `[vault]`, `[keyring]`. | core |
+| `airprompter-agent-runtime` | `airprompter_agent_runtime` | Your application renders and assigns over a release **it already holds** — a bundle you loaded, a release from the store or a daemon — with no store, daemon or network of its own (`BundleRelease` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`); the hosted-execution client (`ManagedAgent`). | core |
+| `airprompter-agent-telemetry` | `airprompter_agent_telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`). | core |
+| `airprompter-agent` | `airprompter_agent` | One install with today's `AirPrompterAgent`: the facade over the four, every public name re-exported, `airprompter_agent.integrations.*` for the openai / anthropic / LiteLLM clients. | all four |
+
+The direction is fixed and linted (`tools/lint_imports.py`): core imports
+nothing of ours; the three clients import core and never each other; the
+facade imports the clients. `tests/test_package_split.py` pins the edge
+set and proves the runtime alone renders over a bundle — the same vectors
+as the TypeScript `packageSplit.test.ts`.
+
+```python
+# The runtime alone, over a bundle committed beside the code: no store, no daemon, no network.
+from airprompter_agent_core import BundleRelease, trusted_root_from_pinned_key
+from airprompter_agent_runtime import ReleaseResolver
+
+root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=PINNED_ROOT_JWK)
+loaded = BundleRelease.load(bundle=json.load(open("release.apbundle")), root=root, scope=scope, now=now_iso())  # raises BundleReleaseRefused
+runtime = ReleaseResolver(release=loaded.current(), run_ref_key=run_ref_key, agent_id=scope["agentId"], target="prod", instance_id=instance_id, now_ms=lambda: time.time() * 1000)
+outcome = runtime.resolve("support.triage", user_id)
+if outcome.ok:
+    r = runtime.render(outcome.slot, {"team": "Billing", "ticket": ticket_text})  # Rendered(text, model, version_id, arm, generation, run_ref, tag)
+```
+
+Development: `python tools/install_dev.py` installs the five editable in
+dependency order; `python tools/build_all.py` builds every sdist and wheel
+into one `dist/`; `python tools/version_lockstep.py --set X.Y.Z` bumps them
+together.
+
 ## Quick start
 
 ```python

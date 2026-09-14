@@ -19,8 +19,8 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent, RenderRefusedError
 from airprompter_agent.agent import SyncOptions
-from airprompter_agent.protocol.trust import public_jwk_of
-from airprompter_agent.store.slot_store import SlotStore
+from airprompter_agent_core.protocol.trust import public_jwk_of
+from airprompter_agent_sync.store.slot_store import SlotStore
 
 from .control_plane import FakeControlPlane
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AEAD_AES_128_GCM, AEAD_AES_256_GCM, decap, encap, generateX25519KeyPair, keySchedule, open, openFrom, seal, sealTo, x25519PrivateKeyFromRaw } from "../src/bundle/hpke.js";
+import { AEAD_AES_128_GCM, AEAD_AES_256_GCM, decap, encap, generateX25519KeyPair, keySchedule, open, openFrom, seal, sealTo, x25519PrivateKeyFromRaw } from "../packages/core/src/bundle/hpke.js";
 
 const hex = (text: string) => Buffer.from(text, "hex");
 

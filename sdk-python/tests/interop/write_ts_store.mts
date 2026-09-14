@@ -9,11 +9,11 @@
 
 import { join } from "node:path";
 
-import { fileKey } from "../../../sdk-typescript/src/store/keyProvider.js";
-import { SlotStore } from "../../../sdk-typescript/src/store/slotStore.js";
-import { DirectorySink, SpoolWriter } from "../../../sdk-typescript/src/spool/writer.js";
-import { publicJwkOf } from "../../../sdk-typescript/src/protocol/trust.js";
-import { mintRunRef } from "../../../sdk-typescript/src/render/runRef.js";
+import { fileKey } from "../../../sdk-typescript/packages/sync/src/store/keyProvider.js";
+import { SlotStore } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { DirectorySink, SpoolWriter } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
+import { publicJwkOf } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
+import { mintRunRef } from "../../../sdk-typescript/packages/core/src/render/runRef.js";
 import { createHmac } from "node:crypto";
 import { FakeControlPlane } from "../../../sdk-typescript/test/helpers/controlPlane.js";
 

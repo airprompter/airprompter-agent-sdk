@@ -10,9 +10,9 @@
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 
-import type { AirPrompterAgent } from "../../../sdk-typescript/src/agent.js";
-import { DAEMON_MAX_LINE_BYTES } from "../../../sdk-typescript/src/sync/daemon.js";
-import type { SpoolUploader, UploaderStatus } from "../../../sdk-typescript/src/telemetry/uploader.js";
+import type { AirPrompterAgent } from "../../../sdk-typescript/packages/sdk/src/agent.js";
+import { DAEMON_MAX_LINE_BYTES } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
+import type { SpoolUploader, UploaderStatus } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
 
 export interface DaemonStatus {
   daemon: string;

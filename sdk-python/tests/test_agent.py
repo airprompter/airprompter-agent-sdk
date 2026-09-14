@@ -16,15 +16,15 @@ import time
 
 import pytest
 
-from airprompter_agent._util import instant, iso_ms, now_ms
+from airprompter_agent_core._util import instant, iso_ms, now_ms
 from airprompter_agent.agent import AgentStartError, AirPrompterAgent, RenderRefusedError, SyncOptions, VendoredBundle
-from airprompter_agent.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle
-from airprompter_agent.bundle.hpke import generate_x25519_key_pair
-from airprompter_agent.protocol.trust import key_thumbprint, public_jwk_of, release_digest
-from airprompter_agent.render.run_ref import parse_run_ref
-from airprompter_agent.render.template import MissingVariableError, UnknownVariableError
-from airprompter_agent.sync.loop import required_models_missing
-from airprompter_agent._util import b64url_encode
+from airprompter_agent_core.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle
+from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
+from airprompter_agent_core.protocol.trust import key_thumbprint, public_jwk_of, release_digest
+from airprompter_agent_core.render.run_ref import parse_run_ref
+from airprompter_agent_core.render.template import MissingVariableError, UnknownVariableError
+from airprompter_agent_sync.sync.loop import required_models_missing
+from airprompter_agent_core._util import b64url_encode
 
 from .control_plane import FakeControlPlane, new_key
 

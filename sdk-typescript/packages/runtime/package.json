@@ -1,0 +1,59 @@
+{
+  "name": "@airprompter/agent-runtime",
+  "version": "0.1.0",
+  "description": "Serve a verified AirPrompter agent release: slot resolution under the ramp and any retreat, rendered text with run references, provider wrappers, and the hosted-execution client. Renders and assigns over a bundle the customer loads with no store, daemon or network.",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/airprompter/airprompter-agent-sdk",
+    "directory": "sdk-typescript/packages/runtime"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\""
+  },
+  "airprompter": {
+    "sizeBudgetBytes": 160000
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dependencies": {
+    "@airprompter/agent-core": "0.1.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.40",
+    "ai": ">=5",
+    "openai": ">=4.50"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "ai": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    }
+  }
+}

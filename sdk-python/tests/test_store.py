@@ -12,9 +12,9 @@ import os
 
 import pytest
 
-from airprompter_agent._util import iso_ms, now_ms
-from airprompter_agent.store.key_provider import custom_key_provider, file_key, unwrap_with_raw_key, wrap_with_raw_key
-from airprompter_agent.store.slot_store import SlotStore, StoreError, StoreHooks
+from airprompter_agent_core._util import iso_ms, now_ms
+from airprompter_agent_sync.store.key_provider import custom_key_provider, file_key, unwrap_with_raw_key, wrap_with_raw_key
+from airprompter_agent_sync.store.slot_store import SlotStore, StoreError, StoreHooks
 
 from .control_plane import FakeControlPlane
 

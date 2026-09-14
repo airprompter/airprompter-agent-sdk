@@ -11,9 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent } from "../../sdk-typescript/src/agent.js";
-import { publicJwkOf } from "../../sdk-typescript/src/protocol/trust.js";
-import type { Bundle } from "../../sdk-typescript/src/protocol/types.js";
+import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js";
+import { publicJwkOf } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
+import type { Bundle } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import { FakeControlPlane, newKey, rootDocument } from "../../sdk-typescript/test/helpers/controlPlane.js";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";

@@ -3,8 +3,12 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
-    "types": ["node"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -13,7 +17,33 @@
     "skipLibCheck": true,
     "noEmit": true,
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@airprompter/agent-core": [
+        "../sdk-typescript/packages/core/src/index.ts"
+      ],
+      "@airprompter/agent-core/testing": [
+        "../sdk-typescript/packages/core/src/testing/index.ts"
+      ],
+      "@airprompter/agent-sync": [
+        "../sdk-typescript/packages/sync/src/index.ts"
+      ],
+      "@airprompter/agent-runtime": [
+        "../sdk-typescript/packages/runtime/src/index.ts"
+      ],
+      "@airprompter/agent-telemetry": [
+        "../sdk-typescript/packages/telemetry/src/index.ts"
+      ],
+      "@airprompter/agent-sdk": [
+        "../sdk-typescript/packages/sdk/src/index.ts"
+      ]
+    }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "../sdk-typescript/src/**/*.ts", "../sdk-typescript/test/helpers/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "../sdk-typescript/packages/*/src/**/*.ts",
+    "../sdk-typescript/test/helpers/*.ts"
+  ]
 }

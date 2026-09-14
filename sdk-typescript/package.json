@@ -1,62 +1,29 @@
 {
-  "name": "@airprompter/agent-sdk",
+  "name": "@airprompter/agent-sdk-workspace",
   "version": "0.1.0",
-  "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry.",
+  "private": true,
+  "description": "Workspace for the AirPrompter agent SDK packages (core, sync, runtime, telemetry, sdk) \u2014 one version, released in lockstep.",
   "license": "BSD-3-Clause",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/airprompter/airprompter-agent-sdk",
-    "directory": "sdk-typescript"
-  },
   "type": "module",
   "engines": {
     "node": ">=20"
   },
-  "main": "./dist/cjs/index.js",
-  "module": "./dist/esm/index.js",
-  "types": "./dist/esm/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/esm/index.d.ts",
-      "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.js"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md"
+  "workspaces": [
+    "packages/*"
   ],
-  "sideEffects": false,
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\"",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
-    "prepublishOnly": "npm run build && npm test",
-    "test:wrap-live": "WRAP_LIVE=1 node --import tsx --test test/wrapLive.test.ts"
-  },
-  "peerDependencies": {
-    "@anthropic-ai/sdk": ">=0.40",
-    "ai": ">=5",
-    "openai": ">=4.50"
-  },
-  "peerDependenciesMeta": {
-    "@anthropic-ai/sdk": {
-      "optional": true
-    },
-    "ai": {
-      "optional": true
-    },
-    "openai": {
-      "optional": true
-    }
+    "lint:imports": "node scripts/lint-imports.mjs",
+    "test": "npm run lint:imports && node --import tsx --test \"test/**/*.test.ts\"",
+    "size": "node scripts/size-budget.mjs",
+    "compat-table": "node scripts/compat-table.mjs",
+    "test:wrap-live": "WRAP_LIVE=1 node --import tsx --test test/wrapLive.test.ts",
+    "version:lockstep": "node scripts/version-lockstep.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.16.5",
     "tsx": "^4.20.3",
     "typescript": "^5.9.3"
-  },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
   }
 }

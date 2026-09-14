@@ -14,8 +14,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 
-import type { Bundle, Manifest, ManifestSlot } from "../../../sdk-typescript/src/protocol/types.js";
-import { isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
+import type { Bundle, Manifest, ManifestSlot } from "../../../sdk-typescript/packages/core/src/protocol/types.js";
+import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { openBundleFile } from "../chain.js";
 import { EXIT, Output, refused, usage, type Context } from "../io.js";

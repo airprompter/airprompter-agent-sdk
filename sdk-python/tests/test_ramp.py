@@ -9,10 +9,10 @@ import tempfile
 import pytest
 
 from airprompter_agent import AirPrompterAgent, RenderRefusedError
-from airprompter_agent._util import instant
+from airprompter_agent_core._util import instant
 from airprompter_agent.agent import SyncOptions
-from airprompter_agent.protocol.assignment import AssignmentError, assign_arm, effective_arms, ramp_weights_at, validate_ramp
-from airprompter_agent.protocol.trust import public_jwk_of, release_digest, verify_manifest
+from airprompter_agent_core.protocol.assignment import AssignmentError, assign_arm, effective_arms, ramp_weights_at, validate_ramp
+from airprompter_agent_core.protocol.trust import public_jwk_of, release_digest, verify_manifest
 
 from .control_plane import FakeControlPlane
 

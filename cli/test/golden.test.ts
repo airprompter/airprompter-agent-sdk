@@ -12,9 +12,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { canonicalBytes, sha256Prefixed } from "../../sdk-typescript/src/protocol/canonicalJson.js";
-import { publicJwkOf } from "../../sdk-typescript/src/protocol/trust.js";
-import type { ManifestSlot } from "../../sdk-typescript/src/protocol/types.js";
+import { canonicalBytes, sha256Prefixed } from "../../sdk-typescript/packages/core/src/protocol/canonicalJson.js";
+import { publicJwkOf } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
+import type { ManifestSlot } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import { FakeControlPlane } from "../../sdk-typescript/test/helpers/controlPlane.js";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";

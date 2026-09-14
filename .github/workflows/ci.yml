@@ -114,7 +114,24 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
+      # S10: five packages in lockstep. Build in dependency order first — the
+      # two-copies vector loads the built dist beside the source — then the
+      # whole tree as one program, the import direction, the suites, the size
+      # budgets, and the compatibility table's freshness.
+      - run: npm run build
+        working-directory: sdk-typescript
+      - run: npm run typecheck
+        working-directory: sdk-typescript
       - run: npm test
+        working-directory: sdk-typescript
+      - run: npm run size
+        working-directory: sdk-typescript
+      - name: The compatibility table is what the conformance run produces
+        run: node scripts/compat-table.mjs --check
+        working-directory: sdk-typescript
+      - name: Every package installs on its own (a fresh project, one sibling at a time)
+        shell: bash
+        run: node scripts/install-alone.mjs
         working-directory: sdk-typescript
 
   sdk-python:
@@ -138,11 +155,19 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
-      - run: python -m pip install -e ".[test]" pyflakes
+      # S10: five distributions in lockstep, installed editable in dependency order; the import direction is linted.
+      - run: python tools/install_dev.py pyflakes build
         working-directory: sdk-python
-      - run: python -m pyflakes src tests
+      - run: python -m pyflakes packages/*/src tests tools
+        working-directory: sdk-python
+      - run: python tools/lint_imports.py
+        working-directory: sdk-python
+      - run: python tools/version_lockstep.py
         working-directory: sdk-python
       - run: python -m pytest -rs
+        working-directory: sdk-python
+      - name: Every distribution builds (sdist + wheel) into one dist/
+        run: python tools/build_all.py
         working-directory: sdk-python
       - name: The interop test ran (not skipped)
         run: python -m pytest tests/test_interop.py -rs 2>&1 | tee /tmp/interop.log && ! grep -q SKIPPED /tmp/interop.log

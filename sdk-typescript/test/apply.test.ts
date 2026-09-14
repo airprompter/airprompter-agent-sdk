@@ -15,10 +15,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent, RenderRefusedError } from "../src/agent.js";
-import { parseWindow, windowState } from "../src/apply/window.js";
-import { publicJwkOf, releaseDigest } from "../src/protocol/trust.js";
-import { requiredModelsMissing } from "../src/sync/loop.js";
+import { AirPrompterAgent, RenderRefusedError } from "../packages/sdk/src/agent.js";
+import { parseWindow, windowState } from "../packages/sync/src/apply/window.js";
+import { publicJwkOf, releaseDigest } from "../packages/core/src/protocol/trust.js";
+import { requiredModelsMissing } from "../packages/sync/src/sync/loop.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };

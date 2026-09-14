@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "airprompter-agent"
+version = "0.1.0"
+description = "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. The facade over airprompter-agent-core, -sync, -runtime and -telemetry."
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.10"
+authors = [{ name = "AirPrompter" }]
+keywords = ["airprompter", "prompts", "llm", "agent", "governance"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+  "airprompter-agent-core==0.1.0",
+  "airprompter-agent-sync==0.1.0",
+  "airprompter-agent-runtime==0.1.0",
+  "airprompter-agent-telemetry==0.1.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+# Key providers (airprompter-agent-sync extras), re-exposed here so one install names them.
+kms = ["airprompter-agent-sync[kms]==0.1.0"]
+vault = ["airprompter-agent-sync[vault]==0.1.0"]
+keyring = ["airprompter-agent-sync[keyring]==0.1.0"]
+# Provider wrappers: `airprompter_agent.integrations.*` import these lazily.
+openai = ["openai>=1.40"]
+anthropic = ["anthropic>=0.40"]
+litellm = ["litellm>=1.50"]
+
+[project.urls]
+Homepage = "https://github.com/airprompter/airprompter-agent-sdk"
+Source = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-python/packages/agent"
+Protocol = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/protocol"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/airprompter_agent"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/airprompter_agent", "README.md"]

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "airprompter-agent-core"
+version = "0.1.0"
+description = "The pure half of the AirPrompter agent SDK: the protocol (types, trust chain, canonical JSON, arm assignment and the ramp walk), rendering, output checks, golden sets, the judge, bundle reading, telemetry row schemas, the control-plane client, and the port interfaces. No side effects at import; no sibling dependencies."
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.10"
+authors = [{ name = "AirPrompter" }]
+keywords = ["airprompter", "prompts", "llm", "agent", "governance"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+  "cryptography>=42",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/airprompter/airprompter-agent-sdk"
+Source = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-python/packages/core"
+Protocol = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/protocol"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/airprompter_agent_core"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/airprompter_agent_core", "README.md"]

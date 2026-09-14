@@ -4,8 +4,8 @@
  * ever includes payload text. `Context` is what tests inject.
  */
 
-import type { FetchLike } from "../../sdk-typescript/src/sync/client.js";
-import { errorNamed } from "../../sdk-typescript/src/protocol/errors.js";
+import type { FetchLike } from "../../sdk-typescript/packages/core/src/control/client.js";
+import { errorNamed } from "../../sdk-typescript/packages/core/src/protocol/errors.js";
 
 /** Exit codes are the CI contract: scripts branch on them, never on text. */
 export const EXIT = {

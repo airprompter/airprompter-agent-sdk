@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "airprompter-agent-sync"
+version = "0.1.0"
+description = "Pull and hold AirPrompter agent releases: signed pull-only updates, the encrypted restart-safe slot store, key providers, the apply policy and its windows, and the daemon client."
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.10"
+authors = [{ name = "AirPrompter" }]
+keywords = ["airprompter", "prompts", "llm", "agent", "governance"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+  "airprompter-agent-core==0.1.0",
+  "cryptography>=42",
+]
+
+[project.optional-dependencies]
+# Key providers: what protects the store's key-encryption key (reported on the heartbeat as storageProtection).
+kms = ["boto3>=1.34"]
+vault = ["hvac>=2"]
+keyring = ["keyring>=25"]
+
+[project.urls]
+Homepage = "https://github.com/airprompter/airprompter-agent-sdk"
+Source = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-python/packages/sync"
+Protocol = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/protocol"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/airprompter_agent_sync"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/airprompter_agent_sync", "README.md"]

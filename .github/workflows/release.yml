@@ -5,10 +5,15 @@
 #   protocol/vX.Y.Z        protocol tag — CI conformance only (ci.yml); the
 #                          protocol is consumed by pinning the tag, not by a
 #                          package.
-#   sdk-typescript/vX.Y.Z  npm publish with provenance (OIDC; no npm token in
-#                          the repository — trusted publishing on npmjs.com
-#                          must be configured for @airprompter/agent-sdk).
-#   sdk-python/vX.Y.Z      PyPI trusted publishing (OIDC; no API token).
+#   sdk-typescript/vX.Y.Z  npm publish of the five packages (core, sync,
+#                          runtime, telemetry, sdk) from one tag, in
+#                          dependency order, each with provenance (OIDC; no
+#                          npm token in the repository — trusted publishing
+#                          on npmjs.com must be configured for every
+#                          @airprompter/agent-* package).
+#   sdk-python/vX.Y.Z      PyPI trusted publishing of the five distributions
+#                          (airprompter-agent-core, -sync, -runtime,
+#                          -telemetry, airprompter-agent) from one tag.
 #   cli/vX.Y.Z             single-file executables for linux/macos/windows,
 #                          cosign keyless signatures, SBOM, GitHub release.
 #
@@ -63,10 +68,10 @@ jobs:
             protocol.spdx.json.sigstore
 
   npm:
-    name: Publish @airprompter/agent-sdk
+    name: Publish @airprompter/agent-* (five packages, one tag)
     if: startsWith(github.ref, 'refs/tags/sdk-typescript/v')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: write
       id-token: write
@@ -78,12 +83,14 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
+      - run: npm run build
+        working-directory: sdk-typescript
       - run: npm test
         working-directory: sdk-typescript
-      - name: Tag matches package.json
+      - name: Tag matches every package.json (one version, lockstep)
         run: |
           v="${GITHUB_REF_NAME#sdk-typescript/v}"
-          test "$(node -p "require('./package.json').version")" = "$v"
+          node scripts/version-lockstep.mjs --expect "$v"
         working-directory: sdk-typescript
       - name: SBOM
         uses: anchore/sbom-action@v0
@@ -91,8 +98,12 @@ jobs:
           path: sdk-typescript
           format: spdx-json
           output-file: agent-sdk.spdx.json
-      - name: Publish with provenance
-        run: npm publish --provenance --access public
+      - name: Publish with provenance, in dependency order
+        # core first: a sibling's exact pin must resolve on the registry before the sibling is published.
+        run: |
+          for name in core sync runtime telemetry sdk; do
+            npm publish --provenance --access public --workspace "@airprompter/agent-$name"
+          done
         working-directory: sdk-typescript
       - uses: softprops/action-gh-release@v2
         with:
@@ -100,10 +111,10 @@ jobs:
           generate_release_notes: true
 
   pypi:
-    name: Publish airprompter-agent
+    name: Publish airprompter-agent-* (five distributions, one tag)
     if: startsWith(github.ref, 'refs/tags/sdk-python/v')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: pypi
     permissions:
       contents: write
@@ -114,12 +125,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install build
-      - run: python -m build
+      - name: Build every distribution into one dist/ (core, sync, runtime, telemetry, agent)
+        run: python tools/build_all.py
         working-directory: sdk-python
-      - name: Tag matches pyproject version
+      - name: Tag matches every pyproject version (one version, lockstep)
         run: |
           v="${GITHUB_REF_NAME#sdk-python/v}"
-          python -c "import tomllib,sys; d=tomllib.load(open('pyproject.toml','rb')); sys.exit(0 if d['project']['version']=='$v' else 1)"
+          python tools/version_lockstep.py --expect "$v"
         working-directory: sdk-python
       - name: SBOM
         uses: anchore/sbom-action@v0

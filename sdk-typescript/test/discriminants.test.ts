@@ -14,13 +14,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AgentStartError, isAgentStartError } from "../src/agent.js";
-import { ManagedRunError, isManagedRunError } from "../src/managed/client.js";
-import { errorNamed } from "../src/protocol/errors.js";
-import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type SpoolSink } from "../src/spool/writer.js";
-import { PayloadDecryptError, isPayloadDecryptError } from "../src/store/payloadCrypto.js";
-import { StoreError, isStoreError } from "../src/store/slotStore.js";
-import { DaemonError, isDaemonError } from "../src/sync/daemon.js";
+import { AgentStartError, isAgentStartError } from "../packages/sdk/src/agent.js";
+import { ManagedRunError, isManagedRunError } from "../packages/runtime/src/managed/client.js";
+import { errorNamed } from "../packages/core/src/protocol/errors.js";
+import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type SpoolSink } from "../packages/telemetry/src/spool/writer.js";
+import { PayloadDecryptError, isPayloadDecryptError } from "../packages/sync/src/store/payloadCrypto.js";
+import { StoreError, isStoreError } from "../packages/sync/src/store/slotStore.js";
+import { DaemonError, isDaemonError } from "../packages/sync/src/sync/daemon.js";
 
 /** What another copy of this package throws: a plain Error dressed with the same name and code. */
 function foreign(name: string, fields: Record<string, unknown>): Error {
@@ -82,7 +82,7 @@ test("no source file uses instanceof on an SDK class", () => {
       else if (path.endsWith(".ts") && !path.endsWith(".d.ts")) files.push(path);
     }
   };
-  walk(join(process.cwd(), "src"));
+  for (const pkg of readdirSync(join(process.cwd(), "packages"))) walk(join(process.cwd(), "packages", pkg, "src"));
   walk(join(process.cwd(), "..", "cli", "src"));
   for (const file of files) for (const m of readFileSync(file, "utf8").matchAll(/^export class (\w+)/gm)) sdkClasses.add(m[1]!);
   assert.ok(sdkClasses.has("StoreError") && sdkClasses.has("MemorySink") && sdkClasses.has("CliError"), "the class census found the SDK classes");

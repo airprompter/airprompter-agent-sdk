@@ -19,10 +19,10 @@ import time
 
 import pytest
 
-from airprompter_agent._util import b64url_encode
+from airprompter_agent_core._util import b64url_encode
 from airprompter_agent.agent import AirPrompterAgent, SyncOptions
-from airprompter_agent.protocol.trust import public_jwk_of
-from airprompter_agent.sync.daemon import DaemonClient, DaemonError, daemon_socket_path
+from airprompter_agent_core.protocol.trust import public_jwk_of
+from airprompter_agent_sync.sync.daemon import DaemonClient, DaemonError, daemon_socket_path
 
 from .control_plane import FakeControlPlane
 

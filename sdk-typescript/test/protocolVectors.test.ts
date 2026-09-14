@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { assignArm, AssignmentError, orderedSteps, StepError } from "../src/protocol/assignment.js";
-import { canonicalJson, CanonicalJsonError, sha256Prefixed } from "../src/protocol/canonicalJson.js";
-import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../src/protocol/trust.js";
-import { checksRefusals, evaluateChecks, patternRefusal, projectChecks, type DeclaredCheck } from "../src/checks/index.js";
+import { assignArm, AssignmentError, orderedSteps, StepError } from "../packages/core/src/protocol/assignment.js";
+import { canonicalJson, CanonicalJsonError, sha256Prefixed } from "../packages/core/src/protocol/canonicalJson.js";
+import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../packages/core/src/protocol/trust.js";
+import { checksRefusals, evaluateChecks, patternRefusal, projectChecks, type DeclaredCheck } from "../packages/core/src/checks/index.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));
 

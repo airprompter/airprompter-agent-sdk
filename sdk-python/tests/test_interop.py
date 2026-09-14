@@ -19,9 +19,9 @@ import tempfile
 import pytest
 
 from airprompter_agent.agent import AirPrompterAgent
-from airprompter_agent.render.run_ref import parse_run_ref
-from airprompter_agent.spool.writer import epoch_minute
-from airprompter_agent._util import instant
+from airprompter_agent_core.render.run_ref import parse_run_ref
+from airprompter_agent_telemetry.spool.writer import epoch_minute
+from airprompter_agent_core._util import instant
 
 HERE = os.path.dirname(__file__)
 TS_DIR = os.path.abspath(os.path.join(HERE, "..", "..", "sdk-typescript"))

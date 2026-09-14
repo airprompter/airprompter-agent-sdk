@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { SlotStore } from "../../sdk-typescript/src/store/slotStore.js";
-import { epochMinute, segmentName, type SpoolRow } from "../../sdk-typescript/src/spool/writer.js";
+import { SlotStore } from "../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { epochMinute, segmentName, type SpoolRow } from "../../sdk-typescript/packages/telemetry/src/spool/writer.js";
 import { FakeControlPlane } from "../../sdk-typescript/test/helpers/controlPlane.js";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";

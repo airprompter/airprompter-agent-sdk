@@ -1,0 +1,45 @@
+"""``airprompter_agent_runtime`` — serving a verified release: which slot a subject gets under which arm (the ramp
+walked on this host's clock, a retreat honoured), the rendered text with its run reference, the provider wrappers that
+attribute a model call to a render and classify what came back, and the hosted-execution client. Consumes a
+``LoadedRelease`` from ``airprompter_agent_core`` — the slot store, a daemon or a bundle the customer loaded — and
+never imports the sync or the telemetry package (S10)."""
+
+from .attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
+from .managed import MANAGED_REFUSAL_CODES, MANAGED_SDK_USER_AGENT, ManagedAgent, ManagedRunError, ManagedRunResult, ManagedRunStream, ManagedWorkflow, parse_sse
+from .observe import ObserveTarget, PendingObservation, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
+from .release.resolver import Disabled, ReleaseResolver, Rendered, ResolveOutcome, Workflow, WorkflowStep, disabled_from
+from .wrap import WRAPPED_METHODS, WrapHooks, wrap_client
+
+__all__ = [
+    "Attribution",
+    "Disabled",
+    "MANAGED_REFUSAL_CODES",
+    "MANAGED_SDK_USER_AGENT",
+    "ManagedAgent",
+    "ManagedRunError",
+    "ManagedRunResult",
+    "ManagedRunStream",
+    "ManagedWorkflow",
+    "ObserveTarget",
+    "PendingObservation",
+    "ReleaseResolver",
+    "RenderRegistry",
+    "Rendered",
+    "ResolveOutcome",
+    "UsageNormalized",
+    "WRAPPED_METHODS",
+    "Workflow",
+    "WorkflowStep",
+    "WrapHooks",
+    "attribution_scope",
+    "classify_error",
+    "classify_result",
+    "current_attribution",
+    "disabled_from",
+    "normalize_usage",
+    "observe_call",
+    "observe_call_async",
+    "parse_sse",
+    "request_texts",
+    "wrap_client",
+]

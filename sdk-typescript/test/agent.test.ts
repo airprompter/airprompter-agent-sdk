@@ -13,13 +13,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent, AgentStartError, RenderRefusedError } from "../src/agent.js";
-import { createEncryptedBundle, createPlaintextBundle } from "../src/bundle/apbundle.js";
-import { generateX25519KeyPair } from "../src/bundle/hpke.js";
-import { keyThumbprint, publicJwkOf, releaseDigest } from "../src/protocol/trust.js";
-import { MissingVariableError } from "../src/render/template.js";
-import { parseRunRef } from "../src/render/runRef.js";
-import type { WindowRow } from "../src/spool/writer.js";
+import { AirPrompterAgent, AgentStartError, RenderRefusedError } from "../packages/sdk/src/agent.js";
+import { createEncryptedBundle, createPlaintextBundle } from "../packages/core/src/bundle/apbundle.js";
+import { generateX25519KeyPair } from "../packages/core/src/bundle/hpke.js";
+import { keyThumbprint, publicJwkOf, releaseDigest } from "../packages/core/src/protocol/trust.js";
+import { MissingVariableError } from "../packages/core/src/render/template.js";
+import { parseRunRef } from "../packages/core/src/render/runRef.js";
+import type { WindowRow } from "../packages/telemetry/src/spool/writer.js";
 import { FakeControlPlane, newKey } from "./helpers/controlPlane.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };

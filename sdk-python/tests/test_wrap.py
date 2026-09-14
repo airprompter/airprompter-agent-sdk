@@ -14,9 +14,9 @@ from typing import Any
 import pytest
 
 from airprompter_agent.integrations.litellm import AirPrompterLiteLLMCallback
-from airprompter_agent.telemetry.attribution import RenderRegistry, request_texts
-from airprompter_agent.telemetry.observe import ObserveTarget, PendingObservation
-from airprompter_agent.telemetry.wrap import WrapHooks, wrap_client
+from airprompter_agent_runtime.attribution import RenderRegistry, request_texts
+from airprompter_agent_runtime.observe import ObserveTarget, PendingObservation
+from airprompter_agent_runtime.wrap import WrapHooks, wrap_client
 
 from .control_plane import FakeControlPlane
 from .test_agent import SCOPE, start

@@ -16,9 +16,9 @@ import json
 import httpx
 import pytest
 
-from airprompter_agent._util import b64url_decode, b64url_encode
-from airprompter_agent.managed import ManagedAgent, ManagedRunError, SseFrame, parse_sse
-from airprompter_agent.protocol.assignment import subject_hash
+from airprompter_agent_core._util import b64url_decode, b64url_encode
+from airprompter_agent_runtime.managed import ManagedAgent, ManagedRunError, SseFrame, parse_sse
+from airprompter_agent_core.protocol.assignment import subject_hash
 
 SALT = b64url_encode(b"0123456789abcdef0123456789abcdef")
 

@@ -21,10 +21,10 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { AirPrompterAgent } from "../../sdk-typescript/src/agent.js";
-import { publicJwkOf } from "../../sdk-typescript/src/protocol/trust.js";
-import { SlotStore } from "../../sdk-typescript/src/store/slotStore.js";
-import { DaemonClient, daemonSocketPath } from "../../sdk-typescript/src/sync/daemon.js";
+import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js";
+import { publicJwkOf } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
+import { SlotStore } from "../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { DaemonClient, daemonSocketPath } from "../../sdk-typescript/packages/sync/src/sync/daemon.js";
 import { FakeControlPlane, serveOverHttp } from "../../sdk-typescript/test/helpers/controlPlane.js";
 import { run } from "../src/cli.js";
 import { EXIT } from "../src/io.js";
@@ -186,7 +186,7 @@ test("two SDK processes attach to one daemon; one poll moves both; healthz answe
   await daemon.exited;
   await until(() => sdkA.status().daemon?.attached === false, "runtime A noticed");
   assert.equal(sdkA.prompt("support.reply").render({ name: "z" }).text, "two z", "keeps serving what it holds");
-  const store = await SlotStore.open({ stateDir, ...scope, keyProvider: (await import("../../sdk-typescript/src/store/keyProvider.js")).fileKey(join(SlotStore.path({ stateDir, ...scope }), "store.key")) });
+  const store = await SlotStore.open({ stateDir, ...scope, keyProvider: (await import("../../sdk-typescript/packages/sync/src/store/keyProvider.js")).fileKey(join(SlotStore.path({ stateDir, ...scope }), "store.key")) });
   assert.equal(store.state.generation, 2);
   assert.equal(store.load(store.state.active!, { now: new Date().toISOString(), root: store.state.root, expectGeneration: 2 }).generation, 2);
   assert.deepEqual({ value: store.state.applyPolicyPin?.value, source: store.state.applyPolicyPin?.source }, { value: "auto", source: "operator" }, "the pin is in the store the daemon owns");

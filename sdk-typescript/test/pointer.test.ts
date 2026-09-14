@@ -14,9 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent, RenderRefusedError } from "../src/agent.js";
-import { publicJwkOf } from "../src/protocol/trust.js";
-import { FakeControlPlane } from "../src/testing/index.js";
+import { AirPrompterAgent, RenderRefusedError } from "../packages/sdk/src/agent.js";
+import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
+import { FakeControlPlane } from "../packages/core/src/testing/index.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_pointer", target: "prod" as const };
 

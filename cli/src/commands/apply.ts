@@ -8,8 +8,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 
-import type { Bundle } from "../../../sdk-typescript/src/protocol/types.js";
-import { isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
+import type { Bundle } from "../../../sdk-typescript/packages/core/src/protocol/types.js";
+import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { EXPIRY_WARNING_DAYS, openBundleFile, payloadsOf, verifyChain } from "../chain.js";
 import { GOLDEN_OPTIONS, goldenInvokeOf, runGoldenSets } from "../golden.js";

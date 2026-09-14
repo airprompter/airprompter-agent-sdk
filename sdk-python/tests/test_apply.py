@@ -16,10 +16,10 @@ import time
 
 import pytest
 
-from airprompter_agent._util import instant, iso_ms, now_ms
+from airprompter_agent_core._util import instant, iso_ms, now_ms
 from airprompter_agent.agent import AirPrompterAgent, RenderRefusedError, SyncOptions
-from airprompter_agent.apply.window import parse_window, window_state
-from airprompter_agent.protocol.trust import public_jwk_of
+from airprompter_agent_sync.apply.window import parse_window, window_state
+from airprompter_agent_core.protocol.trust import public_jwk_of
 
 from .control_plane import FakeControlPlane
 

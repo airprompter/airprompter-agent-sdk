@@ -57,7 +57,7 @@ counted on the writer (`faults.byCode`, by the filesystem's own code) and
 the rows that could not be kept are said in one `dropped` row the moment
 a write works again — never thrown into your request. Every SDK reaches the
 filesystem through a port, so the same writer runs in your CI over
-`MemoryFs` from `@airprompter/agent-sdk` (`airprompter_agent.testing` in
+`MemoryFs` from `@airprompter/agent-core/testing` (also `@airprompter/agent-sdk/testing`; `airprompter_agent_core.testing` in
 Python): a filesystem you can fill, fail and take files from, with a clock
 you can advance or skew. Our own vectors are those cases — two writers over
 budget, a crash mid-open, no daemon, no grant — and they are the same

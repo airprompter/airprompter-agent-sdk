@@ -16,8 +16,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type WindowRow } from "../src/spool/writer.js";
-import { classifyError, classifyResult, normalizeUsage, observeCall } from "../src/telemetry/observe.js";
+import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type WindowRow } from "../packages/telemetry/src/spool/writer.js";
+import { classifyError, classifyResult, normalizeUsage, observeCall } from "../packages/runtime/src/observe.js";
 
 const target = { tag: "support.triage", versionId: "ver_1", arm: "none", model: "gpt-5" };
 

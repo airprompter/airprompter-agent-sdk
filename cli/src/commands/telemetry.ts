@@ -24,10 +24,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { SlotStore } from "../../../sdk-typescript/src/store/slotStore.js";
-import { SyncClient } from "../../../sdk-typescript/src/sync/client.js";
-import { EXPORTED_CAP_BYTES, inspectSegment, postSegment, SEGMENT_NAME, type UploadGrant } from "../../../sdk-typescript/src/telemetry/uploader.js";
-import { PROTOCOL_VERSION } from "../../../sdk-typescript/src/agent.js";
+import { SlotStore } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { SyncClient } from "../../../sdk-typescript/packages/core/src/control/client.js";
+import { EXPORTED_CAP_BYTES, inspectSegment, postSegment, SEGMENT_NAME, type UploadGrant } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
+import { PROTOCOL_VERSION } from "../../../sdk-typescript/packages/sdk/src/agent.js";
 import { CLI_VERSION } from "../version.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { EXIT, Output, refused, usage, type Context } from "../io.js";

@@ -8,10 +8,10 @@
 
 import { join } from "node:path";
 
-import { AirPrompterAgent, isAgentStartError, SDK_NAME, SDK_VERSION } from "../../../sdk-typescript/src/agent.js";
-import { daemonSocketPath } from "../../../sdk-typescript/src/sync/daemon.js";
-import { SlotStore } from "../../../sdk-typescript/src/store/slotStore.js";
-import { SpoolUploader } from "../../../sdk-typescript/src/telemetry/uploader.js";
+import { AirPrompterAgent, isAgentStartError, SDK_NAME, SDK_VERSION } from "../../../sdk-typescript/packages/sdk/src/agent.js";
+import { daemonSocketPath } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
+import { SlotStore } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { SpoolUploader } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { DaemonServer } from "../daemon/server.js";
 import { EXIT, refused, usage, type Context } from "../io.js";

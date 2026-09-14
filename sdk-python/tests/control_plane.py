@@ -14,9 +14,9 @@ from typing import Any, Callable, Optional
 
 import httpx
 
-from airprompter_agent._util import instant, iso_ms, now_ms
-from airprompter_agent.protocol.canonical_json import canonical_bytes, sha256_prefixed
-from airprompter_agent.protocol.trust import generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
+from airprompter_agent_core._util import instant, iso_ms, now_ms
+from airprompter_agent_core.protocol.canonical_json import canonical_bytes, sha256_prefixed
+from airprompter_agent_core.protocol.trust import generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
 
 #: The protocol version this checkout of the repository declares; manifests the fake signs carry it.
 with open(os.path.join(os.path.dirname(__file__), "..", "..", "protocol", "VERSION"), encoding="utf-8") as _f:

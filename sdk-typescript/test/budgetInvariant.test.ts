@@ -18,13 +18,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent } from "../src/agent.js";
-import { publicJwkOf } from "../src/protocol/trust.js";
-import { epochMinute, segmentName, SEGMENT_MAX_BYTES, SpoolWriter, type SpoolRow } from "../src/spool/writer.js";
-import { SlotStore } from "../src/store/slotStore.js";
-import { OPEN_SEGMENT_RECLAIM_MS, QUARANTINE_CAP_BYTES, SEGMENT_NAME, SpoolUploader } from "../src/telemetry/uploader.js";
-import { FakeControlPlane, MemoryFs } from "../src/testing/index.js";
-import { MemorySink } from "../src/spool/writer.js";
+import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
+import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
+import { epochMinute, segmentName, SEGMENT_MAX_BYTES, SpoolWriter, type SpoolRow } from "../packages/telemetry/src/spool/writer.js";
+import { SlotStore } from "../packages/sync/src/store/slotStore.js";
+import { OPEN_SEGMENT_RECLAIM_MS, QUARANTINE_CAP_BYTES, SEGMENT_NAME, SpoolUploader } from "../packages/telemetry/src/uploader.js";
+import { FakeControlPlane, MemoryFs } from "../packages/core/src/testing/index.js";
+import { MemorySink } from "../packages/telemetry/src/spool/writer.js";
 
 const T0 = Date.parse("2026-09-13T12:00:10Z");
 const WRITER_A = "i-writerAAAAAAAA";
@@ -142,7 +142,7 @@ test("every process is its own instance: two runtimes on one store report distin
   const a = await start();
   const b = await start();
   try {
-    const storeId = (await SlotStore.open({ stateDir, ...scope, keyProvider: (await import("../src/store/keyProvider.js")).fileKey(join(SlotStore.path({ stateDir, ...scope }), "store.key")) })).instanceId;
+    const storeId = (await SlotStore.open({ stateDir, ...scope, keyProvider: (await import("../packages/sync/src/store/keyProvider.js")).fileKey(join(SlotStore.path({ stateDir, ...scope }), "store.key")) })).instanceId;
     assert.notEqual(a.instanceId, b.instanceId, "N workers are N instances");
     assert.notEqual(a.instanceId, storeId, "the store's id is the store's, not a process's");
     assert.notEqual(b.instanceId, storeId);

@@ -7,9 +7,9 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 
-import type { Bundle } from "../../../sdk-typescript/src/protocol/types.js";
-import { SlotStore, isStoreError } from "../../../sdk-typescript/src/store/slotStore.js";
-import { fileKey } from "../../../sdk-typescript/src/store/keyProvider.js";
+import type { Bundle } from "../../../sdk-typescript/packages/core/src/protocol/types.js";
+import { SlotStore, isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { fileKey } from "../../../sdk-typescript/packages/sync/src/store/keyProvider.js";
 import { join } from "node:path";
 import { COMMON_OPTIONS, ROOT_OPTIONS, SCOPE_OPTIONS, flag, helpFor, parse, rootOf, scopeOf, str, type OptionSpec } from "../args.js";
 import { EXPIRY_WARNING_DAYS, openBundleFile, payloadsOf, summarizeManifest, verifyChain, type ChainReport } from "../chain.js";

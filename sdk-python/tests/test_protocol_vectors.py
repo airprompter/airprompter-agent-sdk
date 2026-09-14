@@ -14,8 +14,8 @@ import os
 
 import pytest
 
-from airprompter_agent._util import b64url_decode
-from airprompter_agent.protocol import (
+from airprompter_agent_core._util import b64url_decode
+from airprompter_agent_core.protocol import (
     UNDEFINED,
     AssignmentError,
     CanonicalJsonError,

@@ -15,10 +15,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent } from "../src/agent.js";
-import { publicJwkOf } from "../src/protocol/trust.js";
-import { SlotStore } from "../src/store/slotStore.js";
-import { FakeControlPlane } from "../src/testing/index.js";
+import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
+import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
+import { SlotStore } from "../packages/sync/src/store/slotStore.js";
+import { FakeControlPlane } from "../packages/core/src/testing/index.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_upload", target: "prod" as const };
 const T0 = Date.parse("2026-09-13T12:00:00Z");

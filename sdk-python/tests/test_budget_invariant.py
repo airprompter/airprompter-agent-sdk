@@ -14,12 +14,12 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import SyncOptions
-from airprompter_agent.protocol.trust import public_jwk_of
-from airprompter_agent.spool.writer import SEGMENT_MAX_BYTES, MemorySink, Observation, SpoolWriter, WriterIdentity, epoch_minute, segment_name
-from airprompter_agent.store.key_provider import file_key
-from airprompter_agent.store.slot_store import SlotStore
-from airprompter_agent.telemetry.uploader import OPEN_SEGMENT_RECLAIM_MS, QUARANTINE_CAP_BYTES, SEGMENT_NAME, GrantDecision, SpoolUploader
-from airprompter_agent.testing import MemoryFs
+from airprompter_agent_core.protocol.trust import public_jwk_of
+from airprompter_agent_telemetry.spool.writer import SEGMENT_MAX_BYTES, MemorySink, Observation, SpoolWriter, WriterIdentity, epoch_minute, segment_name
+from airprompter_agent_sync.store.key_provider import file_key
+from airprompter_agent_sync.store.slot_store import SlotStore
+from airprompter_agent_telemetry.uploader import OPEN_SEGMENT_RECLAIM_MS, QUARANTINE_CAP_BYTES, SEGMENT_NAME, GrantDecision, SpoolUploader
+from airprompter_agent_core.testing import MemoryFs
 
 from .control_plane import FakeControlPlane
 

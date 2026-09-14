@@ -5,9 +5,9 @@
  * the release in counts, hashes and ids — never in text.
  */
 
-import { openBundle, bundlePayloadBytes, type DistributionKey } from "../../sdk-typescript/src/bundle/apbundle.js";
-import { instant, referencedPayloads, verifyManifest, verifyRootMetadata } from "../../sdk-typescript/src/protocol/trust.js";
-import type { Bundle, BundleContents, Manifest, RootMetadata, Target } from "../../sdk-typescript/src/protocol/types.js";
+import { openBundle, bundlePayloadBytes, type DistributionKey } from "../../sdk-typescript/packages/core/src/bundle/apbundle.js";
+import { instant, referencedPayloads, verifyManifest, verifyRootMetadata } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
+import type { Bundle, BundleContents, Manifest, RootMetadata, Target } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import { refused } from "./io.js";
 import type { RootSource } from "./keys.js";
 

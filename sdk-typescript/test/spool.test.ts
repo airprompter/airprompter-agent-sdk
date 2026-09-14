@@ -13,8 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { normalizeFeedback } from "../src/spool/feedback.js";
-import { DirectorySink, LATENCY_BUCKET_EDGES_MS, MemorySink, SEGMENT_MAX_BYTES, SegmentPlanner, SpoolWriter, epochMinute, latencyBucketIndex, minuteOf, segmentName, type Observation, type SpoolRow, type WindowRow } from "../src/spool/writer.js";
+import { normalizeFeedback } from "../packages/core/src/telemetry/feedback.js";
+import { DirectorySink, LATENCY_BUCKET_EDGES_MS, MemorySink, SEGMENT_MAX_BYTES, SegmentPlanner, SpoolWriter, epochMinute, latencyBucketIndex, minuteOf, segmentName, type Observation, type SpoolRow, type WindowRow } from "../packages/telemetry/src/spool/writer.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));
 const stable = (value: unknown): unknown => (Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable((value as Record<string, unknown>)[k])])) : value);

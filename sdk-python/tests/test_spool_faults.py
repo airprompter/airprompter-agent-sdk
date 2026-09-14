@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from airprompter_agent.spool.writer import HOST_SPOOL_BUDGET_BYTES, DirectorySink
-from airprompter_agent.testing import MemoryFs
+from airprompter_agent_telemetry.spool.writer import HOST_SPOOL_BUDGET_BYTES, DirectorySink
+from airprompter_agent_core.testing import MemoryFs
 
 DIR = "/state/airprompter/agt_1/prod/spool/telemetry"
 MINUTE = 1_789_300_800_000.0  # 2026-09-13T12:00:00Z
@@ -17,7 +17,7 @@ REPORT_SEGMENT_BYTES = 160
 
 
 def row(n: int, at: float, instance_id: str = "i-writer-a") -> dict:
-    from airprompter_agent._util import iso_seconds
+    from airprompter_agent_core._util import iso_seconds
 
     return {"type": "refusal", "v": 1, "at": iso_seconds(at), "instanceId": instance_id, "reason": "lease_expired", "generation": n, "tag": None}
 

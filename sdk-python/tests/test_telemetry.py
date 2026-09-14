@@ -21,8 +21,8 @@ from airprompter_agent.agent import AirPrompterAgent, SyncOptions
 from airprompter_agent.integrations.anthropic import messages_create, messages_create_async
 from airprompter_agent.integrations.litellm import AirPrompterLiteLLMCallback, litellm_metadata
 from airprompter_agent.integrations.openai import chat_completion, chat_completion_async, responses_create
-from airprompter_agent.protocol.trust import public_jwk_of
-from airprompter_agent.telemetry.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
+from airprompter_agent_core.protocol.trust import public_jwk_of
+from airprompter_agent_runtime.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
 
 from .control_plane import FakeControlPlane
 

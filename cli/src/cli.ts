@@ -9,6 +9,7 @@ import { apply } from "./commands/apply.js";
 import { daemon } from "./commands/daemon.js";
 import { dev } from "./commands/dev.js";
 import { diff } from "./commands/diff.js";
+import { doctor } from "./commands/doctor.js";
 import { importPrompts } from "./commands/importPrompts.js";
 import { login } from "./commands/login.js";
 import { keygen } from "./commands/keygen.js";
@@ -16,6 +17,7 @@ import { policy } from "./commands/policy.js";
 import { pull } from "./commands/pull.js";
 import { status } from "./commands/status.js";
 import { exportTelemetry, importTelemetry } from "./commands/telemetry.js";
+import { telemetryValidate } from "./commands/telemetryValidate.js";
 import { telemetryVerify } from "./commands/telemetryVerify.js";
 import { unlock } from "./commands/unlock.js";
 import { verify } from "./commands/verify.js";
@@ -27,6 +29,7 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   verify: { run: verify, summary: "Run the verification chain on a bundle or a state directory and print the reasons" },
   apply: { run: apply, summary: "Stage a bundle into the store and activate it per the environment's policy" },
   status: { run: status, summary: "Active and staged generation, lease, storage protection, spool depth, last upload" },
+  doctor: { run: doctor, summary: "Every reason this host is not serving the release it should, with the remedy: source, root, store, lease, key protection, spool vs budget, daemon, policy pin" },
   unlock: { run: unlock, summary: "Make the staged release live on this host (the operator's unlock; --generation N to name it)" },
   policy: { run: policy, summary: "Show or set the apply policy this host holds (an update may tighten it; only this loosens it)" },
   diff: { run: diff, summary: "What a bundle would change against the active release on this host" },
@@ -34,7 +37,7 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   daemon: { run: daemon, summary: "airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket" },
   "export-telemetry": { run: exportTelemetry, summary: "Pack the spool's unsent segments into one file for a host that never calls home" },
   "import-telemetry": { run: importTelemetry, summary: "Upload an exported telemetry file through the grant path on a connected host (idempotent)" },
-  telemetry: { run: telemetry, summary: "telemetry verify --budget <bytes> --sink-absent: prove the spool's disk budget is an invariant, on this machine, with no registry" },
+  telemetry: { run: telemetry, summary: "telemetry verify --budget <bytes> --sink-absent: prove the spool's disk budget is an invariant; telemetry validate <segment>…: a third-party writer's segments against the spool contract" },
   dev: { run: dev, summary: "Serve a directory of prompts as a registry over the protocol's routes (dev key, dev root, hot reload; --daemon serves the host's SDKs too)" },
   login: { run: login, summary: "Sign in as a workspace member and print the session token the write commands read (never an API key)" },
   import: { run: importPrompts, summary: "A directory, a JSON/CSV export or a SQL query result becomes workspace prompts with reviewable versions; re-runs are idempotent (--dry-run plans)" },
@@ -43,7 +46,8 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
 async function telemetry(argv: string[], ctx: Context): Promise<number> {
   const [verb, ...rest] = argv;
   if (verb === "verify") return telemetryVerify(rest, ctx);
-  throw new CliError(EXIT.usage, `telemetry takes "verify" (telemetry verify --budget <bytes> --sink-absent)`);
+  if (verb === "validate") return telemetryValidate(rest, ctx);
+  throw new CliError(EXIT.usage, `telemetry takes "verify" (telemetry verify --budget <bytes> --sink-absent) or "validate" (telemetry validate <segment>…)`);
 }
 
 export function help(): string {

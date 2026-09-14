@@ -180,6 +180,73 @@ class ReleaseChange:
     staged_generation: Optional[int]
 
 
+_HEALTHZ_LEVELS = {"ok": 0, "degraded": 1, "failing": 2}
+
+
+def healthz_of(status: AgentStatus, *, spool_budget_bytes: Optional[int], now_ms: float) -> dict[str, Any]:
+    """S14: what a probe asks, over any status document (the daemon's healthz shares it). ``ok`` is the liveness
+    answer; ``status`` adds the one degraded middle. The rules, each a vector (``tests/test_healthz.py``):
+
+    - ``failing`` (ok False): nothing verified to serve (generation 0); the lease lapsed under ``on_lease_expiry="halt"``.
+    - ``degraded`` (ok True): the lease lapsed under ``degrade``; three or more consecutive sync failures; the uploader
+      backing off; a forced downgrade in force; the daemon this process attached to is gone; the spool at 80 % of its
+      budget or more.
+    - ``ok`` otherwise. ``reasons`` names every rule that fired, in that order. Keys are the wire document's (camelCase),
+      the same as the TypeScript SDK's and the daemon's."""
+    reasons: list[str] = []
+    level = "ok"
+
+    def raise_to(to: str, reason: str) -> None:
+        nonlocal level
+        reasons.append(reason)
+        if _HEALTHZ_LEVELS[to] > _HEALTHZ_LEVELS[level]:
+            level = to
+
+    if status.generation <= 0:
+        raise_to("failing", "no_verified_release")
+    if status.lease_expired and status.on_lease_expiry == "halt":
+        raise_to("failing", "lease_expired_halt")
+    if status.lease_expired and status.on_lease_expiry == "degrade":
+        raise_to("degraded", "lease_expired_degrade")
+    if status.consecutive_sync_failures >= 3:
+        raise_to("degraded", "sync_failing")
+    backoff_until = (status.upload or {}).get("backoffUntil")
+    if backoff_until and instant(backoff_until) > now_ms:
+        raise_to("degraded", "upload_backing_off")
+    if status.forced_downgrade:
+        raise_to("degraded", "forced_downgrade")
+    if status.daemon is not None and not status.daemon.get("attached"):
+        raise_to("degraded", "daemon_detached")
+    depth_bytes = int(status.spool.get("depth_bytes", 0))
+    if spool_budget_bytes is not None and spool_budget_bytes > 0 and depth_bytes >= spool_budget_bytes * 0.8:
+        raise_to("degraded", "spool_near_budget")
+    return {
+        "ok": _HEALTHZ_LEVELS[level] < _HEALTHZ_LEVELS["failing"],
+        "status": level,
+        "reasons": reasons,
+        "generation": status.generation,
+        "stagedGeneration": status.staged_generation,
+        "applyState": status.apply_state,
+        "source": status.source,
+        "leaseExpiresAt": status.lease_expires_at,
+        "leaseExpired": status.lease_expired,
+        "onLeaseExpiry": status.on_lease_expiry,
+        "lastSyncAt": status.last_sync_at,
+        "lastSyncOutcome": status.last_sync_outcome,
+        "consecutiveSyncFailures": status.consecutive_sync_failures,
+        "forcedDowngrade": status.forced_downgrade,
+        "daemon": {"attached": bool(status.daemon.get("attached"))} if status.daemon is not None else None,
+        "spool": {"depthSegments": int(status.spool.get("depth_segments", 0)), "depthBytes": depth_bytes, "budgetBytes": spool_budget_bytes},
+        "lastUploadAt": (status.upload or {}).get("lastUploadAt"),
+        "backoffUntil": backoff_until,
+    }
+
+
+def healthz_response(healthz: Mapping[str, Any]) -> tuple[int, dict[str, str], str]:
+    """An HTTP answer for any framework: ``(200, headers, body)`` when ok, ``503`` otherwise."""
+    return (200 if healthz.get("ok") else 503, {"content-type": "application/json", "cache-control": "no-store"}, json.dumps(healthz, separators=(",", ":")))
+
+
 class RenderRefusedError(Exception):
     """``render()`` refused by the control plane's standing instructions: a disable directive, or a lapsed lease on a ``halt`` target."""
 
@@ -1573,6 +1640,16 @@ class AirPrompterAgent:
         return True
 
     # ------------------------------------------------------------------ status
+
+    def healthz(self) -> dict[str, Any]:
+        """S14: the in-process healthz — the rules of ``healthz_of`` over this process's own status. Never raises."""
+        directory = callable(getattr(self._sink, "depth", None)) and not callable(getattr(self._sink, "drain", None))
+        budget = (self._telemetry.spool_budget_bytes or 100 * 1024 * 1024) if directory else None
+        return healthz_of(self.status(), spool_budget_bytes=budget, now_ms=self._now_ms())
+
+    def healthz_response(self) -> tuple[int, dict[str, str], str]:
+        """S14: ``(status_code, headers, body)`` for a ``GET /healthz`` handler in any framework."""
+        return healthz_response(self.healthz())
 
     def status(self) -> AgentStatus:
         state = self._store.state if self._store else None

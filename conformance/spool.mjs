@@ -3,12 +3,12 @@
 // filesystem rules (0600, fsync + rename, .open recovery) are the SDKs' to
 // test; what is checkable across implementations is here.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const LATENCY_BUCKET_EDGES_MS = JSON.parse(readFileSync(join(here, "..", "protocol", "schemas", "latency-buckets.json"), "utf8")).edges;
+export const LATENCY_BUCKET_EDGES_MS = JSON.parse(readFileSync(join(existsSync(join(here, "..", "protocol", "schemas")) ? join(here, "..", "protocol") : join(here, "protocol"), "schemas", "latency-buckets.json"), "utf8")).edges;
 export const SEGMENT_MAX_BYTES = 1024 * 1024;
 const OUTCOME_NAME = /^[a-z][a-zA-Z0-9]{0,31}$/;
 

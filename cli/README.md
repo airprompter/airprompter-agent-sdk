@@ -9,12 +9,19 @@ airprompter pull     Fetch and verify the current release; write an encrypted .a
 airprompter verify   Run the verification chain on a bundle or a state directory and print the reasons
 airprompter apply    Stage a bundle into the store and activate it per the environment's policy
 airprompter status   Active and staged generation, lease, storage protection, spool depth, last upload
+airprompter doctor   Every reason this host is not serving the release it should, with the remedy (source, root, store, lease, key protection, spool, daemon, policy pin)
 airprompter diff     What a bundle would change against the active release on this host, or against another bundle (--against)
 airprompter keygen   Generate a distribution or countersign keypair
 airprompter daemon   airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket
 airprompter export-telemetry   Pack the spool's unsent segments into one file for a host that never calls home
 airprompter import-telemetry   Upload an exported telemetry file through the grant path on a connected host (idempotent)
+airprompter telemetry verify   Prove the spool's disk budget is an invariant, on this machine, with no registry
+airprompter telemetry validate <segment>…   A third-party writer's segments against the spool contract, line by line
 ```
+
+`doctor`, `telemetry validate`, the in-process `healthz`, the verify
+GitHub Action (`action/verify`) and the published conformance harness are
+described in [`docs/operator-tooling.md`](../docs/operator-tooling.md).
 
 Coming with a later ticket: `countersign` (T10).
 

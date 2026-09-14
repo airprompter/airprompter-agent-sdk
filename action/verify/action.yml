@@ -1,0 +1,90 @@
+# airprompter/airprompter-agent-sdk/action/verify (S14): `airprompter verify`
+# on every bundle a pull request commits, with the CLI fetched from a signed
+# release and checked before it runs. A bundle that would be refused on a
+# host is refused here, with the step and the reason in the job summary.
+#
+#   - uses: airprompter/airprompter-agent-sdk/action/verify@cli/v0.1.0
+#     with:
+#       bundle: bundles/*.apbundle
+#       org: org_…
+#       agent: agt_…
+#       environment: prod
+#       root: keys/root.prod.jwk.json
+#
+# The executable is downloaded from the `cli/vX.Y.Z` GitHub release named
+# by `version` (the action's own ref when omitted), its SHA-256 checked
+# against the release's `.sha256`, and its Sigstore bundle verified with
+# cosign when `verify-signature` is true (the default; needs
+# sigstore/cosign-installer in the job). `binary` skips the download for a
+# CLI the job already has. An encrypted bundle needs `distribution-key`: a
+# file the job wrote from a secret, never the secret itself.
+
+name: "AirPrompter: verify bundles"
+description: "Runs airprompter verify on the .apbundle files a pull request commits; refuses what a host would refuse, with reasons."
+branding:
+  icon: shield
+  color: blue
+inputs:
+  bundle:
+    description: "Path or glob of .apbundle files to verify (one per line for several)"
+    required: true
+  org:
+    description: "Organization id (org_…)"
+    required: true
+  agent:
+    description: "Agent id (agt_…)"
+    required: true
+  environment:
+    description: "dev | staging | prod"
+    required: true
+  root:
+    description: "Path to the pinned root public JWK, or a signed root document, in the repository"
+    required: true
+  distribution-key:
+    description: "Path to the distribution PRIVATE key file for encrypted bundles (written from a secret by an earlier step)"
+    required: false
+  version:
+    description: "CLI release tag to download (cli/vX.Y.Z); default: the tag this action was used at"
+    required: false
+  binary:
+    description: "Path to an airprompter executable already on the runner (skips the download and the signature check)"
+    required: false
+  verify-signature:
+    description: "Verify the downloaded executable's Sigstore bundle with cosign (true/false)"
+    required: false
+    default: "true"
+  fail-on-expiring:
+    description: "Fail when a bundle expires within the CLI's warning window (true/false)"
+    required: false
+    default: "false"
+outputs:
+  ok:
+    description: "true when every bundle verified"
+    value: ${{ steps.verify.outputs.ok }}
+  generation:
+    description: "The generation of the last bundle verified"
+    value: ${{ steps.verify.outputs.generation }}
+  release-digest:
+    description: "The release digest of the last bundle verified"
+    value: ${{ steps.verify.outputs.release-digest }}
+  report:
+    description: "Path to the JSON report (one entry per bundle)"
+    value: ${{ steps.verify.outputs.report }}
+runs:
+  using: composite
+  steps:
+    - id: verify
+      shell: bash
+      env:
+        INPUT_BUNDLE: ${{ inputs.bundle }}
+        INPUT_ORG: ${{ inputs.org }}
+        INPUT_AGENT: ${{ inputs.agent }}
+        INPUT_ENVIRONMENT: ${{ inputs.environment }}
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_DISTRIBUTION_KEY: ${{ inputs.distribution-key }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BINARY: ${{ inputs.binary }}
+        INPUT_VERIFY_SIGNATURE: ${{ inputs.verify-signature }}
+        INPUT_FAIL_ON_EXPIRING: ${{ inputs.fail-on-expiring }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: node "${{ github.action_path }}/run.mjs"

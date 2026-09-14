@@ -10,7 +10,8 @@
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 
-import type { AirPrompterAgent } from "../../../sdk-typescript/packages/sdk/src/agent.js";
+import { healthzOf, type AirPrompterAgent } from "../../../sdk-typescript/packages/sdk/src/agent.js";
+import { HOST_SPOOL_BUDGET_BYTES } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
 import { DAEMON_MAX_LINE_BYTES } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
 import type { SpoolUploader, UploaderStatus } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
 
@@ -55,6 +56,8 @@ export interface DaemonServerOptions {
   now?: () => number;
   logger?: (event: Record<string, unknown>) => void;
   uploader?: SpoolUploader | null;
+  /** S14: the spool budget the uploader enforces, for healthz's 80 % rule (the host default when unset). */
+  spoolBudgetBytes?: number;
 }
 
 export class DaemonServer {
@@ -146,12 +149,18 @@ export class DaemonServer {
     socket.on("close", () => this.clients.delete(socket));
   }
 
-  private answerHealthz(socket: Socket): void {
+  /** S14: the same rules and document as `AirPrompterAgent#healthz()`, over the daemon's own uploader; `spoolDepth` kept for older probes. */
+  healthz(): Record<string, unknown> {
     const status = this.agent.status();
-    const healthy = status.generation > 0;
     const upload = this.options.uploader?.status() ?? null;
-    const body = JSON.stringify({ ok: healthy, generation: status.generation, stagedGeneration: status.stagedGeneration, leaseExpired: status.leaseExpired, lastSyncAt: status.lastSyncAt, lastSyncOutcome: status.lastSyncOutcome, spoolDepth: upload?.depth.segments ?? status.spool.depthSegments, lastUploadAt: upload?.lastUploadAt ?? null, backoffUntil: upload?.backoffUntil ?? null });
-    socket.end(`HTTP/1.1 ${healthy ? "200 OK" : "503 Service Unavailable"}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+    const healthz = healthzOf({ ...status, upload, spool: upload ? { depthSegments: upload.depth.segments, depthBytes: upload.depth.bytes } : status.spool }, { spoolBudgetBytes: this.options.spoolBudgetBytes ?? HOST_SPOOL_BUDGET_BYTES, nowMs: this.now() });
+    return { ...healthz, spoolDepth: healthz.spool.depthSegments };
+  }
+
+  private answerHealthz(socket: Socket): void {
+    const healthz = this.healthz();
+    const body = JSON.stringify(healthz);
+    socket.end(`HTTP/1.1 ${healthz.ok ? "200 OK" : "503 Service Unavailable"}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
   }
 
   private send(socket: Socket, message: Record<string, unknown>): void {
@@ -219,10 +228,8 @@ export class DaemonServer {
         this.broadcast({ event: "policy", applyPolicy });
         return { applyPolicy };
       }
-      case "healthz": {
-        const upload = this.options.uploader?.status() ?? null;
-        return { ok: status.generation > 0, generation: status.generation, leaseExpired: status.leaseExpired, lastSyncAt: status.lastSyncAt, spoolDepth: upload?.depth.segments ?? status.spool.depthSegments, lastUploadAt: upload?.lastUploadAt ?? null, backoffUntil: upload?.backoffUntil ?? null };
-      }
+      case "healthz":
+        return this.healthz();
       case "upload": {
         // An operator's `airprompter upload`: one pass now, whatever the cadence says.
         const uploader = this.options.uploader;

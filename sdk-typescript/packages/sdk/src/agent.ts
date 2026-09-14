@@ -22,7 +22,7 @@ import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256Public
 import { parseRunRef } from "@airprompter/agent-core";
 import type { Delimiters } from "@airprompter/agent-core";
 import { normalizeFeedback } from "@airprompter/agent-core";
-import { DirectorySink, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "@airprompter/agent-telemetry";
+import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "@airprompter/agent-telemetry";
 import { fileKey, type KeyProvider, type StorageProtection } from "@airprompter/agent-sync";
 import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "@airprompter/agent-sync";
 import { observeCall, type ObserveOptions } from "@airprompter/agent-runtime";
@@ -201,6 +201,87 @@ export interface AgentStatus {
 export interface ReleaseChange {
   generation: number;
   stagedGeneration: number | null;
+}
+
+/**
+ * S14: what a probe asks. `ok` is the liveness answer (serve this process traffic?); `status` adds the one degraded
+ * middle. The rules, each a vector (`test/healthz.test.ts`, `sdk-python/tests/test_healthz.py`):
+ * - `failing` (ok: false): nothing verified to serve (generation 0); the lease lapsed under `onLeaseExpiry: "halt"`
+ *   (every render refuses).
+ * - `degraded` (ok: true): the lease lapsed under `degrade` (serving the last verified release); three or more
+ *   consecutive sync failures; the uploader backing off; a forced downgrade in force; the daemon this process
+ *   attached to is gone (serving what it holds); the spool at 80 % of its budget or more.
+ * - `ok` otherwise. `reasons` names every rule that fired, in that order.
+ */
+export interface Healthz {
+  ok: boolean;
+  status: "ok" | "degraded" | "failing";
+  reasons: string[];
+  generation: number;
+  stagedGeneration: number | null;
+  applyState: AgentStatus["applyState"];
+  source: ReleaseSource;
+  leaseExpiresAt: string | null;
+  leaseExpired: boolean;
+  onLeaseExpiry: "degrade" | "halt" | null;
+  lastSyncAt: string | null;
+  lastSyncOutcome: string | null;
+  consecutiveSyncFailures: number;
+  forcedDowngrade: boolean;
+  daemon: { attached: boolean } | null;
+  spool: { depthSegments: number; depthBytes: number; budgetBytes: number | null };
+  lastUploadAt: string | null;
+  backoffUntil: string | null;
+}
+
+/** The same rules on any status document — the daemon's healthz and a host's share it. */
+export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: number | null; nowMs: number }): Healthz {
+  const reasons: string[] = [];
+  const levels = { ok: 0, degraded: 1, failing: 2 } as const;
+  let level: Healthz["status"] = "ok";
+  const raise = (to: Healthz["status"], reason: string) => {
+    reasons.push(reason);
+    if (levels[to] > levels[level]) level = to;
+  };
+  const failing = (reason: string) => raise("failing", reason);
+  const degraded = (reason: string) => raise("degraded", reason);
+  if (status.generation <= 0) failing("no_verified_release");
+  if (status.leaseExpired && status.onLeaseExpiry === "halt") failing("lease_expired_halt");
+  if (status.leaseExpired && status.onLeaseExpiry === "degrade") degraded("lease_expired_degrade");
+  if (status.consecutiveSyncFailures >= 3) degraded("sync_failing");
+  const backoffUntil = status.upload?.backoffUntil ?? null;
+  if (backoffUntil && instant(backoffUntil) > input.nowMs) degraded("upload_backing_off");
+  if (status.forcedDowngrade) degraded("forced_downgrade");
+  if (status.daemon && !status.daemon.attached) degraded("daemon_detached");
+  const budgetBytes = input.spoolBudgetBytes ?? null;
+  if (budgetBytes !== null && budgetBytes > 0 && status.spool.depthBytes >= budgetBytes * 0.8) degraded("spool_near_budget");
+  const status_: Healthz["status"] = level;
+  return {
+    ok: levels[status_] < levels.failing,
+    status: status_,
+    reasons,
+    generation: status.generation,
+    stagedGeneration: status.stagedGeneration,
+    applyState: status.applyState,
+    source: status.source,
+    leaseExpiresAt: status.leaseExpiresAt,
+    leaseExpired: status.leaseExpired,
+    onLeaseExpiry: status.onLeaseExpiry,
+    lastSyncAt: status.lastSyncAt,
+    lastSyncOutcome: status.lastSyncOutcome,
+    consecutiveSyncFailures: status.consecutiveSyncFailures,
+    forcedDowngrade: status.forcedDowngrade,
+    daemon: status.daemon ? { attached: status.daemon.attached } : null,
+    spool: { depthSegments: status.spool.depthSegments, depthBytes: status.spool.depthBytes, budgetBytes },
+    lastUploadAt: status.upload?.lastUploadAt ?? null,
+    backoffUntil,
+  };
+}
+
+/** An HTTP answer for any framework: 200 with the document when `ok`, 503 otherwise. */
+export function healthzResponse(healthz: Healthz): { status: 200 | 503; headers: Record<string, string>; body: string } {
+  const body = JSON.stringify(healthz);
+  return { status: healthz.ok ? 200 : 503, headers: { "content-type": "application/json", "cache-control": "no-store" }, body };
 }
 
 /** `render()` refused by the control plane's standing instructions: a disable directive, or a lapsed lease on a `halt` target. */
@@ -1447,6 +1528,28 @@ export class AirPrompterAgent {
     const slot = override ?? payload?.slots.find((entry) => entry.tag === facts.tag);
     this.spool.outcomes({ tag: facts.tag, versionId: facts.versionId, arm: facts.arm, model: slot?.model ?? "unknown" }, normalized.outcomes, this.nowMs());
     return true;
+  }
+
+  /** S14: the in-process healthz — the rules on `Healthz`, over this process's own status. Never throws. */
+  healthz(): Healthz {
+    return healthzOf(this.status(), { spoolBudgetBytes: this.sink.depth ? (this.options.telemetry?.spoolBudgetBytes ?? HOST_SPOOL_BUDGET_BYTES) : null, nowMs: this.nowMs() });
+  }
+
+  /**
+   * S14: a request handler for Node's `http` (or any framework with `(req, res)`): `GET /healthz` → 200 / 503 with the
+   * document. Mount it where your probes look; nothing else is served.
+   */
+  healthzHandler(): (request: { method?: string }, response: { writeHead(status: number, headers: Record<string, string>): unknown; end(body?: string): unknown }) => void {
+    return (request, response) => {
+      if (request.method && request.method !== "GET" && request.method !== "HEAD") {
+        response.writeHead(405, { allow: "GET, HEAD" });
+        response.end();
+        return;
+      }
+      const answer = healthzResponse(this.healthz());
+      response.writeHead(answer.status, answer.headers);
+      response.end(request.method === "HEAD" ? undefined : answer.body);
+    };
   }
 
   status(): AgentStatus {

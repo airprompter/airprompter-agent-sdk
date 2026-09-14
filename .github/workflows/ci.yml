@@ -133,6 +133,9 @@ jobs:
         shell: bash
         run: node scripts/install-alone.mjs
         working-directory: sdk-typescript
+      - name: The built packages pass the conformance harness through the published adapter contract (S14)
+        run: node harness.mjs --adapter adapters/agent-sdk.mjs
+        working-directory: conformance
 
   sdk-python:
     name: SDK (Python ${{ matrix.python }})
@@ -172,6 +175,9 @@ jobs:
       - name: The interop test ran (not skipped)
         run: python -m pytest tests/test_interop.py -rs 2>&1 | tee /tmp/interop.log && ! grep -q SKIPPED /tmp/interop.log
         working-directory: sdk-python
+      - name: The Python SDK passes the conformance harness over JSON lines (S14)
+        run: node harness.mjs --adapter-command "python ../examples/conformance-adapter/python/adapter.py"
+        working-directory: conformance
 
   cli:
     name: CLI (${{ matrix.artifact }})
@@ -212,6 +218,24 @@ jobs:
         # rule that the Agent key never comes from argv.
         run: node scripts/smoke.mjs "dist/${{ matrix.artifact }}"
         working-directory: cli
+      - name: A bundle for the verify action (S14)
+        id: action-fixture
+        shell: bash
+        run: node scripts/action-fixture.mjs "$RUNNER_TEMP/action-fixture"
+        working-directory: cli
+      - name: The verify action verifies it (S14)
+        id: verify-action
+        uses: ./action/verify
+        with:
+          bundle: ${{ steps.action-fixture.outputs.bundle }}
+          org: ${{ steps.action-fixture.outputs.org }}
+          agent: ${{ steps.action-fixture.outputs.agent }}
+          environment: ${{ steps.action-fixture.outputs.environment }}
+          root: ${{ steps.action-fixture.outputs.root }}
+          binary: cli/dist/airprompter.cjs
+      - name: The action's outputs name the bundle it verified (S14)
+        shell: bash
+        run: test "${{ steps.verify-action.outputs.ok }}" = "true" && test "${{ steps.verify-action.outputs.generation }}" = "1"
       - name: Live conformance against airprompter dev (S12)
         # The built executable serves the fixture directory; the runner exercises
         # every route with the protocol's schemas and trust chain.

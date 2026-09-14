@@ -9,8 +9,8 @@
  * alone writes the spool from their own instrumentation.
  */
 
-export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION, PROTOCOL_VERSION, VENDORED_BUNDLE_EXPIRY_WARNING_DAYS } from "./agent.js";
-export type { AgentStatus, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange, SpoolReport, HeartbeatSdkName } from "./agent.js";
+export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION, PROTOCOL_VERSION, VENDORED_BUNDLE_EXPIRY_WARNING_DAYS, healthzOf, healthzResponse } from "./agent.js";
+export type { AgentStatus, Healthz, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange, SpoolReport, HeartbeatSdkName } from "./agent.js";
 
 export * from "@airprompter/agent-core";
 export * from "@airprompter/agent-sync";

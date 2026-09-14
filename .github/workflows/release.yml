@@ -17,6 +17,9 @@
 #                          -telemetry, airprompter-agent) from one tag.
 #   cli/vX.Y.Z             single-file executables for linux/macos/windows,
 #                          cosign keyless signatures, SBOM, GitHub release.
+#   conformance/vX.Y.Z     npm publish of @airprompter/protocol-conformance
+#                          (the harness with the protocol's vectors bundled
+#                          at pack time), with provenance (S14).
 #
 # `workflow_dispatch` runs a dry run: it builds the protocol SBOM, signs it
 # keyless with cosign, and uploads the signed artifacts — the release path
@@ -30,6 +33,7 @@ on:
       - "sdk-typescript/v*"
       - "sdk-python/v*"
       - "cli/v*"
+      - "conformance/v*"
   workflow_dispatch:
 
 permissions:
@@ -67,6 +71,39 @@ jobs:
           path: |
             protocol.spdx.json
             protocol.spdx.json.sigstore
+
+  conformance:
+    name: Publish @airprompter/protocol-conformance
+    if: startsWith(github.ref, 'refs/tags/conformance/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: conformance
+      - name: The protocol's own gate and the harness's suite
+        run: npm test
+        working-directory: conformance
+      - name: Tag matches package.json
+        run: test "$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME#conformance/v}"
+        working-directory: conformance
+      # prepack bundles ../protocol/{vectors,schemas,VERSION}; postpack removes the copy.
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
+        working-directory: conformance
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
 
   npm:
     name: Publish @airprompter/agent-* (five packages, one tag)

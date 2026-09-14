@@ -1,5 +1,22 @@
 # Conformance
 
+Two runners. `run.mjs` is the protocol's own gate (below). `harness.mjs`
+(S14) is the gate an SDK ships: every vector, run against **any** SDK
+through a JSON adapter — an ES module or a process speaking JSON lines —
+published as `@airprompter/protocol-conformance` with the vectors bundled:
+
+```sh
+npx airprompter-conformance --adapter ./adapter.mjs
+npx airprompter-conformance --adapter-command "python3 adapter.py"
+```
+
+The adapter contract is [`ADAPTER.md`](ADAPTER.md); `adapters/reference.mjs`
+is the yardstick, `adapters/agent-sdk.mjs` the TypeScript packages,
+`../examples/conformance-adapter/python/adapter.py` the Python SDK. A section
+the adapter cannot answer is skipped and reported, never passed.
+`node --test test/harness.test.mjs` is the harness's own suite (wrong answers fail by name,
+the pipe transport, `npm pack` self-containment).
+
 `npm ci && npm test` here runs, against `../protocol`:
 
 1. every `schemas/*.schema.json` compiles as JSON Schema 2020-12 (strict);

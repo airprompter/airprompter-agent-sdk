@@ -1,17 +1,51 @@
 {
   "name": "@airprompter/protocol-conformance",
-  "private": true,
   "version": "0.1.0",
-  "description": "Runs protocol/schemas, protocol/examples and protocol/vectors against the reference implementations; every SDK runs the same vectors.",
+  "description": "The AirPrompter agent protocol's conformance harness: every vector in protocol/vectors, run against any SDK through a JSON adapter (an ES module, or any process speaking JSON lines). The reference implementations and the schema/example runner ride along.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "test": "node run.mjs",
-    "lint:openapi": "redocly lint ../protocol/openapi.yaml"
+    "test": "node run.mjs && node --test test/harness.test.mjs",
+    "harness": "node harness.mjs",
+    "lint:openapi": "redocly lint ../protocol/openapi.yaml",
+    "prepack": "node -e \"const fs=require('fs');fs.rmSync('protocol',{recursive:true,force:true});fs.mkdirSync('protocol');for(const d of ['vectors','schemas'])fs.cpSync('../protocol/'+d,'protocol/'+d,{recursive:true});fs.copyFileSync('../protocol/VERSION','protocol/VERSION')\"",
+    "postpack": "node -e \"require('fs').rmSync('protocol',{recursive:true,force:true})\""
   },
   "devDependencies": {
     "@redocly/cli": "1.34.3",
     "ajv": "8.17.1",
     "ajv-formats": "3.0.1"
+  },
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/airprompter/airprompter-agent-sdk",
+    "directory": "conformance"
+  },
+  "bin": {
+    "airprompter-conformance": "./harness.mjs"
+  },
+  "exports": {
+    ".": "./harness.mjs",
+    "./reference": "./adapters/reference.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "harness.mjs",
+    "reference.mjs",
+    "trust.mjs",
+    "spool.mjs",
+    "checks.mjs",
+    "otel.mjs",
+    "adapters/reference.mjs",
+    "protocol/",
+    "ADAPTER.md",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

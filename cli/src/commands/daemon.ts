@@ -142,7 +142,7 @@ export async function daemon(argv: string[], ctx: Context): Promise<number> {
       return { droppedSegments: s.droppedSegments, quarantinedSegments: s.quarantinedSegments, lastUploadAt: s.lastUploadAt, backoffUntil: s.backoffUntil };
     });
   }
-  const server = new DaemonServer(agent, { socketPath, version: CLI_VERSION, protocol: PROTOCOL_VERSION, agentId: scope.agentId, target: scope.target, now: ctx.now, logger: log, uploader });
+  const server = new DaemonServer(agent, { socketPath, version: CLI_VERSION, protocol: PROTOCOL_VERSION, agentId: scope.agentId, target: scope.target, now: ctx.now, logger: log, uploader, ...(spoolBudgetBytes !== undefined ? { spoolBudgetBytes } : {}) });
   try {
     await server.listen();
   } catch (error) {

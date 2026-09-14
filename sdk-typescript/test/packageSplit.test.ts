@@ -188,4 +188,8 @@ test("S10: the five packages carry one version, exact-pinned siblings, the locks
     assert.ok(sizes[name]!.bytes > 0, `${name} built`);
     assert.ok(sizes[name]!.bytes <= sizes[name]!.budget, `${name}: ${sizes[name]!.bytes} bytes over its ${sizes[name]!.budget}-byte budget`);
   }
+  // Every source the CLI bundles from must reach the sidecar image's build stage: a package added here and not there
+  // builds everywhere but the Dockerfile (S13 found it in CI).
+  const dockerfile = readFileSync(join(root, "..", "deploy", "docker", "Dockerfile"), "utf8");
+  for (const name of PACKAGES) assert.ok(dockerfile.includes(`COPY sdk-typescript/packages/${name}/src sdk-typescript/packages/${name}/src`), `deploy/docker/Dockerfile copies packages/${name}/src`);
 });

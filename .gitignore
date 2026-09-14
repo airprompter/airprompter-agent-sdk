@@ -4,3 +4,5 @@ dist/
 __pycache__/
 *.pyc
 .DS_Store
+# The conformance package bundles a copy of protocol/ at pack time (npm run prepack).
+conformance/protocol/

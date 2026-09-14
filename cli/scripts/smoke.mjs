@@ -77,6 +77,16 @@ try {
 
   const noKey = run(["pull", "--org", "org_1", "--agent", "agt_1", "--environment", "prod", "--root", root, "--out", join(work, "b.apbundle")], { env: { ...process.env, AIRPROMPTER_AGENT_KEY: "" } });
   check("pull without the key env exits 2 and names the variable", noKey.code === 2 && noKey.stderr.includes("AIRPROMPTER_AGENT_KEY"), noKey.stderr);
+
+  // S11: the write commands take a member's session, never an API key and never argv; nothing is sent without it.
+  mkdirSync(join(work, "prompts"), { recursive: true });
+  writeFileSync(join(work, "prompts", "a.md"), "# A\n\nA prompt.\n");
+  const noToken = run(["import", "--workspace", "ws", "--collection", "col", "--from", join(work, "prompts"), "--key", "smoke", "--category", "c", "--platform", "claude", "--base-url", "https://127.0.0.1:9"], { env: { ...process.env, AIRPROMPTER_SESSION_TOKEN: "" } });
+  check("import without the session token exits 2 and names `airprompter login`", noToken.code === 2 && noToken.stderr.includes("AIRPROMPTER_SESSION_TOKEN") && noToken.stderr.includes("airprompter login"), noToken.stderr);
+  const onArgv = run(["import", "--workspace", "ws", "--collection", "col", "--from", join(work, "prompts"), "--key", "smoke", "--category", "c", "--platform", "claude", "--session-token", "x"]);
+  check("import has no --session-token flag (exit 2)", onArgv.code === 2, onArgv.stderr);
+  const noPassword = run(["login", "--email", "smoke@example.com", "--base-url", "https://127.0.0.1:9"], { env: { ...process.env, AIRPROMPTER_PASSWORD: "" } });
+  check("login with no password env and no terminal exits 2 without a request", noPassword.code === 2 && noPassword.stderr.includes("never taken on argv"), noPassword.stderr);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

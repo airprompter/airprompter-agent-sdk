@@ -8,6 +8,8 @@
 import { apply } from "./commands/apply.js";
 import { daemon } from "./commands/daemon.js";
 import { diff } from "./commands/diff.js";
+import { importPrompts } from "./commands/importPrompts.js";
+import { login } from "./commands/login.js";
 import { keygen } from "./commands/keygen.js";
 import { policy } from "./commands/policy.js";
 import { pull } from "./commands/pull.js";
@@ -32,6 +34,8 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   "export-telemetry": { run: exportTelemetry, summary: "Pack the spool's unsent segments into one file for a host that never calls home" },
   "import-telemetry": { run: importTelemetry, summary: "Upload an exported telemetry file through the grant path on a connected host (idempotent)" },
   telemetry: { run: telemetry, summary: "telemetry verify --budget <bytes> --sink-absent: prove the spool's disk budget is an invariant, on this machine, with no registry" },
+  login: { run: login, summary: "Sign in as a workspace member and print the session token the write commands read (never an API key)" },
+  import: { run: importPrompts, summary: "A directory, a JSON/CSV export or a SQL query result becomes workspace prompts with reviewable versions; re-runs are idempotent (--dry-run plans)" },
 };
 
 async function telemetry(argv: string[], ctx: Context): Promise<number> {
@@ -50,7 +54,7 @@ export function help(): string {
     ...Object.entries(COMMANDS).map(([name, entry]) => `  ${name.padEnd(width)}${entry.summary}`),
     "",
     "Every command takes --json (one document on stdout) and --help.",
-    `Exit codes: ${EXIT.ok} ok · ${EXIT.refused} refused (reason on stderr) · ${EXIT.usage} usage · ${EXIT.stale} stale (pull --check)`,
+    `Exit codes: ${EXIT.ok} ok · ${EXIT.refused} refused (reason on stderr) · ${EXIT.usage} usage · ${EXIT.stale} stale (pull --check) · ${EXIT.partial} partial (import: some items failed)`,
     "Secrets are never taken on argv: the Agent key comes from AIRPROMPTER_AGENT_KEY (or --api-key-env), private keys from files.",
   ].join("\n");
 }

@@ -62,16 +62,39 @@ Kubernetes are in [`../deploy/`](../deploy/); the wire format is
 
 - **Exit codes**: `0` ok · `1` refused (verification failed, apply refused,
   the fetch was denied — reason on stderr) · `2` usage · `3` stale
-  (`pull --check` only).
+  (`pull --check` only) · `4` partial (`import` only: some items failed
+  and the output names each; the others landed).
 - **`--json`**: one JSON document on stdout, always the last line; on a
   refusal it carries `{ ok: false, error, exitCode, step?, reason? }`.
 - **Secrets never travel on argv.** The Agent key is read from
   `AIRPROMPTER_AGENT_KEY` (or the variable named by `--api-key-env`);
-  private keys come from files the CLI wrote with mode `0600`.
+  private keys come from files the CLI wrote with mode `0600`; the session
+  token `import` needs is read from `AIRPROMPTER_SESSION_TOKEN` (printed by
+  `login`, whose password comes from `AIRPROMPTER_PASSWORD` or a terminal
+  prompt).
 - **Nothing printed is prompt text**, at any verbosity. `pull`, `verify`,
   `diff` and `status` describe releases in generations, digests, ids,
   models, variable names and counts. The bundle on disk is ciphertext
   unless you asked for `--plaintext` on `dev`.
+
+## Bringing your prompts in (`import`)
+
+The other direction: a directory of prompt files, a JSON or CSV export, or
+the rows of a database query become workspace prompts with reviewable
+versions — idempotently, so the same command runs on every merge or on a
+schedule. `airprompter login` prints the session token it needs (team
+writes are a signed-in member's, never an API key's).
+
+```bash
+eval "$(airprompter login --email you@example.com)"      # password from AIRPROMPTER_PASSWORD or the terminal
+airprompter import --workspace ws_… --collection col_… --from ./prompts --key git:prompts --category support --platform claude --dry-run
+airprompter import --workspace ws_… --collection col_… --from rows.json --key postgres:prompts --map key=slug,title=name,content=body --platform claude
+```
+
+The prompt id is derived from (workspace, import key, item key): unchanged
+content writes nothing, changed content is a new version submitted for
+review, a new key is a new prompt. The round trip for each habit is
+[`../docs/ingest.md`](../docs/ingest.md).
 
 ## Vendoring a bundle in CI
 

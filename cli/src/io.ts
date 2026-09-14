@@ -15,6 +15,8 @@ export const EXIT = {
   usage: 2,
   /** `pull --check`: the vendored bundle is more than `--max-behind` generations behind. */
   stale: 3,
+  /** `import`: some items landed and some failed; the output names each. */
+  partial: 4,
 } as const;
 
 export class CliError extends Error {

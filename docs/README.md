@@ -14,6 +14,7 @@ them. Both cite the design revision they follow.
 | [key-handling.md](key-handling.md) | The six keys, who holds them, what a compromise means, how each rotates | §5, §6.1, §6.3, §10 |
 | [change-control.md](change-control.md) | How your change control, update windows, CI, golden sets, countersign, freeze and rollback plug into activation | §6.2–6.5, §8.2 (5-D) |
 | [telemetry.md](telemetry.md) | The spool contract in one table and the field → OpenTelemetry mapping | §9, §9.3 |
+| [ingest.md](ingest.md) | Your prompts (a git directory, a database table, an export) become reviewable versions: `airprompter login` + `airprompter import`, the derived id, what a re-run does | S11 |
 | [`../protocol/trust-chain.md`](../protocol/trust-chain.md) | Root metadata acceptance (R1–R5), manifest verification (M1–M12), refusal vocabulary, rotation | §5 |
 | [`../protocol/canonical-json.md`](../protocol/canonical-json.md) | The encoding under every digest and signature; what the digest covers | §5 |
 | [`../protocol/spool-format.md`](../protocol/spool-format.md) | The spool: files, rows, what may never be in it, upload, offline, third-party writers | §9.1, §9.3 |

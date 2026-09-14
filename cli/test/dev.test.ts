@@ -189,12 +189,19 @@ test("the live conformance runner passes against airprompter dev; with --daemon 
     assert.equal(socketPath, daemonSocketPath({ stateDir: join(dir, ".airprompter-dev", "state"), agentId: "agt_dev", target: "dev" }));
     await until(() => existsSync(socketPath), "the daemon socket");
 
+    // The runner needs the conformance package's own dependencies (ajv); CI installs them before this suite.
+    assert.ok(existsSync(join(cliRoot, "..", "conformance", "node_modules", "ajv")), "conformance/node_modules is installed (npm ci in conformance/)");
     const live = spawn(process.execPath, [join(cliRoot, "..", "conformance", "live.mjs"), "--base-url", String(facts.baseUrl), "--agent", "agt_dev", "--environment", "dev", "--api-key", DEV_API_KEY, "--root", String(facts.root), "--json"], { cwd: join(cliRoot, "..", "conformance"), stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
+    let liveErr = "";
     live.stdout.setEncoding("utf8");
     live.stdout.on("data", (chunk: string) => (output += chunk));
+    live.stderr.setEncoding("utf8");
+    live.stderr.on("data", (chunk: string) => (liveErr += chunk));
     const code = await new Promise<number | null>((resolve) => live.once("exit", resolve));
-    const report = JSON.parse(output.trim().split("\n").pop()!) as { checks: number; failures: number; results: Array<{ route: string; rule: string; ok: boolean; detail?: string }> };
+    const last = output.trim().split("\n").pop() ?? "";
+    assert.ok(last.startsWith("{"), `the runner printed no report (exit ${code}): ${liveErr.slice(0, 400)}`);
+    const report = JSON.parse(last) as { checks: number; failures: number; results: Array<{ route: string; rule: string; ok: boolean; detail?: string }> };
     assert.equal(code, 0, report.results.filter((r) => !r.ok).map((r) => `${r.route} ${r.rule}: ${r.detail}`).join("\n"));
     assert.ok(report.checks >= 20 && report.failures === 0, JSON.stringify({ checks: report.checks, failures: report.failures }));
 

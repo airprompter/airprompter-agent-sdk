@@ -196,6 +196,9 @@ jobs:
           node-version: 24  # current LTS; the executable embeds this runtime
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: cli
+      # S12: the dev test and the live-conformance step run conformance/live.mjs, which needs the runner's own deps.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: conformance
       - run: npm run typecheck
         working-directory: cli
       - run: npm test
@@ -213,9 +216,7 @@ jobs:
         # The built executable serves the fixture directory; the runner exercises
         # every route with the protocol's schemas and trust chain.
         shell: bash
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund --prefix ../conformance
-          node scripts/live-conformance.mjs "dist/${{ matrix.artifact }}"
+        run: node scripts/live-conformance.mjs "dist/${{ matrix.artifact }}"
         working-directory: cli
       - name: Size
         shell: bash

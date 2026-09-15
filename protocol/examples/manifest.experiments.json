@@ -1,0 +1,243 @@
+{
+  "payload": {
+    "protocol": "0.3.0",
+    "organizationId": "org_7d3f9a2b",
+    "agentId": "agt_4e8c1b6d",
+    "target": "prod",
+    "generation": 43,
+    "releaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+    "previousReleaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+    "issuedAt": "2026-09-12T11:00:00Z",
+    "leaseSeconds": 3600,
+    "onLeaseExpiry": "degrade",
+    "applyPolicy": "unlock_required",
+    "requireCountersign": true,
+    "slots": [
+      {
+        "tag": "docs.summarise-translate",
+        "kind": "workflow",
+        "artifactId": "wfl_a1b2c3d4e5f6",
+        "versionId": "ver_01j9x4k2p1bb",
+        "versionOrdinal": 2,
+        "contentHash": "sha256:e50bfa33c86487b818ef5330aee6fcda6ea2bbe4b5f587f0f9ac1928d3e4a0ec",
+        "byteLength": 23,
+        "model": "claude-sonnet-5",
+        "variables": [
+          {
+            "name": "document",
+            "required": true,
+            "trust": "end_user"
+          },
+          {
+            "name": "language",
+            "required": true,
+            "trust": "operator"
+          }
+        ],
+        "steps": [
+          {
+            "stepId": "docs.summarise-translate#1",
+            "ordinal": 1,
+            "promptArtifactId": "prm_step1",
+            "promptVersionId": "ver_step1",
+            "contentHash": "sha256:270322f111ad60e3d6e045e27af785e294a8203e7a101c8715774c1f092dc193",
+            "byteLength": 24
+          },
+          {
+            "stepId": "docs.summarise-translate#2",
+            "ordinal": 2,
+            "promptArtifactId": "prm_step2",
+            "promptVersionId": "ver_step2",
+            "contentHash": "sha256:c872a595a97023a45dfe0c967614cc1219fe7daa211b0aa36b28a9ddc61175d6",
+            "byteLength": 39
+          }
+        ]
+      },
+      {
+        "tag": "support.reply",
+        "kind": "prompt",
+        "artifactId": "prm_1c4d5e6f7a8b",
+        "versionId": "ver_01j9x4k2n0aa",
+        "versionOrdinal": 3,
+        "contentHash": "sha256:0034486e0f7b7390756a2d7a5596a8a5d023894c2566c91a78dc9007cef81c6b",
+        "byteLength": 53,
+        "model": "gpt-5",
+        "variables": [
+          {
+            "name": "customer_name",
+            "required": true,
+            "trust": "operator"
+          },
+          {
+            "name": "topic",
+            "required": false,
+            "trust": "operator"
+          }
+        ]
+      },
+      {
+        "tag": "support.triage",
+        "kind": "prompt",
+        "artifactId": "prm_8b2f3c1d9e4a",
+        "versionId": "ver_01j9x4k2m7q8",
+        "versionOrdinal": 7,
+        "contentHash": "sha256:5457fbcd983010938f27756efd7c81ea2aabe39fdacd99af0b4479585c231129",
+        "byteLength": 96,
+        "model": "claude-sonnet-5",
+        "variables": [
+          {
+            "name": "ticket_body",
+            "required": true,
+            "trust": "end_user"
+          }
+        ]
+      }
+    ],
+    "directives": [
+      {
+        "kind": "disable",
+        "scope": "arm",
+        "experimentId": "exp_6a0d4e2c",
+        "arm": "candidate",
+        "issuedAt": "2026-09-12T11:30:00Z",
+        "reason": "p95 latency doubled on the reply candidate"
+      }
+    ],
+    "experiments": [
+      {
+        "experimentId": "exp_2f9c0a1b",
+        "tag": "support.triage",
+        "salt": "AAECAwQFBgcICQoLDA0ODw",
+        "subjectKey": "request",
+        "arms": [
+          {
+            "arm": "control",
+            "weightBps": 9000,
+            "releaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+            "overrides": []
+          },
+          {
+            "arm": "candidate",
+            "weightBps": 1000,
+            "releaseDigest": "sha256:5da01ec25da8d0104d5f382cf7c9b7a02959190d49aeb2b98633b3f70fec4e8e",
+            "overrides": [
+              {
+                "tag": "support.triage",
+                "kind": "prompt",
+                "artifactId": "prm_8b2f3c1d9e4a",
+                "versionId": "ver_01j9x4k2m7q9",
+                "versionOrdinal": 8,
+                "contentHash": "sha256:c37d694d3705611bd16227eb52c92a0fa87bbf441e6b53a9ac819bddfe42ebfa",
+                "byteLength": 108,
+                "model": "claude-sonnet-5",
+                "variables": [
+                  {
+                    "name": "ticket_body",
+                    "required": true,
+                    "trust": "end_user"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "ramp": [
+          {
+            "notBefore": "2026-09-13T02:00:00Z",
+            "weightBps": [
+              7500,
+              2500
+            ]
+          },
+          {
+            "notBefore": "2026-09-13T04:00:00Z",
+            "weightBps": [
+              5000,
+              5000
+            ]
+          },
+          {
+            "notBefore": "2026-09-13T08:00:00Z",
+            "weightBps": [
+              0,
+              10000
+            ]
+          }
+        ]
+      },
+      {
+        "experimentId": "exp_6a0d4e2c",
+        "tag": "support.reply",
+        "salt": "EBESExQVFhcYGRobHB0eHw",
+        "subjectKey": "request",
+        "arms": [
+          {
+            "arm": "control",
+            "weightBps": 5000,
+            "releaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+            "overrides": []
+          },
+          {
+            "arm": "candidate",
+            "weightBps": 5000,
+            "releaseDigest": "sha256:eac0229e0b00cc580ddefc08634aac017d507420832a1c58426858346be1cab9",
+            "overrides": [
+              {
+                "tag": "support.reply",
+                "kind": "prompt",
+                "artifactId": "prm_retention_script",
+                "versionId": "ver_01j9x4k2m7q1",
+                "versionOrdinal": 1,
+                "contentHash": "sha256:5e6a4fe78cc84506f007a9a7233646b46fb878cebb40bf00c15aec3abaf9c0ce",
+                "byteLength": 32,
+                "model": "gpt-5",
+                "variables": [
+                  {
+                    "name": "customer_name",
+                    "required": true,
+                    "trust": "operator"
+                  },
+                  {
+                    "name": "topic",
+                    "required": false,
+                    "trust": "operator"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "signatures": [
+    {
+      "keyId": "d248f03be9e1629a74451cb3b5de16e0809bcf35db684b71b6f935231e756cc8",
+      "alg": "ES256",
+      "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw"
+    }
+  ],
+  "countersignatures": [
+    {
+      "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
+      "alg": "ES256",
+      "releaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+      "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
+      "signedAt": "2026-09-12T09:30:00Z"
+    },
+    {
+      "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
+      "alg": "ES256",
+      "releaseDigest": "sha256:5da01ec25da8d0104d5f382cf7c9b7a02959190d49aeb2b98633b3f70fec4e8e",
+      "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
+      "signedAt": "2026-09-12T09:31:00Z"
+    },
+    {
+      "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
+      "alg": "ES256",
+      "releaseDigest": "sha256:eac0229e0b00cc580ddefc08634aac017d507420832a1c58426858346be1cab9",
+      "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
+      "signedAt": "2026-09-12T10:31:00Z"
+    }
+  ]
+}

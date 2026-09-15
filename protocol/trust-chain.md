@@ -78,7 +78,8 @@ this order:
 | M11 | when `requireCountersign` (or the target is locally configured to require it): every release the manifest can activate — the manifest's `releaseDigest` and each experiment arm's — carries a countersignature from a key in the **customer** root's `targets` role | `countersign_missing` |
 | M12 | …and each of those signatures verifies over the UTF-8 digest string | `countersign_invalid` |
 | M13 | every `directives[]` entry is of a kind the runtime honours — `disable` or `request_unlock` (S4; checked with M7/M8, before any payload is fetched) | `directive_unknown` |
-| M14 | `experiment.ramp`, when present, is a well-formed plan — 1–8 steps, strictly increasing and ≥ 1 h apart, one integer weight per arm summing to 10000 (S9, assignment-hash.md › The ramp plan) | `ramp_invalid` |
+| M14 | every experiment's `ramp`, when present, is a well-formed plan — 1–8 steps, strictly increasing and ≥ 1 h apart, one integer weight per arm summing to 10000 (S9, assignment-hash.md › The ramp plan) | `ramp_invalid` |
+| M15 | the per-prompt shape is consistent (S16, checked with M13 before any payload): `experiment` and `experiments[]` never together; every `experiments[]` entry names a slot of the release, no slot twice; each arm's overrides name that slot only; an arm-scoped `disable` names one of the experiments | `experiment_conflict` |
 
 Only then does apply policy run — and the policy is the host's, not the
 manifest's (see below): the manifest's `applyPolicy` pins the host on first

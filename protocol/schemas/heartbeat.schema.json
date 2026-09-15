@@ -158,6 +158,7 @@
             "schema_invalid",
             "directive_unknown",
             "ramp_invalid",
+            "experiment_conflict",
             "model_unavailable"
           ]
         },

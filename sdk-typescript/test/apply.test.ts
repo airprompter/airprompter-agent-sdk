@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent, RenderRefusedError } from "../packages/sdk/src/agent.js";
+import { AirPrompterAgent, RenderRefusedError, SDK_VERSION } from "../packages/sdk/src/agent.js";
 import { parseWindow, windowState } from "../packages/sync/src/apply/window.js";
 import { publicJwkOf, releaseDigest } from "../packages/core/src/protocol/trust.js";
 import { requiredModelsMissing } from "../packages/sync/src/sync/loop.js";
@@ -196,7 +196,7 @@ test("the heartbeat: the protocol's body, content-free; the cadence is adopted f
   assert.equal(plane.heartbeats[0]?.heartbeatIntervalSeconds, 45, "the runtime declares its cadence…");
   const body = ap.heartbeatBody();
   assert.equal(body.protocol, "0.3.0");
-  assert.deepEqual(body.sdk, { name: "agent-sdk-typescript", version: "0.1.0" });
+  assert.deepEqual(body.sdk, { name: "agent-sdk-typescript", version: SDK_VERSION });
   assert.equal(body.syncMode, "resident");
   assert.equal(body.heartbeatIntervalSeconds, 60, "…and holds to what the server answered");
   assert.deepEqual(body.generation, { active: 1 });

@@ -18,7 +18,7 @@
  * `protocol/vectors/otel-mapping.json` is the vector every bridge must match.
  */
 
-import { LATENCY_BUCKET_EDGES_MS, type SpoolRow, type WindowRow } from "@airprompter/agent-core";
+import { LATENCY_BUCKET_EDGES_MS, SDK_VERSION, type SpoolRow, type WindowRow } from "@airprompter/agent-core";
 
 export const OTLP_SCOPE_NAME = "airprompter";
 const DELTA = 1;
@@ -137,5 +137,5 @@ export function spoolRowsToOtlp(rows: readonly SpoolRow[], options: MappingOptio
     metrics.push(sumMetric("airprompter.spool.dropped_segments", "{segment}", droppedSegments, "Spool segments evicted by a budget: the loss, reported."));
     metrics.push(sumMetric("airprompter.spool.dropped_bytes", "By", droppedBytes, "Bytes evicted by a budget."));
   }
-  return { resourceMetrics: [{ resource: { attributes: resource }, scopeMetrics: [{ scope: { name: OTLP_SCOPE_NAME, version: options.sdkVersion ?? "0.1.0" }, metrics }] }] };
+  return { resourceMetrics: [{ resource: { attributes: resource }, scopeMetrics: [{ scope: { name: OTLP_SCOPE_NAME, version: options.sdkVersion ?? SDK_VERSION }, metrics }] }] };
 }

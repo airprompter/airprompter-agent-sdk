@@ -50,9 +50,10 @@ function collector(script: Array<{ status: number; headers?: Record<string, stri
 
 test("the mapping is the protocol's vector: every spool field lands where docs/telemetry.md says, and nothing else does", () => {
   for (const c of vector.cases) {
-    assert.deepEqual(spoolRowsToOtlp(c.rows, { resource: c.resource }), c.expected, c.name);
+    // The vector fixes the scope version it was generated with; the bridge defaults to SDK_VERSION when none is given.
+    assert.deepEqual(spoolRowsToOtlp(c.rows, { resource: c.resource, sdkVersion: "0.1.0" }), c.expected, c.name);
   }
-  const request = spoolRowsToOtlp(vector.cases[2]!.rows, { resource: vector.cases[2]!.resource });
+  const request = spoolRowsToOtlp(vector.cases[2]!.rows, { resource: vector.cases[2]!.resource, sdkVersion: "0.1.0" });
   const text = JSON.stringify(request);
   assert.doesNotMatch(text, /Triage|helpful|prompt text/, "no prompt text can appear: the rows have no field for it");
   assert.equal(spoolRowsToOtlp([]).resourceMetrics[0]!.scopeMetrics[0]!.metrics.length, 0, "no rows, no metrics");

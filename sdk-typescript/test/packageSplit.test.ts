@@ -23,6 +23,7 @@ import test from "node:test";
 import { createPlaintextBundle } from "../packages/core/src/bundle/apbundle.js";
 import { AssignmentError, isAssignmentError } from "../packages/core/src/protocol/assignment.js";
 import { publicJwkOf, trustedRootFromPinnedKey } from "../packages/core/src/protocol/trust.js";
+import { SDK_VERSION } from "../packages/core/src/protocol/version.js";
 import type { Bundle } from "../packages/core/src/protocol/types.js";
 import { BundleRelease } from "../packages/core/src/release/bundleRelease.js";
 import { FakeControlPlane } from "../packages/core/src/testing/index.js";
@@ -179,6 +180,8 @@ test("S10: the five packages carry one version, exact-pinned siblings, the locks
       assert.equal(range, version, `${name} → ${dep} is exact-pinned to the lockstep version`);
     }
   }
+  // The version the heartbeat and store.json report is the version that shipped: SDK_VERSION never drifts from package.json (it did, 0.1.0 → 0.2.0).
+  assert.equal(SDK_VERSION, version, "SDK_VERSION is the lockstep version");
   assert.deepEqual(Object.keys(manifests.core!.dependencies ?? {}), []);
   assert.deepEqual(Object.keys(manifests.sdk!.dependencies ?? {}).sort(), ["@airprompter/agent-core", "@airprompter/agent-runtime", "@airprompter/agent-sync", "@airprompter/agent-telemetry"], "the facade never pulls the bridge in: a collector is optional");
   assert.deepEqual(Object.keys(manifests["otel-bridge"]!.dependencies ?? {}), ["@airprompter/agent-core"]);

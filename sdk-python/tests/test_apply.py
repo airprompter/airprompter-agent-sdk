@@ -17,7 +17,7 @@ import time
 import pytest
 
 from airprompter_agent_core._util import instant, iso_ms, now_ms
-from airprompter_agent.agent import AirPrompterAgent, RenderRefusedError, SyncOptions
+from airprompter_agent.agent import SDK_VERSION, AirPrompterAgent, RenderRefusedError, SyncOptions
 from airprompter_agent_sync.apply.window import parse_window, window_state
 from airprompter_agent_core.protocol.trust import public_jwk_of
 
@@ -202,7 +202,7 @@ def test_heartbeat_body_cadence_refusal_and_offline(state_dir):
     assert plane.heartbeats[0]["heartbeatIntervalSeconds"] == 45, "the runtime declares its cadence…"
     body = ap.heartbeat_body()
     assert body["protocol"] == "0.3.0"
-    assert body["sdk"] == {"name": "agent-sdk-python", "version": "0.1.0"}
+    assert body["sdk"] == {"name": "agent-sdk-python", "version": SDK_VERSION}
     assert body["host"]["runtime"].startswith("python ")
     assert body["syncMode"] == "resident"
     assert body["heartbeatIntervalSeconds"] == 60, "…and holds to what the server answered"

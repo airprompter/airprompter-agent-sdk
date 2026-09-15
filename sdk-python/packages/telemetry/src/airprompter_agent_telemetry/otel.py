@@ -42,6 +42,7 @@ from typing import Any, Callable, Mapping, Optional, Union
 
 import httpx
 
+from airprompter_agent_core import SDK_VERSION
 from airprompter_agent_core._util import iso_ms
 from airprompter_agent_core.telemetry.upload_sink import UploadOutcome, UploadSegment
 from .spool.writer import LATENCY_BUCKET_EDGES_MS
@@ -99,7 +100,7 @@ def _sum_metric(name: str, unit: str, points: list[dict[str, Any]], description:
     return {"name": name, "description": description, "unit": unit, "sum": {"aggregationTemporality": _DELTA, "isMonotonic": monotonic, "dataPoints": points}}
 
 
-def spool_rows_to_otlp(rows: list[Mapping[str, Any]], *, resource: Optional[Mapping[str, Union[str, int, float, bool]]] = None, sdk_version: str = "0.1.0") -> dict[str, Any]:
+def spool_rows_to_otlp(rows: list[Mapping[str, Any]], *, resource: Optional[Mapping[str, Union[str, int, float, bool]]] = None, sdk_version: str = SDK_VERSION) -> dict[str, Any]:
     """A segment's rows as one OTLP/HTTP JSON request. Empty rows give a request with no metrics."""
     first = rows[0] if rows else None
     sdk_name, _, sdk_ver = str((first or {}).get("sdk") or "").partition("/")
@@ -214,7 +215,7 @@ class OtlpUploadSink:
         endpoint: Optional[str] = None,
         headers: Optional[Mapping[str, str]] = None,
         resource: Optional[Mapping[str, Union[str, int, float, bool]]] = None,
-        sdk_version: str = "0.1.0",
+        sdk_version: str = SDK_VERSION,
         exporter: Optional[Exporter] = None,
         transport: Optional[httpx.BaseTransport] = None,
         timeout: float = 10.0,

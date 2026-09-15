@@ -1,8 +1,8 @@
 {
   "name": "@airprompter/agent-sdk-workspace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
-  "description": "Workspace for the AirPrompter agent SDK packages (core, sync, runtime, telemetry, sdk) \u2014 one version, released in lockstep.",
+  "description": "Workspace for the AirPrompter agent SDK packages (core, sync, runtime, telemetry, sdk) — one version, released in lockstep.",
   "license": "BSD-3-Clause",
   "type": "module",
   "engines": {

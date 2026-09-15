@@ -126,8 +126,12 @@ export interface StartOptions {
   fs?: FsPort;
   random?: () => number;
   logger?: (event: Record<string, unknown>) => void;
-  /** T26: who reports on the heartbeat — the SDK by default; the daemon names itself `airprompterd`. */
-  sdk?: { name: "agent-sdk-typescript" | "airprompterd" | "airprompter-cli"; version: string };
+  /**
+   * T26: who reports on the heartbeat — this SDK by default; the daemon names itself `airprompterd`, the CLI
+   * `airprompter-cli`. It names the *reporting software*, never the customer's app (the heartbeat schema is an enum,
+   * so any other name is refused by the control plane); `start()` refuses it up front with `invalid_options`.
+   */
+  sdk?: { name: HeartbeatReporterName; version: string };
   /**
    * T34: golden sets before activation. With `invoke` set, every slot of a staged release that carries a golden set is
    * run against the pinned model through this call before the apply decision; a set below its pass-rate floor leaves
@@ -296,9 +300,13 @@ export class RenderRefusedError extends Error {
   }
 }
 
+/** The reporters the heartbeat schema admits (`protocol/schemas/heartbeat.schema.json`, `sdk.name`). */
+export const HEARTBEAT_REPORTER_NAMES = ["agent-sdk-typescript", "agent-sdk-python", "airprompter-cli", "airprompterd"] as const;
+export type HeartbeatReporterName = (typeof HEARTBEAT_REPORTER_NAMES)[number];
+
 export class AgentStartError extends Error {
   constructor(
-    readonly code: "no_verified_release" | "kek_unavailable" | "store_corrupt" | "store_newer",
+    readonly code: "no_verified_release" | "kek_unavailable" | "store_corrupt" | "store_newer" | "invalid_options",
     message: string,
   ) {
     super(message);
@@ -320,6 +328,8 @@ export class AirPrompterAgent {
   private daemonRefreshing: Promise<void> | null = null;
   private lastSyncMs: number | null = null;
   private lastSyncOutcome: string | null = null;
+  /** The reason and detail behind the last sync outcome (`unavailable`/`refused`), for the boot error and the log. */
+  private lastSyncDetail: { reason: string | null; detail: string | null } = { reason: null, detail: null };
   private consecutiveSyncFailures = 0;
   private nextSyncMs: number | null = null;
   private readonly changeListeners = new Set<(change: ReleaseChange) => void>();
@@ -408,6 +418,16 @@ export class AirPrompterAgent {
   }
 
   static async start(options: StartOptions): Promise<AirPrompterAgent> {
+    if (options.sdk !== undefined) {
+      const name = (options.sdk as { name?: unknown }).name;
+      const version = (options.sdk as { version?: unknown }).version;
+      if (!(HEARTBEAT_REPORTER_NAMES as readonly unknown[]).includes(name) || typeof version !== "string" || version.length === 0 || version.length > 64) {
+        throw new AgentStartError(
+          "invalid_options",
+          `options.sdk names the reporting software and must be one of ${HEARTBEAT_REPORTER_NAMES.join(", ")} with a version up to 64 characters (got ${JSON.stringify(options.sdk)}); leave it unset to report as this SDK — it is not the place for your app's name`,
+        );
+      }
+    }
     const stateDir = options.stateDir ?? defaultStateDir();
     const pinnedRoot = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.target, pinnedRoot: options.root.pinned }) : options.root;
     if (options.sync?.mode === "daemon") {
@@ -640,7 +660,7 @@ export class AirPrompterAgent {
       // Nothing verified locally: one synchronous sync before serving is the only time the SDK waits on the network.
       await this.syncNow();
     }
-    if (!this.active) throw new AgentStartError("no_verified_release", "no verified release in the store, no usable vendored bundle, and nothing could be fetched");
+    if (!this.active) throw new AgentStartError("no_verified_release", `no verified release in the store, no usable vendored bundle, and ${this.describeFetchFailure()}`);
     if (this.client && (this.options.sync?.mode ?? "resident") === "resident") {
       this.schedule();
       // The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
@@ -912,6 +932,7 @@ export class AirPrompterAgent {
       this.trustedRoot = result.trustedRoot;
       this.lastSyncMs = this.nowMs();
       this.lastSyncOutcome = result.outcome;
+      this.lastSyncDetail = { reason: result.reason ?? null, detail: result.detail ?? null };
       // S3: contact is a signed manifest or the origin's authenticated answer — never the pointer's silence.
       const contact = result.outcome === "unchanged" || result.outcome === "activated" || result.outcome === "activated_externally" || result.outcome === "staged" || result.outcome === "nothing_promoted" || result.outcome === "held_back";
       if (contact) this.markContact();
@@ -1043,6 +1064,32 @@ export class AirPrompterAgent {
   }
 
   /** The protocol's heartbeat body, built from what this process knows about itself. Content-free by construction. */
+  /**
+   * Why the boot sync brought nothing, in the control plane's own terms — the sentence a customer reads first, so it
+   * names the fix: a 404 is "nothing promoted to this environment" (or a key bound elsewhere), a 401 is the key, a 403
+   * carries the server's code, and a transport failure carries its message.
+   */
+  private describeFetchFailure(): string {
+    const scope = `${this.options.agentId} on ${this.options.target}`;
+    const { reason, detail } = this.lastSyncDetail;
+    if (!this.client) return "no control plane is configured (no apiKey/baseUrl), so nothing could be fetched";
+    switch (this.lastSyncOutcome) {
+      case "nothing_promoted":
+        return `the control plane has no release promoted to ${this.options.target} for ${scope} (HTTP 404) — promote one from the app's board, or check that this key is bound to this app and environment`;
+      case "refused":
+        return `the manifest for ${scope} was fetched but refused: ${reason ?? "unknown"}`;
+      case "unavailable":
+        if (reason === "unauthorized") return `the control plane refused this key for ${scope} (HTTP 401) — the key is wrong, revoked, or minted for another environment`;
+        if (reason === "forbidden") return `the control plane forbade the read for ${scope} (HTTP 403${detail ? ` ${detail}` : ""})`;
+        if (reason === "network") return `the control plane at ${this.options.baseUrl ?? "the configured baseUrl"} could not be reached${detail ? `: ${detail}` : ""}`;
+        return `the control plane answered ${reason ?? "an error"} for ${scope}`;
+      case null:
+        return "nothing could be fetched";
+      default:
+        return `the sync ended ${this.lastSyncOutcome} for ${scope} without a release`;
+    }
+  }
+
   heartbeatBody(): Record<string, unknown> {
     const status = this.status();
     const store = this.store?.state ?? null;
@@ -1103,7 +1150,7 @@ export class AirPrompterAgent {
           this.log({ event: "heartbeat", intervalSeconds: this.heartbeatIntervalSeconds, expiresAt: result.response.expiresAt ?? null, grant: this.uploadGrant ? this.uploadGrant.grantId : null });
         } else if (result.status === "refused") {
           this.lastHeartbeatRefusal = result.code ?? `http_${result.httpStatus}`;
-          this.log({ event: "heartbeat_refused", httpStatus: result.httpStatus, code: result.code });
+          this.log({ event: "heartbeat_refused", httpStatus: result.httpStatus, code: result.code, ...(result.message ? { message: result.message } : {}), ...(result.issues.length ? { issues: result.issues } : {}) });
         } else {
           this.log({ event: "heartbeat_failed", httpStatus: result.httpStatus });
         }

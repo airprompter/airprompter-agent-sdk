@@ -31,6 +31,8 @@ export interface SyncPassResult {
   outcome: "pointer_unchanged" | "unchanged" | "activated" | "activated_externally" | "staged" | "refused" | "unavailable" | "nothing_promoted" | "held_back";
   generation?: number;
   reason?: RefusalCode | "unauthorized" | "forbidden" | "network" | string;
+  /** The control plane's own word for a `forbidden` answer (its `details.code`), or the transport error for `network`. */
+  detail?: string;
 }
 
 export interface SyncPassInput {
@@ -126,7 +128,7 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
     if (fetched.status === "not_found") return done({ outcome: "nothing_promoted" });
     if (fetched.status === "unauthorized" || fetched.status === "forbidden") {
       input.onRefusal?.(fetched.status, null);
-      return done({ outcome: "unavailable", reason: fetched.status });
+      return done({ outcome: "unavailable", reason: fetched.status, ...(fetched.status === "forbidden" && fetched.code ? { detail: fetched.code } : {}) });
     }
     if (fetched.status === "error") return done({ outcome: "unavailable", reason: `http_${fetched.httpStatus}` });
 
@@ -185,7 +187,7 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
     return done({ outcome: "activated", generation: manifest.payload.generation }, active, fetched.etag);
   } catch (error) {
     input.onRefusal?.(`network:${(error as Error).message}`, null);
-    return done({ outcome: "unavailable", reason: "network" });
+    return done({ outcome: "unavailable", reason: "network", detail: String((error as Error).message ?? error).slice(0, 240) });
   }
 }
 

@@ -133,3 +133,8 @@ def test_five_distributions_one_version_exact_pinned_siblings():
         assert [d.split("==")[0] for d in ours] == expected, f"{name} depends on exactly its siblings below"
         assert all("==" in d for d in ours), f"{name}: exact pins"
     assert len(versions) == 1
+    # The version the heartbeat and store.json report is the version that shipped: both constants match pyproject.
+    from airprompter_agent_core import SDK_VERSION as core_version
+    from airprompter_agent.agent import SDK_VERSION as agent_version
+
+    assert {core_version, agent_version} == versions, "SDK_VERSION is the lockstep version"

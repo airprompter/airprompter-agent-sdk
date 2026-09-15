@@ -53,8 +53,9 @@ from airprompter_agent_runtime.observe import PendingObservation, ObserveTarget,
 from airprompter_agent_core.release.reader import ReleaseSlot
 from airprompter_agent_runtime.release.resolver import ReleaseResolver, Rendered, Workflow, WorkflowStep, disabled_from
 
+from airprompter_agent_core import SDK_VERSION  # one constant, pinned to pyproject by tests/test_package_split.py
+
 SDK_NAME = "agent-sdk-python"
-SDK_VERSION = "0.1.0"
 #: The protocol this SDK speaks; the heartbeat names it (the manifest carries its own).
 PROTOCOL_VERSION = "0.3.0"
 # A vendored bundle this close to its notAfter logs vendored_bundle_expiring_soon at start (the platform warns at the same distance).

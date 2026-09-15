@@ -58,7 +58,7 @@ def test_n_minus_one_is_read_and_migrates_forward_on_first_write(state_dir):
     store.pin_apply_policy(value="unlock_required", source="manifest", generation=1, set_at="2026-09-13T12:00:00Z")
     written = on_disk(directory)
     assert written["version"] == STORE_FORMAT_VERSION
-    assert written["writer"] == {"name": "agent-sdk-python", "version": "0.1.0"}
+    assert written["writer"] == {"name": "agent-sdk-python", "version": SDK_VERSION}
     assert written["applyPolicyPin"]["value"] == "unlock_required"
     assert written["instanceId"] == v1["instanceId"], "everything the N-1 file said is kept"
     daemon = SlotStore.open(state_dir=state_dir, **KW, key_provider=provider, hooks=StoreHooks(writer={"name": "airprompterd", "version": "0.1.0"}))
@@ -75,7 +75,7 @@ def test_n_is_read_as_written_and_a_fresh_store_is_format_two(state_dir):
     fresh = tempfile.mkdtemp(prefix="ap-storefmt-fresh-")
     try:
         created = SlotStore.open(state_dir=fresh, **KW, key_provider=file_key(os.path.join(SlotStore.path(state_dir=fresh, **KW), "store.key")))
-        assert created.state["version"] == STORE_FORMAT_VERSION and created.state["writer"] == {"name": "agent-sdk-python", "version": "0.1.0"}
+        assert created.state["version"] == STORE_FORMAT_VERSION and created.state["writer"] == {"name": "agent-sdk-python", "version": SDK_VERSION}
         assert sorted(STORE_FORMATS_READ) == [1, 2]
     finally:
         shutil.rmtree(fresh, ignore_errors=True)
@@ -98,4 +98,3 @@ def test_n_plus_one_is_refused_naming_the_writer(state_dir):
     with pytest.raises(StoreError) as unknown:
         SlotStore.open(state_dir=state_dir, **KW, key_provider=provider)
     assert unknown.value.code == "store_newer" and unknown.value.detail == "an unknown writer"
-    assert SDK_VERSION == "0.1.0"

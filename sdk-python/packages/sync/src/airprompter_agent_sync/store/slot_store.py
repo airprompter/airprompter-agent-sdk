@@ -28,6 +28,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional
 
+from airprompter_agent_core import SDK_VERSION
 from airprompter_agent_core._util import b64url_decode, b64url_encode, fsync_dir, iso_ms, now_ms, random_id
 from airprompter_agent_core.protocol.canonical_json import sha256_prefixed
 from airprompter_agent_core.protocol.trust import Verdict, referenced_payloads, verify_manifest
@@ -91,7 +92,7 @@ class StoreHooks:
 #: migrates an N-1 file forward on its first write, and refuses N+1 with ``store_newer`` naming the writer.
 STORE_FORMAT_VERSION = 2
 STORE_FORMATS_READ = frozenset({1, 2})
-DEFAULT_WRITER = {"name": "agent-sdk-python", "version": "0.1.0"}
+DEFAULT_WRITER = {"name": "agent-sdk-python", "version": SDK_VERSION}
 
 
 class SlotStore:

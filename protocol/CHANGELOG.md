@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### The SDK reports the version that shipped (SDKs 0.2.1)
+- `SDK_VERSION` had stayed at 0.1.0 through the 0.1.1 and 0.2.0 releases, so every heartbeat, store.json writer and OTel scope named a version that never shipped. Now 0.2.1 and pinned to the package version by `packageSplit.test.ts` / `test_package_split.py`; the Python `agent` package reads core's one constant; both OTel bridges default their scope version to it. No protocol change.
+
 ### One experiment per prompt (S16, AIR-1986) — protocol minor, 0.3.0
 - `manifest.schema.json`: `payload.experiments[]` (1–32, each with a required `tag`, own salt, arms, ramp) beside the legacy `payload.experiment`, never both (`not: required [experiment, experiments]`); `experiment.tag` (optional on the legacy shape); `disable scope: "arm"` gains `experimentId`. Example `manifest.experiments.json` (two splits, the second against another prompt under the same key — D79); refused: the two shapes together, an entry without its tag.
 - trust-chain M15 `experiment_conflict` (also in the heartbeat's refusal enum): never both keys, every entry names a slot of the release once, an arm's overrides name that slot only, an arm-scoped disable names its experiment. M9–M12 and M14 run over every experiment. Reference verifier in `conformance/trust.mjs`.

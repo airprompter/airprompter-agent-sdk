@@ -73,6 +73,8 @@ export interface RampStep {
 
 export interface Experiment {
   experimentId: string;
+  /** S16: the one slot this experiment splits — required on every `experiments[]` entry, absent on the legacy single one. */
+  tag?: string;
   salt: string;
   subjectKey: "request" | "instance";
   arms: ExperimentArm[];
@@ -86,7 +88,7 @@ export interface Experiment {
 
 export type Directive =
   | { kind: "request_unlock"; releaseDigest: Sha256; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }
-  | { kind: "disable"; scope: "agent" | "slot" | "arm"; tag?: string; arm?: string; issuedAt: string; reason?: string };
+  | { kind: "disable"; scope: "agent" | "slot" | "arm"; tag?: string; arm?: string; experimentId?: string; issuedAt: string; reason?: string };
 
 /**
  * S4: the set of directive kinds a runtime honours is closed. `disable` is the one kind that acts without a
@@ -114,8 +116,52 @@ export interface ManifestPayload {
   unlockWindow?: { timezone: string; start: string; end: string; days?: Array<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"> };
   requireCountersign: boolean;
   slots: ManifestSlot[];
+  /** The legacy single split (protocol 0.2): applies to every slot its arms override. Never beside `experiments`. */
   experiment?: Experiment;
+  /** S16: one split per slot, each independent — own salt, arms, ramp and share. Never beside `experiment`. */
+  experiments?: Experiment[];
   directives: Directive[];
+}
+
+/** S16: every experiment a manifest carries — `experiments[]`, else the legacy single one, else none. */
+export function experimentsOf(payload: Pick<ManifestPayload, "experiment" | "experiments">): Experiment[] {
+  if (Array.isArray(payload.experiments)) return payload.experiments;
+  return payload.experiment ? [payload.experiment] : [];
+}
+
+/**
+ * S16: the experiment that decides a slot — the `experiments[]` entry naming its tag, else the legacy single one
+ * (which applies to every slot), else null (the slot renders from `slots[]` with arm `none`).
+ */
+export function experimentForTag(payload: Pick<ManifestPayload, "experiment" | "experiments">, tag: string): Experiment | null {
+  if (Array.isArray(payload.experiments)) return payload.experiments.find((experiment) => experiment.tag === tag) ?? null;
+  return payload.experiment ?? null;
+}
+
+/**
+ * M15 (S16): the per-prompt shape is consistent — never both keys; every `experiments[]` entry names a slot of the
+ * release, no slot twice; each arm's overrides name that slot only; an arm-scoped disable names one of the
+ * experiments. Null when it holds.
+ */
+export function experimentConflict(payload: Pick<ManifestPayload, "experiment" | "experiments" | "slots" | "directives">): "experiment_conflict" | null {
+  const list = payload.experiments;
+  if (list === undefined || list === null) return null;
+  if (payload.experiment !== undefined && payload.experiment !== null) return "experiment_conflict";
+  if (!Array.isArray(list) || list.length === 0) return "experiment_conflict";
+  const slotTags = new Set((payload.slots ?? []).map((slot) => slot.tag));
+  const seen = new Set<string>();
+  const ids = new Set<string>();
+  for (const experiment of list) {
+    if (!experiment || typeof experiment !== "object" || typeof experiment.tag !== "string") return "experiment_conflict";
+    if (!slotTags.has(experiment.tag) || seen.has(experiment.tag)) return "experiment_conflict";
+    seen.add(experiment.tag);
+    ids.add(experiment.experimentId);
+    for (const arm of experiment.arms ?? []) for (const override of arm.overrides ?? []) if (override.tag !== experiment.tag) return "experiment_conflict";
+  }
+  for (const directive of payload.directives ?? []) {
+    if (directive && directive.kind === "disable" && directive.scope === "arm" && (directive.experimentId === undefined || !ids.has(directive.experimentId))) return "experiment_conflict";
+  }
+  return null;
 }
 
 export interface Signature {
@@ -223,5 +269,6 @@ export type RefusalCode =
   | "directive_unknown"
   /** S9: the ramp plan is malformed (order, spacing, a weight per arm, sums) — refused whole before a byte is fetched. */
   | "ramp_invalid"
+  | "experiment_conflict"
   /** The chain verified; a slot's required model is not in this runtime's declared catalog (T15). */
   | "model_unavailable";

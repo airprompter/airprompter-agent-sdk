@@ -164,7 +164,7 @@ class FakeControlPlane:
                 slot["steps"].append({"stepId": f"{tag}#{index + 1}", "ordinal": index + 1, "promptArtifactId": f"art_{tag}_{index + 1}", "promptVersionId": step.get("versionId") or f"ver_{tag}_step{index + 1}", "contentHash": step_hash, "byteLength": len(step_bytes)})
         return slot
 
-    def promote(self, slots: list[dict[str, Any]], *, apply_policy: str = "auto", lease_seconds: int = 3600, experiment: Optional[dict] = None, directives: Optional[list] = None, on_lease_expiry: str = "degrade", unlock_window: Optional[dict] = None, sign_with: Optional[dict] = None, generation: Optional[int] = None) -> dict[str, Any]:
+    def promote(self, slots: list[dict[str, Any]], *, apply_policy: str = "auto", lease_seconds: int = 3600, experiment: Optional[dict] = None, experiments: Optional[list[dict]] = None, directives: Optional[list] = None, on_lease_expiry: str = "degrade", unlock_window: Optional[dict] = None, sign_with: Optional[dict] = None, generation: Optional[int] = None) -> dict[str, Any]:
         """Seal and promote: generation + 1, signed with the signing key."""
         ordered = sorted(slots, key=lambda s: s["tag"])
         self.generation = generation if generation is not None else self.generation + 1
@@ -185,6 +185,8 @@ class FakeControlPlane:
             payload["unlockWindow"] = unlock_window
         if experiment:
             payload["experiment"] = experiment
+        if experiments:
+            payload["experiments"] = experiments
         signer = sign_with or self.signing_key
         manifest = {"payload": payload, "signatures": [{"keyId": key_thumbprint(signer), "alg": "ES256", "sig": sign_bytes(canonical_bytes(payload), signer)}], "countersignatures": []}
         data = json.dumps(manifest).encode("utf-8")

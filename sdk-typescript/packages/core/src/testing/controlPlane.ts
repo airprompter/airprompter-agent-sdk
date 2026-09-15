@@ -189,7 +189,7 @@ export class FakeControlPlane {
     return { status: 204, body: "" };
   }
 
-  promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "directives" | "onLeaseExpiry" | "unlockWindow">> & { signWith?: P256PrivateJwk; generation?: number } = {}): Manifest {
+  promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "experiments" | "directives" | "onLeaseExpiry" | "unlockWindow">> & { signWith?: P256PrivateJwk; generation?: number } = {}): Manifest {
     const sorted = [...slots].sort((a, b) => (a.tag < b.tag ? -1 : 1));
     this.generation = options.generation ?? this.generation + 1;
     const payload: ManifestPayload = {
@@ -205,6 +205,7 @@ export class FakeControlPlane {
       requireCountersign: this.requireCountersign,
       slots: sorted,
       ...(options.experiment ? { experiment: options.experiment } : {}),
+      ...(options.experiments ? { experiments: options.experiments } : {}),
       directives: options.directives ?? [],
     };
     const signer = options.signWith ?? this.signingKey;

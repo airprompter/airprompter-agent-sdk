@@ -79,6 +79,12 @@ const goldenDigest = releaseDigest(goldenSlots);
 if (goldenDigest === digest) throw new Error("a golden set must change the release digest");
 const payloadsWithGolden = [...payloadsOk, { contentHash: sha256Prefixed(goldenBytes), bytes: goldenBytes.toString("base64url") }];
 
+/** S16: a well-formed per-slot experiment — the candidate arm overrides that slot only, on a digest of its own. */
+function experimentFor(tag, experimentId) {
+  const own = slots.find((s) => s.tag === tag);
+  return { experimentId, tag, salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 9000, releaseDigest: digest, overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: "sha256:" + experimentId.slice(-1).repeat(64), overrides: [{ ...own, versionId: "ver_candidate" }] }] };
+}
+
 function payload(overrides = {}) {
   return {
     protocol: PROTOCOL,
@@ -165,6 +171,12 @@ const manifestCases = [
   { name: "a golden set's payload is referenced like any other: not fetched is refused (T34)", ...base, root: rootV1, manifest: manifest(payload({ slots: goldenSlots, releaseDigest: goldenDigest })), payloads: payloadsOk, expected: { ok: false, reason: "payload_missing" } },
   { name: "a directive of a kind the runtime does not honour refuses the whole manifest before any payload is fetched (S4)", ...base, root: rootV1, manifest: manifest(payload({ directives: [{ kind: "reboot", issuedAt: "2026-09-12T10:00:00Z" }, { kind: "disable", scope: "agent", issuedAt: "2026-09-12T10:00:00Z" }] })), payloads: payloadsOk, expected: { ok: false, reason: "directive_unknown" } },
   { name: "the two kinds the runtime honours verify (S4): disable acts without a local act, request_unlock only asks", ...base, root: rootV1, manifest: manifest(payload({ directives: [{ kind: "disable", scope: "slot", tag: "support.reply", issuedAt: "2026-09-12T10:00:00Z", reason: "incident" }, { kind: "request_unlock", releaseDigest: digest, requestedBy: "usr_console", requestedAt: "2026-09-12T10:00:00Z", expiresAt: "2026-09-12T14:00:00Z" }] })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
+  // S16 (M15): per-prompt experiments — a well-formed experiments[] verifies; the conflicts are refused before any payload.
+  { name: "experiments[] with one split per slot verifies (S16)", ...base, root: rootV1, manifest: manifest(payload({ experiments: [experimentFor("support.triage", "exp_a"), experimentFor("support.reply", "exp_b")] })), expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
+  { name: "experiment beside experiments[] is refused (S16, M15)", ...base, root: rootV1, manifest: manifest(payload({ experiment: (() => { const { tag: _t, ...legacy } = experimentFor("support.triage", "exp_legacy"); return legacy; })(), experiments: [experimentFor("support.reply", "exp_b")] })), expected: { ok: false, reason: "experiment_conflict" } },
+  { name: "a slot in two experiments is refused (S16, M15)", ...base, root: rootV1, manifest: manifest(payload({ experiments: [experimentFor("support.triage", "exp_a"), experimentFor("support.triage", "exp_b")] })), expected: { ok: false, reason: "experiment_conflict" } },
+  { name: "an override naming another experiment's slot is refused (S16, M15)", ...base, root: rootV1, manifest: manifest(payload({ experiments: [{ ...experimentFor("support.triage", "exp_a"), arms: [{ arm: "control", weightBps: 9000, releaseDigest: digest, overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: "sha256:" + "c".repeat(64), overrides: [slots.find((s) => s.tag === "support.reply")] }] }] })), expected: { ok: false, reason: "experiment_conflict" } },
+  { name: "an arm-scoped disable without its experiment on an experiments[] manifest is refused (S16, M15)", ...base, root: rootV1, manifest: manifest(payload({ experiments: [experimentFor("support.triage", "exp_a")], directives: [{ kind: "disable", scope: "arm", arm: "candidate", issuedAt: "2026-09-12T11:30:00Z" }] })), expected: { ok: false, reason: "experiment_conflict" } },
   { name: "experiment on a countersign target: both arms must be countersigned (D58)", ...base, root: rootV1, countersignRoot: customerRoot, manifest: manifest(payload({ requireCountersign: true, experiment: { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 9000, releaseDigest: digest, overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: "sha256:" + "c".repeat(64), overrides: [] }] } }), ["targets"], [countersign(digest)]), expected: { ok: false, reason: "countersign_missing" } },
 ];
 

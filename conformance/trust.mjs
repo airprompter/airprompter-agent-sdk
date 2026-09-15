@@ -100,6 +100,39 @@ const SUPPORTED_PROTOCOL_MAJORS = new Set([0]);
 /** M13 (S4): the directive kinds a runtime honours. */
 const DIRECTIVE_KINDS = new Set(["request_unlock", "disable"]);
 
+/** S16: every experiment a manifest carries — experiments[] (one per slot), else the legacy single one. */
+export function experimentsOf(payload) {
+  if (Array.isArray(payload.experiments)) return payload.experiments;
+  return payload.experiment ? [payload.experiment] : [];
+}
+
+/**
+ * M15 (S16): the per-prompt shape is consistent — never both keys; every experiments[] entry names a slot of the
+ * release, no slot twice; each arm's overrides name that slot only; an arm-scoped disable names one of the experiments.
+ * Null when it holds; the reason otherwise.
+ */
+export function experimentConflict(payload) {
+  const hasLegacy = payload.experiment !== undefined && payload.experiment !== null;
+  const list = payload.experiments;
+  if (list === undefined || list === null) return null;
+  if (hasLegacy) return "experiment_conflict";
+  if (!Array.isArray(list) || list.length === 0) return "experiment_conflict";
+  const slotTags = new Set((payload.slots ?? []).map((slot) => slot.tag));
+  const seen = new Set();
+  const ids = new Set();
+  for (const experiment of list) {
+    if (!experiment || typeof experiment !== "object" || typeof experiment.tag !== "string") return "experiment_conflict";
+    if (!slotTags.has(experiment.tag) || seen.has(experiment.tag)) return "experiment_conflict";
+    seen.add(experiment.tag);
+    ids.add(experiment.experimentId);
+    for (const arm of experiment.arms ?? []) for (const override of arm.overrides ?? []) if (override.tag !== experiment.tag) return "experiment_conflict";
+  }
+  for (const directive of payload.directives ?? []) {
+    if (directive && directive.kind === "disable" && directive.scope === "arm" && !ids.has(directive.experimentId)) return "experiment_conflict";
+  }
+  return null;
+}
+
 function referencedHashes(payload) {
   const hashes = new Map();
   const add = (slot) => {
@@ -108,7 +141,7 @@ function referencedHashes(payload) {
     if (slot.goldenSet) hashes.set(slot.goldenSet.contentHash, slot.goldenSet.byteLength);
   };
   for (const slot of payload.slots) add(slot);
-  for (const arm of payload.experiment?.arms ?? []) for (const override of arm.overrides) add(override);
+  for (const experiment of experimentsOf(payload)) for (const arm of experiment.arms ?? []) for (const override of arm.overrides) add(override);
   return hashes;
 }
 
@@ -157,6 +190,9 @@ export function verifyManifest({
   if (!Array.isArray(payload.directives) || payload.directives.some((d) => !d || typeof d !== "object" || !DIRECTIVE_KINDS.has(d.kind))) {
     return { ok: false, reason: "directive_unknown" };
   }
+  // M15 (S16): the per-prompt shape is consistent, or the manifest is refused whole before any payload.
+  const conflict = experimentConflict(payload);
+  if (conflict) return { ok: false, reason: conflict };
 
   if (payloads) {
     for (const [hash, byteLength] of referencedHashes(payload)) {
@@ -167,7 +203,7 @@ export function verifyManifest({
   }
 
   if (payload.requireCountersign || requireCountersign) {
-    const digests = new Set([payload.releaseDigest, ...(payload.experiment?.arms ?? []).map((arm) => arm.releaseDigest)]);
+    const digests = new Set([payload.releaseDigest, ...experimentsOf(payload).flatMap((experiment) => (experiment.arms ?? []).map((arm) => arm.releaseDigest))]);
     const role = countersignRoot?.signed.roles.targets ?? { keyIds: [], threshold: 1 };
     const keys = countersignRoot?.signed.keys ?? {};
     for (const digest of digests) {

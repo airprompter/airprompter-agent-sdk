@@ -157,11 +157,62 @@ def referenced_payloads(payload: Mapping[str, Any]) -> dict[str, int]:
 
     for slot in payload.get("slots", []):
         add(slot)
-    experiment = payload.get("experiment")
-    for arm in (experiment or {}).get("arms", []):
-        for override in arm.get("overrides", []):
-            add(override)
+    for experiment in experiments_of(payload):
+        for arm in experiment.get("arms", []):
+            for override in arm.get("overrides", []):
+                add(override)
     return hashes
+
+
+def experiments_of(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """S16: every experiment a manifest carries — ``experiments[]``, else the legacy single one, else none."""
+    listed = payload.get("experiments")
+    if isinstance(listed, list):
+        return listed
+    experiment = payload.get("experiment")
+    return [experiment] if isinstance(experiment, Mapping) else []
+
+
+def experiment_for_tag(payload: Mapping[str, Any], tag: str) -> Mapping[str, Any] | None:
+    """S16: the experiment that decides a slot — the ``experiments[]`` entry naming its tag, else the legacy single one
+    (which applies to every slot), else None (the slot renders from ``slots[]`` with arm ``none``)."""
+    listed = payload.get("experiments")
+    if isinstance(listed, list):
+        return next((experiment for experiment in listed if isinstance(experiment, Mapping) and experiment.get("tag") == tag), None)
+    experiment = payload.get("experiment")
+    return experiment if isinstance(experiment, Mapping) else None
+
+
+def experiment_conflict(payload: Mapping[str, Any]) -> str | None:
+    """M15 (S16): the per-prompt shape is consistent — never both keys; every ``experiments[]`` entry names a slot of the
+    release, no slot twice; each arm's overrides name that slot only; an arm-scoped disable names one of the
+    experiments. None when it holds."""
+    listed = payload.get("experiments")
+    if listed is None:
+        return None
+    if payload.get("experiment") is not None:
+        return "experiment_conflict"
+    if not isinstance(listed, list) or not listed:
+        return "experiment_conflict"
+    slot_tags = {slot.get("tag") for slot in payload.get("slots") or []}
+    seen: set[str] = set()
+    ids: set[str] = set()
+    for experiment in listed:
+        if not isinstance(experiment, Mapping) or not isinstance(experiment.get("tag"), str):
+            return "experiment_conflict"
+        tag = experiment["tag"]
+        if tag not in slot_tags or tag in seen:
+            return "experiment_conflict"
+        seen.add(tag)
+        ids.add(str(experiment.get("experimentId")))
+        for arm in experiment.get("arms") or []:
+            for override in arm.get("overrides") or []:
+                if override.get("tag") != tag:
+                    return "experiment_conflict"
+    for directive in payload.get("directives") or []:
+        if isinstance(directive, Mapping) and directive.get("kind") == "disable" and directive.get("scope") == "arm" and str(directive.get("experimentId")) not in ids:
+            return "experiment_conflict"
+    return None
 
 
 def _key_usable_at(key: Mapping[str, Any], now: str) -> bool:
@@ -218,9 +269,14 @@ def verify_manifest(
     directives = payload.get("directives")
     if not isinstance(directives, list) or any(not isinstance(d, Mapping) or d.get("kind") not in DIRECTIVE_KINDS for d in directives):
         return Verdict(False, "directive_unknown")
-    # M14 (S9): a ramp plan, when present, is well-formed — a malformed one is refused whole rather than walked wrongly.
-    experiment = payload.get("experiment")
-    if isinstance(experiment, Mapping) and experiment.get("ramp") is not None:
+    # M15 (S16): the per-prompt shape is consistent, or the manifest is refused whole before any payload.
+    conflict = experiment_conflict(payload)
+    if conflict:
+        return Verdict(False, conflict)
+    # M14 (S9): every experiment's ramp plan, when present, is well-formed — a malformed one is refused whole.
+    for experiment in experiments_of(payload):
+        if experiment.get("ramp") is None:
+            continue
         try:
             validate_ramp(experiment.get("ramp"), len(experiment.get("arms") or []))
         except AssignmentError as error:
@@ -237,7 +293,7 @@ def verify_manifest(
                 return Verdict(False, "payload_hash_mismatch")
 
     if payload.get("requireCountersign") or require_countersign:
-        digests = {payload["releaseDigest"], *[arm["releaseDigest"] for arm in (payload.get("experiment") or {}).get("arms", [])]}
+        digests = {payload["releaseDigest"], *[arm["releaseDigest"] for experiment in experiments_of(payload) for arm in experiment.get("arms", [])]}
         role = (countersign_root or {}).get("signed", {}).get("roles", {}).get("targets", {"keyIds": [], "threshold": 1})
         cs_keys = (countersign_root or {}).get("signed", {}).get("keys", {})
         for digest in sorted(digests):

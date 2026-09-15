@@ -1,5 +1,5 @@
 {
-  "protocol": "0.2.5",
+  "protocol": "0.3.0",
   "description": "Spool writer conformance (spool-format.md): latency bucket index, minute formatting, segment naming, rotation, and minute-window aggregation. Windows compare as sets (order of emission is not significant).",
   "segmentMaxBytes": 1048576,
   "latencyBuckets": {

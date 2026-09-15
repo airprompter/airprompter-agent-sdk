@@ -31,13 +31,15 @@ export function vectorsDir(override) {
   throw new Error("no protocol/vectors directory: pass --vectors <dir>");
 }
 
-export const OPERATIONS = ["canonicalJson", "orderedSteps", "assignArm", "validateRamp", "rampWeightsAt", "effectiveArms", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
+export const OPERATIONS = ["canonicalJson", "orderedSteps", "assignArm", "experimentForTag", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
 
 /** Which operations each section needs; a section runs only when its adapter has them all. */
 export const SECTIONS = {
   "canonical-json": ["canonicalJson"],
   "workflow-steps": ["orderedSteps"],
   assignment: ["assignArm"],
+  // S16: which experiment decides a slot, and the shape rule (M15).
+  "assignment-per-tag": ["assignArm", "experimentForTag", "experimentConflict"],
   ramp: ["validateRamp", "rampWeightsAt", "effectiveArms", "assignArm"],
   "trust-root": ["verifyRootMetadata"],
   "trust-manifest": ["verifyManifest"],
@@ -190,6 +192,31 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
       const as = readJson("assignment.json");
       for (const c of as.cases) await expectOk(c.name, "assignArm", { salt: c.salt, subject: c.subject, arms: c.arms }, (r) => (r.subjectHash === c.expected.subjectHash && r.bucket === c.expected.bucket && r.arm === c.expected.arm ? true : `got ${short(r)}, expected ${short(c.expected)}`));
       for (const r of as.refused) await expectRefusal(`refused: ${r.name}`, "assignArm", { salt: r.salt, subject: "user-1", arms: r.arms }, r.reason);
+    },
+    "assignment-per-tag": async () => {
+      const pt = readJson("assignment.json").perTag;
+      for (const c of pt.cases) {
+        const payload = { experiments: c.experiments.map((e) => ({ ...e, subjectKey: "request", arms: e.arms.map((a) => ({ ...a, releaseDigest: `sha256:${"0".repeat(64)}`, overrides: [] })) })) };
+        for (const tag of c.tags) {
+          const expected = c.expected[tag];
+          await expectOk(`${c.name} · ${tag}`, "experimentForTag", { payload, tag }, (r) => {
+            if (!r.experiment) return expected.arm === "none" && expected.experimentId === null ? true : `got no experiment, expected ${short(expected)}`;
+            return r.experiment.experimentId === expected.experimentId ? true : `got ${r.experiment.experimentId}, expected ${expected.experimentId}`;
+          });
+          if (expected.arm === "none") continue;
+          const e = payload.experiments.find((x) => x.tag === tag);
+          await expectOk(`${c.name} · ${tag} arm`, "assignArm", { salt: e.salt, subject: c.subject, arms: e.arms }, (r) => (r.bucket === expected.bucket && r.arm === expected.arm ? true : `got ${short(r)}, expected ${short(expected)}`));
+        }
+      }
+      for (const r of pt.refused) {
+        const payload = {
+          slots: [{ tag: "support.triage" }, { tag: "support.reply" }],
+          directives: [],
+          ...(r.experiment ? { experiment: r.experiment } : {}),
+          experiments: r.experiments.map((e) => ({ ...e, subjectKey: "request", arms: e.arms.map((a) => ({ ...a, releaseDigest: `sha256:${"0".repeat(64)}`, overrides: (e.overrideTags?.[a.arm] ?? []).map((tag) => ({ tag })) })) })),
+        };
+        await expectOk(`refused: ${r.name}`, "experimentConflict", { payload }, (res) => (res.reason === r.reason ? true : `got ${short(res)}, expected ${r.reason}`));
+      }
     },
     ramp: async () => {
       const rp = readJson("ramp.json");

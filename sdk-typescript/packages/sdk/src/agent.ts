@@ -10,7 +10,7 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
-import { errorNamed } from "@airprompter/agent-core";
+import { errorNamed, experimentForTag, experimentsOf } from "@airprompter/agent-core";
 import type { FsPort } from "@airprompter/agent-core";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -153,6 +153,18 @@ export interface SpoolReport {
 
 export type { Rendered };
 
+/** S9/S16: a ramp plan as this host walks it — one per experiment. */
+export interface AgentRampStatus {
+  experimentId: string;
+  /** S16: the slot the experiment splits; null on the legacy single experiment. */
+  tag: string | null;
+  weightBps: number[];
+  arms: string[];
+  step: number;
+  nextStepAt: string | null;
+  plan: Array<{ notBefore: string; weightBps: number[] }>;
+}
+
 export interface AgentStatus {
   instanceId: string;
   generation: number;
@@ -173,7 +185,9 @@ export interface AgentStatus {
    * S9: the ramp plan as this host walks it — the weights in force now (after any disabled arm's share went to the control),
    * the step in force (0-based index into `ramp`, or -1 before the first / with no plan), and the next step's instant.
    */
-  ramp: { experimentId: string; weightBps: number[]; arms: string[]; step: number; nextStepAt: string | null; plan: Array<{ notBefore: string; weightBps: number[] }> } | null;
+  ramp: AgentRampStatus | null;
+  /** S16: one entry per experiment the active manifest carries (per slot); `ramp` is the first of them. */
+  ramps: AgentRampStatus[];
   /** Open (unexpired) unlock requests carried by the latest verified manifest, for operator tooling. */
   unlockRequests: Array<{ releaseDigest: string; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }>;
   /** T9: the update window in force (local, else the manifest's) and whether it is open now. */
@@ -1030,8 +1044,10 @@ export class AirPrompterAgent {
 
   /** What is disabled right now: the standing directives when they are as new as the active manifest, else the active manifest's own. */
   private disabledNow(): { agent: boolean; slots: string[]; arms: string[] } {
-    if (!this.active) return this.standingDirectives ? disabledFrom(this.standingDirectives.directives) : { agent: false, slots: [], arms: [] };
-    return this.resolver().disabled();
+    // The public shape (status, heartbeat) is agent / slots / arms; the per-experiment detail stays in the resolver.
+    const detail = !this.active ? (this.standingDirectives ? disabledFrom(this.standingDirectives.directives) : null) : this.resolver().disabled();
+    if (!detail) return { agent: false, slots: [], arms: [] };
+    return { agent: detail.agent, slots: detail.slots, arms: [...detail.arms, ...Object.values(detail.armsByExperiment).flat()] };
   }
 
   /** S10: the runtime over the active release — resolution, the ramp walk and rendering live in `@airprompter/agent-runtime`. */
@@ -1451,7 +1467,7 @@ export class AirPrompterAgent {
   private declaredChecksFor(tag: string, arm: string): NonNullable<ManifestSlot["outputChecks"]> {
     const payload = this.active?.manifest.payload;
     if (!payload) return [];
-    const override = payload.experiment?.arms.find((entry) => entry.arm === arm)?.overrides.find((entry) => entry.tag === tag);
+    const override = experimentForTag(payload, tag)?.arms.find((entry) => entry.arm === arm)?.overrides.find((entry) => entry.tag === tag);
     const slot = override ?? payload.slots.find((entry) => entry.tag === tag);
     return slot?.outputChecks ?? [];
   }
@@ -1514,8 +1530,10 @@ export class AirPrompterAgent {
   private async runGoldenFor(manifest: Manifest, payloads: ReadonlyMap<string, Uint8Array>, invoke: GoldenInvoke, concurrency: number | undefined, onlyTag?: string): Promise<GoldenReport[]> {
     const payload = manifest.payload;
     const targets: Array<{ slot: ManifestSlot; arm: string }> = payload.slots.filter((slot) => slot.goldenSet && (!onlyTag || slot.tag === onlyTag)).map((slot) => ({ slot, arm: "none" }));
-    for (const arm of payload.experiment?.arms ?? []) {
-      for (const override of arm.overrides) if (override.goldenSet && (!onlyTag || override.tag === onlyTag)) targets.push({ slot: override, arm: arm.arm });
+    for (const experiment of experimentsOf(payload)) {
+      for (const arm of experiment.arms) {
+        for (const override of arm.overrides) if (override.goldenSet && (!onlyTag || override.tag === onlyTag)) targets.push({ slot: override, arm: arm.arm });
+      }
     }
     const reports: GoldenReport[] = [];
     for (const { slot, arm } of targets) {
@@ -1555,7 +1573,7 @@ export class AirPrompterAgent {
   private promptRubricFor(runRef: string): JudgeRubric {
     const facts = parseRunRef(runRef, this.runRefKey);
     const payload = this.active?.manifest.payload;
-    const override = facts ? payload?.experiment?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag) : undefined;
+    const override = facts && payload ? experimentForTag(payload, facts.tag)?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag) : undefined;
     const slot = override ?? (facts ? payload?.slots.find((entry) => entry.tag === facts.tag) : undefined);
     const text = slot ? this.active?.payloads.get(slot.contentHash) : undefined;
     const criteria = text ? rubricFromPrompt(Buffer.from(text).toString("utf8")) : [];
@@ -1571,7 +1589,7 @@ export class AirPrompterAgent {
     if (!normalized.accepted) return false;
     // Feedback rides on the run's window: same dimension set, no extra count (the run was already counted).
     const payload = this.active?.manifest.payload;
-    const override = payload?.experiment?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag);
+    const override = payload ? experimentForTag(payload, facts.tag)?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag) : undefined;
     const slot = override ?? payload?.slots.find((entry) => entry.tag === facts.tag);
     this.spool.outcomes({ tag: facts.tag, versionId: facts.versionId, arm: facts.arm, model: slot?.model ?? "unknown" }, normalized.outcomes, this.nowMs());
     return true;
@@ -1604,6 +1622,18 @@ export class AirPrompterAgent {
     const manifest = this.active?.manifest.payload;
     const leaseExpiresAt = this.leaseExpiresAt();
     const depth = this.sink.depth?.() ?? { segments: 0, bytes: 0 };
+    // S9/S16: every experiment's plan as this host walks it — per slot, each on its own clock and retreat.
+    const ramps: AgentRampStatus[] = manifest
+      ? experimentsOf(manifest).map((experiment) => {
+          const arms = this.resolver().arms(experiment);
+          const nowMs = this.nowMs();
+          const plan = experiment.ramp ?? [];
+          let step = -1;
+          for (let i = 0; i < plan.length; i += 1) if (instant(plan[i]!.notBefore) <= nowMs) step = i;
+          const next = plan[step + 1] ?? null;
+          return { experimentId: experiment.experimentId, tag: experiment.tag ?? null, weightBps: arms ? arms.map((arm) => arm.weightBps) : rampWeightsAt(experiment.arms, experiment.ramp, nowMs), arms: experiment.arms.map((arm) => arm.arm), step, nextStepAt: next ? next.notBefore : null, plan: plan.map((entry) => ({ notBefore: entry.notBefore, weightBps: [...entry.weightBps] })) };
+        })
+      : [];
     return {
       instanceId: this.ownInstanceId,
       generation: this.active?.generation ?? 0,
@@ -1618,17 +1648,8 @@ export class AirPrompterAgent {
       lastContactAt: this.lastContactMs === null ? null : new Date(this.lastContactMs).toISOString(),
       forcedDowngrade: state?.forcedDowngrade === true,
       disabled: this.disabledNow(),
-      ramp: (() => {
-        const experiment = manifest?.experiment;
-        if (!experiment) return null;
-        const arms = this.resolver().arms();
-        const nowMs = this.nowMs();
-        const plan = experiment.ramp ?? [];
-        let step = -1;
-        for (let i = 0; i < plan.length; i += 1) if (instant(plan[i]!.notBefore) <= nowMs) step = i;
-        const next = plan[step + 1] ?? null;
-        return { experimentId: experiment.experimentId, weightBps: arms ? arms.map((arm) => arm.weightBps) : rampWeightsAt(experiment.arms, experiment.ramp, nowMs), arms: experiment.arms.map((arm) => arm.arm), step, nextStepAt: next ? next.notBefore : null, plan: plan.map((entry) => ({ notBefore: entry.notBefore, weightBps: [...entry.weightBps] })) };
-      })(),
+      ramp: ramps[0] ?? null,
+      ramps,
       unlockRequests: this.openUnlockRequests(manifest ?? null).map((d) => ({ releaseDigest: d.releaseDigest, requestedBy: d.requestedBy, requestedAt: d.requestedAt, expiresAt: d.expiresAt, ...(d.note !== undefined ? { note: d.note } : {}) })),
       applyPolicy: this.effectiveApplyPolicy(),
       window: (() => {
@@ -1727,5 +1748,5 @@ function defaultStateDir(): string {
 /** T34: whether any slot (or arm override) of a manifest carries a golden set. */
 function manifestHasGolden(manifest: Manifest): boolean {
   const payload = manifest.payload;
-  return payload.slots.some((slot) => !!slot.goldenSet) || (payload.experiment?.arms ?? []).some((arm) => arm.overrides.some((override) => !!override.goldenSet));
+  return payload.slots.some((slot) => !!slot.goldenSet) || experimentsOf(payload).some((experiment) => experiment.arms.some((arm) => arm.overrides.some((override) => !!override.goldenSet)));
 }

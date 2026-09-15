@@ -22,7 +22,7 @@ import random
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Sequence
 
-from airprompter_agent_core.protocol.trust import referenced_payloads, verify_manifest, verify_root_metadata
+from airprompter_agent_core.protocol.trust import experiments_of, referenced_payloads, verify_manifest, verify_root_metadata
 from ..store.slot_store import LoadedSlot, SlotStore
 from airprompter_agent_core.control.client import SyncClient
 
@@ -49,8 +49,9 @@ def required_models_missing(payload: Mapping[str, Any], catalog: Optional[Sequen
         return []
     declared = set(catalog)
     slots = list(payload.get("slots", []))
-    for arm in (payload.get("experiment") or {}).get("arms", []):
-        slots.extend(arm.get("overrides", []))
+    for experiment in experiments_of(payload):
+        for arm in experiment.get("arms", []):
+            slots.extend(arm.get("overrides", []))
     return sorted({slot["model"] for slot in slots if slot.get("modelRequired") is True and slot["model"] not in declared})
 
 

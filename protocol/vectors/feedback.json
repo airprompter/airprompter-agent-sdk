@@ -1,5 +1,5 @@
 {
-  "protocol": "0.2.5",
+  "protocol": "0.3.0",
   "description": "ap.feedback(runRef, signals) normalisation against feedback-signals.schema.json: what becomes a window outcome, what is rejected and why. `accepted` is the call's return value.",
   "cases": [
     {

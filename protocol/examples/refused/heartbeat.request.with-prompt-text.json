@@ -2,7 +2,7 @@
   "schema": "heartbeat-request",
   "reason": "content-free by schema: no free-form members",
   "document": {
-    "protocol": "0.2.5",
+    "protocol": "0.3.0",
     "instanceId": "inst_5f3c9a2b7e1d4c08",
     "sdk": {
       "name": "airprompterd",

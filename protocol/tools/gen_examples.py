@@ -149,6 +149,52 @@ manifest = {
     ],
 }
 
+# S16: the same release with one experiment per slot. The triage split is the legacy one re-expressed with its tag;
+# the reply split tests another prompt under the reply key (the override names a different artifactId).
+reply_slot = next(s for s in slots if s["tag"] == "support.reply")
+reply_other = {**reply_slot, "artifactId": "prm_retention_script", "versionId": "ver_01j9x4k2m7q1", "versionOrdinal": 1, "contentHash": sha256_prefixed(b"You are a retention specialist.\n"), "byteLength": len(b"You are a retention specialist.\n")}
+reply_candidate_digest = release_digest([reply_other if s["tag"] == "support.reply" else s for s in slots])
+manifest_experiments_payload = {
+    **{k: v for k, v in manifest_payload.items() if k != "experiment"},
+    "generation": 43,
+    "previousReleaseDigest": digest,
+    "issuedAt": "2026-09-12T11:00:00Z",
+    "experiments": [
+        {
+            "experimentId": "exp_2f9c0a1b",
+            "tag": "support.triage",
+            "salt": b64url(bytes(range(16))),
+            "subjectKey": "request",
+            "arms": [
+                {"arm": "control", "weightBps": 9000, "releaseDigest": digest, "overrides": []},
+                {"arm": "candidate", "weightBps": 1000, "releaseDigest": candidate_digest, "overrides": [candidate_triage]},
+            ],
+            "ramp": manifest_payload["experiment"]["ramp"],
+        },
+        {
+            "experimentId": "exp_6a0d4e2c",
+            "tag": "support.reply",
+            "salt": b64url(bytes(range(16, 32))),
+            "subjectKey": "request",
+            "arms": [
+                {"arm": "control", "weightBps": 5000, "releaseDigest": digest, "overrides": []},
+                {"arm": "candidate", "weightBps": 5000, "releaseDigest": reply_candidate_digest, "overrides": [reply_other]},
+            ],
+        },
+    ],
+    # S16: an arm-scoped disable names its experiment — arm names repeat across experiments.
+    "directives": [{"kind": "disable", "scope": "arm", "experimentId": "exp_6a0d4e2c", "arm": "candidate", "issuedAt": "2026-09-12T11:30:00Z", "reason": "p95 latency doubled on the reply candidate"}],
+}
+manifest_experiments = {
+    "payload": manifest_experiments_payload,
+    "signatures": [{"keyId": key_platform, "alg": "ES256", "sig": placeholder_sig}],
+    "countersignatures": [
+        {"keyId": key_customer, "alg": "ES256", "releaseDigest": digest, "sig": placeholder_sig, "signedAt": "2026-09-12T09:30:00Z"},
+        {"keyId": key_customer, "alg": "ES256", "releaseDigest": candidate_digest, "sig": placeholder_sig, "signedAt": "2026-09-12T09:31:00Z"},
+        {"keyId": key_customer, "alg": "ES256", "releaseDigest": reply_candidate_digest, "sig": placeholder_sig, "signedAt": "2026-09-12T10:31:00Z"},
+    ],
+}
+
 jwk = jwk_root
 key_set = {
     "signed": {
@@ -260,6 +306,9 @@ refused = {
     "manifest.slot-disable-without-tag.json": {"schema": "manifest", "reason": "a slot-scoped disable names the slot", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "slot", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
     "manifest.arm-disable-without-arm.json": {"schema": "manifest", "reason": "an arm-scoped disable names the arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "arm", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
     "manifest.ramp-step-one-weight.json": {"schema": "manifest", "reason": "a ramp step carries one weight per arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "experiment": {**manifest_payload["experiment"], "ramp": [{"notBefore": "2026-09-13T02:00:00Z", "weightBps": [10000]}]}}}},
+    # S16: the two shapes never travel together; every experiments[] entry names its slot.
+    "manifest.experiment-beside-experiments.json": {"schema": "manifest", "reason": "experiment and experiments[] never travel together (S16, experiment_conflict)", "document": {**manifest_experiments, "payload": {**manifest_experiments_payload, "experiment": manifest_payload["experiment"]}}},
+    "manifest.experiments-entry-without-tag.json": {"schema": "manifest", "reason": "every experiments[] entry names the slot it splits (S16)", "document": {**manifest_experiments, "payload": {**manifest_experiments_payload, "experiments": [{k: v for k, v in manifest_experiments_payload["experiments"][0].items() if k != "tag"}]}}},
     "key-set.wrong-curve.json": {"schema": "key-set", "reason": "only P-256 keys in this protocol major", "document": {**key_set, "signed": {**key_set["signed"], "keys": {key_root: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": {**jwk, "crv": "P-384"}}}}}},
     "key-set.non-thumbprint-key-id.json": {"schema": "key-set", "reason": "key ids are thumbprints, lowercase hex", "document": {**key_set, "signed": {**key_set["signed"], "keys": {**key_set["signed"]["keys"], "root-2026-09-prod": key_set["signed"]["keys"][key_root]}}}},
     "key-set.missing-targets-role.json": {"schema": "key-set", "reason": "root metadata always names the targets role", "document": {**key_set, "signed": {**key_set["signed"], "roles": {"root": key_set["signed"]["roles"]["root"]}}}},
@@ -301,6 +350,7 @@ def write(name, doc):
         json.dump(doc, f, indent=2, ensure_ascii=False)
         f.write("\n")
 write("manifest.json", manifest)
+write("manifest.experiments.json", manifest_experiments)
 write("key-set.json", key_set)
 write("bundle.plaintext.json", bundle_plain)
 write("bundle.encrypted.json", bundle_encrypted)
@@ -314,3 +364,4 @@ for name, entry in refused.items():
     write(os.path.join("refused", name), entry)
 print("releaseDigest", digest)
 print("candidateDigest", candidate_digest)
+print("replyCandidateDigest", reply_candidate_digest)

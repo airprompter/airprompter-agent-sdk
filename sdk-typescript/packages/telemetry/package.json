@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-telemetry",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "The content-free telemetry spool and its uploader for AirPrompter agents: minute windows as append-only segments (or in memory on serverless), the host budget, and direct-to-object-store upload under a grant.",
   "license": "BSD-3-Clause",
   "repository": {
@@ -38,6 +38,6 @@
     "provenance": true
   },
   "dependencies": {
-    "@airprompter/agent-core": "0.2.1"
+    "@airprompter/agent-core": "0.2.2"
   }
 }

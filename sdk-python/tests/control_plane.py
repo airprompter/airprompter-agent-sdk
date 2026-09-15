@@ -16,7 +16,7 @@ import httpx
 
 from airprompter_agent_core._util import instant, iso_ms, now_ms
 from airprompter_agent_core.protocol.canonical_json import canonical_bytes, sha256_prefixed
-from airprompter_agent_core.protocol.trust import generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
+from airprompter_agent_core.protocol.trust import experiments_of, generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
 
 #: The protocol version this checkout of the repository declares; manifests the fake signs carry it.
 with open(os.path.join(os.path.dirname(__file__), "..", "..", "protocol", "VERSION"), encoding="utf-8") as _f:
@@ -240,6 +240,7 @@ class FakeControlPlane:
                     "releaseDigest": payload["releaseDigest"],
                     "slots": [{"tag": p["tag"], "kind": p["kind"], "model": p["model"], "variables": p["variables"], "steps": [{"stepId": s["stepId"]} for s in p["steps"]] if p.get("steps") else None} for p in payload["slots"]],
                     "experiment": {"salt": payload["experiment"]["salt"], "subjectKey": payload["experiment"]["subjectKey"], "arms": [a["arm"] for a in payload["experiment"]["arms"]]} if payload.get("experiment") else None,
+                    "experiments": [{"experimentId": e["experimentId"], "tag": e.get("tag"), "salt": e["salt"], "subjectKey": e["subjectKey"], "arms": [a["arm"] for a in e["arms"]]} for e in experiments_of(payload)],
                 }
                 return httpx.Response(200, json=catalogue, headers={"x-agent-generation": str(payload["generation"])})
             heartbeat_match = re.match(r"^/v1/agents/([^/]+)/targets/([^/]+)/heartbeat$", path)

@@ -254,9 +254,16 @@ class ManagedAgent:
         self._catalogue = self._read_catalogue()
         return self._catalogue
 
-    def subject_hash_for(self, subject: Optional[str]) -> Optional[str]:
-        """The hash the route buckets on: the experiment's salt over the subject (or this instance when the experiment assigns by instance). Never the subject."""
-        experiment = self._catalogue.get("experiment")
+    def experiment_for(self, tag: str) -> Optional[dict]:
+        """S17: the experiment that splits a slot — the per-prompt one by tag, else the legacy single one (it covers every slot), else None."""
+        entries = self._catalogue.get("experiments")
+        if entries:
+            return next((e for e in entries if e.get("tag") in (tag, None)), None)
+        return self._catalogue.get("experiment")
+
+    def subject_hash_for(self, subject: Optional[str], tag: Optional[str] = None) -> Optional[str]:
+        """The hash the route buckets on: the slot's experiment salt over the subject (or this instance when the experiment assigns by instance). Never the subject."""
+        experiment = self._catalogue.get("experiment") if tag is None else self.experiment_for(tag)
         if not experiment:
             return None
         value = self._instance_id if experiment.get("subjectKey") == "instance" or subject is None else subject
@@ -287,7 +294,7 @@ class ManagedAgent:
     def stream(self, tag: str, variables: Mapping[str, str], *, subject: Optional[str] = None, step_id: Optional[str] = None, idempotency_key: Optional[str] = None, max_output_tokens: Optional[int] = None, metadata: Optional[Mapping[str, str]] = None) -> ManagedRunStream:
         """The run as SSE: iterate the deltas, read ``result``."""
         body: dict[str, Any] = {"tag": tag, "variables": dict(variables), "stream": True}
-        subject_digest = self.subject_hash_for(subject)
+        subject_digest = self.subject_hash_for(subject, tag)
         if subject_digest:
             body["subjectHash"] = subject_digest
         if step_id:

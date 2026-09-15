@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### The managed-mode client picks its experiment by tag (SDKs 0.2.2)
+- `/slots` lists `experiments[]` (each with its `tag`, salt, subject key and arms) beside the legacy `experiment`; `ManagedAgent.experimentFor(tag)` / `experiment_for(tag)` picks the slot's experiment, and a run hashes the subject with THAT salt — two prompts under test split independently in hosted mode as they do in client mode. A slot outside every experiment sends no hash; the legacy single `experiment` still covers every slot. No protocol change.
+
 ### The SDK reports the version that shipped (SDKs 0.2.1)
 - `SDK_VERSION` had stayed at 0.1.0 through the 0.1.1 and 0.2.0 releases, so every heartbeat, store.json writer and OTel scope named a version that never shipped. Now 0.2.1 and pinned to the package version by `packageSplit.test.ts` / `test_package_split.py`; the Python `agent` package reads core's one constant; both OTel bridges default their scope version to it. No protocol change.
 

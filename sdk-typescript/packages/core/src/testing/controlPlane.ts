@@ -9,6 +9,7 @@ import { generateKeyPairSync } from "node:crypto";
 
 import { canonicalBytes, sha256Prefixed } from "../protocol/canonicalJson.js";
 import { keyThumbprint, publicJwkOf, releaseDigest, signBytes } from "../protocol/trust.js";
+import { experimentsOf } from "../protocol/types.js";
 import type { Manifest, ManifestPayload, ManifestSlot, P256PrivateJwk, RootMetadata, RootMetadataSigned, Target } from "../protocol/types.js";
 import type { FetchLike } from "../control/client.js";
 import { PROTOCOL_VERSION } from "../protocol/version.js";
@@ -262,7 +263,7 @@ export class FakeControlPlane {
         if (slotsMatch[1] !== this.scope.agentId || slotsMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "Forbidden", code: "forbidden", detail: slotsMatch[1] !== this.scope.agentId ? "agent_mismatch" : "target_mismatch" }));
         if (!this.current) return respond(404, JSON.stringify({ error: "nothing is promoted to this environment", code: "nothing_promoted" }));
         const payload = this.current.manifest.payload;
-        return respond(200, JSON.stringify({ agentId: payload.agentId, target: payload.target, generation: payload.generation, releaseDigest: payload.releaseDigest, slots: payload.slots.map((pin) => ({ tag: pin.tag, kind: pin.kind, model: pin.model, variables: pin.variables, steps: pin.steps ? pin.steps.map((s) => ({ stepId: s.stepId })) : null })), experiment: payload.experiment ? { salt: payload.experiment.salt, subjectKey: payload.experiment.subjectKey, arms: payload.experiment.arms.map((a) => a.arm) } : null }), { "x-agent-generation": String(payload.generation) });
+        return respond(200, JSON.stringify({ agentId: payload.agentId, target: payload.target, generation: payload.generation, releaseDigest: payload.releaseDigest, slots: payload.slots.map((pin) => ({ tag: pin.tag, kind: pin.kind, model: pin.model, variables: pin.variables, steps: pin.steps ? pin.steps.map((s) => ({ stepId: s.stepId })) : null })), experiment: payload.experiment ? { salt: payload.experiment.salt, subjectKey: payload.experiment.subjectKey, arms: payload.experiment.arms.map((a) => a.arm) } : null, experiments: experimentsOf(payload).map((e) => ({ experimentId: e.experimentId, tag: e.tag ?? null, salt: e.salt, subjectKey: e.subjectKey, arms: e.arms.map((a) => a.arm) })) }), { "x-agent-generation": String(payload.generation) });
       }
       // T9: the heartbeat — the protocol schema's required keys, content-free; answers the cadence and the expiry.
       const heartbeatMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/heartbeat$/.exec(parsed.pathname);

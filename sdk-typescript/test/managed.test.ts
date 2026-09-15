@@ -182,3 +182,20 @@ test("feedback(runRef, signals) posts to the run surface's feedback route and re
   assert.equal(call.init.headers?.authorization, "Bearer apr_run_key");
   await assert.rejects(agent.feedback("forged", { accepted: true }), (e: unknown) => e instanceof ManagedRunError && e.code === "invalid_run_ref" && e.status === 400);
 });
+
+test("S17: per-prompt experiments — a run on each slot hashes the subject with THAT slot's salt; a slot outside every experiment sends no hash; the legacy single experiment still covers every slot", async () => {
+  const SALT_B = "EBESExQVFhcYGRobHB0eHyAhIiMkJSYn";
+  const perPrompt = { ...CATALOGUE, experiment: { salt: SALT, subjectKey: "request", arms: ["control", "candidate"] }, experiments: [{ experimentId: "exp_a", tag: "support.triage", salt: SALT, subjectKey: "request", arms: ["control", "candidate"] }, { experimentId: "exp_b", tag: "onboarding.flow", salt: SALT_B, subjectKey: "request", arms: ["control", "candidate"] }] };
+  const { fetch, calls } = fakeFetch([() => ({ status: 200, headers: { "x-agent-generation": "3" }, body: JSON.stringify(perPrompt) }), () => ({ status: 200, body: RUN_SSE, stream: true }), () => ({ status: 200, body: RUN_SSE, stream: true })]);
+  const agent = await ManagedAgent.start({ agentId: "agent-1", target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example/", fetch, sleep: async () => {} });
+  await agent.run("support.triage", { team: "Billing", ticket: "x" }, { subject: "user-42" });
+  await agent.run("onboarding.flow", { name: "Ada" }, { subject: "user-42", stepId: "welcome#1" });
+  assert.equal(JSON.parse(calls[1]!.init.body!).subjectHash, subjectHash(SALT, "user-42"));
+  assert.equal(JSON.parse(calls[2]!.init.body!).subjectHash, subjectHash(SALT_B, "user-42"), "own salt per slot");
+  assert.equal(agent.experimentFor("docs.missing"), null, "a slot outside every experiment");
+  assert.equal(agent.subjectHashFor("user-42", "docs.missing"), undefined);
+  assert.deepEqual(agent.experimentFor("onboarding.flow")?.arms, ["control", "candidate"]);
+  // The legacy catalogue (one `experiment`, no list): every slot hashes on it.
+  const { agent: legacy } = await startWith([]);
+  assert.equal(legacy.subjectHashFor("user-42", "onboarding.flow"), subjectHash(SALT, "user-42"));
+});

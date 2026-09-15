@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airprompter-agent-sync"
-version = "0.2.1"
+version = "0.2.2"
 description = "Pull and hold AirPrompter agent releases: signed pull-only updates, the encrypted restart-safe slot store, key providers, the apply policy and its windows, and the daemon client."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -23,7 +23,7 @@ classifiers = [
   "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-  "airprompter-agent-core==0.2.1",
+  "airprompter-agent-core==0.2.2",
   "cryptography>=42",
 ]
 

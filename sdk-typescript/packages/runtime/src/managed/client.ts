@@ -62,7 +62,10 @@ export interface ManagedCatalogue {
   generation: number;
   releaseDigest: string;
   slots: readonly ManagedSlot[];
+  /** The legacy single experiment (it covers every slot); S17: the first of `experiments` when the catalogue lists them. */
   experiment: { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null;
+  /** S17: one entry per experiment, each naming the slot it splits (`tag` null on the legacy single one). */
+  experiments?: readonly { experimentId: string; tag: string | null; salt: string; subjectKey: "request" | "instance"; arms: readonly string[] }[];
 }
 
 export interface ManagedRunOptions {
@@ -238,9 +241,16 @@ export class ManagedAgent {
     return this.catalogue;
   }
 
-  /** The hash the route buckets on: the experiment's salt over the subject (or this instance when the experiment assigns by instance). Never the subject. */
-  subjectHashFor(subject: string | undefined): string | undefined {
-    const experiment = this.catalogue.experiment;
+  /** S17: the experiment that splits a slot — the per-prompt one by tag, else the legacy single one (it covers every slot), else null. */
+  experimentFor(tag: string): { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null {
+    const list = this.catalogue.experiments;
+    if (list && list.length > 0) return list.find((experiment) => experiment.tag === tag || experiment.tag === null) ?? null;
+    return this.catalogue.experiment;
+  }
+
+  /** The hash the route buckets on: the slot's experiment salt over the subject (or this instance when the experiment assigns by instance). Never the subject. */
+  subjectHashFor(subject: string | undefined, tag?: string): string | undefined {
+    const experiment = tag === undefined ? this.catalogue.experiment : this.experimentFor(tag);
     if (!experiment) return undefined;
     const value = experiment.subjectKey === "instance" || subject === undefined ? this.instanceId : subject;
     return saltedSubjectHash(experiment.salt, value);
@@ -283,7 +293,7 @@ export class ManagedAgent {
 
   /** The run as SSE: iterate the deltas, await `result`. */
   async stream(tag: string, variables: Record<string, string>, options: ManagedRunOptions = {}): Promise<ManagedRunStream> {
-    const subjectHash = this.subjectHashFor(options.subject);
+    const subjectHash = this.subjectHashFor(options.subject, tag);
     const body = JSON.stringify({
       tag,
       variables,

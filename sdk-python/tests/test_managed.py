@@ -187,3 +187,20 @@ def test_feedback_posts_to_the_run_surface_and_returns_what_landed():
     with pytest.raises(ManagedRunError) as raised:
         agent.feedback("forged", {"accepted": True})
     assert raised.value.code == "invalid_run_ref" and raised.value.status == 400
+
+
+def test_s17_per_prompt_experiments_hash_with_the_slots_own_salt():
+    salt_b = "EBESExQVFhcYGRobHB0eHyAhIiMkJSYn"
+    per_prompt = {**CATALOGUE, "experiment": {"salt": SALT, "subjectKey": "request", "arms": ["control", "candidate"]}, "experiments": [{"experimentId": "exp_a", "tag": "support.triage", "salt": SALT, "subjectKey": "request", "arms": ["control", "candidate"]}, {"experimentId": "exp_b", "tag": "onboarding.flow", "salt": salt_b, "subjectKey": "request", "arms": ["control", "candidate"]}]}
+    transport, calls = scripted([{"status": 200, "headers": {"x-agent-generation": "3"}, "body": json.dumps(per_prompt)}, {"status": 200, "body": RUN_SSE, "stream": True}, {"status": 200, "body": RUN_SSE, "stream": True}])
+    agent = ManagedAgent.start(agent_id="agent-1", target="prod", api_key="apr_run_key", base_url="https://run.example/", transport=transport, sleep=lambda _s: None)
+    agent.run("support.triage", {"team": "Billing", "ticket": "x"}, subject="user-42")
+    agent.run("onboarding.flow", {"name": "Ada"}, subject="user-42", step_id="welcome#1")
+    assert json.loads(calls[1].content)["subjectHash"] == subject_hash(SALT, "user-42")
+    assert json.loads(calls[2].content)["subjectHash"] == subject_hash(salt_b, "user-42"), "own salt per slot"
+    assert agent.experiment_for("docs.missing") is None
+    assert agent.subject_hash_for("user-42", "docs.missing") is None
+    agent.close()
+    legacy, _ = start_with([])
+    assert legacy.subject_hash_for("user-42", "onboarding.flow") == subject_hash(SALT, "user-42")
+    legacy.close()

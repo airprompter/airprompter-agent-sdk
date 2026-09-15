@@ -23,7 +23,7 @@ from typing import Any, Callable
 from airprompter_agent_core.checks import checks_refusals, evaluate_checks, pattern_refusal, project_checks
 from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, ordered_steps, ramp_weights_at, validate_ramp
 from airprompter_agent_core.protocol.canonical_json import canonical_json, sha256_prefixed
-from airprompter_agent_core.protocol.trust import trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
+from airprompter_agent_core.protocol.trust import experiment_conflict, experiment_for_tag, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
 from airprompter_agent_core.telemetry.rows import epoch_minute, latency_bucket_index, minute_of
 from airprompter_agent_telemetry.otel import spool_rows_to_otlp
@@ -70,6 +70,14 @@ def op_assign_arm(a: dict) -> dict:
     r = assign_arm(salt=a["salt"], subject=a["subject"], arms=a["arms"])
     arm = r.arm["arm"] if isinstance(r.arm, dict) else r.arm
     return {"subjectHash": r.subject_hash, "bucket": r.bucket, "arm": arm}
+
+
+def op_experiment_for_tag(a: dict) -> dict:
+    return {"experiment": experiment_for_tag(a["payload"], a["tag"])}
+
+
+def op_experiment_conflict(a: dict) -> dict:
+    return {"reason": experiment_conflict(a["payload"])}
 
 
 def op_validate_ramp(a: dict) -> dict:
@@ -158,6 +166,8 @@ OPS: dict[str, Callable[[dict], dict]] = {
     "canonicalJson": op_canonical_json,
     "orderedSteps": op_ordered_steps,
     "assignArm": op_assign_arm,
+    "experimentForTag": op_experiment_for_tag,
+    "experimentConflict": op_experiment_conflict,
     "validateRamp": op_validate_ramp,
     "rampWeightsAt": op_ramp_weights_at,
     "effectiveArms": op_effective_arms,

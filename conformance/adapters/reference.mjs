@@ -4,7 +4,7 @@
 // section, and an SDK's adapter answers the same calls the same way.
 
 import { AssignmentError, CanonicalJsonError, assignArm, canonicalJson, effectiveArms, orderedSteps, rampWeightsAt, sha256Prefixed, validateRamp } from "../reference.mjs";
-import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../trust.mjs";
+import { experimentConflict, experimentsOf, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../trust.mjs";
 import { SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "../spool.mjs";
 import { checksRefusals, evaluateChecks, patternRefusal, projectChecks } from "../checks.mjs";
 import { spoolRowsToOtlp } from "../otel.mjs";
@@ -59,6 +59,13 @@ export const ops = {
   verifyRootMetadata({ candidate, trusted, pinned, now }) {
     const trustedRoot = trusted ?? trustedRootFromPinnedKey({ purpose: pinned.purpose, environment: pinned.environment, pinnedRootJwk: pinned.pinnedRoot });
     return verifyRootMetadata({ candidate, trusted: trustedRoot, now });
+  },
+  experimentForTag({ payload, tag }) {
+    const listed = Array.isArray(payload.experiments) ? payload.experiments.find((e) => e.tag === tag) ?? null : (experimentsOf(payload)[0] ?? null);
+    return { experiment: listed };
+  },
+  experimentConflict({ payload }) {
+    return { reason: experimentConflict(payload) };
   },
   verifyManifest({ manifest, root, now, scope, storedGeneration, payloads, countersignRoot, requireCountersign }) {
     return verifyManifest({ manifest, root, now, scope, storedGeneration, payloads: payloads ? new Map(payloads.map((p) => [p.contentHash, Buffer.from(p.bytes, "base64url")])) : null, countersignRoot: countersignRoot ?? null, requireCountersign: requireCountersign ?? false });

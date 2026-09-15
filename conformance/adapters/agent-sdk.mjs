@@ -49,6 +49,8 @@ export const ops = {
   rampWeightsAt: ({ arms, ramp, nowMs }) => ({ weightBps: core.rampWeightsAt(arms, ramp, nowMs) }),
   effectiveArms: ({ arms, ramp, disabledArms, nowMs }) => ({ arms: core.effectiveArms({ arms, ramp, disabledArms: new Set(disabledArms ?? []), nowMs }) }),
   verifyRootMetadata: ({ candidate, trusted, pinned, now }) => core.verifyRootMetadata({ candidate, trusted: trusted ?? core.trustedRootFromPinnedKey({ purpose: pinned.purpose, environment: pinned.environment, pinnedRoot: pinned.pinnedRoot }), now }),
+  experimentForTag: ({ payload, tag }) => ({ experiment: core.experimentForTag(payload, tag) }),
+  experimentConflict: ({ payload }) => ({ reason: core.experimentConflict(payload) }),
   verifyManifest: ({ manifest, root, now, scope, storedGeneration, payloads, countersignRoot, requireCountersign }) => core.verifyManifest({ manifest, root, now, scope, storedGeneration, payloads: payloads ? new Map(payloads.map((p) => [p.contentHash, Buffer.from(p.bytes, "base64url")])) : null, countersignRoot: countersignRoot ?? null, requireCountersign: requireCountersign ?? false }),
   latencyBucketIndex: ({ latencyMs }) => ({ bucket: core.latencyBucketIndex(latencyMs) }),
   minuteOf: ({ epochMs }) => ({ minute: core.minuteOf(epochMs), epochMinute: core.epochMinute(epochMs) }),

@@ -31,6 +31,32 @@ export type ManifestFetch =
   | { status: "forbidden"; code: string | null }
   | { status: "error"; httpStatus: number };
 
+/**
+ * What the control plane said when it refused a call: the message and, for a 400, the validation issues — bounded and
+ * content-free (a field path and a sentence). Logged so an operator reads *why* from the SDK's own log instead of
+ * reproducing the call with a probe.
+ */
+export interface ControlPlaneRefusal {
+  message: string | null;
+  issues: Array<{ path: string; message: string }>;
+}
+
+export async function readControlPlaneRefusal(response: { text(): Promise<string> }): Promise<{ code: string | null } & ControlPlaneRefusal> {
+  try {
+    const body = JSON.parse(await response.text()) as { error?: unknown; message?: unknown; details?: { code?: unknown; issues?: unknown } };
+    const text = typeof body.error === "string" ? body.error : typeof body.message === "string" ? body.message : null;
+    const issues = Array.isArray(body.details?.issues)
+      ? body.details.issues
+          .filter((issue): issue is { path?: unknown; message?: unknown } => typeof issue === "object" && issue !== null)
+          .slice(0, 8)
+          .map((issue) => ({ path: String(issue.path ?? "").slice(0, 120), message: String(issue.message ?? "").slice(0, 240) }))
+      : [];
+    return { code: typeof body.details?.code === "string" ? body.details.code : null, message: text ? text.slice(0, 240) : null, issues };
+  } catch {
+    return { code: null, message: null, issues: [] };
+  }
+}
+
 export class SyncClient {
   private readonly fetchImpl: FetchLike;
 
@@ -57,33 +83,25 @@ export class SyncClient {
     if (response.status === 304) return { status: "not_modified" };
     if (response.status === 404) return { status: "not_found" };
     if (response.status === 401) return { status: "unauthorized" };
-    if (response.status === 403) {
-      let code: string | null = null;
-      try {
-        code = ((JSON.parse(await response.text()) as { details?: { code?: string } }).details?.code ?? null);
-      } catch {
-        code = null;
-      }
-      return { status: "forbidden", code };
-    }
+    if (response.status === 403) return { status: "forbidden", code: (await readControlPlaneRefusal(response)).code };
     if (response.status !== 200) return { status: "error", httpStatus: response.status };
     const generation = response.headers.get("x-agent-generation");
     return { status: "ok", manifest: JSON.parse(await response.text()) as Manifest, etag: response.headers.get("etag"), generation: generation ? Number(generation) : null };
   }
 
   /** T9: the heartbeat. Content-free by schema; the response carries the cadence, the expiry and (T12) the upload grant. */
-  async heartbeat(body: Record<string, unknown>): Promise<{ status: "ok"; response: Record<string, unknown> } | { status: "refused"; httpStatus: number; code: string | null } | { status: "error"; httpStatus: number }> {
+  async heartbeat(
+    body: Record<string, unknown>,
+  ): Promise<
+    | { status: "ok"; response: Record<string, unknown> }
+    | ({ status: "refused"; httpStatus: number; code: string | null } & ControlPlaneRefusal)
+    | { status: "error"; httpStatus: number }
+  > {
     const url = `${this.options.baseUrl}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/heartbeat`;
     const response = await this.fetchImpl(url, { method: "POST", headers: this.headers({ "content-type": "application/json" }), body: JSON.stringify(body) });
     if (response.status === 200) return { status: "ok", response: JSON.parse(await response.text()) as Record<string, unknown> };
     if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 429) {
-      let code: string | null = null;
-      try {
-        code = ((JSON.parse(await response.text()) as { details?: { code?: string } }).details?.code as string | undefined) ?? null;
-      } catch {
-        code = null;
-      }
-      return { status: "refused", httpStatus: response.status, code };
+      return { status: "refused", httpStatus: response.status, ...(await readControlPlaneRefusal(response)) };
     }
     return { status: "error", httpStatus: response.status };
   }

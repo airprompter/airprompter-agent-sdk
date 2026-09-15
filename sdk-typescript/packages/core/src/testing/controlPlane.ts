@@ -108,7 +108,7 @@ export class FakeControlPlane {
   /** T9: every heartbeat body the fake accepted, and what it answers (a test may change the cadence). */
   readonly heartbeats: Array<Record<string, unknown>> = [];
   heartbeatIntervalSeconds = 300;
-  heartbeatRefusal: { status: number; code: string } | null = null;
+  heartbeatRefusal: { status: number; code: string | null; message?: string; issues?: Array<{ path: string; message: string }> } | null = null;
   /**
    * T26: the grant issuer and a fake S3 behind it. With `grantBaseUrl` set, every accepted heartbeat answers an
    * `uploadGrant` for the body's instance prefix (or `retryAfterSeconds` while `grantHold` is set); the POST endpoint at
@@ -267,8 +267,13 @@ export class FakeControlPlane {
       const heartbeatMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/heartbeat$/.exec(parsed.pathname);
       if (heartbeatMatch) {
         if (heartbeatMatch[1] !== this.scope.agentId || heartbeatMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "x", details: { code: heartbeatMatch[1] !== this.scope.agentId ? "agent_mismatch" : "target_mismatch" } }));
-        if (this.heartbeatRefusal) return respond(this.heartbeatRefusal.status, JSON.stringify({ error: "x", details: { code: this.heartbeatRefusal.code } }));
+        if (this.heartbeatRefusal) return respond(this.heartbeatRefusal.status, JSON.stringify({ error: this.heartbeatRefusal.message ?? "x", details: { code: this.heartbeatRefusal.code, ...(this.heartbeatRefusal.issues ? { issues: this.heartbeatRefusal.issues } : {}) } }));
         const body = JSON.parse(typeof init?.body === "string" ? init.body : init?.body ? Buffer.from(init.body).toString("utf8") : "{}") as Record<string, unknown>;
+        // The real schema admits four reporters; anything else is the platform's 400 with its zod issues.
+        const reporter = (body.sdk as { name?: unknown } | undefined)?.name;
+        if (!["agent-sdk-typescript", "agent-sdk-python", "airprompter-cli", "airprompterd"].includes(String(reporter))) {
+          return respond(400, JSON.stringify({ error: "The heartbeat body does not match the protocol", details: { issues: [{ path: "sdk.name", message: `Invalid enum value. Expected 'agent-sdk-typescript' | 'agent-sdk-python' | 'airprompter-cli' | 'airprompterd', received '${String(reporter)}'` }] } }));
+        }
         for (const key of ["protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"]) {
           if (!(key in body)) return respond(400, JSON.stringify({ error: `heartbeat: missing ${key}` }));
         }

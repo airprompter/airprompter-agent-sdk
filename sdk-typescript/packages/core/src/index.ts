@@ -39,7 +39,7 @@ export type { ReleaseReader, ReleaseSlot, LoadedRelease } from "./release/reader
 export type { BundleReleaseInput, BundleReleaseRefusal } from "./release/bundleRelease.js";
 
 export { SyncClient } from "./control/client.js";
-export type { FetchLike, ManifestFetch, SyncClientOptions } from "./control/client.js";
+export type { ControlPlaneRefusal, FetchLike, ManifestFetch, SyncClientOptions } from "./control/client.js";
 
 export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "./telemetry/rows.js";
 export type { Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "./telemetry/rows.js";

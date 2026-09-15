@@ -114,8 +114,20 @@ variable the slot did not declare throws.
    as private as the key.
 3. With still nothing, one synchronous sync runs — the only time the SDK
    waits on the network. If that fails too, `start()` throws
-   `AgentStartError("no_verified_release")`. Serving an unverified release
-   is never an option.
+   `AgentStartError("no_verified_release")` whose message names the control
+   plane's answer: a 404 is "no release promoted to `<target>`" (promote one
+   from the app's board, or the key is bound to another app/environment), a
+   401 is the key, a 403 carries the server's code, a transport failure
+   carries its message and the base URL. Serving an unverified release is
+   never an option.
+
+Two more things the SDK says in its own words rather than as a bare status:
+a refused heartbeat is logged `heartbeat_refused` with the control plane's
+message and, for a 400, its validation issues (bounded to eight); and
+`options.sdk` — which names the *reporting software* (`agent-sdk-typescript`,
+`agent-sdk-python`, `airprompter-cli`, `airprompterd`), never your app — is
+checked at `start()` and refused with `AgentStartError("invalid_options")`
+before any network call. Leave it unset to report as this SDK.
 
 `store.json` is a versioned contract between the daemon that writes it
 and the SDK that reads it (S8, `protocol/store-format.md`): a reader

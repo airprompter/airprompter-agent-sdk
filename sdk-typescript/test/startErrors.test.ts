@@ -126,3 +126,19 @@ test("heartbeat_refused carries the control plane's message and validation issue
   assert.equal("issues" in (capped ?? {}), false);
   await agent.stop();
 });
+
+
+test("S18: the pinned root is scoped to the HOSTED environment, not the app's target — a staging app on the dev deployment verifies with the dev root; the target-scoped mistake was unknown_signing_key", async () => {
+  // The dev deployment signs every target's manifests with its one platform key; its root document says environment "dev".
+  const staging = { organizationId: "org_1", agentId: "agt_1", target: "staging" as const };
+  const plane = new FakeControlPlane(staging, "apa_live_testkey", {}, { hostedEnvironment: "dev" });
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply politely.", variables: [] })]);
+  const agent = await AirPrompterAgent.start({ ...options(plane, { ...staging, root: { pinned: publicJwkOf(plane.rootKey), hostedEnvironment: "dev" }, sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/dev/root.json" } }) });
+  assert.equal(agent.generation, 1);
+  assert.equal(agent.prompt("support.reply").render({}).text, "Reply politely.");
+  await agent.stop();
+  // The same app with the root scoped to its target (the old default) cannot accept the dev root document and never trusts the signing key.
+  const wrong = await startError({ ...options(plane, { ...staging, root: { pinned: publicJwkOf(plane.rootKey), hostedEnvironment: "staging" }, sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/dev/root.json" } }) });
+  assert.equal(wrong.code, "no_verified_release");
+  assert.match(wrong.message, /unknown_signing_key/);
+});

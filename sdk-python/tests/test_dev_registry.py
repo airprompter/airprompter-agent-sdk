@@ -67,7 +67,7 @@ def test_python_sdk_syncs_from_airprompter_dev_and_honours_unlock_required_local
             api_key=facts["apiKey"],
             base_url=facts["baseUrl"],
             state_dir=state_dir,
-            root={"pinned": pinned},
+            root={"pinned": pinned, "hosted_environment": "dev"},  # the local registry's root is scoped to its --environment
             sync=SyncOptions(mode="resident", poll_seconds=1, edge_pointer_url=facts["edgePointerUrl"], root_url=facts["rootUrl"]),
             telemetry={"sink": "memory"},
         )

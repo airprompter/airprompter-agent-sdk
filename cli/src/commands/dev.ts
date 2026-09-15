@@ -265,7 +265,7 @@ export async function dev(argv: string[], ctx: Context): Promise<number> {
   out.field("slots", release.slots.map((s) => `${s.tag} (${s.model}, ${s.variables.length} vars)`));
   out.field("applyPolicy", overrides.applyPolicy ?? release.options.applyPolicy ?? "auto", "apply policy");
   if (created) out.line(`New dev keys under ${join(dir, DEV_DIR)} (keys.json is 0600; commit root.pub.json if teammates should pin it).`);
-  out.line(`Try: AIRPROMPTER_AGENT_KEY=${DEV_API_KEY} airprompter pull --org ${scope.organizationId} --agent ${scope.agentId} --environment ${scope.target} --root ${rootPubPath} --base-url ${server.baseUrl} --out ./release.apbundle --plaintext`);
+  out.line(`Try: AIRPROMPTER_AGENT_KEY=${DEV_API_KEY} airprompter pull --org ${scope.organizationId} --agent ${scope.agentId} --environment ${scope.target} --root ${rootPubPath} --hosted-environment ${scope.target} --base-url ${server.baseUrl} --out ./release.apbundle --plaintext`);
 
   // Hot reload: a change that alters the release is a generation; anything else is not.
   let timer: NodeJS.Timeout | null = null;
@@ -306,7 +306,7 @@ export async function dev(argv: string[], ctx: Context): Promise<number> {
       apiKey: DEV_API_KEY,
       baseUrl: server.baseUrl,
       stateDir,
-      root: { pinned: publicJwkOf(keys.rootKey) },
+      root: { pinned: publicJwkOf(keys.rootKey), hostedEnvironment: scope.target },
       sync: { mode: "resident", pollSeconds, edgePointerUrl: `${server.baseUrl}/edge/${scope.agentId}/${scope.target}/generation.json`, rootUrl: `${server.baseUrl}/roots/${scope.target}/root.json` },
       telemetry: { upload: false },
       ...(ctx.fetch ? { fetch: ctx.fetch } : {}),

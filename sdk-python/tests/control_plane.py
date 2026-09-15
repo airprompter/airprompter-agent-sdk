@@ -48,12 +48,12 @@ def root_document(*, root_key: dict, signing_keys: list[dict], environment: str,
 
 
 class FakeControlPlane:
-    def __init__(self, scope: dict[str, str], api_key: str = "apa_live_testkey"):
+    def __init__(self, scope: dict[str, str], api_key: str = "apa_live_testkey", hosted_environment: Optional[str] = None):
         self.scope = scope
         self.api_key = api_key
         self.root_key = new_key()
         self.signing_key = new_key()
-        self.root = root_document(root_key=self.root_key, signing_keys=[self.signing_key], environment=scope["target"])
+        self.root = root_document(root_key=self.root_key, signing_keys=[self.signing_key], environment=hosted_environment or scope["target"])
         self.payloads: dict[str, bytes] = {}
         self.requests: list[str] = []
         self._current: Optional[dict[str, Any]] = None

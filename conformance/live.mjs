@@ -74,7 +74,8 @@ const validate = (name, value) => {
 
 const now = new Date().toISOString();
 const pinned = readJson(rootPath);
-const root = pinned.kty === "EC" ? trustedRootFromPinnedKey({ purpose: "platform", environment: target, pinnedRootJwk: pinned }) : pinned;
+// A pinned root is scoped to the HOSTED environment (the public service is prod); the local dev registry scopes its root to the target it serves.
+const root = pinned.kty === "EC" ? trustedRootFromPinnedKey({ purpose: "platform", environment: opt("hosted-environment", target), pinnedRootJwk: pinned }) : pinned;
 const authed = { authorization: `Bearer ${apiKey}` };
 const get = (url, headers = {}) => fetch(url, { headers });
 

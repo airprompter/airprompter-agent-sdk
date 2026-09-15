@@ -145,7 +145,7 @@ export function loadDistributionPrivateKey(path: string): DistributionKey & { ke
 
 export type RootSource = { kind: "pinned"; jwk: P256PublicJwk; trusted: RootMetadata } | { kind: "document"; document: RootMetadata };
 
-/** `--root`: a pinned public JWK or a signed root document; the shape decides. */
+/** `--root`: a pinned public JWK or a signed root document; the shape decides. A pinned key is scoped to the HOSTED environment (`--hosted-environment`, default prod), never to the app's target. */
 export function loadRoot(value: string, environment: Target): RootSource {
   const document = readJson(value) as Record<string, unknown>;
   if (document.kty === "EC" && document.crv === "P-256" && typeof document.x === "string" && typeof document.y === "string") {

@@ -73,10 +73,12 @@ export class FakeControlPlane {
     readonly scope: { organizationId: string; agentId: string; target: Target },
     readonly apiKey = "apa_live_testkey",
     keys: { rootKey?: P256PrivateJwk; signingKey?: P256PrivateJwk } = {},
+    /** The hosted environment the root governs; by default the scope's target (the common test shape). */
+    options: { hostedEnvironment?: Target } = {},
   ) {
     this.rootKey = keys.rootKey ?? newKey();
     this.signingKey = keys.signingKey ?? newKey();
-    this.root = rootDocument({ rootKey: this.rootKey, signingKeys: [this.signingKey], environment: scope.target });
+    this.root = rootDocument({ rootKey: this.rootKey, signingKeys: [this.signingKey], environment: options.hostedEnvironment ?? scope.target });
   }
 
   slot(spec: SlotSpec): ManifestSlot {

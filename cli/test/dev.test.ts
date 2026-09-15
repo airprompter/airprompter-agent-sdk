@@ -125,7 +125,7 @@ test("an SDK syncs from airprompter dev as from the hosted service; a save is a 
     // An SDK client: the same start as against the hosted service.
     const stateDir = join(work, "sdk-state");
     const events: Array<Record<string, unknown>> = [];
-    const ap = await AirPrompterAgent.start({ organizationId: "org_dev", agentId: "agt_dev", target: "dev", apiKey: DEV_API_KEY, baseUrl, stateDir, root: { pinned }, sync: { mode: "resident", pollSeconds: 1, edgePointerUrl: String(facts.edgePointerUrl), rootUrl: String(facts.rootUrl) }, telemetry: { sink: "memory" }, logger: (e) => events.push(e) });
+    const ap = await AirPrompterAgent.start({ organizationId: "org_dev", agentId: "agt_dev", target: "dev", apiKey: DEV_API_KEY, baseUrl, stateDir, root: { pinned, hostedEnvironment: "dev" }, sync: { mode: "resident", pollSeconds: 1, edgePointerUrl: String(facts.edgePointerUrl), rootUrl: String(facts.rootUrl) }, telemetry: { sink: "memory" }, logger: (e) => events.push(e) });
     try {
       assert.equal(ap.generation, 1);
       const rendered = ap.prompt("support.triage").render({ ticket: "T-1", customer: "Ada" });
@@ -160,7 +160,7 @@ test("an SDK syncs from airprompter dev as from the hosted service; a save is a 
     assert.equal(restarted.generation, 3, "the counter persisted: the restart's release is generation 3");
     assert.equal(restarted.applyPolicy, "unlock_required");
     assert.deepEqual(JSON.parse(readFileSync(String(restarted.root), "utf8")), pinned, "the same root");
-    const again = await AirPrompterAgent.start({ organizationId: "org_dev", agentId: "agt_dev", target: "dev", apiKey: DEV_API_KEY, baseUrl: String(restarted.baseUrl), stateDir, root: { pinned }, sync: { mode: "resident", pollSeconds: 1, edgePointerUrl: String(restarted.edgePointerUrl), rootUrl: String(restarted.rootUrl) }, telemetry: { sink: "memory" } });
+    const again = await AirPrompterAgent.start({ organizationId: "org_dev", agentId: "agt_dev", target: "dev", apiKey: DEV_API_KEY, baseUrl: String(restarted.baseUrl), stateDir, root: { pinned, hostedEnvironment: "dev" }, sync: { mode: "resident", pollSeconds: 1, edgePointerUrl: String(restarted.edgePointerUrl), rootUrl: String(restarted.rootUrl) }, telemetry: { sink: "memory" } });
     try {
       // The store held generation 2 under the old policy; generation 3 says unlock_required, so it is staged and waits.
       await until(() => again.status().stagedGeneration === 3, () => `generation 3 staged (status: ${JSON.stringify(again.status())})`);

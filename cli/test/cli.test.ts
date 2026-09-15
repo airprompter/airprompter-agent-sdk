@@ -249,7 +249,7 @@ test("refusals: a tampered payload, a foreign signing key, another target, plain
   const devRootDoc = join(work, "dev-root.json");
   writeFileSync(devRootDoc, JSON.stringify(devPlane.root));
   const dev = harness(devPlane, work);
-  const devArgs = ["--org", scope.organizationId, "--agent", scope.agentId, "--environment", "dev"];
+  const devArgs = ["--org", scope.organizationId, "--agent", scope.agentId, "--environment", "dev", "--hosted-environment", "dev"];
   assert.equal(await run(["pull", ...devArgs, "--root", devRootDoc, "--plaintext", "--out", plain, "--json"], dev.ctx), EXIT.ok);
   assert.equal(dev.json().encryption, "none");
   if (process.platform !== "win32") assert.equal(statSync(plain).mode & 0o777, 0o600, "a plaintext bundle is at least private to the user");

@@ -456,7 +456,8 @@ class AirPrompterAgent:
             "logger": logger,
         }
         resolved_state_dir = state_dir or default_state_dir()
-        pinned_root = trusted_root_from_pinned_key(purpose="platform", environment=target, pinned_root=root["pinned"]) if "pinned" in root else root
+        # The root is scoped to the HOSTED environment (the public service is "prod"), never to this app's target.
+        pinned_root = trusted_root_from_pinned_key(purpose="platform", environment=root.get("hosted_environment", "prod"), pinned_root=root["pinned"]) if "pinned" in root else root
         if sync_options.mode == "daemon":
             # The host daemon holds the store and its key; this process attaches and never touches store files.
             socket_path = sync_options.daemon_socket_path or daemon_socket_path(state_dir=resolved_state_dir, agent_id=agent_id, target=target)

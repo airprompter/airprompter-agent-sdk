@@ -201,7 +201,7 @@ def test_heartbeat_body_cadence_refusal_and_offline(state_dir):
     assert plane.heartbeats, "the first heartbeat goes out right after boot"
     assert plane.heartbeats[0]["heartbeatIntervalSeconds"] == 45, "the runtime declares its cadence…"
     body = ap.heartbeat_body()
-    assert body["protocol"] == "0.2.5"
+    assert body["protocol"] == "0.3.0"
     assert body["sdk"] == {"name": "agent-sdk-python", "version": "0.1.0"}
     assert body["host"]["runtime"].startswith("python ")
     assert body["syncMode"] == "resident"

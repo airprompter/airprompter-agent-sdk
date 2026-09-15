@@ -55,7 +55,7 @@ from .telemetry.feedback import NormalizedFeedback, normalize_feedback
 from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
-PROTOCOL_VERSION = "0.2.5"
+PROTOCOL_VERSION = "0.3.0"
 SDK_VERSION = "0.1.0"
 
 __all__ = [

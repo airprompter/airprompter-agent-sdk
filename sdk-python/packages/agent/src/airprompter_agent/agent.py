@@ -33,7 +33,7 @@ from airprompter_agent_core._util import instant, iso_ms, now_ms, random_id
 from airprompter_agent_sync.apply.window import UpdateWindow, parse_window, window_state
 from airprompter_agent_core.bundle.apbundle import DistributionKey, bundle_payload_bytes, open_bundle
 from airprompter_agent_core.protocol.assignment import ramp_weights_at
-from airprompter_agent_core.protocol.trust import key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
+from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from airprompter_agent_runtime.wrap import WrapHooks, wrap_client
 from airprompter_agent_core.render.run_ref import parse_run_ref
@@ -56,7 +56,7 @@ from airprompter_agent_runtime.release.resolver import ReleaseResolver, Rendered
 SDK_NAME = "agent-sdk-python"
 SDK_VERSION = "0.1.0"
 #: The protocol this SDK speaks; the heartbeat names it (the manifest carries its own).
-PROTOCOL_VERSION = "0.2.5"
+PROTOCOL_VERSION = "0.3.0"
 # A vendored bundle this close to its notAfter logs vendored_bundle_expiring_soon at start (the platform warns at the same distance).
 VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30
 _USER_AGENT = f"{SDK_NAME}/{SDK_VERSION}"
@@ -172,6 +172,8 @@ class AgentStatus:
     upload: Optional[dict[str, Any]] = None
     #: S9: the ramp plan as this host walks it — {"experimentId", "weightBps", "arms", "step", "nextStepAt", "plan"}; None without an experiment.
     ramp: Optional[dict[str, Any]] = None
+    #: S16: one entry per experiment the active manifest carries (per slot); ``ramp`` is the first of them.
+    ramps: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1052,11 +1054,16 @@ class AirPrompterAgent:
         if requests:
             self._log({"event": "unlock_requested", "generation": payload["generation"], "requests": [{"releaseDigest": r.get("releaseDigest"), "expiresAt": r.get("expiresAt"), "requestedBy": r.get("requestedBy")} for r in requests]})
 
+    def _ramp_statuses(self, manifest: Optional[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        """S9/S16: every experiment's plan as this host walks it — per slot, each on its own clock and retreat."""
+        return [self._ramp_status_of(experiment) for experiment in experiments_of(manifest or {})]
+
     def _ramp_status(self, manifest: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
-        experiment = (manifest or {}).get("experiment")
-        if not experiment:
-            return None
-        arms = self._resolver().arms()
+        statuses = self._ramp_statuses(manifest)
+        return statuses[0] if statuses else None
+
+    def _ramp_status_of(self, experiment: Mapping[str, Any]) -> dict[str, Any]:
+        arms = self._resolver().arms(experiment)
         now_ms = self._now_ms()
         plan = list(experiment.get("ramp") or [])
         step = -1
@@ -1066,6 +1073,7 @@ class AirPrompterAgent:
         nxt = plan[step + 1] if step + 1 < len(plan) else None
         return {
             "experimentId": experiment["experimentId"],
+            "tag": experiment.get("tag"),
             "weightBps": [arm["weightBps"] for arm in arms] if arms else ramp_weights_at(experiment["arms"], experiment.get("ramp"), now_ms),
             "arms": [arm["arm"] for arm in experiment["arms"]],
             "step": step,
@@ -1488,7 +1496,7 @@ class AirPrompterAgent:
             return []
         payload = active.manifest["payload"]
         slot: Optional[Mapping[str, Any]] = None
-        for candidate in (payload.get("experiment") or {}).get("arms", []):
+        for candidate in (experiment_for_tag(payload, tag) or {}).get("arms", []):
             if candidate.get("arm") == arm:
                 slot = next((o for o in candidate.get("overrides", []) if o.get("tag") == tag), None)
         if slot is None:
@@ -1566,10 +1574,11 @@ class AirPrompterAgent:
     def _run_golden_for(self, manifest: Mapping[str, Any], payloads: Mapping[str, bytes], invoke: GoldenInvoke, concurrency: Optional[int], only_tag: Optional[str] = None) -> list[GoldenReport]:
         payload = manifest["payload"]
         targets: list[tuple[Mapping[str, Any], str]] = [(slot, "none") for slot in payload.get("slots", []) if slot.get("goldenSet") and (not only_tag or slot["tag"] == only_tag)]
-        for arm in (payload.get("experiment") or {}).get("arms", []):
-            for override in arm.get("overrides", []):
-                if override.get("goldenSet") and (not only_tag or override["tag"] == only_tag):
-                    targets.append((override, arm["arm"]))
+        for experiment in experiments_of(payload):
+            for arm in experiment.get("arms", []):
+                for override in arm.get("overrides", []):
+                    if override.get("goldenSet") and (not only_tag or override["tag"] == only_tag):
+                        targets.append((override, arm["arm"]))
         reports: list[GoldenReport] = []
         for slot, arm in targets:
             set_bytes = payloads.get(slot["goldenSet"]["contentHash"])
@@ -1610,7 +1619,7 @@ class AirPrompterAgent:
         payload = self._active.manifest["payload"] if self._active else None
         slot = None
         if facts and payload:
-            experiment = payload.get("experiment")
+            experiment = experiment_for_tag(payload, facts.tag)
             if experiment:
                 arm = next((a for a in experiment["arms"] if a["arm"] == facts.arm), None)
                 slot = next((entry for entry in (arm or {}).get("overrides", []) if entry["tag"] == facts.tag), None)
@@ -1632,8 +1641,9 @@ class AirPrompterAgent:
         # Feedback rides on the run's window: same dimension set, no extra count (the run was already counted).
         payload = self._active.manifest["payload"] if self._active else None
         override = None
-        if payload and payload.get("experiment"):
-            arm = next((a for a in payload["experiment"]["arms"] if a["arm"] == facts.arm), None)
+        experiment = experiment_for_tag(payload, facts.tag) if payload else None
+        if experiment:
+            arm = next((a for a in experiment["arms"] if a["arm"] == facts.arm), None)
             override = next((entry for entry in (arm or {}).get("overrides", []) if entry["tag"] == facts.tag), None)
         slot = override or (next((entry for entry in payload["slots"] if entry["tag"] == facts.tag), None) if payload else None)
         self.spool.outcomes(tag=facts.tag, version_id=facts.version_id, arm=facts.arm, model=slot["model"] if slot else "unknown", outcomes=normalized.outcomes, at_ms=self._now_ms())
@@ -1703,6 +1713,7 @@ class AirPrompterAgent:
             apply_policy=self._effective_apply_policy(),
             upload=self._uploader.status() if self._uploader is not None else None,
             ramp=self._ramp_status(manifest),
+            ramps=self._ramp_statuses(manifest),
         )
 
     @property

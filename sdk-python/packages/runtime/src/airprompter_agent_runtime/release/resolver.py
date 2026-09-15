@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, ordered_steps
+from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of
 from airprompter_agent_core.release.reader import LoadedRelease, ReleaseSlot
 from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref
 from airprompter_agent_core.render.template import render_template
@@ -49,10 +50,19 @@ class Workflow:
 class Disabled:
     agent: bool = False
     slots: list[str] = field(default_factory=list)
+    #: Arm names disabled by directives that name no experiment (the legacy single experiment).
     arms: list[str] = field(default_factory=list)
+    #: S16: arm names disabled per experiment id; a directive without an id counts for every experiment.
+    arms_by_experiment: dict[str, list[str]] = field(default_factory=dict)
+
+    def arms_for(self, experiment_id: str) -> set[str]:
+        """S16: the arms disabled for one experiment — those named with its id, plus any named without one."""
+        return {*self.arms, *self.arms_by_experiment.get(experiment_id, [])}
 
     def as_dict(self) -> dict[str, Any]:
-        return {"agent": self.agent, "slots": list(self.slots), "arms": list(self.arms)}
+        """The heartbeat's shape: agent / slots / arms, every disabled arm name flattened."""
+        flat = [*self.arms, *[arm for arms in self.arms_by_experiment.values() for arm in arms]]
+        return {"agent": self.agent, "slots": list(self.slots), "arms": flat}
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,7 @@ def disabled_from(directives: Sequence[Mapping[str, Any]]) -> Disabled:
     """What ``disable`` directives say, as data."""
     slots: list[str] = []
     arms: list[str] = []
+    arms_by_experiment: dict[str, list[str]] = {}
     agent = False
     for directive in directives:
         if directive.get("kind") != "disable":
@@ -77,10 +88,13 @@ def disabled_from(directives: Sequence[Mapping[str, Any]]) -> Disabled:
         if directive.get("scope") == "agent":
             agent = True
         elif directive.get("scope") == "arm" and directive.get("arm"):
-            arms.append(str(directive["arm"]))
+            if directive.get("experimentId"):
+                arms_by_experiment.setdefault(str(directive["experimentId"]), []).append(str(directive["arm"]))
+            else:
+                arms.append(str(directive["arm"]))
         elif directive.get("tag"):
             slots.append(str(directive["tag"]))
-    return Disabled(agent=agent, slots=slots, arms=arms)
+    return Disabled(agent=agent, slots=slots, arms=arms, arms_by_experiment=arms_by_experiment)
 
 
 class ReleaseResolver:
@@ -120,13 +134,29 @@ class ReleaseResolver:
     def disabled(self) -> Disabled:
         return disabled_from(self.directives())
 
-    def arms(self) -> list[dict[str, Any]] | None:
-        """S9: the arms as they stand now — the signed plan walked on this host's clock, then any disabled arm's share
-        handed to the control. None when there is no experiment, or when every arm is disabled (a freeze for that tag)."""
-        experiment = self._payload.get("experiment")
+    def experiments(self) -> list[Mapping[str, Any]]:
+        """S16: every experiment this release carries — one per slot, or the legacy single one."""
+        return experiments_of(self._payload)
+
+    def experiment_for(self, tag: str) -> Mapping[str, Any] | None:
+        """S16: the experiment that decides a slot, by tag — the entry naming it, else the legacy single one, else None."""
+        return experiment_for_tag(self._payload, tag)
+
+    def arms(self, experiment_or_tag: Mapping[str, Any] | str | None = None) -> list[dict[str, Any]] | None:
+        """S9: an experiment's arms as they stand now — the signed plan walked on this host's clock, then any disabled
+        arm's share handed to the control. None when there is no such experiment, or when every arm is disabled (a
+        freeze for that slot). Without an argument: the legacy single experiment, or the first of ``experiments[]``."""
+        if isinstance(experiment_or_tag, str):
+            experiment = self.experiment_for(experiment_or_tag)
+        elif experiment_or_tag is not None:
+            experiment = experiment_or_tag
+        else:
+            listed = self.experiments()
+            experiment = listed[0] if listed else None
         if not experiment:
             return None
-        return effective_arms(arms=experiment["arms"], ramp=experiment.get("ramp"), disabled_arms=self.disabled().arms, now_ms=self._now_ms())
+        disabled = self.disabled().arms_for(str(experiment.get("experimentId")))
+        return effective_arms(arms=experiment["arms"], ramp=experiment.get("ramp"), disabled_arms=disabled, now_ms=self._now_ms())
 
     def resolve(self, tag: str, subject: Optional[str] = None) -> ResolveOutcome:
         """The slot a subject gets for a tag, or why not. Refusals are data: the facade records them."""
@@ -139,11 +169,12 @@ class ReleaseResolver:
         slot = next((entry for entry in payload["slots"] if entry["tag"] == tag), None)
         if slot is None:
             return ResolveOutcome(False, reason="no_slot", tag=tag)
-        experiment = payload.get("experiment")
+        # S16: the experiment for this slot — its own salt and arms, so two slots split independently.
+        experiment = self.experiment_for(tag)
         if not experiment:
             return ResolveOutcome(True, ReleaseSlot(slot, "none", None))
         subject_value = self._instance_id if experiment.get("subjectKey") == "instance" or subject is None else subject
-        arms = self.arms()
+        arms = self.arms(experiment)
         if arms is None:
             return ResolveOutcome(False, reason="disabled", tag=tag)
         assigned = assign_arm(salt=experiment["salt"], subject=subject_value, arms=arms)

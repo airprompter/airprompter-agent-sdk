@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional, Sequence, Union
 
 from ..checks import estimate_tokens, evaluate_checks
+from ..protocol.trust import experiments_of
 from ..render.template import Delimiters, render_template
 
 GOLDEN_SET_FORMAT = "airprompter-golden-set"
@@ -199,5 +200,4 @@ def manifest_has_golden(manifest: Mapping[str, Any]) -> bool:
     payload = manifest["payload"]
     if any(slot.get("goldenSet") for slot in payload.get("slots", [])):
         return True
-    experiment = payload.get("experiment") or {}
-    return any(override.get("goldenSet") for arm in experiment.get("arms", []) for override in arm.get("overrides", []))
+    return any(override.get("goldenSet") for experiment in experiments_of(payload) for arm in experiment.get("arms", []) for override in arm.get("overrides", []))

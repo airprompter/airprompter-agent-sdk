@@ -12,7 +12,7 @@
  * refused and why; the facade decides what to record.
  */
 
-import { assignArm, effectiveArms, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type Target } from "@airprompter/agent-core";
+import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type Target } from "@airprompter/agent-core";
 
 export interface Rendered {
   text: string;
@@ -27,7 +27,18 @@ export interface Rendered {
 export interface Disabled {
   agent: boolean;
   slots: string[];
+  /** Arm names disabled by directives that name no experiment (the legacy single experiment) — the heartbeat's shape. */
   arms: string[];
+}
+
+/** S16: `Disabled` plus the arm names disabled per experiment id (a directive without an id counts for every experiment). */
+export interface DisabledDetail extends Disabled {
+  armsByExperiment: Record<string, string[]>;
+}
+
+/** S16: the arms disabled for one experiment — those named with its id, plus any named without one. */
+export function disabledArmsFor(disabled: DisabledDetail, experimentId: string): Set<string> {
+  return new Set([...disabled.arms, ...(disabled.armsByExperiment[experimentId] ?? [])]);
 }
 
 export interface ResolverInput {
@@ -50,17 +61,20 @@ export interface ResolverInput {
 export type ResolveOutcome = ({ ok: true } & ReleaseSlot) | { ok: false; reason: "disabled" | "no_slot"; tag: string | null };
 
 /** What `disable` directives say, as data. */
-export function disabledFrom(directives: readonly Directive[]): Disabled {
+export function disabledFrom(directives: readonly Directive[]): DisabledDetail {
   const slots: string[] = [];
   const arms: string[] = [];
+  const armsByExperiment: Record<string, string[]> = {};
   let agent = false;
   for (const directive of directives) {
     if (directive.kind !== "disable") continue;
     if (directive.scope === "agent") agent = true;
-    else if (directive.scope === "arm" && directive.arm) arms.push(directive.arm);
-    else if (directive.tag) slots.push(directive.tag);
+    else if (directive.scope === "arm" && directive.arm) {
+      if (directive.experimentId) (armsByExperiment[directive.experimentId] ??= []).push(directive.arm);
+      else arms.push(directive.arm);
+    } else if (directive.tag) slots.push(directive.tag);
   }
-  return { agent, slots, arms };
+  return { agent, slots, arms, armsByExperiment };
 }
 
 export class ReleaseResolver {
@@ -81,18 +95,29 @@ export class ReleaseResolver {
     return this.payload.directives;
   }
 
-  disabled(): Disabled {
+  disabled(): DisabledDetail {
     return disabledFrom(this.directives());
   }
 
+  /** S16: every experiment this release carries — one per slot, or the legacy single one. */
+  experiments(): Experiment[] {
+    return experimentsOf(this.payload);
+  }
+
+  /** S16: the experiment that decides a slot, by tag — the entry naming it, else the legacy single one, else null. */
+  experimentFor(tag: string): Experiment | null {
+    return experimentForTag(this.payload, tag);
+  }
+
   /**
-   * S9: the arms as they stand now — the signed plan walked on this host's clock, then any disabled arm's share handed
-   * to the control. Null when there is no experiment, or when every arm is disabled (a freeze for that tag).
+   * S9: an experiment's arms as they stand now — the signed plan walked on this host's clock, then any disabled arm's
+   * share handed to the control. Null when there is no such experiment, or when every arm is disabled (a freeze for
+   * that slot). Without an argument: the legacy single experiment, or the first of `experiments[]`.
    */
-  arms(): ExperimentArm[] | null {
-    const experiment = this.payload.experiment;
+  arms(experimentOrTag?: Experiment | string): ExperimentArm[] | null {
+    const experiment = typeof experimentOrTag === "string" ? this.experimentFor(experimentOrTag) : (experimentOrTag ?? this.experiments()[0] ?? null);
     if (!experiment) return null;
-    return effectiveArms({ arms: experiment.arms, ramp: experiment.ramp, disabledArms: new Set(this.disabled().arms), nowMs: this.input.nowMs() });
+    return effectiveArms({ arms: experiment.arms, ramp: experiment.ramp, disabledArms: disabledArmsFor(this.disabled(), experiment.experimentId), nowMs: this.input.nowMs() });
   }
 
   /** The slot a subject gets for a tag, or why not. Refusals are data: the facade records them. */
@@ -103,11 +128,13 @@ export class ReleaseResolver {
     if (disabled.slots.includes(tag)) return { ok: false, reason: "disabled", tag };
     let slot = payload.slots.find((entry) => entry.tag === tag);
     if (!slot) return { ok: false, reason: "no_slot", tag };
-    if (!payload.experiment) return { ok: true, slot, arm: "none", bucket: null };
-    const subjectValue = payload.experiment.subjectKey === "instance" || subject === undefined ? this.input.instanceId : subject;
-    const arms = this.arms();
+    // S16: the experiment for this slot — its own salt and arms, so two slots split independently.
+    const experiment = this.experimentFor(tag);
+    if (!experiment) return { ok: true, slot, arm: "none", bucket: null };
+    const subjectValue = experiment.subjectKey === "instance" || subject === undefined ? this.input.instanceId : subject;
+    const arms = this.arms(experiment);
     if (!arms) return { ok: false, reason: "disabled", tag };
-    const assigned = assignArm({ salt: payload.experiment.salt, subject: subjectValue, arms });
+    const assigned = assignArm({ salt: experiment.salt, subject: subjectValue, arms });
     const override = assigned.arm.overrides.find((entry) => entry.tag === tag);
     if (override) slot = override;
     return { ok: true, slot, arm: assigned.arm.arm, bucket: assigned.bucket };

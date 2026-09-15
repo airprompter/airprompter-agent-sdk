@@ -9,7 +9,7 @@ import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, veri
 
 import { isAssignmentError, validateRamp } from "./assignment.js";
 import { canonicalBytes, canonicalJson, sha256Prefixed } from "./canonicalJson.js";
-import { DIRECTIVE_KINDS, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type Target } from "./types.js";
+import { DIRECTIVE_KINDS, experimentConflict, experimentsOf, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type Target } from "./types.js";
 
 export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([0]);
 
@@ -107,7 +107,7 @@ export function referencedPayloads(payload: ManifestPayload): Map<string, number
     if (slot.goldenSet) hashes.set(slot.goldenSet.contentHash, slot.goldenSet.byteLength);
   };
   for (const slot of payload.slots) add(slot);
-  for (const arm of payload.experiment?.arms ?? []) for (const override of arm.overrides) add(override);
+  for (const experiment of experimentsOf(payload)) for (const arm of experiment.arms) for (const override of arm.overrides) add(override);
   return hashes;
 }
 
@@ -156,10 +156,14 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
   if (!Array.isArray(payload.directives) || payload.directives.some((directive) => !directive || typeof directive !== "object" || !DIRECTIVE_KINDS.has((directive as { kind?: unknown }).kind as string))) {
     return { ok: false, reason: "directive_unknown" };
   }
-  // M14 (S9): a ramp plan, when present, is well-formed — a malformed one is refused whole rather than walked wrongly.
-  if (payload.experiment?.ramp !== undefined) {
+  // M15 (S16): the per-prompt shape is consistent, or the manifest is refused whole before any payload.
+  const conflict = experimentConflict(payload);
+  if (conflict) return { ok: false, reason: conflict };
+  // M14 (S9): every experiment's ramp plan, when present, is well-formed — a malformed one is refused whole rather than walked wrongly.
+  for (const experiment of experimentsOf(payload)) {
+    if (experiment.ramp === undefined) continue;
     try {
-      validateRamp(payload.experiment.ramp, payload.experiment.arms.length);
+      validateRamp(experiment.ramp, experiment.arms.length);
     } catch (error) {
       if (isAssignmentError(error) && error.reason === "ramp_invalid") return { ok: false, reason: "ramp_invalid" };
       throw error;
@@ -175,7 +179,7 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
   }
 
   if (payload.requireCountersign || input.requireCountersign) {
-    const digests = new Set<string>([payload.releaseDigest, ...(payload.experiment?.arms ?? []).map((arm) => arm.releaseDigest)]);
+    const digests = new Set<string>([payload.releaseDigest, ...experimentsOf(payload).flatMap((experiment) => experiment.arms.map((arm) => arm.releaseDigest))]);
     const role = input.countersignRoot?.signed.roles.targets ?? { keyIds: [], threshold: 1 };
     const keys = input.countersignRoot?.signed.keys ?? {};
     for (const digest of digests) {

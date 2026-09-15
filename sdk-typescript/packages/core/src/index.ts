@@ -12,7 +12,7 @@
 
 export { PROTOCOL_VERSION, SDK_VERSION } from "./protocol/version.js";
 export type * from "./protocol/types.js";
-export { DIRECTIVE_KINDS } from "./protocol/types.js";
+export { DIRECTIVE_KINDS, experimentConflict, experimentForTag, experimentsOf } from "./protocol/types.js";
 export { errorNamed } from "./protocol/errors.js";
 export type { FsPort, FsFailure, FsOpenFlags, ClockPort, FetchPort } from "./protocol/ports.js";
 export { fsFailureCode } from "./protocol/ports.js";

@@ -17,6 +17,7 @@ export const SCOPE_OPTIONS: OptionSpec = {
   org: { type: "string", help: "Organization id (org_…)" },
   agent: { type: "string", help: "Agent id (agt_…)" },
   environment: { type: "string", help: "dev | staging | prod" },
+  "hosted-environment": { type: "string", help: "Which AirPrompter deployment a pinned --root belongs to: prod (the public service, default), staging or dev — not this app's --environment" },
 };
 
 export const ROOT_OPTIONS: OptionSpec = {
@@ -66,7 +67,7 @@ export function scopeOf(parsed: Parsed): Scope {
 }
 
 export function rootOf(parsed: Parsed, target: Target): RootSource {
-  return loadRoot(requireOption(str(parsed, "root"), "root"), target);
+  return loadRoot(requireOption(str(parsed, "root"), "root"), (str(parsed, "hosted-environment") as Target | undefined) ?? "prod");
 }
 
 export function defaultStateDir(ctx: Context): string {

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### The pinned root is scoped to the hosted environment, not the app's target (SDKs 0.2.3, CLI)
+- `trust-chain.md` has always said the pinned root is "one public JWK per hosted environment" and root metadata's `environment` is "the hosted environment this root governs". The SDKs built the trusted root from the pinned key with the app's **target** instead, so a `dev` or `staging` target on the public service — or any target other than `dev` on AirPrompter's dev deployment — refused the fetched root document (`root_scope_mismatch`, silently) and then every manifest (`unknown_signing_key`). `root: { pinned, hostedEnvironment }` (`hosted_environment` in Python) names the deployment the key belongs to, default `prod`; the CLI takes `--hosted-environment`; `airprompter dev` scopes its embedded daemon and its printed hint to the environment it serves. Regression tests in both SDKs. No protocol change.
+
 ### The managed-mode client picks its experiment by tag (SDKs 0.2.2)
 - `/slots` lists `experiments[]` (each with its `tag`, salt, subject key and arms) beside the legacy `experiment`; `ManagedAgent.experimentFor(tag)` / `experiment_for(tag)` picks the slot's experiment, and a run hashes the subject with THAT salt — two prompts under test split independently in hosted mode as they do in client mode. A slot outside every experiment sends no hash; the legacy single `experiment` still covers every slot. No protocol change.
 

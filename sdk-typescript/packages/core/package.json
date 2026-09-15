@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-core",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "The pure half of the AirPrompter agent SDK: the protocol (types, trust chain, canonical JSON, arm assignment and the ramp walk), rendering, output checks, golden sets, the judge, bundle reading, telemetry row schemas, the control-plane client, and the port interfaces. No side effects at import; no sibling dependencies.",
   "license": "BSD-3-Clause",
   "repository": {

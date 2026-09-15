@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-sync",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Pull and hold AirPrompter agent releases: signed pull-only updates, the encrypted restart-safe slot store, key providers, the apply policy and its windows, and the daemon client.",
   "license": "BSD-3-Clause",
   "repository": {
@@ -38,6 +38,6 @@
     "provenance": true
   },
   "dependencies": {
-    "@airprompter/agent-core": "0.2.2"
+    "@airprompter/agent-core": "0.2.3"
   }
 }

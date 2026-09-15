@@ -62,7 +62,12 @@ export interface StartOptions {
   stateDir?: string;
   keyProvider?: KeyProvider;
   /** The pinned root for this environment, or a full root document (from the bundle or a previous accept). */
-  root: { pinned: P256PublicJwk } | RootMetadata;
+  /**
+   * The trust anchor: the pinned root public key shipped for the hosted environment this runtime talks to (the public
+   * service is `prod`; `dev` / `staging` are AirPrompter's own stages), or an already-trusted root document. The root is
+   * scoped to the HOSTED environment, never to this app's `target` — one platform key signs every target's manifests.
+   */
+  root: { pinned: P256PublicJwk; hostedEnvironment?: Target } | RootMetadata;
   /** The customer's countersign root, when the target requires countersign. */
   countersignRoot?: RootMetadata;
   requireCountersign?: boolean;
@@ -443,7 +448,7 @@ export class AirPrompterAgent {
       }
     }
     const stateDir = options.stateDir ?? defaultStateDir();
-    const pinnedRoot = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.target, pinnedRoot: options.root.pinned }) : options.root;
+    const pinnedRoot = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.root.hostedEnvironment ?? "prod", pinnedRoot: options.root.pinned }) : options.root;
     if (options.sync?.mode === "daemon") {
       // The host daemon holds the store and its key; this process attaches and never touches store files.
       const socketPath = options.sync.daemonSocketPath ?? daemonSocketPath({ stateDir, agentId: options.agentId, target: options.target });

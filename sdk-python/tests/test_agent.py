@@ -448,3 +448,23 @@ def test_pinned_pointer_does_not_renew_the_lease_and_latest_generation_bypasses_
         ap.prompt("support.reply").render(name="x")
     assert frozen.value.reason == "disabled"
     ap.stop()
+
+
+
+def test_s18_pinned_root_is_scoped_to_the_hosted_environment_not_the_target(state_dir):
+    staging = {"organizationId": "org_1", "agentId": "agt_1", "target": "staging"}
+    plane = FakeControlPlane(staging, hosted_environment="dev")
+    plane.promote([plane.slot(tag="support.reply", text="Reply politely.", variables=[])])
+    kw = {"organization_id": "org_1", "agent_id": "agt_1", "target": "staging", "api_key": plane.api_key, "base_url": "https://api.test", "transport": plane.transport()}
+    sync = SyncOptions(mode="resident", poll_seconds=3600, root_url="https://edge.test/roots/dev/root.json")
+    agent = AirPrompterAgent.start(**kw, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key), "hosted_environment": "dev"}, sync=sync)
+    try:
+        assert agent.generation == 1
+        assert agent.prompt("support.reply").render({}).text == "Reply politely."
+    finally:
+        agent.stop()
+    import tempfile
+
+    with pytest.raises(AgentStartError) as wrong:
+        AirPrompterAgent.start(**kw, state_dir=tempfile.mkdtemp(prefix="ap-s18-"), root={"pinned": public_jwk_of(plane.root_key), "hosted_environment": "staging"}, sync=sync)
+    assert wrong.value.code == "no_verified_release"

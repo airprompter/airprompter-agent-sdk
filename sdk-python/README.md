@@ -119,7 +119,21 @@ update-window timers on daemon threads.
    file migrates on first write, a newer one is refused naming its
    writer). Serving an unverified release
    is never an option.
-4. One shape is not a failure: the sync found a release **staged under
+4. **The fleet pattern** — your store carries the release, your runtimes
+   apply it. One puller job holds the Agent key: `pull_bundle(client=,
+   scope=, trusted_root=, fetch_root=, minimum_generation=,
+   distribution_public_key=)` fetches, verifies and seals an `.apbundle` to
+   the fleet's X25519 distribution key; write it to a row per generation.
+   Every runtime holds only the distribution private key
+   (`distribution_key=` at start): it boots from the newest row
+   (`vendored_bundle=`), serves from memory, and hands a newer row to
+   `agent.apply_bundle(row)` → `{"outcome": "activated" | "staged" |
+   "unchanged" | "held_back" | "refused", "generation": …, "reason": …}` —
+   the same chain as OTA before a byte is staged, never below the held
+   generation, the apply policy deciding. How a runtime learns the row
+   changed is yours (poll, `LISTEN`, your bus). `fetch_root` is not
+   optional in practice: a pinned key names the root, not the signing keys.
+5. One shape is not a failure: the sync found a release **staged under
    `unlock_required`** and nothing active — a first production release,
    or a restart whose active slot is unusable beside a staged one. The
    host starts with nothing to serve (`generation` 0, `apply_state`

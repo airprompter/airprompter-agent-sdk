@@ -29,6 +29,9 @@ def main() -> int:
             text = VERSION_LINE.sub(f'version = "{set_to}"', path.read_text(), count=1)
             text = PIN.sub(lambda m: f'"{m.group(1)}{m.group(2) or ""}=={set_to}"', text)
             path.write_text(text)
+        # The constant the SDK reports on the heartbeat, pinned to core's pyproject by test_package_split.py.
+        init = ROOT / "core" / "src" / "airprompter_agent_core" / "__init__.py"
+        init.write_text(re.sub(r'^SDK_VERSION = "[^"]+"$', f'SDK_VERSION = "{set_to}"', init.read_text(), count=1, flags=re.M))
         print(f"version_lockstep: every distribution is {set_to}")
     problems: list[str] = []
     versions: dict[str, str] = {}

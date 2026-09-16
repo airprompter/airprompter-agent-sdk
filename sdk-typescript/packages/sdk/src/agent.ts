@@ -18,12 +18,13 @@ import { join } from "node:path";
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "@airprompter/agent-core";
 import { rampWeightsAt } from "@airprompter/agent-core";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
-import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RootMetadata, Target, UploadSink } from "@airprompter/agent-core";
+import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, Target, UploadSink } from "@airprompter/agent-core";
 import { parseRunRef } from "@airprompter/agent-core";
 import type { Delimiters } from "@airprompter/agent-core";
 import { normalizeFeedback } from "@airprompter/agent-core";
 import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "@airprompter/agent-telemetry";
 import { fileKey, type KeyProvider, type StorageProtection } from "@airprompter/agent-sync";
+import { requiredModelsMissing } from "@airprompter/agent-sync";
 import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "@airprompter/agent-sync";
 import { observeCall, type ObserveOptions } from "@airprompter/agent-runtime";
 import { ReleaseResolver, disabledFrom, type Rendered } from "@airprompter/agent-runtime";
@@ -74,6 +75,11 @@ export interface StartOptions {
   sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string; daemonSocketPath?: string };
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */
   vendoredBundle?: { bundle: Bundle | string; distributionKey?: DistributionKey };
+  /**
+   * The fleet's X25519 distribution private key: opens every sealed bundle this host is handed — the vendored one
+   * and every `applyBundle()` — when neither names its own. Held by runtimes, never by the puller.
+   */
+  distributionKey?: DistributionKey;
   apply?: {
     /**
      * A local policy this process always applies on top of the host's pin (S4): `unlock_required` here makes every
@@ -323,6 +329,14 @@ export class RenderRefusedError extends Error {
 export const HEARTBEAT_REPORTER_NAMES = ["agent-sdk-typescript", "agent-sdk-python", "airprompter-cli", "airprompterd"] as const;
 export type HeartbeatReporterName = (typeof HEARTBEAT_REPORTER_NAMES)[number];
 
+/** What `applyBundle()` (and the vendored bundle at boot) did with a bundle, and why when it did nothing. */
+export type BundleOutcome =
+  | { outcome: "activated"; generation: number }
+  | { outcome: "staged"; generation: number }
+  | { outcome: "unchanged"; generation: number }
+  | { outcome: "held_back"; generation: number; heldBackBelow: number }
+  | { outcome: "refused"; generation: number | null; reason: RefusalCode | "generation_rollback" | "expired" | "model_unavailable" | "unusable" | "daemon_attached" | "no_store"; held?: number; detail?: string };
+
 export class AgentStartError extends Error {
   constructor(
     readonly code: "no_verified_release" | "kek_unavailable" | "store_corrupt" | "store_newer" | "invalid_options",
@@ -566,39 +580,55 @@ export class AirPrompterAgent {
    * store's release is fine) and applied only as the fallback, lease-expired. Never throws.
    */
   private async takeVendoredBundle(now: string, verifyOptions: { now: string; root: RootMetadata; countersignRoot: RootMetadata | null; requireCountersign?: boolean }): Promise<void> {
-    const store = this.store!;
     let contents: ReturnType<typeof openBundle>;
     try {
       const bundle = typeof this.options.vendoredBundle!.bundle === "string" ? (JSON.parse(readFileSync(this.options.vendoredBundle!.bundle, "utf8")) as Bundle) : this.options.vendoredBundle!.bundle;
-      contents = openBundle(bundle, { agentId: this.options.agentId, target: this.options.target }, this.options.vendoredBundle!.distributionKey);
+      contents = openBundle(bundle, { agentId: this.options.agentId, target: this.options.target }, this.options.vendoredBundle!.distributionKey ?? this.options.distributionKey);
     } catch (error) {
       this.log({ event: "vendored_bundle_unusable", reason: (error as Error).message });
       return;
     }
+    await this.takeBundle(contents, "vendored_bundle", now, verifyOptions);
+  }
+
+  /**
+   * A release handed to this host as a bundle — vendored at boot, or applied at run time from the customer's own
+   * store. With nothing active it is the tier-3 fallback, staged through the store and activated whatever its
+   * generation. With a release serving it is an UPDATE like any other: above the held generation it runs the same
+   * chain as OTA — signatures, scope, every payload's hash — and is staged, then the host's apply policy decides
+   * (auto activates; unlock_required stages, then the hook, the window, `unlock()`); the held generation changes
+   * nothing; one BELOW it is refused — a rollback is `rollback()`, never an older bundle; past `notAfter` it is
+   * refused as an update (the store's release is fine) and applied only as the fallback, lease-expired. Never throws.
+   */
+  private async takeBundle(contents: ReturnType<typeof openBundle>, source: "vendored_bundle" | "applied_bundle", now: string, verifyOptions: { now: string; root: RootMetadata; countersignRoot: RootMetadata | null; requireCountersign?: boolean }): Promise<BundleOutcome> {
+    const store = this.store!;
     const generation = contents.manifest.payload.generation;
     const daysLeft = Math.floor((instant(contents.notAfter) - instant(now)) / 86_400_000);
-    if (this.active) {
+    // A first release staged under unlock_required (nothing active, something staged) is a HELD generation: a bundle
+    // at or below it is not a fallback to activate around the unlock, it is the update path with its rules.
+    const updating = this.active !== null || this.stagedManifest !== null;
+    if (updating) {
       const held = Math.max(store.state.generation, this.stagedManifest?.payload.generation ?? 0);
-      if (generation === held) return;
+      if (generation === held) return { outcome: "unchanged", generation };
       if (generation < held) {
-        // The sentence a git customer sees on a revert: refused, and what to do instead.
-        this.log({ event: "vendored_bundle_refused", reason: "generation_rollback", bundleGeneration: generation, heldGeneration: held, message: `the vendored bundle is generation ${generation}; this host holds ${held}. A bundle never moves a host backwards — a rollback is \`airprompter rollback\`, never an older bundle.` });
+        // The sentence a git customer sees on a revert, or a fleet sees on a restored backup: refused, and what to do instead.
+        this.log({ event: `${source}_refused`, reason: "generation_rollback", bundleGeneration: generation, heldGeneration: held, message: `the bundle is generation ${generation}; this host holds ${held}. A bundle never moves a host backwards — a rollback is \`airprompter rollback\`, never an older bundle.` });
         this.lastRefusal = "generation_rollback";
-        return;
+        return { outcome: "refused", generation, reason: "generation_rollback", held };
       }
       const heldBackBelow = store.state.heldBackBelow;
       if (heldBackBelow !== undefined && generation <= heldBackBelow) {
-        this.log({ event: "vendored_bundle_held_back", bundleGeneration: generation, heldBackBelow });
-        return;
+        this.log({ event: `${source}_held_back`, bundleGeneration: generation, heldBackBelow });
+        return { outcome: "held_back", generation, heldBackBelow };
       }
       if (daysLeft < 0) {
-        this.log({ event: "vendored_bundle_refused", reason: "expired", bundleGeneration: generation, notAfter: contents.notAfter });
-        return;
+        this.log({ event: `${source}_refused`, reason: "expired", bundleGeneration: generation, notAfter: contents.notAfter });
+        return { outcome: "refused", generation, reason: "expired" };
       }
     } else {
       this.bundleNotAfter = contents.notAfter;
-      if (daysLeft < 0) this.log({ event: "vendored_bundle_past_not_after", notAfter: contents.notAfter });
-      else if (daysLeft < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS) this.log({ event: "vendored_bundle_expiring_soon", notAfter: contents.notAfter, daysLeft });
+      if (daysLeft < 0) this.log({ event: `${source}_past_not_after`, notAfter: contents.notAfter });
+      else if (daysLeft < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS) this.log({ event: `${source}_expiring_soon`, notAfter: contents.notAfter, daysLeft });
     }
     try {
       const rootVerdict = verifyRootMetadata({ candidate: contents.keySet, trusted: this.trustedRoot, now });
@@ -607,21 +637,33 @@ export class AirPrompterAgent {
         store.acceptRoot(contents.keySet);
       }
       const payloads = bundlePayloadBytes(contents);
-      if (this.active) {
-        // An update: the same chain as OTA — signatures, scope, anti-rollback, every payload's hash — before a byte is staged.
-        const verdict = verifyManifest({ manifest: contents.manifest, root: this.trustedRoot, now, scope: { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target }, storedGeneration: store.state.generation, payloads, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) });
-        if (!verdict.ok) {
-          this.log({ event: "vendored_bundle_refused", reason: verdict.reason, bundleGeneration: generation });
-          this.lastRefusal = verdict.reason;
-          return;
-        }
+      // The same chain as OTA — signatures, scope, anti-rollback, every payload's hash — BEFORE a byte is staged, in
+      // both branches. Staging first and letting `load` refuse left store.json advanced to a forged generation, and a
+      // fresh host then refused every legitimate release below it: a compromised store could brick a fleet's runtimes.
+      const verdict = verifyManifest({ manifest: contents.manifest, root: this.trustedRoot, now, scope: { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target }, storedGeneration: updating ? store.state.generation : 0, payloads, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) });
+      if (!verdict.ok) {
+        this.log({ event: `${source}_refused`, reason: verdict.reason, bundleGeneration: generation });
+        this.lastRefusal = verdict.reason;
+        return { outcome: "refused", generation, reason: verdict.reason };
+      }
+      // T15: the models this application declared it can call gate a bundle exactly as they gate a release over the air.
+      const missing = requiredModelsMissing(contents.manifest.payload, this.declaredModels());
+      if (missing.length > 0) {
+        this.unavailableModels = [...missing];
+        this.spool.refusal({ at: now, reason: "model_unavailable", generation, tag: null }, this.nowMs());
+        this.log({ event: `${source}_refused`, reason: "model_unavailable", bundleGeneration: generation, models: missing });
+        this.lastRefusal = "model_unavailable";
+        return { outcome: "refused", generation, reason: "model_unavailable", detail: missing.join(", ") };
+      }
+      if (updating) {
         this.takeApplyPolicy(contents.manifest.payload);
         this.takeDirectives(contents.manifest.payload);
         store.stage({ manifest: contents.manifest, payloads });
         const decision = await this.applyPolicy(contents.manifest);
         if (decision === "staged") {
-          this.log({ event: "vendored_bundle_staged", generation });
-          return;
+          this.log({ event: `${source}_staged`, generation });
+          this.emitChange();
+          return { outcome: "staged", generation };
         }
         if (decision === "activated") {
           const slot = store.activate();
@@ -630,18 +672,58 @@ export class AirPrompterAgent {
         }
         this.source = "store";
         this.lastRefusal = null;
-        this.log({ event: "vendored_bundle_activated", generation: this.active.generation });
-        return;
+        this.unavailableModels = [];
+        this.log({ event: `${source}_activated`, generation: this.active!.generation });
+        this.emitChange();
+        return { outcome: "activated", generation: this.active!.generation };
       }
-      // Stage through the store so the bundle's release becomes the encrypted A slot: the same verification path as OTA.
+      // Stage through the store so the bundle's release becomes the encrypted A slot: verified above, like OTA.
       store.stage({ manifest: contents.manifest, payloads });
       const slot = store.activate();
       this.active = store.load(slot, { ...verifyOptions, root: this.trustedRoot });
-      this.source = "vendored_bundle";
-      this.log({ event: "vendored_bundle_applied", generation: this.active.generation });
+      this.stagedManifest = null;
+      this.source = source === "vendored_bundle" ? "vendored_bundle" : "store";
+      this.lastRefusal = null;
+      this.unavailableModels = [];
+      this.log({ event: `${source}_applied`, generation: this.active.generation });
+      this.emitChange();
+      return { outcome: "activated", generation: this.active.generation };
     } catch (error) {
-      this.log({ event: "vendored_bundle_unusable", reason: (error as Error).message });
+      this.log({ event: `${source}_unusable`, reason: (error as Error).message });
+      return { outcome: "refused", generation, reason: "unusable", detail: (error as Error).message };
     }
+  }
+
+  /**
+   * A release from the customer's own store, at run time (T39). The fleet pattern: one puller writes the bundle into
+   * a database, every runtime reads the newest row and hands it here when the generation rises. The same chain and
+   * the same rules as a vendored bundle — verified before a byte is staged, the apply policy decides, never below the
+   * held generation (a restored backup or a stale replica cannot move a host backwards) — and the swap is atomic:
+   * renders in flight finish on the release they resolved against. Attached to a daemon the host's store is the
+   * daemon's, and this refuses. Never throws on a bad bundle; the outcome says why.
+   */
+  async applyBundle(bundle: Bundle | string, options: { distributionKey?: DistributionKey } = {}): Promise<BundleOutcome> {
+    if (this.daemon) return { outcome: "refused", generation: null, reason: "daemon_attached" };
+    if (!this.store) return { outcome: "refused", generation: null, reason: "no_store" };
+    const now = this.nowIso();
+    let contents: ReturnType<typeof openBundle>;
+    try {
+      const parsed = typeof bundle === "string" ? (JSON.parse(bundle) as Bundle) : bundle;
+      contents = openBundle(parsed, { agentId: this.options.agentId, target: this.options.target }, options.distributionKey ?? this.options.distributionKey ?? this.options.vendoredBundle?.distributionKey);
+    } catch (error) {
+      this.log({ event: "applied_bundle_unusable", reason: (error as Error).message });
+      return { outcome: "refused", generation: null, reason: "unusable", detail: (error as Error).message };
+    }
+    const verifyOptions = { now, root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) };
+    // One pass over the store at a time: a sync in flight finishes first, and a sync (or another applyBundle) that
+    // starts meanwhile waits for this one. `stop()` awaits the same promise.
+    const previous = this.syncing ?? Promise.resolve();
+    let outcome!: BundleOutcome;
+    const pass = previous.catch(() => undefined).then(async () => { outcome = await this.takeBundle(contents, "applied_bundle", now, verifyOptions); });
+    const guarded: Promise<void> = pass.finally(() => { if (this.syncing === guarded) this.syncing = null; });
+    this.syncing = guarded;
+    await guarded;
+    return outcome;
   }
 
   /** Store first (active slot, then the other), then the vendored bundle (S7: an update when newer, the fallback when nothing is held), then refuse. Zero network. */
@@ -922,8 +1004,10 @@ export class AirPrompterAgent {
       return;
     }
     if (!this.client || !this.store) return;
+    // One pass over the store at a time. A pass already in flight — a sync, or an `applyBundle` — is the answer: this
+    // call resolves when it ends and runs no sync of its own (the resident timer's next tick catches up).
     if (this.syncing) return this.syncing;
-    this.syncing = (async () => {
+    const pass = (async () => {
       const result = await syncOnce({
         store: this.store!,
         client: this.client!,
@@ -977,10 +1061,12 @@ export class AirPrompterAgent {
         this.log({ event: "release_staged", generation: result.generation });
         this.emitChange();
       }
-    })().finally(() => {
-      this.syncing = null;
-    });
-    return this.syncing;
+    })();
+    // Cleared only by the pass that set it: an `applyBundle` chained behind this sync replaces the guard with its own
+    // promise, and this sync's end must not drop it while the apply is still over the store.
+    const guarded: Promise<void> = pass.finally(() => { if (this.syncing === guarded) this.syncing = null; });
+    this.syncing = guarded;
+    return guarded;
   }
 
   /**

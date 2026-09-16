@@ -42,6 +42,7 @@ from airprompter_agent_core.telemetry.feedback import normalize_feedback
 from airprompter_agent_telemetry.spool.writer import DirectorySink, MemorySink, Observation, SpoolSink, SpoolWriter, WriterIdentity, epoch_minute, segment_name
 from airprompter_agent_sync.store.key_provider import KeyProvider, file_key
 from airprompter_agent_sync.store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
+from airprompter_agent_sync.sync.loop import required_models_missing
 from airprompter_agent_telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant, post_segment
 from airprompter_agent_core.control.client import SyncClient
 from airprompter_agent_sync.sync.daemon import DaemonClient, daemon_socket_path
@@ -420,6 +421,7 @@ class AirPrompterAgent:
         require_countersign: Optional[bool] = None,
         sync: Optional[Union[SyncOptions, Mapping[str, Any]]] = None,
         vendored_bundle: Optional[Union[VendoredBundle, Mapping[str, Any]]] = None,
+        distribution_key: Optional[DistributionKey] = None,
         apply: Optional[Union[ApplyOptions, Mapping[str, Any]]] = None,
         golden: Optional[Union[GoldenOptions, Mapping[str, Any]]] = None,
         heartbeat_seconds: Optional[float] = None,
@@ -444,6 +446,9 @@ class AirPrompterAgent:
             "require_countersign": require_countersign,
             "sync": sync_options,
             "vendored_bundle": _coerce(VendoredBundle, vendored_bundle) if vendored_bundle is not None else None,
+            # The fleet's X25519 distribution private key: opens every sealed bundle this host is handed — the vendored
+            # one and every apply_bundle() — when neither names its own. Held by runtimes, never by the puller.
+            "distribution_key": distribution_key,
             "apply": _coerce(ApplyOptions, apply),
             "golden": _coerce(GoldenOptions, golden) if golden is not None else None,
             "heartbeat_seconds": heartbeat_seconds,
@@ -573,84 +578,142 @@ class AirPrompterAgent:
         return {"now": now, "root": self._trusted_root, "countersign_root": self._o.get("countersign_root"), "require_countersign": self._o.get("require_countersign")}
 
     def _take_vendored_bundle(self, now: str) -> None:
-        """The vendored bundle at boot (S7). With nothing verified on the host it is the tier-3 fallback: staged through the store
-        and activated, whatever its generation. With a store already serving, a bundle is an UPDATE like any other: one whose
-        generation is above what the host holds is verified through the same chain as OTA and staged, and the host's apply
-        policy decides (the S4 pin); one at the held generation changes nothing; one BELOW it — a ``git revert`` to an older
-        bundle — is refused and says so: a rollback is ``airprompter rollback``, never an older bundle. A bundle past its
-        ``notAfter`` is refused as an update and applied only as the fallback. Never raises."""
-        store = self._store
         vendored: VendoredBundle = self._o["vendored_bundle"]
-        assert store is not None
         try:
             if isinstance(vendored.bundle, str):
                 with open(vendored.bundle, encoding="utf-8") as f:
                     bundle = json.load(f)
             else:
                 bundle = vendored.bundle
-            contents = open_bundle(bundle, {"agentId": self._o["agent_id"], "target": self._o["target"]}, vendored.distribution_key)
+            contents = open_bundle(bundle, {"agentId": self._o["agent_id"], "target": self._o["target"]}, vendored.distribution_key or self._o.get("distribution_key"))
         except Exception as error:  # noqa: BLE001
             self._log({"event": "vendored_bundle_unusable", "reason": str(error)})
             return
+        self._take_bundle(contents, "vendored_bundle", now)
+
+    def _take_bundle(self, contents: Mapping[str, Any], source: str, now: str) -> dict[str, Any]:
+        """A release handed to this host as a bundle — vendored at boot, or applied at run time from the customer's own
+        store. With nothing active it is the tier-3 fallback: staged through the store and activated whatever its
+        generation. With a release serving it is an UPDATE like any other: above the held generation it runs the same
+        chain as OTA — signatures, scope, every payload's hash — and is staged, then the host's apply policy decides
+        (auto activates; unlock_required stages, then the hook, the window, ``unlock()``); the held generation changes
+        nothing; one BELOW it is refused — a rollback is ``rollback()``, never an older bundle; past ``notAfter`` it is
+        refused as an update and applied only as the fallback. Never raises; the outcome says what happened."""
+        store = self._store
+        assert store is not None
         generation = int(contents["manifest"]["payload"]["generation"])
         days_left = (instant(contents["notAfter"]) - instant(now)) // 86_400_000
-        if self._active is not None:
+        # A first release staged under unlock_required (nothing active, something staged) is a HELD generation: a bundle
+        # at or below it is not a fallback to activate around the unlock, it is the update path with its rules.
+        updating = self._active is not None or self._staged_manifest is not None
+        if updating:
             held = max(int(store.state.get("generation", 0)), int(self._staged_manifest["payload"]["generation"]) if self._staged_manifest else 0)
             if generation == held:
-                return
+                return {"outcome": "unchanged", "generation": generation}
             if generation < held:
-                self._log({"event": "vendored_bundle_refused", "reason": "generation_rollback", "bundleGeneration": generation, "heldGeneration": held, "message": f"the vendored bundle is generation {generation}; this host holds {held}. A bundle never moves a host backwards — a rollback is `airprompter rollback`, never an older bundle."})
+                self._log({"event": f"{source}_refused", "reason": "generation_rollback", "bundleGeneration": generation, "heldGeneration": held, "message": f"the bundle is generation {generation}; this host holds {held}. A bundle never moves a host backwards — a rollback is `airprompter rollback`, never an older bundle."})
                 self._last_refusal = "generation_rollback"
-                return
+                return {"outcome": "refused", "generation": generation, "reason": "generation_rollback", "held": held}
             held_back = store.state.get("heldBackBelow")
             if held_back is not None and generation <= int(held_back):
-                self._log({"event": "vendored_bundle_held_back", "bundleGeneration": generation, "heldBackBelow": held_back})
-                return
+                self._log({"event": f"{source}_held_back", "bundleGeneration": generation, "heldBackBelow": held_back})
+                return {"outcome": "held_back", "generation": generation, "heldBackBelow": int(held_back)}
             if days_left < 0:
-                self._log({"event": "vendored_bundle_refused", "reason": "expired", "bundleGeneration": generation, "notAfter": contents["notAfter"]})
-                return
+                self._log({"event": f"{source}_refused", "reason": "expired", "bundleGeneration": generation, "notAfter": contents["notAfter"]})
+                return {"outcome": "refused", "generation": generation, "reason": "expired"}
         else:
             self._bundle_not_after = contents["notAfter"]
             if days_left < 0:
-                self._log({"event": "vendored_bundle_past_not_after", "notAfter": contents["notAfter"]})
+                self._log({"event": f"{source}_past_not_after", "notAfter": contents["notAfter"]})
             elif days_left < VENDORED_BUNDLE_EXPIRY_WARNING_DAYS:
-                self._log({"event": "vendored_bundle_expiring_soon", "notAfter": contents["notAfter"], "daysLeft": days_left})
+                self._log({"event": f"{source}_expiring_soon", "notAfter": contents["notAfter"], "daysLeft": days_left})
         try:
             verdict = verify_root_metadata(candidate=contents["keySet"], trusted=self._trusted_root, now=now)
             if verdict.ok:
                 self._trusted_root = contents["keySet"]
                 store.accept_root(contents["keySet"])
             payloads = bundle_payload_bytes(contents)
-            if self._active is not None:
-                # An update: the same chain as OTA — signatures, scope, anti-rollback, every payload's hash — before a byte is staged.
-                scope = {"organizationId": self._o["organization_id"], "agentId": self._o["agent_id"], "target": self._o["target"]}
-                full = verify_manifest(manifest=contents["manifest"], root=self._trusted_root, now=now, scope=scope, stored_generation=int(store.state.get("generation", 0)), payloads=payloads, countersign_root=self._o.get("countersign_root"), require_countersign=self._o.get("require_countersign"))
-                if not full.ok:
-                    self._log({"event": "vendored_bundle_refused", "reason": full.reason, "bundleGeneration": generation})
-                    self._last_refusal = full.reason
-                    return
+            # The same chain as OTA — signatures, scope, anti-rollback, every payload's hash — BEFORE a byte is staged, in
+            # both branches. Staging first and letting load refuse left store.json advanced to a forged generation, and a
+            # fresh host then refused every legitimate release below it: a compromised store could brick a fleet's runtimes.
+            scope = {"organizationId": self._o["organization_id"], "agentId": self._o["agent_id"], "target": self._o["target"]}
+            full = verify_manifest(manifest=contents["manifest"], root=self._trusted_root, now=now, scope=scope, stored_generation=int(store.state.get("generation", 0)) if updating else 0, payloads=payloads, countersign_root=self._o.get("countersign_root"), require_countersign=self._o.get("require_countersign"))
+            if not full.ok:
+                self._log({"event": f"{source}_refused", "reason": full.reason, "bundleGeneration": generation})
+                self._last_refusal = full.reason
+                return {"outcome": "refused", "generation": generation, "reason": full.reason}
+            # T15: the models this application declared it can call gate a bundle exactly as they gate a release over the air.
+            missing = required_models_missing(contents["manifest"]["payload"], self._declared_models())
+            if missing:
+                self._unavailable_models = list(missing)
+                self.spool.refusal(at=now, reason="model_unavailable", generation=generation, tag=None, at_ms=self._now_ms())
+                self._log({"event": f"{source}_refused", "reason": "model_unavailable", "bundleGeneration": generation, "models": missing})
+                self._last_refusal = "model_unavailable"
+                return {"outcome": "refused", "generation": generation, "reason": "model_unavailable", "detail": ", ".join(missing)}
+            if updating:
                 self._take_verified(contents["manifest"]["payload"])
                 store.stage(manifest=contents["manifest"], payloads=payloads)
                 decision = self._apply_policy(contents["manifest"])
                 if decision == "staged":
-                    self._log({"event": "vendored_bundle_staged", "generation": generation})
-                    return
+                    self._log({"event": f"{source}_staged", "generation": generation})
+                    self._emit_change()
+                    return {"outcome": "staged", "generation": generation}
                 if decision == "activated":
                     slot = store.activate()
-                    self._active = store.load(slot, **self._verify_options(now))
-                    self._staged_manifest = None
-                self._source = "store"
-                self._last_refusal = None
-                self._log({"event": "vendored_bundle_activated", "generation": self._active.generation})
-                return
-            # Stage through the store so the bundle's release becomes the encrypted A slot: the same verification path as OTA.
+                    loaded = store.load(slot, **self._verify_options(now))
+                    with self._lock:
+                        self._active = loaded
+                        self._staged_manifest = None
+                with self._lock:
+                    self._source = "store"
+                    self._last_refusal = None
+                    self._unavailable_models = []
+                self._log({"event": f"{source}_activated", "generation": self._active.generation})
+                self._emit_change()
+                return {"outcome": "activated", "generation": self._active.generation}
+            # Stage through the store so the bundle's release becomes the encrypted A slot: verified above, like OTA.
             store.stage(manifest=contents["manifest"], payloads=payloads)
             slot = store.activate()
-            self._active = store.load(slot, **self._verify_options(now))
-            self._source = "vendored_bundle"
-            self._log({"event": "vendored_bundle_applied", "generation": self._active.generation})
+            loaded = store.load(slot, **self._verify_options(now))
+            with self._lock:
+                self._active = loaded
+                self._staged_manifest = None
+                self._source = "vendored_bundle" if source == "vendored_bundle" else "store"
+                self._last_refusal = None
+                self._unavailable_models = []
+            self._log({"event": f"{source}_applied", "generation": self._active.generation})
+            self._emit_change()
+            return {"outcome": "activated", "generation": self._active.generation}
         except Exception as error:  # noqa: BLE001
-            self._log({"event": "vendored_bundle_unusable", "reason": str(error)})
+            self._log({"event": f"{source}_unusable", "reason": str(error)})
+            return {"outcome": "refused", "generation": generation, "reason": "unusable", "detail": str(error)}
+
+    def apply_bundle(self, bundle: Union[Mapping[str, Any], str], *, distribution_key: Optional[DistributionKey] = None) -> dict[str, Any]:
+        """A release from the customer's own store, at run time (T39). The fleet pattern: one puller writes the bundle
+        into a database, every runtime reads the newest row and hands it here when the generation rises. The same chain
+        and the same rules as a vendored bundle — verified before a byte is staged, the apply policy decides, never
+        below the held generation (a restored backup or a stale replica cannot move a host backwards) — and the swap is
+        atomic: renders in flight finish on the release they resolved against. Attached to a daemon the host's store is
+        the daemon's, and this refuses. Never raises on a bad bundle; the outcome says why."""
+        if self._daemon is not None:
+            return {"outcome": "refused", "generation": None, "reason": "daemon_attached"}
+        if self._store is None:
+            return {"outcome": "refused", "generation": None, "reason": "no_store"}
+        now = self._now_iso()
+        try:
+            parsed = json.loads(bundle) if isinstance(bundle, str) else bundle
+            vendored = self._o.get("vendored_bundle")
+            key = distribution_key or self._o.get("distribution_key") or (vendored.distribution_key if vendored is not None else None)
+            contents = open_bundle(parsed, {"agentId": self._o["agent_id"], "target": self._o["target"]}, key)
+        except Exception as error:  # noqa: BLE001
+            self._log({"event": "applied_bundle_unusable", "reason": str(error)})
+            return {"outcome": "refused", "generation": None, "reason": "unusable", "detail": str(error)}
+        # One pass over the store at a time, like sync_now: the pass under _sync_lock (so a sync and an apply never
+        # interleave in the same slot). _take_bundle takes _lock only around the in-memory swap, so a render on another
+        # thread never waits on the on_staged hook or the golden runs, and a hook that renders from a worker cannot
+        # deadlock.
+        with self._sync_lock:
+            return self._take_bundle(contents, "applied_bundle", now)
 
     def _boot(self) -> None:
         """Store first (active slot, then the other), then the vendored bundle (S7: an update when newer, the fallback when nothing is held), then refuse. Zero network."""

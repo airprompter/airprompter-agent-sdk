@@ -84,6 +84,19 @@ const inferenceSlots = [slots[0], { ...slots[1], inference: { topPBps: 9000, tem
 const inferenceDigest = releaseDigest(inferenceSlots);
 if (inferenceDigest === digest) throw new Error("inference must change the release digest");
 if (releaseDigest([slots[0], { ...slots[1], inference: { reasoningEffort: "low", stopSequences: ["\n\nHuman:"], maxOutputTokens: 800, temperatureMilli: 200, topPBps: 9000 } }]) !== inferenceDigest) throw new Error("the inference digest input is order-free");
+// A JSON null in the block is unset, in every implementation: the digest is the one without the key.
+if (releaseDigest([slots[0], { ...slots[1], inference: { temperatureMilli: 200, topPBps: null } }]) !== releaseDigest([slots[0], { ...slots[1], inference: { temperatureMilli: 200 } }])) throw new Error("a null inference key is unset");
+// 0.3.2: a workflow step's own settings are in the digest input when present, projected as a slot's are.
+const stepText = Buffer.from("Summarise {{document}} in three sentences.\n", "utf8");
+const workflowSlot = {
+  tag: "docs.summarise", kind: "workflow", artifactId: "wfl_2a3b4c5d6e7f", versionId: "ver_wf_01", versionOrdinal: 1, contentHash: sha256Prefixed(stepText), byteLength: stepText.length, model: "claude-sonnet-5",
+  variables: [{ name: "document", required: true, trust: "end_user" }],
+  steps: [{ stepId: "docs.summarise#1", ordinal: 1, promptArtifactId: "prm_step1", promptVersionId: "ver_step1", contentHash: sha256Prefixed(stepText), byteLength: stepText.length }],
+};
+const stepInferenceSlots = [slots[0], slots[1], { ...workflowSlot, steps: [{ ...workflowSlot.steps[0], inference: { maxOutputTokens: 1200, temperatureMilli: 0 } }] }];
+const stepInferenceDigest = releaseDigest(stepInferenceSlots);
+if (stepInferenceDigest === releaseDigest([slots[0], slots[1], workflowSlot])) throw new Error("a step's inference must change the release digest");
+const payloadsWithStep = [...payloadsOk, { contentHash: sha256Prefixed(stepText), bytes: stepText.toString("base64url") }];
 
 /** S16: a well-formed per-slot experiment — the candidate arm overrides that slot only, on a digest of its own. */
 function experimentFor(tag, experimentId) {
@@ -176,6 +189,7 @@ const manifestCases = [
   { name: "a slot with a golden set verifies when the set's payload is fetched; the reference is in its release digest (T34)", ...base, root: rootV1, manifest: manifest(payload({ slots: goldenSlots, releaseDigest: goldenDigest })), payloads: payloadsWithGolden, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   { name: "a golden set's payload is referenced like any other: not fetched is refused (T34)", ...base, root: rootV1, manifest: manifest(payload({ slots: goldenSlots, releaseDigest: goldenDigest })), payloads: payloadsOk, expected: { ok: false, reason: "payload_missing" } },
   { name: "a slot with inference settings verifies, and the settings are in its release digest (0.3.1)", ...base, root: rootV1, manifest: manifest(payload({ slots: inferenceSlots, releaseDigest: inferenceDigest })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
+  { name: "a workflow step with inference settings verifies, and the step's settings are in the release digest (0.3.2)", ...base, root: rootV1, manifest: manifest(payload({ slots: stepInferenceSlots, releaseDigest: stepInferenceDigest })), payloads: payloadsWithStep, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   { name: "a directive of a kind the runtime does not honour refuses the whole manifest before any payload is fetched (S4)", ...base, root: rootV1, manifest: manifest(payload({ directives: [{ kind: "reboot", issuedAt: "2026-09-12T10:00:00Z" }, { kind: "disable", scope: "agent", issuedAt: "2026-09-12T10:00:00Z" }] })), payloads: payloadsOk, expected: { ok: false, reason: "directive_unknown" } },
   { name: "the two kinds the runtime honours verify (S4): disable acts without a local act, request_unlock only asks", ...base, root: rootV1, manifest: manifest(payload({ directives: [{ kind: "disable", scope: "slot", tag: "support.reply", issuedAt: "2026-09-12T10:00:00Z", reason: "incident" }, { kind: "request_unlock", releaseDigest: digest, requestedBy: "usr_console", requestedAt: "2026-09-12T10:00:00Z", expiresAt: "2026-09-12T14:00:00Z" }] })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   // S16 (M15): per-prompt experiments — a well-formed experiments[] verifies; the conflicts are refused before any payload.

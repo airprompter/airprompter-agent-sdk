@@ -79,6 +79,11 @@ export function disabledFrom(directives: readonly Directive[]): DisabledDetail {
   return { agent, slots, arms, armsByExperiment };
 }
 
+/** The block as handed out: a copy, frozen — a caller that edits it edits nothing the runtime holds. */
+function frozenInference(inference: SlotInference): SlotInference {
+  return Object.freeze({ ...inference, ...(inference.stopSequences ? { stopSequences: Object.freeze([...inference.stopSequences]) } : {}) }) as SlotInference;
+}
+
 export class ReleaseResolver {
   constructor(private readonly input: ResolverInput) {}
 
@@ -155,11 +160,11 @@ export class ReleaseResolver {
     const generation = this.input.release.generation;
     const text = renderTemplate({ tag: slot.tag, text: this.textOf(slot), variables: slot.variables, values, ...(this.input.delimiters ? { delimiters: this.input.delimiters } : {}) });
     const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, versionId: slot.versionId, arm, generation, bucket };
-    return { text, model: slot.model, ...(slot.inference ? { inference: slot.inference } : {}), versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag };
+    return { text, model: slot.model, ...(slot.inference ? { inference: frozenInference(slot.inference) } : {}), versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag };
   }
 
   /** A workflow slot's steps in ordinal order, each with its prompt text and run reference. */
-  workflow(resolved: ReleaseSlot): { model: string; arm: string; steps: Array<{ stepId: string; ordinal: number; versionId: string; text: string; runRef: string }>; variables: ManifestSlot["variables"] } {
+  workflow(resolved: ReleaseSlot): { model: string; arm: string; steps: Array<{ stepId: string; ordinal: number; versionId: string; text: string; runRef: string; model: string; inference?: SlotInference }>; variables: ManifestSlot["variables"] } {
     const { slot, arm, bucket } = resolved;
     if (slot.kind !== "workflow" || !slot.steps) throw new Error(`${slot.tag} is not a workflow slot`);
     const generation = this.input.release.generation;
@@ -172,6 +177,9 @@ export class ReleaseResolver {
         return bytes ? Buffer.from(bytes).toString("utf8") : "";
       })(),
       runRef: mintRunRef({ agentId: this.input.agentId, target: this.input.target, tag: step.stepId, versionId: step.promptVersionId, arm, generation, bucket }, Buffer.from(this.input.runRefKey)),
+      // The workflow's pinned model (every step runs on it), and — 0.3.2 — the step's own settings for it.
+      model: slot.model,
+      ...(step.inference ? { inference: frozenInference(step.inference) } : {}),
     }));
     return { model: slot.model, arm, steps, variables: slot.variables };
   }

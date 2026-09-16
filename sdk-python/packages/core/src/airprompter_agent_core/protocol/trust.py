@@ -309,11 +309,22 @@ INFERENCE_DIGEST_KEYS = ("maxOutputTokens", "reasoningEffort", "stopSequences", 
 
 
 def inference_digest_input(inference: Mapping[str, Any]) -> dict[str, Any]:
-    """The inference block as the digest covers it: only the known keys, only when set, in this order."""
+    """The inference block as the digest covers it: the known keys, each only when set (a JSON null is unset; canonical JSON sorts them)."""
     out: dict[str, Any] = {}
     for key in INFERENCE_DIGEST_KEYS:
-        if inference.get(key) is not None:
-            out[key] = list(inference[key]) if key == "stopSequences" else inference[key]
+        value = inference.get(key)
+        if value is None:
+            continue
+        out[key] = list(value) if key == "stopSequences" else value
+    return out
+
+
+def _step_digest_input(step: Mapping[str, Any]) -> dict[str, Any]:
+    out = {"stepId": step["stepId"], "ordinal": step["ordinal"], "promptArtifactId": step["promptArtifactId"], "promptVersionId": step["promptVersionId"], "contentHash": step["contentHash"], "byteLength": step["byteLength"]}
+    inference = step.get("inference")
+    if inference is not None:
+        # 0.3.2: a step's own settings, projected as a slot's are.
+        out["inference"] = inference_digest_input(inference)
     return out
 
 
@@ -340,13 +351,10 @@ def release_digest_input(slots: list[Mapping[str, Any]]) -> list[dict[str, Any]]
         if golden:
             entry["goldenSet"] = {"setId": golden["setId"], "cases": golden["cases"], "contentHash": golden["contentHash"], "byteLength": golden["byteLength"], "minPassBps": golden["minPassBps"]}
         inference = slot.get("inference")
-        if inference:
+        if inference is not None:
             entry["inference"] = inference_digest_input(inference)
         if slot.get("steps") is not None:
-            entry["steps"] = [
-                {"stepId": s["stepId"], "ordinal": s["ordinal"], "promptArtifactId": s["promptArtifactId"], "promptVersionId": s["promptVersionId"], "contentHash": s["contentHash"], "byteLength": s["byteLength"]}
-                for s in slot["steps"]
-            ]
+            entry["steps"] = [_step_digest_input(s) for s in slot["steps"]]
         projected.append(entry)
     return projected
 

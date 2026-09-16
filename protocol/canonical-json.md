@@ -33,8 +33,16 @@ tag, kind, artifactId, versionId, versionOrdinal (integer or null),
 contentHash, byteLength, model, modelRequired (only when true),
 outputChecks[{ kind, name, …the kind's own members }]   (only when present; checks.md),
 variables[{ name, required, trust }],
-steps[{ stepId, ordinal, promptArtifactId, promptVersionId, contentHash, byteLength }]   (workflow pins only)
+goldenSet{ setId, cases, contentHash, byteLength, minPassBps }   (only when present; golden-sets.md),
+inference{ maxOutputTokens, reasoningEffort, stopSequences, temperatureMilli, topPBps }   (only when present; each key only when set),
+steps[{ stepId, ordinal, promptArtifactId, promptVersionId, contentHash, byteLength, inference{…} }]   (workflow pins only; a step's inference as above)
 ```
+
+`inference` (0.3.1 on a slot, 0.3.2 on a workflow step) is projected only
+when the pin carries the block, and only its known keys, each only when
+set: a runtime that meets a key it does not know drops it from the
+projection, so a future key changes the digest of the releases that use it
+and nothing else. The sort in rule 3 makes the listed order immaterial.
 
 `outputChecks` is projected only when the slot carries enabled checks
 (sorted by name, the kind's own members — `projectChecks` in checks.md), so

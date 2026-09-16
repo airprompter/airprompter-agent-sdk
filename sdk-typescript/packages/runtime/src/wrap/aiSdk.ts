@@ -19,6 +19,8 @@
 
 import type { ObserveOptions, ObserveTarget } from "../observe.js";
 import type { Attribution } from "./attribution.js";
+import type { SlotInference } from "@airprompter/agent-core";
+import { INFERENCE_KEYS, temperatureOf, topPOf, type AppliedInference } from "./inference.js";
 
 export interface AiSdkMiddlewareHooks {
   attribute(params: unknown): Attribution | undefined;
@@ -39,6 +41,8 @@ export interface AiSdkMiddlewareOptions {
 export interface AiSdkMiddleware {
   middlewareVersion?: "v1" | "v2";
   specificationVersion?: "v3" | "v4";
+  /** 0.3.1: the release's inference settings put on the call parameters before the model sees them. */
+  transformParams(options: { type: "generate" | "stream"; params: unknown; model?: { modelId?: string } }): Promise<unknown>;
   wrapGenerate(options: { doGenerate: () => PromiseLike<unknown>; params: unknown; model: { modelId?: string } }): Promise<unknown>;
   wrapStream(options: { doStream: () => PromiseLike<unknown>; params: unknown; model: { modelId?: string } }): Promise<unknown>;
 }
@@ -99,6 +103,33 @@ export function generateResultShape(result: unknown): unknown {
   return { choices: [{ finish_reason: finishReasonOf(record?.finishReason), message: { role: "assistant", content: text } }], ...(usage ? { usage } : {}) };
 }
 
+/** The AI SDK's parameter names for the settings the shape carries; a reasoning effort is a provider option the SDK cannot name for every provider. */
+const AI_SDK_PARAMETER: Record<keyof SlotInference, string | null> = { temperatureMilli: "temperature", topPBps: "topP", maxOutputTokens: "maxOutputTokens", stopSequences: "stopSequences", reasoningEffort: null };
+
+/** The settings on an AI SDK call's params (`transformParams`): the release's model only, the call site told when it disagreed. */
+export function applyAiSdkInference(params: Record<string, unknown>, inference: SlotInference, options: { model?: string; modelId?: string | undefined } = {}): AppliedInference {
+  const out: Record<string, unknown> = { ...params };
+  if (options.model !== undefined && typeof options.modelId === "string" && options.modelId !== options.model) return { params: out, overridden: [], unsupported: [], skipped: "model_mismatch" };
+  const overridden: string[] = [];
+  const unsupported: AppliedInference["unsupported"] = [];
+  const values: Record<keyof SlotInference, unknown> = {
+    temperatureMilli: temperatureOf(inference),
+    topPBps: topPOf(inference),
+    maxOutputTokens: inference.maxOutputTokens ?? undefined,
+    stopSequences: inference.stopSequences ? [...inference.stopSequences] : undefined,
+    reasoningEffort: inference.reasoningEffort ?? undefined,
+  };
+  for (const key of INFERENCE_KEYS) {
+    const value = values[key];
+    if (value === undefined) continue;
+    const parameter = AI_SDK_PARAMETER[key];
+    if (parameter === null) { unsupported.push({ setting: key, reason: "shape" }); continue; }
+    if (out[parameter] !== undefined && out[parameter] !== null && JSON.stringify(out[parameter]) !== JSON.stringify(value)) overridden.push(parameter);
+    out[parameter] = value;
+  }
+  return { params: out, overridden, unsupported };
+}
+
 export function aiSdkMiddleware(hooks: AiSdkMiddlewareHooks, options: AiSdkMiddlewareOptions = {}): AiSdkMiddleware {
   const begin = (params: unknown, model: { modelId?: string }): Deferred | null => {
     let attribution: Attribution | undefined;
@@ -120,6 +151,29 @@ export function aiSdkMiddleware(hooks: AiSdkMiddlewareHooks, options: AiSdkMiddl
     options.version === "v1" || options.version === "v2" ? { middlewareVersion: options.version } : options.version === "v3" || options.version === "v4" ? { specificationVersion: options.version } : { middlewareVersion: "v2", specificationVersion: "v4" };
   return {
     ...stamps,
+    async transformParams({ params, model }) {
+      let attribution: Attribution | undefined;
+      try {
+        attribution = hooks.attribute(params);
+      } catch {
+        return params;
+      }
+      const record = obj(params);
+      if (!attribution?.inference || !record) return params;
+      try {
+        const applied = applyAiSdkInference(record, attribution.inference, { model: attribution.model, modelId: model?.modelId });
+        if (applied.skipped === "model_mismatch") {
+          hooks.log({ event: "wrap_inference_model_mismatch", method: "ai-sdk", tag: attribution.tag, releaseModel: attribution.model, model: model?.modelId });
+          return params;
+        }
+        if (applied.overridden.length > 0) hooks.log({ event: "wrap_inference_overridden", method: "ai-sdk", tag: attribution.tag, parameters: applied.overridden });
+        if (applied.unsupported.length > 0) hooks.log({ event: "wrap_inference_unsupported", method: "ai-sdk", tag: attribution.tag, settings: applied.unsupported });
+        return applied.params;
+      } catch (error) {
+        hooks.log({ event: "wrap_inference_failed", method: "ai-sdk", reason: (error as Error).message });
+        return params;
+      }
+    },
     async wrapGenerate({ doGenerate, params, model }) {
       const final = begin(params, model);
       if (!final) return doGenerate();

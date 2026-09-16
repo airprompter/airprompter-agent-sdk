@@ -161,7 +161,7 @@ class FakeControlPlane:
                 step_bytes = step["text"].encode("utf-8")
                 step_hash = sha256_prefixed(step_bytes)
                 self.payloads[step_hash] = step_bytes
-                slot["steps"].append({"stepId": f"{tag}#{index + 1}", "ordinal": index + 1, "promptArtifactId": f"art_{tag}_{index + 1}", "promptVersionId": step.get("versionId") or f"ver_{tag}_step{index + 1}", "contentHash": step_hash, "byteLength": len(step_bytes)})
+                slot["steps"].append({"stepId": f"{tag}#{index + 1}", "ordinal": index + 1, "promptArtifactId": f"art_{tag}_{index + 1}", "promptVersionId": step.get("versionId") or f"ver_{tag}_step{index + 1}", "contentHash": step_hash, "byteLength": len(step_bytes), **({"inference": step["inference"]} if step.get("inference") else {})})
         return slot
 
     def promote(self, slots: list[dict[str, Any]], *, apply_policy: str = "auto", lease_seconds: int = 3600, experiment: Optional[dict] = None, experiments: Optional[list[dict]] = None, directives: Optional[list] = None, on_lease_expiry: str = "degrade", unlock_window: Optional[dict] = None, sign_with: Optional[dict] = None, generation: Optional[int] = None) -> dict[str, Any]:

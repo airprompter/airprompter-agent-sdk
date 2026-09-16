@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airprompter-agent"
-version = "0.2.6"
+version = "0.2.7"
 description = "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. The facade over airprompter-agent-core, -sync, -runtime and -telemetry."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -23,18 +23,18 @@ classifiers = [
   "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-  "airprompter-agent-core==0.2.6",
-  "airprompter-agent-sync==0.2.6",
-  "airprompter-agent-runtime==0.2.6",
-  "airprompter-agent-telemetry==0.2.6",
+  "airprompter-agent-core==0.2.7",
+  "airprompter-agent-sync==0.2.7",
+  "airprompter-agent-runtime==0.2.7",
+  "airprompter-agent-telemetry==0.2.7",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
 # Key providers (airprompter-agent-sync extras), re-exposed here so one install names them.
-kms = ["airprompter-agent-sync[kms]==0.2.6"]
-vault = ["airprompter-agent-sync[vault]==0.2.6"]
-keyring = ["airprompter-agent-sync[keyring]==0.2.6"]
+kms = ["airprompter-agent-sync[kms]==0.2.7"]
+vault = ["airprompter-agent-sync[vault]==0.2.7"]
+keyring = ["airprompter-agent-sync[keyring]==0.2.7"]
 # Provider wrappers: `airprompter_agent.integrations.*` import these lazily.
 openai = ["openai>=1.40"]
 anthropic = ["anthropic>=0.40"]

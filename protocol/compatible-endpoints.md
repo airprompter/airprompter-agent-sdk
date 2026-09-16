@@ -46,7 +46,9 @@ completion.airprompter.runRef;                       // also in the X-AirPrompte
 | `stream` | SSE in the provider's own event shape | see below |
 | `airprompter.idempotencyKey` (or the `Idempotency-Key` header), `airprompter.stepId`, `airprompter.metadata` | as on `/run` | the same replay window, workflow step and echoed metadata |
 
-**Accepted and ignored** (the release owns them): Chat `temperature`,
+**Accepted and ignored** (the release owns them — the run uses the slot's
+own `inference` settings, sealed with the version, and never the caller's):
+Chat `temperature`,
 `top_p`, `stop`, `presence_penalty`, `frequency_penalty`, `seed`,
 `logit_bias`, `store`, `stream_options`, `service_tier`, `reasoning_effort`,
 `verbosity`, `parallel_tool_calls`, `prompt_cache_key`, `safety_identifier`,

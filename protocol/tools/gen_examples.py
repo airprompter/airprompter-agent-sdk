@@ -19,16 +19,19 @@ def sha256_prefixed(data: bytes) -> str:
 def b64url(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode().rstrip("=")
 
+def inference_input(inference):
+    return {k: inference[k] for k in ("maxOutputTokens", "reasoningEffort", "stopSequences", "temperatureMilli", "topPBps") if inference.get(k) is not None}
+
 def digest_input(slots):
     out = []
     for s in sorted(slots, key=lambda s: s["tag"]):
         p = {k: s[k] for k in ("tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model")}
         p["variables"] = [{"name": v["name"], "required": v["required"], "trust": v["trust"]} for v in s["variables"]]
         if "steps" in s:
-            p["steps"] = [{k: st[k] for k in ("stepId", "ordinal", "promptArtifactId", "promptVersionId", "contentHash", "byteLength")} for st in s["steps"]]
-        if s.get("inference"):
-            # 0.3.1: the inference block is digest-bound when present — known keys only, in this order.
-            p["inference"] = {k: s["inference"][k] for k in ("maxOutputTokens", "reasoningEffort", "stopSequences", "temperatureMilli", "topPBps") if s["inference"].get(k) is not None}
+            p["steps"] = [{**{k: st[k] for k in ("stepId", "ordinal", "promptArtifactId", "promptVersionId", "contentHash", "byteLength")}, **({"inference": inference_input(st["inference"])} if st.get("inference") is not None else {})} for st in s["steps"]]
+        if s.get("inference") is not None:
+            # 0.3.1: the inference block is digest-bound when present — its known keys, each only when set.
+            p["inference"] = inference_input(s["inference"])
         out.append(p)
     return out
 
@@ -100,7 +103,7 @@ slots = [
         ],
         "steps": [
             {"stepId": "docs.summarise-translate#1", "ordinal": 1, "promptArtifactId": "prm_step1", "promptVersionId": "ver_step1", "contentHash": sha256_prefixed(step1_text), "byteLength": len(step1_text)},
-            {"stepId": "docs.summarise-translate#2", "ordinal": 2, "promptArtifactId": "prm_step2", "promptVersionId": "ver_step2", "contentHash": sha256_prefixed(step2_text), "byteLength": len(step2_text)},
+            {"stepId": "docs.summarise-translate#2", "ordinal": 2, "promptArtifactId": "prm_step2", "promptVersionId": "ver_step2", "contentHash": sha256_prefixed(step2_text), "byteLength": len(step2_text), "inference": {"temperatureMilli": 0, "maxOutputTokens": 1200}},
         ],
     },
 ]

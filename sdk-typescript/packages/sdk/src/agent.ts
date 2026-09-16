@@ -1514,7 +1514,7 @@ export class AirPrompterAgent {
   workflow(tag: string, options: { subject?: string } = {}) {
     const resolved = this.resolveSlot(tag, options.subject);
     const workflow = this.resolver().workflow(resolved);
-    for (const step of workflow.steps) this.renders.register(step.text, { tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model });
+    for (const step of workflow.steps) this.renders.register(step.text, { tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
     return workflow;
   }
 

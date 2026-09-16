@@ -464,9 +464,11 @@ def test_inference_settings_ride_the_render_and_go_out_on_the_wrapped_call(state
     """0.3.1: the release's values, whatever the call site wrote; integers on the wire, floats to the provider."""
     events: list = []
     plane = FakeControlPlane(SCOPE)
+    full = {"temperatureMilli": 200, "topPBps": 9000, "maxOutputTokens": 800, "stopSequences": ["\n\nHuman:"], "reasoningEffort": "low"}
     plane.promote([
-        {**plane.slot(tag="support.reply", text="Reply politely.", model="gpt-5"), "inference": {"temperatureMilli": 200, "topPBps": 9000, "maxOutputTokens": 800, "stopSequences": ["\n\nHuman:"], "reasoningEffort": "low"}},
+        {**plane.slot(tag="support.reply", text="Reply politely.", model="gpt-5"), "inference": full},
         plane.slot(tag="support.triage", text="Triage.", model="gpt-5"),
+        {**plane.slot(tag="support.claude", text="Reply as Claude.", model="claude-haiku-4-5"), "inference": full},
     ])
     ap = start(plane, state_dir, logger=events.append)
     rendered = ap.prompt("support.reply").render()
@@ -482,12 +484,46 @@ def test_inference_settings_ride_the_render_and_go_out_on_the_wrapped_call(state
     overridden = next(e for e in events if e.get("event") == "wrap_inference_overridden")
     assert overridden["parameters"] == ["temperature", "max_tokens"]
 
+    # A call to a model other than the release's keeps its own parameters: the settings were sealed for gpt-5, not for Claude.
+    elsewhere = FakeAnthropic()
+    ap.wrap(elsewhere).messages.create(model="claude-haiku-4-5", max_tokens=100, temperature=1, system=rendered.text, messages=[{"role": "user", "content": "hi"}])
+    other = elsewhere.calls[0]
+    assert other["temperature"] == 1 and other["max_tokens"] == 100 and "stop_sequences" not in other
+    mismatch = next(e for e in events if e.get("event") == "wrap_inference_model_mismatch")
+    assert (mismatch["tag"], mismatch["releaseModel"], mismatch["model"]) == ("support.reply", "gpt-5", "claude-haiku-4-5")
+
+    # Anthropic messages, on the release's model: temperature goes and top_p does not (Messages takes one of the two);
+    # a reasoning effort has no Messages parameter. Both are reported, not sent.
+    claude = ap.prompt("support.claude").render()
     anthropic = FakeAnthropic()
-    ap.wrap(anthropic).messages.create(model="claude-haiku-4-5", max_tokens=100, system=rendered.text, messages=[{"role": "user", "content": "hi"}])
+    ap.wrap(anthropic).messages.create(model="claude-haiku-4-5", max_tokens=100, system=claude.text, messages=[{"role": "user", "content": "hi"}])
     message = anthropic.calls[0]
-    assert message["temperature"] == 0.2 and message["top_p"] == 0.9 and message["max_tokens"] == 800
+    assert message["temperature"] == 0.2 and "top_p" not in message and message["max_tokens"] == 800
     assert message["stop_sequences"] == ["\n\nHuman:"] and "reasoning_effort" not in message
-    assert next(e for e in events if e.get("event") == "wrap_inference_unsupported")["settings"] == ["reasoningEffort"]
+    assert next(e for e in events if e.get("event") == "wrap_inference_unsupported")["settings"] == [{"setting": "topPBps", "reason": "one_sampling_parameter"}, {"setting": "reasoningEffort", "reason": "shape"}]
+
+    # With a thinking block the call site set, no sampling parameter goes at all.
+    thinking = FakeAnthropic()
+    before_thinking = len(events)
+    ap.wrap(thinking).messages.create(model="claude-haiku-4-5", max_tokens=100, thinking={"type": "enabled", "budget_tokens": 1024}, system=claude.text, messages=[{"role": "user", "content": "hi"}])
+    thought = thinking.calls[0]
+    assert "temperature" not in thought and "top_p" not in thought and thought["max_tokens"] == 800
+    assert next(e for e in events[before_thinking:] if e.get("event") == "wrap_inference_unsupported")["settings"] == [{"setting": "temperatureMilli", "reason": "thinking"}, {"setting": "topPBps", "reason": "thinking"}, {"setting": "reasoningEffort", "reason": "shape"}]
+
+    # Responses: the reasoning object is merged, not replaced; a stop sequence has no home.
+    responses = FakeOpenAI()
+    before_responses = len(events)
+    ap.wrap(responses).responses.create(model="gpt-5", reasoning={"effort": "high", "summary": "auto"}, instructions=rendered.text, input="hi")
+    response = responses.calls[0]
+    assert response["reasoning"] == {"effort": "low", "summary": "auto"} and response["max_output_tokens"] == 800 and "stop" not in response
+    assert next(e for e in events[before_responses:] if e.get("event") == "wrap_inference_overridden")["parameters"] == ["reasoning.effort"]
+    assert next(e for e in events[before_responses:] if e.get("event") == "wrap_inference_unsupported")["settings"] == [{"setting": "stopSequences", "reason": "shape"}]
+
+    # An explicit attribute() scope carries the settings like a matched render does.
+    scoped = FakeOpenAI()
+    with ap.attribute(rendered):
+        ap.wrap(scoped).chat.completions.create(model="gpt-5", temperature=1, messages=[{"role": "user", "content": "text the registry never saw"}])
+    assert scoped.calls[0]["temperature"] == 0.2, "attribute() applies the settings"
 
     quiet = FakeOpenAI()
     before = len(events)

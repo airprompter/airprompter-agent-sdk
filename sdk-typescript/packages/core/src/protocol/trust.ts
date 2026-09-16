@@ -191,18 +191,20 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
   return { ok: true, signingKeyId: usable[0]!.keyId, generation: payload.generation };
 }
 
-/** The digest input: pins sorted by tag, projected to exactly the covered members (canonical-json.md). */
-/** The inference block as the digest covers it: only the known keys, only when set, in this order. */
+export const INFERENCE_DIGEST_KEYS = ["maxOutputTokens", "reasoningEffort", "stopSequences", "temperatureMilli", "topPBps"] as const satisfies readonly (keyof SlotInference)[];
+
+/** The inference block as the digest covers it: the known keys, each only when set (a JSON null is unset; canonical JSON sorts them). */
 export function inferenceDigestInput(inference: SlotInference): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (inference.maxOutputTokens !== undefined) out.maxOutputTokens = inference.maxOutputTokens;
-  if (inference.reasoningEffort !== undefined) out.reasoningEffort = inference.reasoningEffort;
-  if (inference.stopSequences !== undefined) out.stopSequences = [...inference.stopSequences];
-  if (inference.temperatureMilli !== undefined) out.temperatureMilli = inference.temperatureMilli;
-  if (inference.topPBps !== undefined) out.topPBps = inference.topPBps;
+  for (const key of INFERENCE_DIGEST_KEYS) {
+    const value = inference[key];
+    if (value === undefined || value === null) continue;
+    out[key] = key === "stopSequences" ? [...(value as readonly string[])] : value;
+  }
   return out;
 }
 
+/** The digest input: pins sorted by tag, projected to exactly the covered members (canonical-json.md). */
 export function releaseDigestInput(slots: readonly ManifestSlot[]): unknown[] {
   return [...slots]
     .sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
@@ -221,7 +223,7 @@ export function releaseDigestInput(slots: readonly ManifestSlot[]): unknown[] {
       ...(slot.inference ? { inference: inferenceDigestInput(slot.inference) } : {}),
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
       ...(slot.steps
-        ? { steps: slot.steps.map((s) => ({ stepId: s.stepId, ordinal: s.ordinal, promptArtifactId: s.promptArtifactId, promptVersionId: s.promptVersionId, contentHash: s.contentHash, byteLength: s.byteLength })) }
+        ? { steps: slot.steps.map((s) => ({ stepId: s.stepId, ordinal: s.ordinal, promptArtifactId: s.promptArtifactId, promptVersionId: s.promptVersionId, contentHash: s.contentHash, byteLength: s.byteLength, ...(s.inference ? { inference: inferenceDigestInput(s.inference) } : {}) })) }
         : {}),
     }));
 }

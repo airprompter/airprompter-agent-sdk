@@ -14,7 +14,7 @@
 
 import { evaluateChecks, estimateTokens } from "../checks/index.js";
 import { renderTemplate, type Delimiters } from "../render/template.js";
-import type { GoldenSetRef, ManifestSlot, OutputCheck } from "../protocol/types.js";
+import type { GoldenSetRef, ManifestSlot, OutputCheck, SlotInference } from "../protocol/types.js";
 
 export const GOLDEN_SET_FORMAT = "airprompter-golden-set";
 export const GOLDEN_SET_VERSION = 1;
@@ -92,6 +92,8 @@ export interface GoldenInvocation {
   model: string;
   arm: string;
   variables: Readonly<Record<string, string>>;
+  /** 0.3.1: the slot's inference settings — the call is made as production makes it, or the gate measures something else. */
+  inference?: SlotInference;
 }
 
 /** The customer's model call: the output text, optionally with the provider's output token count (a length band uses it). */
@@ -132,7 +134,7 @@ export function passBpsOf(passed: number, cases: number): number {
  * with the error's message (a class of failure, not the output). Cases run `concurrency` at a time in order.
  */
 export async function runGoldenSet(input: {
-  slot: Pick<ManifestSlot, "tag" | "model" | "variables">;
+  slot: Pick<ManifestSlot, "tag" | "model" | "variables" | "inference">;
   arm: string;
   text: string;
   set: GoldenSet;
@@ -154,7 +156,7 @@ export async function runGoldenSet(input: {
       let result: GoldenCaseResult;
       try {
         const text = renderTemplate({ tag: input.slot.tag, text: input.text, variables: input.slot.variables, values: entry.variables, ...(input.delimiters ? { delimiters: input.delimiters } : {}) });
-        const answer = await input.invoke({ tag: input.slot.tag, caseId: entry.caseId, text, model: input.slot.model, arm: input.arm, variables: entry.variables });
+        const answer = await input.invoke({ tag: input.slot.tag, caseId: entry.caseId, text, model: input.slot.model, arm: input.arm, variables: entry.variables, ...(input.slot.inference ? { inference: input.slot.inference } : {}) });
         const output = typeof answer === "string" ? { text: answer, outputTokens: null } : { text: answer.text, outputTokens: answer.outputTokens ?? null };
         const outcome = evaluateChecks(entry.expect, { text: output.text, outputTokens: output.outputTokens ?? estimateTokens(output.text) });
         const failed = outcome.results.filter((r) => r.verdict === "fail").map((r) => r.name);

@@ -17,6 +17,7 @@
 
 import type { ObserveOptions, ObserveTarget } from "../observe.js";
 import type { Attribution } from "./attribution.js";
+import { applyInference } from "./inference.js";
 
 export interface WrapHooks {
   /** The rendered prompt a call belongs to, from its parameters; undefined passes the call through unobserved. */
@@ -112,7 +113,19 @@ function wrapMethod(original: (...args: unknown[]) => unknown, kind: StreamKind,
       hooks.log({ event: "wrap_unattributed", method });
       return original(...args);
     }
-    const params = obj(args[0]);
+    let params = obj(args[0]);
+    // 0.3.1: the release owns the inference settings — applied here, the call site told once when it disagreed.
+    if (attribution.inference && params) {
+      try {
+        const applied = applyInference(kind, params, attribution.inference);
+        if (applied.overridden.length > 0) hooks.log({ event: "wrap_inference_overridden", method, tag: attribution.tag, parameters: applied.overridden });
+        if (applied.unsupported.length > 0) hooks.log({ event: "wrap_inference_unsupported", method, tag: attribution.tag, settings: applied.unsupported });
+        args = [applied.params, ...args.slice(1)];
+        params = applied.params;
+      } catch (error) {
+        hooks.log({ event: "wrap_inference_failed", method, reason: (error as Error).message });
+      }
+    }
     const model = typeof params?.model === "string" ? params.model : attribution.model;
     // The clock starts now; the observation settles when the response (or the whole stream) has gone by.
     const final = deferred();

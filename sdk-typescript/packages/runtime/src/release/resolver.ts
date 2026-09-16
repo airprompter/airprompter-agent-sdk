@@ -12,11 +12,13 @@
  * refused and why; the facade decides what to record.
  */
 
-import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type Target } from "@airprompter/agent-core";
+import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type Target } from "@airprompter/agent-core";
 
 export interface Rendered {
   text: string;
   model: string;
+  /** 0.3.1: how the model is called for this slot, as the version declared it — the wrappers apply it. */
+  inference?: SlotInference;
   versionId: string;
   arm: string;
   generation: number;
@@ -153,7 +155,7 @@ export class ReleaseResolver {
     const generation = this.input.release.generation;
     const text = renderTemplate({ tag: slot.tag, text: this.textOf(slot), variables: slot.variables, values, ...(this.input.delimiters ? { delimiters: this.input.delimiters } : {}) });
     const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, versionId: slot.versionId, arm, generation, bucket };
-    return { text, model: slot.model, versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag };
+    return { text, model: slot.model, ...(slot.inference ? { inference: slot.inference } : {}), versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag };
   }
 
   /** A workflow slot's steps in ordinal order, each with its prompt text and run reference. */

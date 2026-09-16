@@ -29,6 +29,15 @@ export type OutputCheck =
   | { kind: "length"; name: string; minTokens?: number; maxTokens?: number }
   | { kind: "must_match" | "must_not_match"; name: string; pattern: string; flags?: "i" };
 
+/** Integers only (canonical-json.md): temperature in thousandths, top-p in basis points. */
+export interface SlotInference {
+  temperatureMilli?: number;
+  topPBps?: number;
+  maxOutputTokens?: number;
+  stopSequences?: string[];
+  reasoningEffort?: "low" | "medium" | "high";
+}
+
 export interface ManifestSlot {
   tag: string;
   kind: "prompt" | "workflow";
@@ -42,6 +51,8 @@ export interface ManifestSlot {
   modelRequired?: boolean;
   /** T29: the slot's enabled output checks (checks.md), sorted by name; in the digest input only when present. */
   outputChecks?: OutputCheck[];
+  /** 0.3.1: how the model is called for this slot, as the version declared it; in the digest when present. */
+  inference?: SlotInference;
   /** T34: the slot's golden set (golden-sets.md) — a reference to a payload the runtime opens and runs before activation; in the digest input only when present. */
   goldenSet?: GoldenSetRef;
   variables: SlotVariable[];

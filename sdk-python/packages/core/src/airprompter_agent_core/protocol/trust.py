@@ -305,6 +305,18 @@ def verify_manifest(
     return Verdict(True, signing_key_id=usable[0]["keyId"], generation=payload["generation"])
 
 
+INFERENCE_DIGEST_KEYS = ("maxOutputTokens", "reasoningEffort", "stopSequences", "temperatureMilli", "topPBps")
+
+
+def inference_digest_input(inference: Mapping[str, Any]) -> dict[str, Any]:
+    """The inference block as the digest covers it: only the known keys, only when set, in this order."""
+    out: dict[str, Any] = {}
+    for key in INFERENCE_DIGEST_KEYS:
+        if inference.get(key) is not None:
+            out[key] = list(inference[key]) if key == "stopSequences" else inference[key]
+    return out
+
+
 def release_digest_input(slots: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """The digest input: pins sorted by tag, projected to exactly the covered members (canonical-json.md)."""
     projected = []
@@ -327,6 +339,9 @@ def release_digest_input(slots: list[Mapping[str, Any]]) -> list[dict[str, Any]]
         golden = slot.get("goldenSet")
         if golden:
             entry["goldenSet"] = {"setId": golden["setId"], "cases": golden["cases"], "contentHash": golden["contentHash"], "byteLength": golden["byteLength"], "minPassBps": golden["minPassBps"]}
+        inference = slot.get("inference")
+        if inference:
+            entry["inference"] = inference_digest_input(inference)
         if slot.get("steps") is not None:
             entry["steps"] = [
                 {"stepId": s["stepId"], "ordinal": s["ordinal"], "promptArtifactId": s["promptArtifactId"], "promptVersionId": s["promptVersionId"], "contentHash": s["contentHash"], "byteLength": s["byteLength"]}

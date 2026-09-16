@@ -123,7 +123,7 @@
       }
     },
     "slot": {
-      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true, `outputChecks` and `goldenSet` only when present.",
+      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true, `outputChecks`, `goldenSet` and `inference` only when present.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model", "variables"],
@@ -141,6 +141,19 @@
           "type": "boolean"
         },
         "variables": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/variable" } },
+        "inference": {
+          "description": "How the model is called for this slot, as the version declared it: the provider wrappers and the hosted endpoints apply these and refuse a caller's own values for the same parameters. Omitted when the version declares none; in the digest input only when present. Integers only (canonical-json.md): temperature in thousandths (temperatureMilli 200 = 0.2), top-p in basis points (topPBps 9000 = 0.9). A runtime ignores keys it does not know.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "temperatureMilli": { "type": "integer", "minimum": 0, "maximum": 2000 },
+            "topPBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "maxOutputTokens": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+            "stopSequences": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+            "reasoningEffort": { "type": "string", "enum": ["low", "medium", "high"] }
+          }
+        },
         "outputChecks": {
           "description": "The slot's enabled output checks, sorted by name (checks.md). Omitted when none; in the digest input only when present.",
           "type": "array",

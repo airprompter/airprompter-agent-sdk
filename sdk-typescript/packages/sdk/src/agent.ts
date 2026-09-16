@@ -1504,7 +1504,7 @@ export class AirPrompterAgent {
     const render = (values: Record<string, string | number | boolean | null | undefined> = {}): Rendered => {
       const resolved = this.resolveSlot(tag, options.subject);
       const rendered = this.resolver().render(resolved, values);
-      this.renders.register(rendered.text, { tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model });
+      this.renders.register(rendered.text, { tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
       return rendered;
     };
     return { render, variables: () => this.resolveSlot(tag, options.subject).slot.variables };
@@ -1584,8 +1584,8 @@ export class AirPrompterAgent {
   }
 
   /** Run `fn` with every wrapped call inside it (across awaits) attributed to `rendered`, whatever text it carries. */
-  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model">, fn: () => T): T {
-    return withAttribution({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model }, fn);
+  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "inference">, fn: () => T): T {
+    return withAttribution({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
   }
 
   /** A Vercel AI SDK middleware for `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })`. */

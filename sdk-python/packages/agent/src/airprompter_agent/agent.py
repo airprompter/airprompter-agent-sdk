@@ -57,8 +57,9 @@ from airprompter_agent_runtime.release.resolver import ReleaseResolver, Rendered
 from airprompter_agent_core import SDK_VERSION  # one constant, pinned to pyproject by tests/test_package_split.py
 
 SDK_NAME = "agent-sdk-python"
-#: The protocol this SDK speaks; the heartbeat names it (the manifest carries its own).
-PROTOCOL_VERSION = "0.3.0"
+#: The protocol this SDK speaks; the heartbeat names it (the manifest carries its own). One constant, core's — a
+#: second copy here drifted a whole protocol bump behind it.
+from airprompter_agent_core import PROTOCOL_VERSION  # noqa: E402
 # A vendored bundle this close to its notAfter logs vendored_bundle_expiring_soon at start (the platform warns at the same distance).
 VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30
 _USER_AGENT = f"{SDK_NAME}/{SDK_VERSION}"
@@ -1518,7 +1519,7 @@ class AirPrompterAgent:
         with self._lock:
             slot, arm, bucket = self._resolve_slot(tag, subject)
             rendered = self._resolver().render(ReleaseSlot(slot, arm, bucket), values)
-        self._renders.register(rendered.text, Attribution(tag, rendered.version_id, rendered.arm, rendered.model))
+        self._renders.register(rendered.text, Attribution(tag, rendered.version_id, rendered.arm, rendered.model, rendered.inference))
         return rendered
 
     def workflow(self, tag: str, *, subject: Optional[str] = None) -> Workflow:
@@ -1612,7 +1613,7 @@ class AirPrompterAgent:
     def attribute(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget]):
         """``with ap.attribute(rendered):`` — every wrapped call inside the block is that render's, whatever text it carries."""
         target = self._target_of(rendered, None)
-        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model))
+        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, getattr(target, "inference", None)))
 
     def attribution_for(self, params: Any) -> Optional[Attribution]:
         """The render a request's parameters name: an explicit scope first, else a message whose text is a recent render."""

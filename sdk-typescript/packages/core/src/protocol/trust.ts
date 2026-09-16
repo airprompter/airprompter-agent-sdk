@@ -9,7 +9,7 @@ import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, veri
 
 import { isAssignmentError, validateRamp } from "./assignment.js";
 import { canonicalBytes, canonicalJson, sha256Prefixed } from "./canonicalJson.js";
-import { DIRECTIVE_KINDS, experimentConflict, experimentsOf, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type Target } from "./types.js";
+import { DIRECTIVE_KINDS, experimentConflict, experimentsOf, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type SlotInference, type Target } from "./types.js";
 
 export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([0]);
 
@@ -192,6 +192,17 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
 }
 
 /** The digest input: pins sorted by tag, projected to exactly the covered members (canonical-json.md). */
+/** The inference block as the digest covers it: only the known keys, only when set, in this order. */
+export function inferenceDigestInput(inference: SlotInference): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (inference.maxOutputTokens !== undefined) out.maxOutputTokens = inference.maxOutputTokens;
+  if (inference.reasoningEffort !== undefined) out.reasoningEffort = inference.reasoningEffort;
+  if (inference.stopSequences !== undefined) out.stopSequences = [...inference.stopSequences];
+  if (inference.temperatureMilli !== undefined) out.temperatureMilli = inference.temperatureMilli;
+  if (inference.topPBps !== undefined) out.topPBps = inference.topPBps;
+  return out;
+}
+
 export function releaseDigestInput(slots: readonly ManifestSlot[]): unknown[] {
   return [...slots]
     .sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
@@ -207,6 +218,7 @@ export function releaseDigestInput(slots: readonly ManifestSlot[]): unknown[] {
       ...(slot.modelRequired === true ? { modelRequired: true } : {}),
       ...(Array.isArray(slot.outputChecks) && slot.outputChecks.length > 0 ? { outputChecks: slot.outputChecks } : {}),
       ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
+      ...(slot.inference ? { inference: inferenceDigestInput(slot.inference) } : {}),
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
       ...(slot.steps
         ? { steps: slot.steps.map((s) => ({ stepId: s.stepId, ordinal: s.ordinal, promptArtifactId: s.promptArtifactId, promptVersionId: s.promptVersionId, contentHash: s.contentHash, byteLength: s.byteLength })) }

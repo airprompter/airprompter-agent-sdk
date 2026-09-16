@@ -341,9 +341,44 @@ def test_staged_release_survives_restart_never_serves_as_fallback(state_dir):
     store_dir = os.path.join(state_dir, "airprompter", "agt_1", "prod")
     state = json.load(open(os.path.join(store_dir, "store.json"), encoding="utf-8"))
     os.remove(os.path.join(store_dir, "slots", state["active"], "manifest.json"))
+    # The staged slot is not a fallback: the host starts with nothing to serve (so the unlock can still be given from
+    # it) and refuses every render until it is — the unapproved release is never served by accident.
+    bare = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)})
+    assert bare.generation == 0 and bare.status().staged_generation == 3
     with pytest.raises(AgentStartError) as refused:
-        AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)})
+        bare.prompt("support.reply").render()
     assert refused.value.code == "no_verified_release"
+    assert bare.unlock() == {"generation": 3}
+    assert bare.prompt("support.reply").render().text == "v3"
+    bare.stop()
+
+
+def test_first_release_staged_under_unlock_required_starts_the_host(state_dir):
+    plane = FakeControlPlane(SCOPE)
+    triage, reply = triage_slots(plane)
+    plane.promote([triage, reply], apply_policy="unlock_required")
+    events: list[dict] = []
+    staged: list[int] = []
+    # Before this the start raised no_verified_release, and a customer whose first production release waited on an
+    # unlock had no running process to give it from (T9: the unlock is theirs).
+    ap = start(plane, state_dir, logger=events.append, apply={"on_staged": lambda s: staged.append(s.generation)})
+    assert any(e.get("event") == "awaiting_first_unlock" for e in events)
+    assert staged == [1]
+    assert ap.generation == 0
+    assert ap.status().apply_state == "awaiting_unlock" and ap.status().staged_generation == 1
+    assert ap.healthz()["status"] == "failing"
+    with pytest.raises(AgentStartError, match="generation 1 is staged under unlock_required and waiting for an unlock"):
+        ap.prompt("support.reply").render(name="Ann")
+    ap.heartbeat_now()
+    assert plane.heartbeats[-1]["generation"] == {"active": 0, "staged": 1}
+    ap.stop()
+
+    again = start(plane, state_dir)
+    assert again.status().apply_state == "awaiting_unlock" and again.status().staged_generation == 1
+    assert again.unlock() == {"generation": 1}
+    assert again.status().apply_state == "active"
+    assert again.prompt("support.reply").render(name="Ann").text == "Reply politely to Ann."
+    again.stop()
 
 
 def test_feedback_on_candidate_arm_lands_on_that_model(state_dir):

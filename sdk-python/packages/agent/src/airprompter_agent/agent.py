@@ -689,7 +689,13 @@ class AirPrompterAgent:
             # Nothing verified locally: one synchronous sync before serving is the only time the SDK waits on the network.
             self.sync_now()
         if self._active is None:
-            raise AgentStartError("no_verified_release", "no verified release in the store, no usable vendored bundle, and nothing could be fetched")
+            # A first release staged under unlock_required (the sync just staged it, or a restart found it in the store) is
+            # a host with nothing to serve yet — not a host that cannot run. T9 makes the unlock the customer's to give, and
+            # a process that refuses to start can never give it: so it starts, heartbeats as generation 0 with the staged
+            # generation beside it, keeps syncing, and answers unlock(), the window, or the hook. prompt() refuses until then.
+            if self._staged_manifest is None:
+                raise AgentStartError("no_verified_release", "no verified release in the store, no usable vendored bundle, and nothing could be fetched")
+            self._log({"event": "awaiting_first_unlock", "generation": self._staged_manifest["payload"]["generation"]})
         if self._client is not None and self._sync_options.mode == "resident":
             self._schedule()
             # The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
@@ -1094,6 +1100,8 @@ class AirPrompterAgent:
         """S10: the runtime over the active release — resolution, the ramp walk and rendering live in ``airprompter_agent_runtime``."""
         release = self._active
         if release is None:
+            if self._staged_manifest is not None:
+                raise AgentStartError("no_verified_release", f"no active release: generation {self._staged_manifest['payload']['generation']} is staged under unlock_required and waiting for an unlock")
             raise AgentStartError("no_verified_release", "no active release")
         cached = self._resolver_for
         if cached is not None and cached[0] is release and cached[1] is self._standing_directives:
@@ -1696,7 +1704,7 @@ class AirPrompterAgent:
             last_contact_at=None if self._last_contact_ms is None else iso_ms(self._last_contact_ms),
             forced_downgrade=bool(state and state.get("forcedDowngrade") is True),
             disabled=self._disabled_now(),
-            unlock_requests=[{k: d[k] for k in ("releaseDigest", "requestedBy", "requestedAt", "expiresAt", "note") if k in d} for d in self._open_unlock_requests(manifest)],
+            unlock_requests=[{k: d[k] for k in ("releaseDigest", "requestedBy", "requestedAt", "expiresAt", "note") if k in d} for d in self._open_unlock_requests(manifest or (self._staged_manifest["payload"] if self._staged_manifest else None))],
             window=window,
             heartbeat={
                 "last_at": None if self._last_heartbeat_ms is None else iso_ms(self._last_heartbeat_ms),

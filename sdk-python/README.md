@@ -119,6 +119,15 @@ update-window timers on daemon threads.
    file migrates on first write, a newer one is refused naming its
    writer). Serving an unverified release
    is never an option.
+4. One shape is not a failure: the sync found a release **staged under
+   `unlock_required`** and nothing active — a first production release,
+   or a restart whose active slot is unusable beside a staged one. The
+   host starts with nothing to serve (`generation` 0, `apply_state`
+   `awaiting_unlock`, `healthz()` failing, logged `awaiting_first_unlock`),
+   heartbeats `{"active": 0, "staged": N}`, keeps syncing, and answers
+   `unlock()`, the window, or the `on_staged` hook; `prompt()` refuses with
+   the staged generation named until then. The unlock is yours to give,
+   and a process that refuses to start could never give it.
 
 Sync modes: `resident` (timer + jitter, edge pointer first so idle
 instances never wake a Lambda), `on_invoke` (serverless: `ap.invoke(fn)`

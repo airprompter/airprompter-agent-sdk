@@ -679,7 +679,14 @@ export class AirPrompterAgent {
       // Nothing verified locally: one synchronous sync before serving is the only time the SDK waits on the network.
       await this.syncNow();
     }
-    if (!this.active) throw new AgentStartError("no_verified_release", `no verified release in the store, no usable vendored bundle, and ${this.describeFetchFailure()}`);
+    if (!this.active) {
+      // A first release staged under unlock_required (the sync just staged it, or a restart found it in the store) is a
+      // host with nothing to serve yet — not a host that cannot run. T9 makes the unlock the customer's to give, and a
+      // process that refuses to start can never give it: so it starts, heartbeats as generation 0 with the staged
+      // generation beside it, keeps syncing, and answers `unlock()`, the window, or the hook. `prompt()` refuses until then.
+      if (!this.stagedManifest) throw new AgentStartError("no_verified_release", `no verified release in the store, no usable vendored bundle, and ${this.describeFetchFailure()}`);
+      this.log({ event: "awaiting_first_unlock", generation: this.stagedManifest.payload.generation });
+    }
     if (this.client && (this.options.sync?.mode ?? "resident") === "resident") {
       this.schedule();
       // The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
@@ -1058,7 +1065,7 @@ export class AirPrompterAgent {
   /** S10: the runtime over the active release — resolution, the ramp walk and rendering live in `@airprompter/agent-runtime`. */
   private resolver(): ReleaseResolver {
     const release = this.active;
-    if (!release) throw new AgentStartError("no_verified_release", "no active release");
+    if (!release) throw new AgentStartError("no_verified_release", this.stagedManifest ? `no active release: generation ${this.stagedManifest.payload.generation} is staged under unlock_required and waiting for an unlock` : "no active release");
     if (this.resolverFor?.release === release && this.resolverFor.standing === this.standingDirectives) return this.resolverFor.resolver;
     const resolver = new ReleaseResolver({
       release,
@@ -1655,7 +1662,7 @@ export class AirPrompterAgent {
       disabled: this.disabledNow(),
       ramp: ramps[0] ?? null,
       ramps,
-      unlockRequests: this.openUnlockRequests(manifest ?? null).map((d) => ({ releaseDigest: d.releaseDigest, requestedBy: d.requestedBy, requestedAt: d.requestedAt, expiresAt: d.expiresAt, ...(d.note !== undefined ? { note: d.note } : {}) })),
+      unlockRequests: this.openUnlockRequests(manifest ?? this.stagedManifest?.payload ?? null).map((d) => ({ releaseDigest: d.releaseDigest, requestedBy: d.requestedBy, requestedAt: d.requestedAt, expiresAt: d.expiresAt, ...(d.note !== undefined ? { note: d.note } : {}) })),
       applyPolicy: this.effectiveApplyPolicy(),
       window: (() => {
         const governing = this.windowInForce(this.stagedManifest ?? this.active?.manifest ?? null);

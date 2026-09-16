@@ -115,6 +115,8 @@ const AI_SDK_V1_CAP = "maxTokens";
 export function applyAiSdkInference(params: Record<string, unknown>, inference: SlotInference, options: { model?: string; modelId?: string | undefined; version?: AiSdkMiddlewareOptions["version"] } = {}): AppliedInference {
   const out: Record<string, unknown> = { ...params };
   if (options.model !== undefined && typeof options.modelId === "string" && options.modelId !== options.model) return { params: out, overridden: [], unsupported: [], skipped: "model_mismatch" };
+  // AI SDK 4's call options (`LanguageModelV1CallOptions`) carry `mode` and `inputFormat`; later contracts carry neither.
+  const v1 = options.version === "v1" || (options.version === undefined && ("mode" in params || "inputFormat" in params));
   const overridden: string[] = [];
   const unsupported: AppliedInference["unsupported"] = [];
   const values: Record<keyof SlotInference, unknown> = {
@@ -127,7 +129,7 @@ export function applyAiSdkInference(params: Record<string, unknown>, inference: 
   for (const key of INFERENCE_KEYS) {
     const value = values[key];
     if (value === undefined) continue;
-    const parameter = key === "maxOutputTokens" && options.version === "v1" ? AI_SDK_V1_CAP : AI_SDK_PARAMETER[key];
+    const parameter = key === "maxOutputTokens" && v1 ? AI_SDK_V1_CAP : AI_SDK_PARAMETER[key];
     if (parameter === null) { unsupported.push({ setting: key, reason: "shape" }); continue; }
     if (out[parameter] !== undefined && out[parameter] !== null && JSON.stringify(out[parameter]) !== JSON.stringify(value)) overridden.push(parameter);
     out[parameter] = value;

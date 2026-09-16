@@ -1584,10 +1584,11 @@ export class AirPrompterAgent {
   }
 
   /** Run `fn` with every wrapped call inside it (across awaits) attributed to `rendered`, whatever text it carries. */
-  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "inference"> | (Pick<Rendered, "versionId" | "model" | "inference"> & { stepId: string; arm?: string }), fn: () => T): T {
-    // A workflow step attributes under its step id (`<tag>#<n>`); its arm is the workflow's, or "none" when not given.
+  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "inference"> | (Pick<Rendered, "versionId" | "model" | "inference"> & { stepId: string; arm?: string; runRef?: string }), fn: () => T): T {
+    // A workflow step attributes under its step id (`<tag>#<n>`); its arm is the one its run reference carries (the
+    // workflow's), unless the caller names one.
     const tag = "stepId" in rendered ? rendered.stepId : rendered.tag;
-    const arm = rendered.arm ?? "none";
+    const arm = rendered.arm ?? ("runRef" in rendered && rendered.runRef ? parseRunRef(rendered.runRef, this.runRefKey)?.arm : undefined) ?? "none";
     return withAttribution({ tag, versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
   }
 

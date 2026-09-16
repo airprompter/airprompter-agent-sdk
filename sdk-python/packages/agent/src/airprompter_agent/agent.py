@@ -52,7 +52,7 @@ from airprompter_agent_core.golden import GoldenInvoke, GoldenReport, golden_rep
 from airprompter_agent_core.judge import JUDGE_RUBRICS, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
 from airprompter_agent_runtime.observe import PendingObservation, ObserveTarget, observe_call, observe_call_async
 from airprompter_agent_core.release.reader import ReleaseSlot
-from airprompter_agent_runtime.release.resolver import ReleaseResolver, Rendered, Workflow, WorkflowStep, disabled_from
+from airprompter_agent_runtime.release.resolver import ReleaseResolver, Rendered, Workflow, WorkflowStep, copy_inference, disabled_from
 
 from airprompter_agent_core import SDK_VERSION  # one constant, pinned to pyproject by tests/test_package_split.py
 
@@ -323,13 +323,6 @@ class PromptHandle:
 
     def variables(self) -> list[Mapping[str, Any]]:
         return list(self._agent._resolve_slot(self._tag, self._subject)[0].get("variables", []))
-
-
-def _own(inference: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
-    """A copy of an inference block (stop sequences included), so no two holders share one mutable object."""
-    if inference is None:
-        return None
-    return {key: (list(value) if key == "stopSequences" and value is not None else value) for key, value in inference.items()}
 
 
 class AirPrompterAgent:
@@ -1527,7 +1520,7 @@ class AirPrompterAgent:
             slot, arm, bucket = self._resolve_slot(tag, subject)
             rendered = self._resolver().render(ReleaseSlot(slot, arm, bucket), values)
         # The registry keeps its own copy of the block: the one handed out is the caller's to edit.
-        self._renders.register(rendered.text, Attribution(tag, rendered.version_id, rendered.arm, rendered.model, _own(rendered.inference)))
+        self._renders.register(rendered.text, Attribution(tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference)))
         return rendered
 
     def workflow(self, tag: str, *, subject: Optional[str] = None) -> Workflow:
@@ -1536,7 +1529,7 @@ class AirPrompterAgent:
             slot, arm, bucket = self._resolve_slot(tag, subject)
             workflow = self._resolver().workflow(ReleaseSlot(slot, arm, bucket))
             for step in workflow.steps:
-                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, _own(step.inference)))
+                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference)))
             return workflow
 
     # ------------------------------------------------------------------ telemetry
@@ -1622,7 +1615,7 @@ class AirPrompterAgent:
         """``with ap.attribute(rendered):`` — every wrapped call inside the block is that render's, whatever text it carries."""
         target = self._target_of(rendered, None)
         # The observe target carries no settings; the rendered prompt (or the workflow step) does.
-        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, _own(getattr(rendered, "inference", None))))
+        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, copy_inference(getattr(rendered, "inference", None))))
 
     def attribution_for(self, params: Any) -> Optional[Attribution]:
         """The render a request's parameters name: an explicit scope first, else a message whose text is a recent render."""

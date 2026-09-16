@@ -110,7 +110,7 @@
       }
     },
     "inference": {
-      "description": "How the model is called, as the prompt version declared it: the provider wrappers and the hosted endpoints apply these and refuse a caller's own values for the same parameters. On a slot, or on a workflow step for that step's prompt version. Omitted when the version declares none; in the digest input only when present. Integers only (canonical-json.md): temperature in thousandths (temperatureMilli 200 = 0.2), top-p in basis points (topPBps 9000 = 0.9). A runtime ignores keys it does not know.",
+      "description": "How the model is called, as the prompt version declared it: the provider wrappers and the hosted endpoints apply these and refuse a caller's own values for the same parameters. On a slot, or on a workflow step for that step's prompt version. Omitted when the version declares none; in the digest input only when present. Integers only (canonical-json.md): temperature in thousandths (temperatureMilli 200 = 0.2), top-p in basis points (topPBps 9000 = 0.9). A new key is a new protocol minor: this schema refuses one it does not name, and a runtime that does not validate the schema drops it from the digest projection (canonical-json.md).",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,

@@ -8,7 +8,7 @@ from .attribution import Attribution, RenderRegistry, attribution_scope, current
 from .inference import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
 from .managed import MANAGED_REFUSAL_CODES, MANAGED_SDK_USER_AGENT, ManagedAgent, ManagedRunError, ManagedRunResult, ManagedRunStream, ManagedWorkflow, parse_sse
 from .observe import ObserveTarget, PendingObservation, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
-from .release.resolver import Disabled, ReleaseResolver, Rendered, ResolveOutcome, Workflow, WorkflowStep, disabled_from
+from .release.resolver import Disabled, ReleaseResolver, Rendered, ResolveOutcome, Workflow, WorkflowStep, copy_inference, disabled_from
 from .wrap import WRAPPED_METHODS, WrapHooks, wrap_client
 
 __all__ = [
@@ -40,6 +40,7 @@ __all__ = [
     "attribution_scope",
     "classify_error",
     "classify_result",
+    "copy_inference",
     "current_attribution",
     "disabled_from",
     "normalize_usage",

@@ -18,8 +18,9 @@ from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref
 from airprompter_agent_core.render.template import render_template
 
 
-def _handed_out(inference: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
-    """The block as handed out: a plain copy (serialisable, picklable) — a caller that edits it edits nothing the runtime holds."""
+def copy_inference(inference: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+    """A plain copy of an inference block (stop sequences included; serialisable, picklable): what is handed out, and
+    what each holder keeps, so no two holders share one mutable object and nothing the runtime holds can be edited."""
     if inference is None:
         return None
     return {key: (list(value) if key == "stopSequences" and value is not None else value) for key, value in inference.items()}
@@ -207,7 +208,7 @@ class ReleaseResolver:
         generation = self.release.generation
         text = render_template(tag=slot["tag"], text=self.text_of(slot), variables=slot.get("variables", []), values=dict(values or {}), delimiters=self._delimiters)
         facts = RunRefFacts(self._agent_id, self._target, slot["tag"], slot["versionId"], resolved.arm, generation, resolved.bucket)
-        return Rendered(text=text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=_handed_out(slot.get("inference")))
+        return Rendered(text=text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")))
 
     def workflow(self, resolved: ReleaseSlot) -> Workflow:
         """A workflow slot's steps in ordinal order, each with its prompt text and run reference."""
@@ -222,7 +223,7 @@ class ReleaseResolver:
                 version_id=step["promptVersionId"],
                 text=(self.release.payloads.get(step["contentHash"]) or b"").decode("utf-8"),
                 run_ref=mint_run_ref(RunRefFacts(self._agent_id, self._target, step["stepId"], step["promptVersionId"], resolved.arm, generation, resolved.bucket), self._run_ref_key),
-                inference=_handed_out(step.get("inference")),
+                inference=copy_inference(step.get("inference")),
                 model=slot["model"],
             )
             for step in ordered_steps(slot["tag"], slot["steps"])

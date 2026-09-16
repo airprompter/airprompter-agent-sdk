@@ -29,6 +29,9 @@ if (set) {
   const workspace = read(join(root, "package.json"));
   workspace.version = set;
   write(join(root, "package.json"), workspace);
+  // The constant the SDK reports on the heartbeat, pinned to core's package.json by packageSplit.test.ts.
+  const versionTs = join(root, "packages", "core", "src", "protocol", "version.ts");
+  writeFileSync(versionTs, readFileSync(versionTs, "utf8").replace(/export const SDK_VERSION = "[^"]+";/, `export const SDK_VERSION = "${set}";`));
   console.log(`version-lockstep: every package is ${set}`);
 }
 

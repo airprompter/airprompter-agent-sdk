@@ -9,6 +9,7 @@ from .store.payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_
 from .store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
 from .sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
 from .sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
+from .sync.pull_bundle import PullBundleResult, pull_bundle
 
 __all__ = [
     "DAEMON_MAX_LINE_BYTES",
@@ -36,6 +37,8 @@ __all__ = [
     "parse_window",
     "payload_aad",
     "sync_once",
+    "pull_bundle",
+    "PullBundleResult",
     "unwrap_with_raw_key",
     "validate_window",
     "vault",

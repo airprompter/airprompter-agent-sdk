@@ -103,11 +103,16 @@ export function generateResultShape(result: unknown): unknown {
   return { choices: [{ finish_reason: finishReasonOf(record?.finishReason), message: { role: "assistant", content: text } }], ...(usage ? { usage } : {}) };
 }
 
-/** The AI SDK's parameter names for the settings the shape carries; a reasoning effort is a provider option the SDK cannot name for every provider. */
+/**
+ * The AI SDK's parameter names for the settings the shape carries: AI SDK 5+ (`LanguageModelV2CallOptions`) names the
+ * cap `maxOutputTokens`, AI SDK 4 (`LanguageModelV1CallOptions`, middleware `v1`) `maxTokens`. A reasoning effort is a
+ * provider option the SDK cannot name for every provider.
+ */
 const AI_SDK_PARAMETER: Record<keyof SlotInference, string | null> = { temperatureMilli: "temperature", topPBps: "topP", maxOutputTokens: "maxOutputTokens", stopSequences: "stopSequences", reasoningEffort: null };
+const AI_SDK_V1_CAP = "maxTokens";
 
 /** The settings on an AI SDK call's params (`transformParams`): the release's model only, the call site told when it disagreed. */
-export function applyAiSdkInference(params: Record<string, unknown>, inference: SlotInference, options: { model?: string; modelId?: string | undefined } = {}): AppliedInference {
+export function applyAiSdkInference(params: Record<string, unknown>, inference: SlotInference, options: { model?: string; modelId?: string | undefined; version?: AiSdkMiddlewareOptions["version"] } = {}): AppliedInference {
   const out: Record<string, unknown> = { ...params };
   if (options.model !== undefined && typeof options.modelId === "string" && options.modelId !== options.model) return { params: out, overridden: [], unsupported: [], skipped: "model_mismatch" };
   const overridden: string[] = [];
@@ -122,7 +127,7 @@ export function applyAiSdkInference(params: Record<string, unknown>, inference: 
   for (const key of INFERENCE_KEYS) {
     const value = values[key];
     if (value === undefined) continue;
-    const parameter = AI_SDK_PARAMETER[key];
+    const parameter = key === "maxOutputTokens" && options.version === "v1" ? AI_SDK_V1_CAP : AI_SDK_PARAMETER[key];
     if (parameter === null) { unsupported.push({ setting: key, reason: "shape" }); continue; }
     if (out[parameter] !== undefined && out[parameter] !== null && JSON.stringify(out[parameter]) !== JSON.stringify(value)) overridden.push(parameter);
     out[parameter] = value;
@@ -161,7 +166,7 @@ export function aiSdkMiddleware(hooks: AiSdkMiddlewareHooks, options: AiSdkMiddl
       const record = obj(params);
       if (!attribution?.inference || !record) return params;
       try {
-        const applied = applyAiSdkInference(record, attribution.inference, { model: attribution.model, modelId: model?.modelId });
+        const applied = applyAiSdkInference(record, attribution.inference, { model: attribution.model, modelId: model?.modelId, ...(options.version ? { version: options.version } : {}) });
         if (applied.skipped === "model_mismatch") {
           hooks.log({ event: "wrap_inference_model_mismatch", method: "ai-sdk", tag: attribution.tag, releaseModel: attribution.model, model: model?.modelId });
           return params;

@@ -9,7 +9,6 @@ says *what* would be refused and why; the facade decides what to record."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, ordered_steps
@@ -19,11 +18,11 @@ from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref
 from airprompter_agent_core.render.template import render_template
 
 
-def _handed_out(inference: Optional[Mapping[str, Any]]) -> Optional[Mapping[str, Any]]:
-    """The block as handed out: a read-only view of a copy — a caller that edits it edits nothing the runtime holds."""
+def _handed_out(inference: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
+    """The block as handed out: a plain copy (serialisable, picklable) — a caller that edits it edits nothing the runtime holds."""
     if inference is None:
         return None
-    return MappingProxyType({key: (list(value) if key == "stopSequences" and value is not None else value) for key, value in inference.items()})
+    return {key: (list(value) if key == "stopSequences" and value is not None else value) for key, value in inference.items()}
 
 
 @dataclass(frozen=True)

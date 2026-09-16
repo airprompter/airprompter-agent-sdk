@@ -86,7 +86,8 @@ slots = [
             {"name": "topic", "required": False, "trust": "operator"},
         ],
         # 0.3.1: how the model is called, as the version declared it — sealed into the digest, applied by the wrappers.
-        "inference": {"temperatureMilli": 200, "topPBps": 9000, "maxOutputTokens": 800},
+        # A reasoning model takes an effort and a cap, not a temperature (the control plane refuses what the model cannot take).
+        "inference": {"maxOutputTokens": 800, "reasoningEffort": "low"},
     },
     {
         "tag": "docs.summarise-translate",

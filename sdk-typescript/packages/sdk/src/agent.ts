@@ -1584,8 +1584,11 @@ export class AirPrompterAgent {
   }
 
   /** Run `fn` with every wrapped call inside it (across awaits) attributed to `rendered`, whatever text it carries. */
-  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "inference">, fn: () => T): T {
-    return withAttribution({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
+  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "inference"> | (Pick<Rendered, "versionId" | "model" | "inference"> & { stepId: string; arm?: string }), fn: () => T): T {
+    // A workflow step attributes under its step id (`<tag>#<n>`); its arm is the workflow's, or "none" when not given.
+    const tag = "stepId" in rendered ? rendered.stepId : rendered.tag;
+    const arm = rendered.arm ?? "none";
+    return withAttribution({ tag, versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
   }
 
   /** A Vercel AI SDK middleware for `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })`. */

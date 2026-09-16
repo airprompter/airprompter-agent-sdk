@@ -109,6 +109,19 @@
         "minPassBps": { "description": "Pass-rate floor in basis points; a run below it leaves the release staged.", "type": "integer", "minimum": 0, "maximum": 10000 }
       }
     },
+    "inference": {
+      "description": "How the model is called, as the prompt version declared it: the provider wrappers and the hosted endpoints apply these and refuse a caller's own values for the same parameters. On a slot, or on a workflow step for that step's prompt version. Omitted when the version declares none; in the digest input only when present. Integers only (canonical-json.md): temperature in thousandths (temperatureMilli 200 = 0.2), top-p in basis points (topPBps 9000 = 0.9). A runtime ignores keys it does not know.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "temperatureMilli": { "type": "integer", "minimum": 0, "maximum": 2000 },
+        "topPBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "maxOutputTokens": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "stopSequences": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+        "reasoningEffort": { "type": "string", "enum": ["low", "medium", "high"] }
+      }
+    },
     "step": {
       "type": "object",
       "additionalProperties": false,
@@ -119,7 +132,8 @@
         "promptArtifactId": { "$ref": "#/$defs/identifier" },
         "promptVersionId": { "$ref": "#/$defs/identifier" },
         "contentHash": { "$ref": "#/$defs/sha256" },
-        "byteLength": { "type": "integer", "minimum": 0, "maximum": 65536 }
+        "byteLength": { "type": "integer", "minimum": 0, "maximum": 65536 },
+        "inference": { "$ref": "#/$defs/inference" }
       }
     },
     "slot": {
@@ -141,19 +155,7 @@
           "type": "boolean"
         },
         "variables": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/variable" } },
-        "inference": {
-          "description": "How the model is called for this slot, as the version declared it: the provider wrappers and the hosted endpoints apply these and refuse a caller's own values for the same parameters. Omitted when the version declares none; in the digest input only when present. Integers only (canonical-json.md): temperature in thousandths (temperatureMilli 200 = 0.2), top-p in basis points (topPBps 9000 = 0.9). A runtime ignores keys it does not know.",
-          "type": "object",
-          "additionalProperties": false,
-          "minProperties": 1,
-          "properties": {
-            "temperatureMilli": { "type": "integer", "minimum": 0, "maximum": 2000 },
-            "topPBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
-            "maxOutputTokens": { "type": "integer", "minimum": 1, "maximum": 1000000 },
-            "stopSequences": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
-            "reasoningEffort": { "type": "string", "enum": ["low", "medium", "high"] }
-          }
-        },
+        "inference": { "$ref": "#/$defs/inference" },
         "outputChecks": {
           "description": "The slot's enabled output checks, sorted by name (checks.md). Omitted when none; in the digest input only when present.",
           "type": "array",

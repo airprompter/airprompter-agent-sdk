@@ -1,5 +1,5 @@
 {
-  "protocol": "0.3.1",
+  "protocol": "0.3.2",
   "instanceId": "inst_5f3c9a2b7e1d4c08",
   "sdk": {
     "name": "airprompterd",
@@ -17,7 +17,7 @@
     "staged": 42
   },
   "activeReleaseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "stagedReleaseDigest": "sha256:d691b3e329558e4507eaabc07d7fdf211961cdf30c4e66062c6c39678c56223b",
+  "stagedReleaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
   "applyState": "awaiting_unlock",
   "signingKeyId": "d248f03be9e1629a74451cb3b5de16e0809bcf35db684b71b6f935231e756cc8",
   "storageProtection": "kms",

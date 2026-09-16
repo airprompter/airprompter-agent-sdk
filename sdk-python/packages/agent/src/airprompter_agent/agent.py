@@ -1528,7 +1528,7 @@ class AirPrompterAgent:
             slot, arm, bucket = self._resolve_slot(tag, subject)
             workflow = self._resolver().workflow(ReleaseSlot(slot, arm, bucket))
             for step in workflow.steps:
-                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model))
+                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, step.inference))
             return workflow
 
     # ------------------------------------------------------------------ telemetry
@@ -1596,7 +1596,7 @@ class AirPrompterAgent:
             return rendered
         if isinstance(rendered, WorkflowStep):
             facts = parse_run_ref(rendered.run_ref, self._run_ref_key)
-            return ObserveTarget(rendered.step_id, rendered.version_id, facts.arm if facts else "none", model or "unknown")
+            return ObserveTarget(rendered.step_id, rendered.version_id, facts.arm if facts else "none", model or rendered.model or "unknown")
         return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model)
 
     # ------------------------------------------------------------------ T33: wrapped clients
@@ -1613,7 +1613,8 @@ class AirPrompterAgent:
     def attribute(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget]):
         """``with ap.attribute(rendered):`` — every wrapped call inside the block is that render's, whatever text it carries."""
         target = self._target_of(rendered, None)
-        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, getattr(target, "inference", None)))
+        # The observe target carries no settings; the rendered prompt (or the workflow step) does.
+        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, getattr(rendered, "inference", None)))
 
     def attribution_for(self, params: Any) -> Optional[Attribution]:
         """The render a request's parameters name: an explicit scope first, else a message whose text is a recent render."""

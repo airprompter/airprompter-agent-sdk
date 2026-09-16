@@ -9,7 +9,13 @@ render is ignored: the callback never guesses which slot a call was.
 
     import litellm
     litellm.callbacks = [AirPrompterLiteLLMCallback(ap)]
-    litellm.completion(model="gpt-5", messages=[...], metadata=litellm_metadata(rendered))
+    litellm.completion(model=rendered.model, messages=[...], metadata=litellm_metadata(rendered), **litellm_inference(rendered))
+
+A callback sees a call after the fact, so the release's inference settings
+(0.3.1) cannot be put on it there: ``litellm_inference(rendered)`` returns
+them as the keyword arguments of a ``litellm.completion`` call (OpenAI chat
+names — ``temperature``, ``top_p``, ``max_completion_tokens``, ``stop``,
+``reasoning_effort``), empty when the version declares none.
 
 The class derives from ``litellm.integrations.custom_logger.CustomLogger``
 when LiteLLM is installed and from ``object`` otherwise, so it imports (and
@@ -23,6 +29,7 @@ from typing import Any, Mapping, Optional
 
 from ..agent import AirPrompterAgent, Rendered, WorkflowStep
 from airprompter_agent_telemetry.spool.writer import Observation
+from airprompter_agent_runtime.inference import apply_inference
 from airprompter_agent_runtime.observe import classify_error, classify_result, normalize_usage
 
 try:  # pragma: no cover - exercised only when litellm is installed
@@ -39,8 +46,16 @@ METADATA_KEY = "airprompter"
 def litellm_metadata(rendered: Rendered | WorkflowStep, *, model: Optional[str] = None) -> dict[str, Any]:
     """The ``metadata=`` to pass to ``litellm.completion`` so the callback can attribute the call. Content-free: ids and the model only."""
     if isinstance(rendered, WorkflowStep):
-        return {METADATA_KEY: {"tag": rendered.step_id, "versionId": rendered.version_id, "arm": "none", "model": model or "unknown", "runRef": rendered.run_ref}}
+        return {METADATA_KEY: {"tag": rendered.step_id, "versionId": rendered.version_id, "arm": "none", "model": model or rendered.model or "unknown", "runRef": rendered.run_ref}}
     return {METADATA_KEY: {"tag": rendered.tag, "versionId": rendered.version_id, "arm": rendered.arm, "model": model or rendered.model, "runRef": rendered.run_ref}}
+
+
+def litellm_inference(rendered: Rendered | WorkflowStep) -> dict[str, Any]:
+    """The release's inference settings for this render as ``litellm.completion`` keyword arguments; ``{}`` when none."""
+    inference = getattr(rendered, "inference", None)
+    if not inference:
+        return {}
+    return apply_inference("chat", {}, inference).params
 
 
 def _attribution(kwargs: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:

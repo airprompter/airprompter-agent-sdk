@@ -489,6 +489,7 @@ test("0.3.1: a slot's inference settings ride the render and go out on the wrapp
   plane.promote([
     { ...plane.slot({ tag: "support.reply", text: "Reply politely.", model: "gpt-5" }), inference: { temperatureMilli: 200, topPBps: 9000, maxOutputTokens: 800, stopSequences: ["\n\nHuman:"], reasoningEffort: "low" } },
     plane.slot({ tag: "support.triage", text: "Triage.", model: "gpt-5" }),
+    { ...plane.slot({ tag: "support.claude", text: "Reply as Claude.", model: "claude-haiku-4-5" }), inference: { temperatureMilli: 200, topPBps: 9000, maxOutputTokens: 800, stopSequences: ["\n\nHuman:"], reasoningEffort: "low" } },
   ]);
   const ap = await AirPrompterAgent.start({ ...scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/prod/root.json" }, fetch: plane.fetch(), logger: (e) => void events.push(e) });
   const rendered = ap.prompt("support.reply").render({});
@@ -508,16 +509,54 @@ test("0.3.1: a slot's inference settings ride the render and go out on the wrapp
   const overridden = events.find((e) => e.event === "wrap_inference_overridden");
   assert.deepEqual(overridden?.parameters, ["temperature", "max_tokens"]);
 
-  // Anthropic messages: stop_sequences and max_tokens land; a reasoning effort has no Messages parameter and is reported, not sent.
+  // A call to a model other than the release's keeps its own parameters: the settings were sealed for gpt-5, not for Claude.
+  const elsewhere = new FakeAnthropic();
+  await ap.wrap(elsewhere).messages.create({ model: "claude-haiku-4-5", max_tokens: 100, temperature: 1, system: rendered.text, messages: [{ role: "user", content: "hi" }] });
+  const other = elsewhere.calls[0] as Record<string, unknown>;
+  assert.equal(other.temperature, 1);
+  assert.equal(other.max_tokens, 100);
+  assert.equal("stop_sequences" in other, false);
+  const mismatch = events.find((e) => e.event === "wrap_inference_model_mismatch");
+  assert.deepEqual([mismatch?.tag, mismatch?.releaseModel, mismatch?.model], ["support.reply", "gpt-5", "claude-haiku-4-5"]);
+
+  // Anthropic messages, on the release's model: stop_sequences and max_tokens land; temperature goes and top_p does not
+  // (Messages takes one of the two); a reasoning effort has no Messages parameter. Both are reported, not sent.
+  const claude = ap.prompt("support.claude").render({});
   const anthropic = new FakeAnthropic();
-  await ap.wrap(anthropic).messages.create({ model: "claude-haiku-4-5", max_tokens: 100, system: rendered.text, messages: [{ role: "user", content: "hi" }] });
+  await ap.wrap(anthropic).messages.create({ model: "claude-haiku-4-5", max_tokens: 100, system: claude.text, messages: [{ role: "user", content: "hi" }] });
   const message = anthropic.calls[0] as Record<string, unknown>;
   assert.equal(message.temperature, 0.2);
-  assert.equal(message.top_p, 0.9);
+  assert.equal("top_p" in message, false, "one sampling parameter on Messages");
   assert.equal(message.max_tokens, 800);
   assert.deepEqual(message.stop_sequences, ["\n\nHuman:"]);
   assert.equal("reasoning_effort" in message, false);
-  assert.deepEqual(events.find((e) => e.event === "wrap_inference_unsupported")?.settings, ["reasoningEffort"]);
+  assert.deepEqual(events.find((e) => e.event === "wrap_inference_unsupported")?.settings, [{ setting: "topPBps", reason: "one_sampling_parameter" }, { setting: "reasoningEffort", reason: "shape" }]);
+
+  // With a thinking block the call site set, no sampling parameter goes at all.
+  const thinking = new FakeAnthropic();
+  const beforeThinking = events.length;
+  await ap.wrap(thinking).messages.create({ model: "claude-haiku-4-5", max_tokens: 100, thinking: { type: "enabled", budget_tokens: 1024 }, system: claude.text, messages: [{ role: "user", content: "hi" }] });
+  const thought = thinking.calls[0] as Record<string, unknown>;
+  assert.equal("temperature" in thought, false);
+  assert.equal("top_p" in thought, false);
+  assert.equal(thought.max_tokens, 800);
+  assert.deepEqual(events.slice(beforeThinking).find((e) => e.event === "wrap_inference_unsupported")?.settings, [{ setting: "temperatureMilli", reason: "thinking" }, { setting: "topPBps", reason: "thinking" }, { setting: "reasoningEffort", reason: "shape" }]);
+
+  // Responses: the reasoning object is merged, not replaced — the call site's summary survives; a stop sequence has no home.
+  const responses = new FakeOpenAI();
+  const beforeResponses = events.length;
+  await ap.wrap(responses).responses.create({ model: "gpt-5", reasoning: { effort: "high", summary: "auto" }, instructions: rendered.text, input: "hi" });
+  const response = responses.calls[0] as Record<string, unknown>;
+  assert.deepEqual(response.reasoning, { effort: "low", summary: "auto" });
+  assert.equal(response.max_output_tokens, 800);
+  assert.equal("stop" in response, false);
+  assert.deepEqual(events.slice(beforeResponses).find((e) => e.event === "wrap_inference_overridden")?.parameters, ["reasoning.effort"]);
+  assert.deepEqual(events.slice(beforeResponses).find((e) => e.event === "wrap_inference_unsupported")?.settings, [{ setting: "stopSequences", reason: "shape" }]);
+
+  // An explicit attribute() scope carries the settings like a matched render does.
+  const scoped = new FakeOpenAI();
+  await ap.attribute(rendered, () => ap.wrap(scoped).chat.completions.create({ model: "gpt-5", messages: [{ role: "user", content: "text the registry never saw" }] }));
+  assert.equal((scoped.calls[0] as Record<string, unknown>).temperature, 0.2, "attribute() applies the settings");
 
   // A call site that already agrees is not reported.
   const quiet = new FakeOpenAI();

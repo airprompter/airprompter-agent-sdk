@@ -20,6 +20,8 @@ export interface SlotStep {
   promptVersionId: string;
   contentHash: Sha256;
   byteLength: number;
+  /** 0.3.2: how the model is called for this step, as its prompt version declared it; digest-bound when present. */
+  inference?: SlotInference;
 }
 
 /** One declared output check as a pin carries it (checks.md): the kind's own members only. */

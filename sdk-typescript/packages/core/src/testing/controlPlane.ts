@@ -51,7 +51,9 @@ export interface SlotSpec {
   model?: string;
   variables?: ManifestSlot["variables"];
   versionId?: string;
-  steps?: Array<{ text: string; versionId?: string }>;
+  /** 0.3.1: the slot's inference settings, as the version declared them. */
+  inference?: ManifestSlot["inference"];
+  steps?: Array<{ text: string; versionId?: string; inference?: ManifestSlot["inference"] }>;
 }
 
 export class FakeControlPlane {
@@ -95,13 +97,14 @@ export class FakeControlPlane {
       byteLength: bytes.length,
       model: spec.model ?? "claude-sonnet-5",
       variables: spec.variables ?? [],
+      ...(spec.inference ? { inference: spec.inference } : {}),
     };
     if (spec.steps) {
       slot.steps = spec.steps.map((step, index) => {
         const stepBytes = Buffer.from(step.text, "utf8");
         const stepHash = sha256Prefixed(stepBytes);
         this.payloads.set(stepHash, stepBytes);
-        return { stepId: `${spec.tag}#${index + 1}`, ordinal: index + 1, promptArtifactId: `art_${spec.tag}_${index + 1}`, promptVersionId: step.versionId ?? `ver_${spec.tag}_step${index + 1}`, contentHash: stepHash, byteLength: stepBytes.length };
+        return { stepId: `${spec.tag}#${index + 1}`, ordinal: index + 1, promptArtifactId: `art_${spec.tag}_${index + 1}`, promptVersionId: step.versionId ?? `ver_${spec.tag}_step${index + 1}`, contentHash: stepHash, byteLength: stepBytes.length, ...(step.inference ? { inference: step.inference } : {}) };
       });
     }
     return slot;

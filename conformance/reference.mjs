@@ -68,6 +68,13 @@ export function sha256Prefixed(bytes) {
 }
 
 /** The digest input: pins sorted by tag, projected to exactly the covered members. */
+export const INFERENCE_DIGEST_KEYS = ["maxOutputTokens", "reasoningEffort", "stopSequences", "temperatureMilli", "topPBps"];
+
+/** The inference block as the digest covers it: the known keys, each only when set. */
+export function inferenceDigestInput(inference) {
+  return Object.fromEntries(INFERENCE_DIGEST_KEYS.filter((k) => inference[k] !== undefined && inference[k] !== null).map((k) => [k, inference[k]]));
+}
+
 export function releaseDigestInput(slots) {
   return [...slots]
     .sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
@@ -83,8 +90,8 @@ export function releaseDigestInput(slots) {
       ...(slot.modelRequired === true ? { modelRequired: true } : {}),
       ...(Array.isArray(slot.outputChecks) && slot.outputChecks.length > 0 ? { outputChecks: slot.outputChecks } : {}),
       ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
-      // 0.3.1: the inference block is digest-bound when present — known keys only, in this order.
-      ...(slot.inference ? { inference: Object.fromEntries(["maxOutputTokens", "reasoningEffort", "stopSequences", "temperatureMilli", "topPBps"].filter((k) => slot.inference[k] !== undefined).map((k) => [k, slot.inference[k]])) } : {}),
+      // 0.3.1: the inference block is digest-bound when present — its known keys, each only when set (a JSON null is unset).
+      ...(slot.inference ? { inference: inferenceDigestInput(slot.inference) } : {}),
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
       ...(slot.steps
         ? {
@@ -95,6 +102,8 @@ export function releaseDigestInput(slots) {
               promptVersionId: s.promptVersionId,
               contentHash: s.contentHash,
               byteLength: s.byteLength,
+              // 0.3.2: a step's own settings, projected as a slot's are.
+              ...(s.inference ? { inference: inferenceDigestInput(s.inference) } : {}),
             })),
           }
         : {}),

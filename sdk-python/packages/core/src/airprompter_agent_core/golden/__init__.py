@@ -93,6 +93,8 @@ class GoldenInvocation:
     model: str
     arm: str
     variables: Mapping[str, str]
+    #: 0.3.1: the slot's inference settings — the call is made as production makes it, or the gate measures something else.
+    inference: Optional[Mapping[str, Any]] = None
 
 
 #: The customer's model call: the output text, or ``{"text": …, "output_tokens": …}`` (a length band uses the count).
@@ -152,7 +154,7 @@ def run_golden_set(
     def one(entry: Mapping[str, Any]) -> GoldenCaseResult:
         try:
             rendered = render_template(tag=slot["tag"], text=text, variables=slot.get("variables", []), values=entry["variables"], delimiters=delimiters)
-            answer = invoke(GoldenInvocation(tag=slot["tag"], case_id=entry["caseId"], text=rendered, model=slot["model"], arm=arm, variables=entry["variables"]))
+            answer = invoke(GoldenInvocation(tag=slot["tag"], case_id=entry["caseId"], text=rendered, model=slot["model"], arm=arm, variables=entry["variables"], inference=slot.get("inference")))
             if isinstance(answer, str):
                 output_text, output_tokens = answer, None
             else:

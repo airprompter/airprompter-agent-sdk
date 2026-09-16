@@ -279,6 +279,32 @@ reports what was seen.
 `with_raw_response` / `with_streaming_response` surfaces and any method
 not in the table are the client's own and are not observed.
 
+**The release's inference settings (protocol 0.3.1 / 0.3.2).** A prompt
+version declares how its model is called — temperature, top-p, the output
+cap, stop sequences, reasoning effort — and the release seals those with
+the text (`rendered.inference`, integers on the wire: `temperatureMilli`
+200 is 0.2, `topPBps` 9000 is 0.9; a workflow step carries its own). A
+wrapped call attributed to that render goes out with the release's values:
+`temperature`, `top_p`, `max_completion_tokens` / `max_output_tokens` /
+`max_tokens`, `stop` / `stop_sequences`, `reasoning_effort` /
+`reasoning.effort` (the Responses `reasoning` object is merged, its other
+members kept). A call site that wrote a different value is told once —
+`wrap_inference_overridden` names the parameters — never failed. The
+settings go only on a call to the release's model: a call that names
+another model keeps its own parameters (`wrap_inference_model_mismatch`),
+since settings sealed for one model are refused by another. A setting the
+call cannot carry is reported, not sent (`wrap_inference_unsupported`, with
+a reason): a stop sequence on Responses or a reasoning effort on Messages
+(`shape`); on Anthropic Messages, which takes one sampling parameter,
+temperature goes and top-p does not (`one_sampling_parameter`), and neither
+goes beside a `thinking` block the call site set (`thinking`). A LiteLLM
+callback sees a call after the fact, so pass
+`**litellm_inference(rendered)` to `litellm.completion` (OpenAI chat
+names). Instrumentation that calls a provider itself uses
+`apply_inference(kind, params, inference, model=…)` (exported from
+`airprompter_agent_runtime` and `airprompter_agent`); a golden-set `invoke`
+receives `inference` so the activation gate samples as production does.
+
 **Which render a call belongs to.** In order: an enclosing
 `with ap.attribute(rendered):` block (a `contextvars` variable, so it
 follows `await`s and threads started with a copied context); else a
@@ -300,7 +326,7 @@ tests/test_wrap_live.py` locally).
 
 ## Parity with the TypeScript SDK
 
-Same protocol version (`0.2.5`), same vectors, same store layout. The
+Same protocol version (`0.3.2`), same vectors, same store layout. The
 conformance suite (`tests/test_protocol_vectors.py`, `tests/test_spool.py`)
 runs every vector the TypeScript SDK runs, and `tests/test_interop.py`
 opens a store the TypeScript SDK wrote (encrypted A slot, spool segment,

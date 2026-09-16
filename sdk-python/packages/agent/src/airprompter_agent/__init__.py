@@ -99,6 +99,7 @@ from airprompter_agent_core.control.client import SyncClient
 from airprompter_agent_sync.sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
 from airprompter_agent_sync.sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
 from airprompter_agent_core.checks import CHECK_BOUNDS, check_refusal, checks_refusals, estimate_tokens, evaluate_check, evaluate_checks, output_text_of, pattern_refusal, project_checks, validate_json_schema, value_at_path
+from airprompter_agent_runtime.inference import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
 from airprompter_agent_runtime.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
 from airprompter_agent_telemetry.uploader import GrantDecision, PassResult, SpoolUploader, UploadGrant, backoff_delay_ms, inspect_segment, post_segment, validate_spool_row
 
@@ -111,6 +112,11 @@ __version__ = SDK_VERSION
 
 __all__ = [
     "APBUNDLE_INFO",
+    "AppliedInference",
+    "INFERENCE_KEYS",
+    "apply_inference",
+    "temperature_of",
+    "top_p_of",
     "ASSIGNMENT_MODULUS",
     "AgentStartError",
     "AgentStatus",

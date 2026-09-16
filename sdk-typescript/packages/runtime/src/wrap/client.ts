@@ -114,14 +114,19 @@ function wrapMethod(original: (...args: unknown[]) => unknown, kind: StreamKind,
       return original(...args);
     }
     let params = obj(args[0]);
-    // 0.3.1: the release owns the inference settings — applied here, the call site told once when it disagreed.
+    // 0.3.1: the release owns the inference settings — applied here, on a call to the release's model, the call site
+    // told once when it disagreed (and told when it named another model, whose parameters it keeps).
     if (attribution.inference && params) {
       try {
-        const applied = applyInference(kind, params, attribution.inference);
-        if (applied.overridden.length > 0) hooks.log({ event: "wrap_inference_overridden", method, tag: attribution.tag, parameters: applied.overridden });
-        if (applied.unsupported.length > 0) hooks.log({ event: "wrap_inference_unsupported", method, tag: attribution.tag, settings: applied.unsupported });
-        args = [applied.params, ...args.slice(1)];
-        params = applied.params;
+        const applied = applyInference(kind, params, attribution.inference, { model: attribution.model });
+        if (applied.skipped === "model_mismatch") {
+          hooks.log({ event: "wrap_inference_model_mismatch", method, tag: attribution.tag, releaseModel: attribution.model, model: params.model });
+        } else {
+          if (applied.overridden.length > 0) hooks.log({ event: "wrap_inference_overridden", method, tag: attribution.tag, parameters: applied.overridden });
+          if (applied.unsupported.length > 0) hooks.log({ event: "wrap_inference_unsupported", method, tag: attribution.tag, settings: applied.unsupported });
+          args = [applied.params, ...args.slice(1)];
+          params = applied.params;
+        }
       } catch (error) {
         hooks.log({ event: "wrap_inference_failed", method, reason: (error as Error).message });
       }

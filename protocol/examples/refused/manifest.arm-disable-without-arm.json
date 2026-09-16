@@ -3,12 +3,12 @@
   "reason": "an arm-scoped disable names the arm (S9)",
   "document": {
     "payload": {
-      "protocol": "0.3.1",
+      "protocol": "0.3.2",
       "organizationId": "org_7d3f9a2b",
       "agentId": "agt_4e8c1b6d",
       "target": "prod",
       "generation": 42,
-      "releaseDigest": "sha256:d691b3e329558e4507eaabc07d7fdf211961cdf30c4e66062c6c39678c56223b",
+      "releaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
       "previousReleaseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "issuedAt": "2026-09-12T10:00:00Z",
       "leaseSeconds": 3600,
@@ -52,7 +52,11 @@
               "promptArtifactId": "prm_step2",
               "promptVersionId": "ver_step2",
               "contentHash": "sha256:c872a595a97023a45dfe0c967614cc1219fe7daa211b0aa36b28a9ddc61175d6",
-              "byteLength": 39
+              "byteLength": 39,
+              "inference": {
+                "temperatureMilli": 0,
+                "maxOutputTokens": 1200
+              }
             }
           ]
         },
@@ -109,13 +113,13 @@
           {
             "arm": "control",
             "weightBps": 9000,
-            "releaseDigest": "sha256:d691b3e329558e4507eaabc07d7fdf211961cdf30c4e66062c6c39678c56223b",
+            "releaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
             "overrides": []
           },
           {
             "arm": "candidate",
             "weightBps": 1000,
-            "releaseDigest": "sha256:5918e71cba74d323187545f7fdc58df749446419df45aa887fac65331f7b2ac1",
+            "releaseDigest": "sha256:50c76d804ce9ce928559bef4fc382b199ad63d2cb300327ff71d1308bf8d4682",
             "overrides": [
               {
                 "tag": "support.triage",
@@ -180,14 +184,14 @@
       {
         "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
         "alg": "ES256",
-        "releaseDigest": "sha256:d691b3e329558e4507eaabc07d7fdf211961cdf30c4e66062c6c39678c56223b",
+        "releaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
         "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
         "signedAt": "2026-09-12T09:30:00Z"
       },
       {
         "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
         "alg": "ES256",
-        "releaseDigest": "sha256:5918e71cba74d323187545f7fdc58df749446419df45aa887fac65331f7b2ac1",
+        "releaseDigest": "sha256:50c76d804ce9ce928559bef4fc382b199ad63d2cb300327ff71d1308bf8d4682",
         "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
         "signedAt": "2026-09-12T09:31:00Z"
       }

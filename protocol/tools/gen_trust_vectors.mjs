@@ -93,9 +93,10 @@ const workflowSlot = {
   variables: [{ name: "document", required: true, trust: "end_user" }],
   steps: [{ stepId: "docs.summarise#1", ordinal: 1, promptArtifactId: "prm_step1", promptVersionId: "ver_step1", contentHash: sha256Prefixed(stepText), byteLength: stepText.length }],
 };
-const stepInferenceSlots = [slots[0], slots[1], { ...workflowSlot, steps: [{ ...workflowSlot.steps[0], inference: { maxOutputTokens: 1200, temperatureMilli: 0 } }] }];
+// Sorted by tag as the control plane writes them (the service refuses an unsorted slot list; the digest sorts either way).
+const stepInferenceSlots = [{ ...workflowSlot, steps: [{ ...workflowSlot.steps[0], inference: { maxOutputTokens: 1200, temperatureMilli: 0 } }] }, slots[0], slots[1]];
 const stepInferenceDigest = releaseDigest(stepInferenceSlots);
-if (stepInferenceDigest === releaseDigest([slots[0], slots[1], workflowSlot])) throw new Error("a step's inference must change the release digest");
+if (stepInferenceDigest === releaseDigest([workflowSlot, slots[0], slots[1]])) throw new Error("a step's inference must change the release digest");
 const payloadsWithStep = [...payloadsOk, { contentHash: sha256Prefixed(stepText), bytes: stepText.toString("base64url") }];
 
 /** S16: a well-formed per-slot experiment — the candidate arm overrides that slot only, on a digest of its own. */

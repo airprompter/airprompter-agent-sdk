@@ -26,6 +26,9 @@ def digest_input(slots):
         p["variables"] = [{"name": v["name"], "required": v["required"], "trust": v["trust"]} for v in s["variables"]]
         if "steps" in s:
             p["steps"] = [{k: st[k] for k in ("stepId", "ordinal", "promptArtifactId", "promptVersionId", "contentHash", "byteLength")} for st in s["steps"]]
+        if s.get("inference"):
+            # 0.3.1: the inference block is digest-bound when present — known keys only, in this order.
+            p["inference"] = {k: s["inference"][k] for k in ("maxOutputTokens", "reasoningEffort", "stopSequences", "temperatureMilli", "topPBps") if s["inference"].get(k) is not None}
         out.append(p)
     return out
 
@@ -79,6 +82,8 @@ slots = [
             {"name": "customer_name", "required": True, "trust": "operator"},
             {"name": "topic", "required": False, "trust": "operator"},
         ],
+        # 0.3.1: how the model is called, as the version declared it — sealed into the digest, applied by the wrappers.
+        "inference": {"temperatureMilli": 200, "topPBps": 9000, "maxOutputTokens": 800},
     },
     {
         "tag": "docs.summarise-translate",

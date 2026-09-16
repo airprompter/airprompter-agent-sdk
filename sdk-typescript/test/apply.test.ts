@@ -195,7 +195,7 @@ test("the heartbeat: the protocol's body, content-free; the cadence is adopted f
   assert.ok(plane.heartbeats.length >= 1, "the first heartbeat goes out right after boot");
   assert.equal(plane.heartbeats[0]?.heartbeatIntervalSeconds, 45, "the runtime declares its cadence…");
   const body = ap.heartbeatBody();
-  assert.equal(body.protocol, "0.3.0");
+  assert.equal(body.protocol, "0.3.1");
   assert.deepEqual(body.sdk, { name: "agent-sdk-typescript", version: SDK_VERSION });
   assert.equal(body.syncMode, "resident");
   assert.equal(body.heartbeatIntervalSeconds, 60, "…and holds to what the server answered");

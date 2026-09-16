@@ -14,6 +14,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { SlotInference } from "@airprompter/agent-core";
 import { createHash } from "node:crypto";
 
 export interface Attribution {
@@ -21,6 +22,8 @@ export interface Attribution {
   versionId: string;
   arm: string;
   model: string;
+  /** 0.3.1: the slot's inference settings, applied to the wrapped call (`inference.ts`). */
+  inference?: SlotInference;
 }
 
 const scope = new AsyncLocalStorage<Attribution>();

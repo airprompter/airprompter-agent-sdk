@@ -458,3 +458,39 @@ def test_request_texts_and_registry():
     assert registry.match(["nothing", "text 3"]).tag == "t3"
     registry.register("text 2", SimpleNamespace(tag="t2b"))
     assert registry.match(["text 2"]).tag == "t2b", "the newest render of the same text wins"
+
+
+def test_inference_settings_ride_the_render_and_go_out_on_the_wrapped_call(state_dir):
+    """0.3.1: the release's values, whatever the call site wrote; integers on the wire, floats to the provider."""
+    events: list = []
+    plane = FakeControlPlane(SCOPE)
+    plane.promote([
+        {**plane.slot(tag="support.reply", text="Reply politely.", model="gpt-5"), "inference": {"temperatureMilli": 200, "topPBps": 9000, "maxOutputTokens": 800, "stopSequences": ["\n\nHuman:"], "reasoningEffort": "low"}},
+        plane.slot(tag="support.triage", text="Triage.", model="gpt-5"),
+    ])
+    ap = start(plane, state_dir, logger=events.append)
+    rendered = ap.prompt("support.reply").render()
+    assert rendered.inference == {"temperatureMilli": 200, "topPBps": 9000, "maxOutputTokens": 800, "stopSequences": ["\n\nHuman:"], "reasoningEffort": "low"}
+    assert ap.prompt("support.triage").render().inference is None
+
+    openai = FakeOpenAI()
+    ap.wrap(openai).chat.completions.create(model="gpt-5", temperature=1, max_tokens=50, messages=[{"role": "system", "content": rendered.text}, {"role": "user", "content": "hi"}])
+    chat = openai.calls[0]
+    assert chat["temperature"] == 0.2 and chat["top_p"] == 0.9 and chat["max_completion_tokens"] == 800
+    assert "max_tokens" not in chat
+    assert chat["stop"] == ["\n\nHuman:"] and chat["reasoning_effort"] == "low"
+    overridden = next(e for e in events if e.get("event") == "wrap_inference_overridden")
+    assert overridden["parameters"] == ["temperature", "max_tokens"]
+
+    anthropic = FakeAnthropic()
+    ap.wrap(anthropic).messages.create(model="claude-haiku-4-5", max_tokens=100, system=rendered.text, messages=[{"role": "user", "content": "hi"}])
+    message = anthropic.calls[0]
+    assert message["temperature"] == 0.2 and message["top_p"] == 0.9 and message["max_tokens"] == 800
+    assert message["stop_sequences"] == ["\n\nHuman:"] and "reasoning_effort" not in message
+    assert next(e for e in events if e.get("event") == "wrap_inference_unsupported")["settings"] == ["reasoningEffort"]
+
+    quiet = FakeOpenAI()
+    before = len(events)
+    ap.wrap(quiet).chat.completions.create(model="gpt-5", temperature=0.2, messages=[{"role": "system", "content": rendered.text}])
+    assert not any(e.get("event") == "wrap_inference_overridden" for e in events[before:])
+    ap.stop()

@@ -78,6 +78,12 @@ const goldenSlots = [slots[0], { ...slots[1], goldenSet: { setId: goldenSet.setI
 const goldenDigest = releaseDigest(goldenSlots);
 if (goldenDigest === digest) throw new Error("a golden set must change the release digest");
 const payloadsWithGolden = [...payloadsOk, { contentHash: sha256Prefixed(goldenBytes), bytes: goldenBytes.toString("base64url") }];
+// 0.3.1: a slot's inference settings are in the digest input when present — and only the settings, in one order,
+// so every SDK reproduces the digest whatever order the manifest's author wrote the keys in.
+const inferenceSlots = [slots[0], { ...slots[1], inference: { topPBps: 9000, temperatureMilli: 200, maxOutputTokens: 800, stopSequences: ["\n\nHuman:"], reasoningEffort: "low" } }];
+const inferenceDigest = releaseDigest(inferenceSlots);
+if (inferenceDigest === digest) throw new Error("inference must change the release digest");
+if (releaseDigest([slots[0], { ...slots[1], inference: { reasoningEffort: "low", stopSequences: ["\n\nHuman:"], maxOutputTokens: 800, temperatureMilli: 200, topPBps: 9000 } }]) !== inferenceDigest) throw new Error("the inference digest input is order-free");
 
 /** S16: a well-formed per-slot experiment — the candidate arm overrides that slot only, on a digest of its own. */
 function experimentFor(tag, experimentId) {
@@ -169,6 +175,7 @@ const manifestCases = [
   { name: "a slot whose model is required verifies; the flag is in its release digest (T15)", ...base, root: rootV1, manifest: manifest(payload({ slots: requiredSlots, releaseDigest: requiredDigest })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   { name: "a slot with a golden set verifies when the set's payload is fetched; the reference is in its release digest (T34)", ...base, root: rootV1, manifest: manifest(payload({ slots: goldenSlots, releaseDigest: goldenDigest })), payloads: payloadsWithGolden, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   { name: "a golden set's payload is referenced like any other: not fetched is refused (T34)", ...base, root: rootV1, manifest: manifest(payload({ slots: goldenSlots, releaseDigest: goldenDigest })), payloads: payloadsOk, expected: { ok: false, reason: "payload_missing" } },
+  { name: "a slot with inference settings verifies, and the settings are in its release digest (0.3.1)", ...base, root: rootV1, manifest: manifest(payload({ slots: inferenceSlots, releaseDigest: inferenceDigest })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   { name: "a directive of a kind the runtime does not honour refuses the whole manifest before any payload is fetched (S4)", ...base, root: rootV1, manifest: manifest(payload({ directives: [{ kind: "reboot", issuedAt: "2026-09-12T10:00:00Z" }, { kind: "disable", scope: "agent", issuedAt: "2026-09-12T10:00:00Z" }] })), payloads: payloadsOk, expected: { ok: false, reason: "directive_unknown" } },
   { name: "the two kinds the runtime honours verify (S4): disable acts without a local act, request_unlock only asks", ...base, root: rootV1, manifest: manifest(payload({ directives: [{ kind: "disable", scope: "slot", tag: "support.reply", issuedAt: "2026-09-12T10:00:00Z", reason: "incident" }, { kind: "request_unlock", releaseDigest: digest, requestedBy: "usr_console", requestedAt: "2026-09-12T10:00:00Z", expiresAt: "2026-09-12T14:00:00Z" }] })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   // S16 (M15): per-prompt experiments — a well-formed experiments[] verifies; the conflicts are refused before any payload.

@@ -11,6 +11,8 @@
 
 export { ReleaseResolver, disabledFrom } from "./release/resolver.js";
 export type { Rendered, Disabled, ResolverInput, ResolveOutcome } from "./release/resolver.js";
+export { applyInference, temperatureOf, topPOf } from "./wrap/inference.js";
+export type { AppliedInference } from "./wrap/inference.js";
 
 export { classifyError, classifyResult, normalizeUsage, observeCall, type ObserveOptions, type ObserveTarget, type UsageNormalized } from "./observe.js";
 export { wrapClient, accumulatorFor, WRAPPED_METHODS } from "./wrap/client.js";

@@ -3,12 +3,12 @@
   "reason": "directive kinds are a closed set",
   "document": {
     "payload": {
-      "protocol": "0.3.0",
+      "protocol": "0.3.1",
       "organizationId": "org_7d3f9a2b",
       "agentId": "agt_4e8c1b6d",
       "target": "prod",
       "generation": 42,
-      "releaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+      "releaseDigest": "sha256:d691b3e329558e4507eaabc07d7fdf211961cdf30c4e66062c6c39678c56223b",
       "previousReleaseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "issuedAt": "2026-09-12T10:00:00Z",
       "leaseSeconds": 3600,
@@ -76,7 +76,12 @@
               "required": false,
               "trust": "operator"
             }
-          ]
+          ],
+          "inference": {
+            "temperatureMilli": 200,
+            "topPBps": 9000,
+            "maxOutputTokens": 800
+          }
         },
         {
           "tag": "support.triage",
@@ -104,13 +109,13 @@
           {
             "arm": "control",
             "weightBps": 9000,
-            "releaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+            "releaseDigest": "sha256:d691b3e329558e4507eaabc07d7fdf211961cdf30c4e66062c6c39678c56223b",
             "overrides": []
           },
           {
             "arm": "candidate",
             "weightBps": 1000,
-            "releaseDigest": "sha256:5da01ec25da8d0104d5f382cf7c9b7a02959190d49aeb2b98633b3f70fec4e8e",
+            "releaseDigest": "sha256:5918e71cba74d323187545f7fdc58df749446419df45aa887fac65331f7b2ac1",
             "overrides": [
               {
                 "tag": "support.triage",
@@ -174,14 +179,14 @@
       {
         "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
         "alg": "ES256",
-        "releaseDigest": "sha256:288cf5aead3c20a54523745b15865dbea86353980cd7238e4f38fd1a0dc697b8",
+        "releaseDigest": "sha256:d691b3e329558e4507eaabc07d7fdf211961cdf30c4e66062c6c39678c56223b",
         "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
         "signedAt": "2026-09-12T09:30:00Z"
       },
       {
         "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
         "alg": "ES256",
-        "releaseDigest": "sha256:5da01ec25da8d0104d5f382cf7c9b7a02959190d49aeb2b98633b3f70fec4e8e",
+        "releaseDigest": "sha256:5918e71cba74d323187545f7fdc58df749446419df45aa887fac65331f7b2ac1",
         "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
         "signedAt": "2026-09-12T09:31:00Z"
       }

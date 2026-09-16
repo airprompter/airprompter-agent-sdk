@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
 
 from .observe import PendingObservation
+from .inference import apply_inference
 from .attribution import Attribution
 
 WRAPPED_METHODS: Mapping[tuple[str, ...], str] = {
@@ -134,6 +135,22 @@ def _wrap_method(original: Callable[..., Any], kind: str, method: str, hooks: Wr
         if attribution is None:
             hooks.log({"event": "wrap_unattributed", "method": method})
             return original(*args, **kwargs)
+        # 0.3.1: the release owns the inference settings — applied here, the call site told once when it disagreed.
+        inference = getattr(attribution, "inference", None)
+        if inference and isinstance(params, Mapping):
+            try:
+                applied = apply_inference(kind, params, inference)
+                if applied.overridden:
+                    hooks.log({"event": "wrap_inference_overridden", "method": method, "tag": attribution.tag, "parameters": applied.overridden})
+                if applied.unsupported:
+                    hooks.log({"event": "wrap_inference_unsupported", "method": method, "tag": attribution.tag, "settings": applied.unsupported})
+                if kwargs:
+                    kwargs = applied.params
+                else:
+                    args = (applied.params, *args[1:])
+                params = applied.params
+            except Exception as error:  # noqa: BLE001
+                hooks.log({"event": "wrap_inference_failed", "method": method, "reason": str(error)})
         model = params.get("model") if isinstance(params, Mapping) else None
         pending = hooks.begin(attribution, model if isinstance(model, str) else attribution.model)
         try:

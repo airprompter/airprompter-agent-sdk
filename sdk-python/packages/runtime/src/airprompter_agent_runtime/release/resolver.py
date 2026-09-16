@@ -27,6 +27,8 @@ class Rendered:
     generation: int
     run_ref: str
     tag: str
+    #: 0.3.1: how the model is called for this slot, as the version declared it — the wrappers apply it.
+    inference: Optional[Mapping[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -194,7 +196,7 @@ class ReleaseResolver:
         generation = self.release.generation
         text = render_template(tag=slot["tag"], text=self.text_of(slot), variables=slot.get("variables", []), values=dict(values or {}), delimiters=self._delimiters)
         facts = RunRefFacts(self._agent_id, self._target, slot["tag"], slot["versionId"], resolved.arm, generation, resolved.bucket)
-        return Rendered(text=text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"])
+        return Rendered(text=text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=slot.get("inference"))
 
     def workflow(self, resolved: ReleaseSlot) -> Workflow:
         """A workflow slot's steps in ordinal order, each with its prompt text and run reference."""

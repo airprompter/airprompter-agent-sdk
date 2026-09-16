@@ -83,6 +83,8 @@ export function releaseDigestInput(slots) {
       ...(slot.modelRequired === true ? { modelRequired: true } : {}),
       ...(Array.isArray(slot.outputChecks) && slot.outputChecks.length > 0 ? { outputChecks: slot.outputChecks } : {}),
       ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
+      // 0.3.1: the inference block is digest-bound when present — known keys only, in this order.
+      ...(slot.inference ? { inference: Object.fromEntries(["maxOutputTokens", "reasoningEffort", "stopSequences", "temperatureMilli", "topPBps"].filter((k) => slot.inference[k] !== undefined).map((k) => [k, slot.inference[k]])) } : {}),
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
       ...(slot.steps
         ? {

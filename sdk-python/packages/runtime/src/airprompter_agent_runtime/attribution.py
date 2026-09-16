@@ -31,6 +31,8 @@ class Attribution:
     version_id: str
     arm: str
     model: str
+    #: 0.3.1: the slot's inference settings, applied to the wrapped call (``inference.py``).
+    inference: Optional[Mapping[str, Any]] = None
 
 
 _scope: contextvars.ContextVar[Optional[Attribution]] = contextvars.ContextVar("airprompter_attribution", default=None)

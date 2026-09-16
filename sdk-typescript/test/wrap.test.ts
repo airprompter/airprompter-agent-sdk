@@ -480,3 +480,50 @@ test("the middleware never imports the AI SDK and the wrapper never reads a prov
   }
   assert.equal(typeof aiSdkMiddleware, "function");
 });
+
+
+test("0.3.1: a slot's inference settings ride the render and go out on the wrapped call — the release's values, whatever the call site wrote; integers on the wire, floats to the provider", async () => {
+  const events: Record<string, unknown>[] = [];
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  plane.promote([
+    { ...plane.slot({ tag: "support.reply", text: "Reply politely.", model: "gpt-5" }), inference: { temperatureMilli: 200, topPBps: 9000, maxOutputTokens: 800, stopSequences: ["\n\nHuman:"], reasoningEffort: "low" } },
+    plane.slot({ tag: "support.triage", text: "Triage.", model: "gpt-5" }),
+  ]);
+  const ap = await AirPrompterAgent.start({ ...scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/prod/root.json" }, fetch: plane.fetch(), logger: (e) => void events.push(e) });
+  const rendered = ap.prompt("support.reply").render({});
+  assert.deepEqual(rendered.inference, { temperatureMilli: 200, topPBps: 9000, maxOutputTokens: 800, stopSequences: ["\n\nHuman:"], reasoningEffort: "low" }, "the render carries the slot's settings");
+  assert.equal(ap.prompt("support.triage").render({}).inference, undefined, "a slot without settings renders none");
+
+  // OpenAI chat: every setting has a home; the call site's temperature and legacy max_tokens are replaced and reported.
+  const openai = new FakeOpenAI();
+  await ap.wrap(openai).chat.completions.create({ model: "gpt-5", temperature: 1, max_tokens: 50, messages: [{ role: "system", content: rendered.text }, { role: "user", content: "hi" }] });
+  const chat = openai.calls[0] as Record<string, unknown>;
+  assert.equal(chat.temperature, 0.2);
+  assert.equal(chat.top_p, 0.9);
+  assert.equal(chat.max_completion_tokens, 800);
+  assert.equal("max_tokens" in chat, false, "the legacy cap is not sent beside the new one");
+  assert.deepEqual(chat.stop, ["\n\nHuman:"]);
+  assert.equal(chat.reasoning_effort, "low");
+  const overridden = events.find((e) => e.event === "wrap_inference_overridden");
+  assert.deepEqual(overridden?.parameters, ["temperature", "max_tokens"]);
+
+  // Anthropic messages: stop_sequences and max_tokens land; a reasoning effort has no Messages parameter and is reported, not sent.
+  const anthropic = new FakeAnthropic();
+  await ap.wrap(anthropic).messages.create({ model: "claude-haiku-4-5", max_tokens: 100, system: rendered.text, messages: [{ role: "user", content: "hi" }] });
+  const message = anthropic.calls[0] as Record<string, unknown>;
+  assert.equal(message.temperature, 0.2);
+  assert.equal(message.top_p, 0.9);
+  assert.equal(message.max_tokens, 800);
+  assert.deepEqual(message.stop_sequences, ["\n\nHuman:"]);
+  assert.equal("reasoning_effort" in message, false);
+  assert.deepEqual(events.find((e) => e.event === "wrap_inference_unsupported")?.settings, ["reasoningEffort"]);
+
+  // A call site that already agrees is not reported.
+  const quiet = new FakeOpenAI();
+  const before = events.length;
+  await ap.wrap(quiet).chat.completions.create({ model: "gpt-5", temperature: 0.2, messages: [{ role: "system", content: rendered.text }] });
+  assert.equal(events.slice(before).some((e) => e.event === "wrap_inference_overridden"), false);
+  await ap.stop();
+  rmSync(stateDir, { recursive: true, force: true });
+});

@@ -5,8 +5,8 @@
     "agentId": "agt_4e8c1b6d",
     "target": "prod",
     "generation": 43,
-    "releaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
-    "previousReleaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
+    "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
+    "previousReleaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
     "issuedAt": "2026-09-12T11:00:00Z",
     "leaseSeconds": 3600,
     "onLeaseExpiry": "degrade",
@@ -79,9 +79,8 @@
           }
         ],
         "inference": {
-          "temperatureMilli": 200,
-          "topPBps": 9000,
-          "maxOutputTokens": 800
+          "maxOutputTokens": 800,
+          "reasoningEffort": "low"
         }
       },
       {
@@ -122,13 +121,13 @@
           {
             "arm": "control",
             "weightBps": 9000,
-            "releaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
+            "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
             "overrides": []
           },
           {
             "arm": "candidate",
             "weightBps": 1000,
-            "releaseDigest": "sha256:50c76d804ce9ce928559bef4fc382b199ad63d2cb300327ff71d1308bf8d4682",
+            "releaseDigest": "sha256:47e4731f529c1234e26bc0a7c5709f552efddc6f4dbe8aee2563506c8fc947a6",
             "overrides": [
               {
                 "tag": "support.triage",
@@ -183,13 +182,13 @@
           {
             "arm": "control",
             "weightBps": 5000,
-            "releaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
+            "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
             "overrides": []
           },
           {
             "arm": "candidate",
             "weightBps": 5000,
-            "releaseDigest": "sha256:882fedeaa4f8350bc85970536ae4f579bdc810ffa22c7d63f8e0e559a3aae8ec",
+            "releaseDigest": "sha256:2b2a4f536224bfd045bce834efe6415b717770fddcd21b5b36cf829d3465fe08",
             "overrides": [
               {
                 "tag": "support.reply",
@@ -213,9 +212,8 @@
                   }
                 ],
                 "inference": {
-                  "temperatureMilli": 200,
-                  "topPBps": 9000,
-                  "maxOutputTokens": 800
+                  "maxOutputTokens": 800,
+                  "reasoningEffort": "low"
                 }
               }
             ]
@@ -235,21 +233,21 @@
     {
       "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
       "alg": "ES256",
-      "releaseDigest": "sha256:ee7882392f409fa7c97a992d9b76c89cd111e071c4e2c78cebedbf60636d35bd",
+      "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
       "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
       "signedAt": "2026-09-12T09:30:00Z"
     },
     {
       "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
       "alg": "ES256",
-      "releaseDigest": "sha256:50c76d804ce9ce928559bef4fc382b199ad63d2cb300327ff71d1308bf8d4682",
+      "releaseDigest": "sha256:47e4731f529c1234e26bc0a7c5709f552efddc6f4dbe8aee2563506c8fc947a6",
       "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
       "signedAt": "2026-09-12T09:31:00Z"
     },
     {
       "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
       "alg": "ES256",
-      "releaseDigest": "sha256:882fedeaa4f8350bc85970536ae4f579bdc810ffa22c7d63f8e0e559a3aae8ec",
+      "releaseDigest": "sha256:2b2a4f536224bfd045bce834efe6415b717770fddcd21b5b36cf829d3465fe08",
       "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
       "signedAt": "2026-09-12T10:31:00Z"
     }

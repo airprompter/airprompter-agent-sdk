@@ -80,10 +80,11 @@ if (goldenDigest === digest) throw new Error("a golden set must change the relea
 const payloadsWithGolden = [...payloadsOk, { contentHash: sha256Prefixed(goldenBytes), bytes: goldenBytes.toString("base64url") }];
 // 0.3.1: a slot's inference settings are in the digest input when present — and only the settings, in one order,
 // so every SDK reproduces the digest whatever order the manifest's author wrote the keys in.
-const inferenceSlots = [slots[0], { ...slots[1], inference: { topPBps: 9000, temperatureMilli: 200, maxOutputTokens: 800, stopSequences: ["\n\nHuman:"], reasoningEffort: "low" } }];
+// The block suits the slot's model (Claude takes one sampling parameter and no reasoning effort): a release the control plane seals.
+const inferenceSlots = [slots[0], { ...slots[1], inference: { stopSequences: ["\n\nHuman:"], temperatureMilli: 200, maxOutputTokens: 800 } }];
 const inferenceDigest = releaseDigest(inferenceSlots);
 if (inferenceDigest === digest) throw new Error("inference must change the release digest");
-if (releaseDigest([slots[0], { ...slots[1], inference: { reasoningEffort: "low", stopSequences: ["\n\nHuman:"], maxOutputTokens: 800, temperatureMilli: 200, topPBps: 9000 } }]) !== inferenceDigest) throw new Error("the inference digest input is order-free");
+if (releaseDigest([slots[0], { ...slots[1], inference: { maxOutputTokens: 800, temperatureMilli: 200, stopSequences: ["\n\nHuman:"] } }]) !== inferenceDigest) throw new Error("the inference digest input is order-free");
 // A JSON null in the block is unset, in every implementation: the digest is the one without the key.
 if (releaseDigest([slots[0], { ...slots[1], inference: { temperatureMilli: 200, topPBps: null } }]) !== releaseDigest([slots[0], { ...slots[1], inference: { temperatureMilli: 200 } }])) throw new Error("a null inference key is unset");
 // 0.3.2: a workflow step's own settings are in the digest input when present, projected as a slot's are.

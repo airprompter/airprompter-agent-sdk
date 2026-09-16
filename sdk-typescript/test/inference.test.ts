@@ -66,6 +66,10 @@ test("the AI SDK middleware applies the settings through transformParams under t
   assert.deepEqual(applied.overridden, ["temperature", "maxOutputTokens"]);
   assert.deepEqual(applied.unsupported, [{ setting: "reasoningEffort", reason: "shape" }]);
   assert.equal(applyAiSdkInference({ temperature: 1 }, full, { model: "gpt-5", modelId: "gpt-5-mini" }).skipped, "model_mismatch");
+  // AI SDK 4 (middleware v1) names the cap maxTokens; the release's cap lands there and the call site's is reported.
+  const v1 = applyAiSdkInference({ maxTokens: 5 }, { maxOutputTokens: 800 }, { model: "gpt-5", modelId: "gpt-5", version: "v1" });
+  assert.deepEqual(v1.params, { maxTokens: 800 });
+  assert.deepEqual(v1.overridden, ["maxTokens"]);
 });
 
 test("0.3.2: a workflow step carries its own settings — in the release digest, on the rendered step, on a wrapped call for that step; a golden invocation carries the slot's", async () => {
@@ -93,6 +97,8 @@ test("0.3.2: a workflow step carries its own settings — in the release digest,
   assert.equal(calls[0]!.max_completion_tokens, 1200);
   await ap.wrap(client).chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "system", content: flow.steps[1]!.text }] });
   assert.equal(calls[1]!.temperature, 1, "a step without settings leaves the call alone");
+  await ap.attribute({ ...flow.steps[0]!, arm: flow.arm }, () => ap.wrap(client).chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "user", content: "unseen" }] }));
+  assert.equal(calls[2]!.temperature, 0, "attribute() on a workflow step carries the step's settings");
 
   // A golden-set invocation is made as production makes the call: the slot's settings ride it.
   const seen: unknown[] = [];

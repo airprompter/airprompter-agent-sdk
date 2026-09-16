@@ -81,12 +81,13 @@ def test_workflow_step_settings_and_golden_invocation(state_dir):
     plane.promote([wf, golden])
     ap = start(plane, state_dir, logger=events.append)
     flow = ap.workflow("docs.flow")
-    assert dict(flow.steps[0].inference) == step_inference and flow.steps[1].inference is None
-    try:
-        flow.steps[0].inference["temperatureMilli"] = 999  # type: ignore[index]
-        raise AssertionError("the handed-out block is read-only")
-    except TypeError:
-        pass
+    assert flow.steps[0].inference == step_inference and flow.steps[1].inference is None
+    handed = ap.workflow("docs.flow").steps[0].inference
+    handed["temperatureMilli"] = 999  # type: ignore[index]
+    assert flow.steps[0].inference == step_inference, "the handed-out block is a copy; the release is untouched"
+    import json, pickle
+    json.dumps(flow.steps[0].inference)
+    pickle.dumps(flow.steps[0])
 
     calls: list = []
 

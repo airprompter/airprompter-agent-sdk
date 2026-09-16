@@ -746,8 +746,11 @@ components:
                     name: { type: string, pattern: "^[a-zA-Z0-9_.-]{1,64}$" }
                     required: { type: boolean }
                     trust: { type: string }
+              inference:
+                description: "0.3.1: how the model is called for the slot, as the release sealed it — what a hosted run uses; the caller's own values are ignored."
+                $ref: "schemas/manifest.schema.json#/$defs/inference"
               steps:
-                description: Workflow slots list their step ids in order; prompt slots carry null.
+                description: Workflow slots list their step ids in order (0.3.2: each with its own settings when it has any); prompt slots carry null.
                 type: array
                 nullable: true
                 items:
@@ -756,6 +759,8 @@ components:
                   required: [stepId]
                   properties:
                     stepId: { type: string }
+                    inference:
+                      $ref: "schemas/manifest.schema.json#/$defs/inference"
         experiment:
           description: The running experiment, or null; the salt is what `subjectHash` is computed with.
           type: object

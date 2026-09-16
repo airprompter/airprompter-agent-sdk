@@ -12,6 +12,7 @@
  * frame for callers who did not ask to stream.
  */
 
+import type { SlotInference } from "@airprompter/agent-core";
 import { createHash } from "node:crypto";
 import { errorNamed } from "@airprompter/agent-core";
 
@@ -53,7 +54,9 @@ export interface ManagedSlot {
   kind: "prompt" | "workflow";
   model: string;
   variables: ReadonlyArray<{ name: string; required: boolean; trust: string }>;
-  steps: ReadonlyArray<{ stepId: string }> | null;
+  /** 0.3.1: how the model is called for the slot, as the release sealed it — what a hosted run uses. */
+  inference?: SlotInference;
+  steps: ReadonlyArray<{ stepId: string; inference?: SlotInference }> | null;
 }
 
 export interface ManagedCatalogue {

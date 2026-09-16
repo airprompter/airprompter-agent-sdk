@@ -56,7 +56,7 @@ from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation,
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
 PROTOCOL_VERSION = "0.3.0"
-SDK_VERSION = "0.2.3"
+SDK_VERSION = "0.2.4"
 
 __all__ = [
     "APBUNDLE_INFO",

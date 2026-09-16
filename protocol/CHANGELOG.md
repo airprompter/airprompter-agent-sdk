@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### A first release staged under unlock_required starts the host (SDKs 0.2.4)
+- `start()` refused (`no_verified_release`, "the sync ended staged … without a release") when the only release the control plane had for a target was staged under `unlock_required` — the ordinary shape of a first production release. The unlock is the customer's to give (T9), and a process that refuses to start can never give it. Both SDKs now start with nothing to serve: `generation` 0, `applyState` `awaiting_unlock` with the staged generation, `healthz` failing on `no_verified_release`, the `onStaged` hook called, heartbeats reporting `{ active: 0, staged: N }`, sync continuing; `prompt()` refuses with the staged generation named until `unlock()`, the window, or the hook activates it. A restart on a store whose active slot is unusable and whose other slot is staged starts the same way instead of refusing — the staged slot is still never served as a fallback. Logged `awaiting_first_unlock`. No protocol change.
+
 ### The pinned root is scoped to the hosted environment, not the app's target (SDKs 0.2.3, CLI)
 - `trust-chain.md` has always said the pinned root is "one public JWK per hosted environment" and root metadata's `environment` is "the hosted environment this root governs". The SDKs built the trusted root from the pinned key with the app's **target** instead, so a `dev` or `staging` target on the public service — or any target other than `dev` on AirPrompter's dev deployment — refused the fetched root document (`root_scope_mismatch`, silently) and then every manifest (`unknown_signing_key`). `root: { pinned, hostedEnvironment }` (`hosted_environment` in Python) names the deployment the key belongs to, default `prod`; the CLI takes `--hosted-environment`; `airprompter dev` scopes its embedded daemon and its printed hint to the environment it serves. Regression tests in both SDKs. No protocol change.
 

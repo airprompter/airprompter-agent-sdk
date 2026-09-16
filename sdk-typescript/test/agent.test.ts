@@ -360,7 +360,9 @@ test("a staged release survives a restart as staged: it is reported, unlockable,
   assert.equal(restarted.prompt("support.reply").render({}).text, "v2");
   await restarted.stop();
 
-  // Stage again, then corrupt the active slot: the staged slot is not a fallback, so start refuses rather than serving an unapproved release.
+  // Stage again, then corrupt the active slot: the staged slot is not a fallback. The host starts with nothing to
+  // serve (so the unlock can still be given from it) and refuses every render until it is — the unapproved release is
+  // never served by accident.
   const again = await start(plane, stateDir);
   plane.promote([triage!, plane.slot({ tag: "support.reply", text: "v3", versionId: "ver_3" })], { applyPolicy: "unlock_required" });
   await again.syncNow();
@@ -369,7 +371,13 @@ test("a staged release survives a restart as staged: it is reported, unlockable,
   const storeDir = join(stateDir, "airprompter", "agt_1", "prod");
   const state = JSON.parse(readFileSync(join(storeDir, "store.json"), "utf8")) as { active: "A" | "B"; staged: "A" | "B" };
   rmSync(join(storeDir, "slots", state.active, "manifest.json"), { force: true });
-  await assert.rejects(AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) } }), (e: unknown) => e instanceof AgentStartError && e.code === "no_verified_release");
+  const bare = await AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) } });
+  assert.equal(bare.generation, 0, "nothing verified is active");
+  assert.equal(bare.status().stagedGeneration, 3, "the staged slot is reported, not served");
+  assert.throws(() => bare.prompt("support.reply").render({}), (e: unknown) => e instanceof AgentStartError && e.code === "no_verified_release");
+  assert.deepEqual(await bare.unlock(), { generation: 3 });
+  assert.equal(bare.prompt("support.reply").render({}).text, "v3");
+  await bare.stop();
   rmSync(stateDir, { recursive: true, force: true });
 });
 
@@ -429,5 +437,38 @@ test("declared output checks run inside observe() and count on the window; the d
   assert.equal(windows[0]!.count, 3);
   assert.deepEqual(windows[0]!.checks, { passed: 7, failed: 2 });
   assert.equal(JSON.stringify(windows).includes("Guaranteed"), false, "no output text on the wire");
+  rmSync(stateDir, { recursive: true, force: true });
+});
+
+test("a FIRST release staged under unlock_required starts the host: nothing served, the unlock answerable, a restart on the staged store the same", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const [triage, reply] = triageSlots(plane);
+  plane.promote([triage!, reply!], { applyPolicy: "unlock_required" });
+  const events: string[] = [];
+  const staged: number[] = [];
+  // Before this the start threw no_verified_release ("the sync ended staged … without a release"), and a customer whose
+  // first production release waited on an unlock had no running process to give it from (T9: the unlock is theirs).
+  const ap = await start(plane, stateDir, { logger: (e) => void events.push(String(e.event)), apply: { onStaged: (s) => void staged.push(s.generation) } });
+  assert.ok(events.includes("awaiting_first_unlock"), `logged: ${events.join(",")}`);
+  assert.deepEqual(staged, [1], "the hook saw the staged generation");
+  assert.equal(ap.generation, 0);
+  assert.equal(ap.status().applyState, "awaiting_unlock");
+  assert.equal(ap.status().stagedGeneration, 1);
+  assert.equal(ap.healthz().status, "failing", "nothing is served yet, and healthz says so");
+  assert.throws(() => ap.prompt("support.reply").render({ name: "Ann" }), /generation 1 is staged under unlock_required and waiting for an unlock/);
+  await ap.heartbeatNow();
+  const beat = plane.heartbeats.at(-1) as { generation: { active: number; staged?: number } };
+  assert.deepEqual(beat.generation, { active: 0, staged: 1 }, "the fleet view sees the host with its staged generation");
+  await ap.stop();
+
+  // A restart finds the staged slot in the store and starts the same way — no network needed for the decision.
+  const again = await start(plane, stateDir, { logger: (e) => void events.push(String(e.event)) });
+  assert.equal(again.status().applyState, "awaiting_unlock");
+  assert.equal(again.status().stagedGeneration, 1);
+  assert.deepEqual(await again.unlock(), { generation: 1 });
+  assert.equal(again.status().applyState, "active");
+  assert.equal(again.prompt("support.reply").render({ name: "Ann" }).text, "Reply politely to Ann.");
+  await again.stop();
   rmSync(stateDir, { recursive: true, force: true });
 });

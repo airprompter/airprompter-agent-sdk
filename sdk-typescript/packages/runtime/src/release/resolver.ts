@@ -12,7 +12,7 @@
  * refused and why; the facade decides what to record.
  */
 
-import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type Target } from "@airprompter/agent-core";
+import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";
 
 export interface Rendered {
   text: string;
@@ -154,13 +154,27 @@ export class ReleaseResolver {
     return Buffer.from(bytes).toString("utf8");
   }
 
-  /** Render a prompt slot the resolver already resolved. */
-  render(resolved: ReleaseSlot, values: Record<string, string | number | boolean | null | undefined> = {}): Rendered {
+  /**
+   * Render a prompt slot the resolver already resolved. `fenced` names variables a source of `end_user` trust filled:
+   * they are rendered as end-user text whatever the slot declared — the declaration can be tightened here, never
+   * loosened (the set is applied on top of the slot's own list). `text` is the slot's payload when the caller has
+   * already read it (one decode per render, not two).
+   */
+  render(resolved: ReleaseSlot, values: Record<string, string | number | boolean | null | undefined> = {}, options: { fenced?: ReadonlySet<string>; text?: string } = {}): Rendered {
     const { slot, arm, bucket } = resolved;
     const generation = this.input.release.generation;
-    const text = renderTemplate({ tag: slot.tag, text: this.textOf(slot), variables: slot.variables, values, ...(this.input.delimiters ? { delimiters: this.input.delimiters } : {}) });
+    const text = this.renderText({ tag: slot.tag, text: options.text ?? this.textOf(slot), variables: slot.variables, values, fenced: options.fenced });
     const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, versionId: slot.versionId, arm, generation, bucket };
     return { text, model: slot.model, ...(slot.inference ? { inference: frozenInference(slot.inference) } : {}), versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag };
+  }
+
+  /**
+   * One text with the slot's declarations and this resolver's delimiters — the prompt path and a workflow step share
+   * it, so both fence the same way. `fenced` tightens declarations to `end_user`; nothing here can loosen one.
+   */
+  renderText(input: { tag: string; text: string; variables: readonly SlotVariable[]; values: Record<string, string | number | boolean | null | undefined>; fenced?: ReadonlySet<string> | undefined }): string {
+    const variables = input.fenced && input.fenced.size > 0 ? input.variables.map((variable) => (input.fenced!.has(variable.name) && variable.trust !== "end_user" ? { ...variable, trust: "end_user" as const } : variable)) : input.variables;
+    return renderTemplate({ tag: input.tag, text: input.text, variables, values: input.values, ...(this.input.delimiters ? { delimiters: this.input.delimiters } : {}) });
   }
 
   /** A workflow slot's steps in ordinal order, each with its prompt text and run reference. */

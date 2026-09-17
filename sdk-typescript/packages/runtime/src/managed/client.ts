@@ -9,11 +9,17 @@
  * honouring `Retry-After`. Every run streams under the hood — the run route
  * sits behind an edge that closes a silent connection at 60 s, and a JSON
  * run is silent until the model finishes — and `run()` assembles the `done`
- * frame for callers who did not ask to stream.
+ * frame for callers who did not ask to stream. Variable sources the
+ * application registered (`start({ variables })`) fill required declared
+ * variables here, before the POST — the hosted route has no way into your
+ * systems; this process does.
  */
 
-import type { SlotInference } from "@airprompter/agent-core";
+import type { SlotInference, SlotVariable } from "@airprompter/agent-core";
 import { createHash } from "node:crypto";
+import { VariableSourceRegistry, type VariableSourceInput } from "../variables/sources.js";
+import { fillAsync, planFill, stricterSources, supplied, unsourced, type RenderValues } from "../variables/fill.js";
+import { VariableSourceError } from "../variables/sources.js";
 import { errorNamed } from "@airprompter/agent-core";
 
 import { subjectHash as saltedSubjectHash } from "@airprompter/agent-core";
@@ -40,6 +46,13 @@ export interface ManagedStartOptions {
   /** The run route's origin (the AgentRunUrl output of the execution stack), e.g. `https://d123.cloudfront.net`. */
   baseUrl: string;
   fetch?: ManagedFetchLike;
+  /**
+   * How this process fills a slot's declared variables from its own system before a run is posted (the hosted
+   * endpoint has no way into your systems; this process does). A literal per name, or `{ resolve, trust, … }` — see
+   * `variables/sources.ts`. Consulted for every required declared variable the call site did not pass (the
+   * catalogue names the declarations, not the text, so "used in the text" cannot be known here).
+   */
+  variables?: Record<string, VariableSourceInput>;
   /** Retries on 429 only; each waits `Retry-After` (or a second). Default 2. */
   maxRateLimitRetries?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -205,6 +218,8 @@ export class ManagedAgent {
   private catalogue: ManagedCatalogue;
   private readonly fetchImpl: ManagedFetchLike;
   private readonly instanceId: string;
+  /** The application's variable sources (`start({ variables })`, `agent.variables.provide()`). */
+  readonly variables: VariableSourceRegistry;
 
   private constructor(
     private readonly options: ManagedStartOptions,
@@ -213,6 +228,7 @@ export class ManagedAgent {
     this.catalogue = catalogue;
     this.fetchImpl = options.fetch ?? (globalThis.fetch as unknown as ManagedFetchLike);
     this.instanceId = options.instanceId ?? createHash("sha256").update(`${process.pid}:${Date.now()}:${Math.random()}`).digest("hex");
+    this.variables = new VariableSourceRegistry(options.variables);
   }
 
   /** Reads the catalogue once; refuses (typed) when the key, the target or the promotion is not there. */
@@ -294,12 +310,42 @@ export class ManagedAgent {
     };
   }
 
+  /** The required declared variables a run of this slot would still lack after these values and the registered sources. */
+  needs(tag: string, values: RenderValues = {}): string[] {
+    const slot = this.catalogue.slots.find((s) => s.tag === tag);
+    if (!slot) throw new Error(`no slot ${tag} in the catalogue`);
+    return unsourced({ variables: slot.variables as readonly SlotVariable[], values, registry: this.variables });
+  }
+
+  /**
+   * The values a run posts: the call site's, then the application's sources for required declared variables it left
+   * unfilled. Trust cannot be tightened here — the hosted run fences by the slot's declaration — so a source stricter
+   * than the declaration is refused BEFORE any lookup (`VariableSourceError`, reason `unfenceable`), never sent raw.
+   * The catalogue types trust as a string; anything but `end_user` counts as the looser declaration, which is the
+   * safe direction. An aborted run is not filled.
+   */
+  private async fillForRun(tag: string, values: Record<string, string>, subject: string | undefined, signal: AbortSignal | undefined): Promise<Record<string, string>> {
+    const slot = this.catalogue.slots.find((s) => s.tag === tag);
+    if (!slot || this.variables.names().length === 0) return values;
+    const declared = slot.variables as readonly SlotVariable[];
+    const plan = planFill({ tag, variables: declared, text: null, values, registry: this.variables });
+    if (plan.literal.length === 0 && plan.async.length === 0) return values;
+    // Only what this run would actually fill can be unfenceable: an optional variable no run posts is not refused.
+    const planned = new Set([...plan.literal, ...plan.async]);
+    const unfenceable = stricterSources(declared, this.variables).filter((name) => planned.has(name));
+    if (unfenceable.length > 0) throw new VariableSourceError(tag, unfenceable[0]!, "unfenceable");
+    if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("run aborted");
+    const filled = await fillAsync(plan, { tag, subject, versionId: null, arm: null }, this.variables);
+    return Object.fromEntries(Object.entries(filled.values).filter(([name]) => supplied(filled.values, name)).map(([k, v]) => [k, String(v)]));
+  }
+
   /** The run as SSE: iterate the deltas, await `result`. */
   async stream(tag: string, variables: Record<string, string>, options: ManagedRunOptions = {}): Promise<ManagedRunStream> {
     const subjectHash = this.subjectHashFor(options.subject, tag);
+    const filledVariables = await this.fillForRun(tag, variables, options.subject, options.signal);
     const body = JSON.stringify({
       tag,
-      variables,
+      variables: filledVariables,
       stream: true,
       ...(subjectHash ? { subjectHash } : {}),
       ...(options.stepId ? { stepId: options.stepId } : {}),

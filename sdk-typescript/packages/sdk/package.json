@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-sdk",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry.",
   "keywords": [
     "airprompter",
@@ -51,17 +51,17 @@
     "build": "rm -rf dist && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\""
   },
   "airprompter": {
-    "sizeBudgetBytes": 220000
+    "sizeBudgetBytes": 240000
   },
   "publishConfig": {
     "access": "public",
     "provenance": true
   },
   "dependencies": {
-    "@airprompter/agent-core": "0.2.9",
-    "@airprompter/agent-sync": "0.2.9",
-    "@airprompter/agent-runtime": "0.2.9",
-    "@airprompter/agent-telemetry": "0.2.9"
+    "@airprompter/agent-core": "0.2.10",
+    "@airprompter/agent-sync": "0.2.10",
+    "@airprompter/agent-runtime": "0.2.10",
+    "@airprompter/agent-telemetry": "0.2.10"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.40",

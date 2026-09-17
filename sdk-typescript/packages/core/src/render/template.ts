@@ -13,6 +13,8 @@
 import type { SlotVariable } from "../protocol/types.js";
 
 export class MissingVariableError extends Error {
+  /** The telemetry error class this failure is counted under; callers identify the error by name and code, never `instanceof`. */
+  readonly code = "render_missing_variable";
   constructor(
     readonly tag: string,
     readonly missing: string[],
@@ -23,6 +25,7 @@ export class MissingVariableError extends Error {
 }
 
 export class UnknownVariableError extends Error {
+  readonly code = "render_unknown_variable";
   constructor(
     readonly tag: string,
     readonly unknown: string[],
@@ -44,6 +47,13 @@ export const xmlDelimiters: Delimiters = {
 };
 
 const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_.-]{1,64})\s*\}\}/g;
+
+/** The variable names a text uses — what a render must fill, whatever the slot declares beyond them. */
+export function placeholdersOf(text: string): Set<string> {
+  const names = new Set<string>();
+  for (const match of text.matchAll(PLACEHOLDER)) names.add(match[1]!);
+  return names;
+}
 
 export interface RenderInput {
   tag: string;

@@ -10,6 +10,20 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.2.10 — 2026-09-17 (protocol 0.3.3) — TypeScript only; Python follows in 0.2.11
+
+### Added
+- Variable sources: `start({ variables })` and `ap.variables.provide(name, valueOrSource)` / `revoke(name)` fill a declared variable from the application's own system at render time — a literal, or `{ resolve: async (ctx) => …, trust, timeoutMs?, maxBytes? }` with `trust` required. Precedence: the call site's value, then a source (consulted only for a declared variable that is required or present in the text, so a version that dropped it never causes the lookup), then missing. The effective trust is the stricter of the prompt's declaration and the source's; an `end_user` source is fenced wherever the prompt declared `operator`, and `variable_source_trust_stricter` is logged once per slot and name.
+- `ap.prompt(tag).renderAsync(values)` runs sources (concurrently, each under its own timeout and byte bound); `render()` stays synchronous and throws `VariableSourceRequiredError` when a callable source would be needed. A source that throws, times out, oversizes, answers something other than text, or answers nothing for a required variable is `VariableSourceError { tag, variable, reason }` (`threw` · `timeout` · `too_large` · `not_text` · `empty`; `unfenceable` in managed mode) plus `variable_source_failed` in the log and one content-free `render_missing_variable` error row. The slot is captured before any await.
+- `ap.prompt(tag).needs(values)` and `status().variables` (`sources`, and per slot and arm the required names no source fills — `unsourced`) find an uncoverable version at start-up, from declarations alone (no payload is read).
+- `flow.renderStepAsync(stepId, values)` renders a workflow step with the same precedence, scanned per step; `ManagedAgent.start({ variables })` and `agent.needs(tag, values)` fill required declared variables before a hosted run is posted (an `end_user` source for an `operator`-declared variable is refused before any lookup — `VariableSourceError` reason `unfenceable` — since a hosted run cannot fence it; an aborted run is not filled).
+- `ReleaseResolver.renderText()`: one render path for prompts and workflow steps (fencing and delimiters in one place; `render()` takes `fenced` and an already-decoded `text`). `placeholdersOf(text)` in `@airprompter/agent-core`; `MissingVariableError` / `UnknownVariableError` carry `code`s (`render_missing_variable`, `render_unknown_variable`) so callers identify them by name and code, never `instanceof`.
+- `docs/variables.md`.
+
+### Changed
+- Publish size budgets: `@airprompter/agent-runtime` 180 KB (was 160), `@airprompter/agent-sdk` 240 KB (was 220) — the variables module.
+- `VariableSourceContext.versionId` / `.arm` are `string | null` (null in managed mode, where the run route resolves them). The runtime barrel also exports `stricterSources` and `supplied`.
+
 ## 0.2.9 — 2026-09-17 (protocol 0.3.3)
 
 ### Fixed

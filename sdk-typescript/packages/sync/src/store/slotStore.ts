@@ -321,7 +321,7 @@ export class SlotStore {
    */
   rollbackLocal(): SlotName {
     if (!this.file.active) throw new StoreError("no_release", "nothing is active");
-    if (this.file.staged) throw new StoreError("release_staged", "the other slot holds a staged release, not a previous one: unlock it, or discard it, before rolling back");
+    if (this.file.staged) throw new StoreError("release_staged", "the other slot holds a staged release, not a previous one: unlock it first (a runtime can also discard it)");
     const previous = otherSlot(this.file.active);
     if (!this.fs.exists(join(this.dir, "slots", previous, "manifest.json"))) throw new StoreError("no_previous_release", "this host has held one release only; there is nothing to go back to");
     const manifest = this.readManifest(previous);

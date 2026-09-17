@@ -10,7 +10,7 @@ AIRPROMPTER_AGENT_KEY=… airprompter doctor --org org_… --agent agt_… --env
   --root ./root.jwk.json [--state-dir …] [--base-url …] [--edge-pointer-url …] [--spool-budget-bytes …] [--json]
 ```
 
-Nine checks, each `ok`, `warn`, `fail` or `skip`, printed with what to do
+Twelve checks, each `ok`, `warn`, `fail` or `skip`, printed with what to do
 next; `--json` gives the same as `{ ok, checks: [{ name, level, detail,
 remedy? }] }`.
 

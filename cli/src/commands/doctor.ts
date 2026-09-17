@@ -1,6 +1,6 @@
 /**
  * `airprompter doctor` (S14): every reason a host is not serving the release
- * it should, with the remedy next to it. Nine checks, each `ok`, `warn`,
+ * it should, with the remedy next to it. Twelve checks, each `ok`, `warn`,
  * `fail` or `skip`, never a throw: the source (the API answers this key for
  * this agent and target; the edge pointer when named), the root, the store
  * (present, opens, active slot re-verifies as a runtime would), the lease,

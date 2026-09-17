@@ -4,9 +4,9 @@ Closed segments from ANY writer in ``<store>/spool/telemetry/`` are validated
 line by line against the spool row contract, quarantined when they do not
 fit, and POSTed straight to S3 under the heartbeat's presigned grant — one
 in flight per host, oldest first, exponential backoff with full jitter
-(1 s → 5 min), acknowledged segments moved to ``sent/``, ``sent/`` and
-``quarantine/`` swept after 24 h, the host budget enforced across writers
-with the loss written as a ``dropped`` row. Nothing here reads a row for
+(1 s → 5 min), acknowledged segments deleted (S6), ``quarantine/`` and
+``exported/`` capped in bytes and swept by age, the host budget enforced
+across writers with the loss written as a ``dropped`` row. Nothing here reads a row for
 anything but its shape. Parity with ``sdk-typescript/packages/telemetry/src/uploader.ts``.
 
 A grant is per INSTANCE prefix (``org/{org}/agent/{agent}/{target}/{instance}/``):

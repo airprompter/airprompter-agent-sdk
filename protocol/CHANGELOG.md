@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `daemon-socket.md`: an `ok: false` reply may carry `reason` — the daemon's own code for a refusal a client can act on (a store error such as `release_staged` or `no_previous_release` on `rollback`). Optional and additive; no version bump.
+
 ### 0.3.4 — a slot variable carries a default and names who fills it; the heartbeat names what a runtime can fill (SDKs 0.2.12)
 - `slots[].variables[].default` (optional; a string, 1–4096 characters): the text rendered when neither the call site nor a source the application registered (`docs/variables.md`) supplies a value. Only on an optional `operator` variable — the schema refuses one elsewhere (`if`/`then`; three refused examples pin it), and a runtime ignores one there. Applied by `renderTemplate` / `render_template` as the last resort, so golden and client renders agree; the hosted run route applies it once the service speaks 0.3.4. In the digest input when present; a runtime treats a JSON `null` as unset, the schema refuses one.
 - `slots[].variables[].source` (optional; `caller` | `runtime`): who the author expects to fill the variable — the code that renders, or a source the application registers. In the digest input when present. A client runtime does not act on it (the text says what a render needs); a managed client fills a `source: runtime` variable from its registered source before the run is posted, required or not, since the catalogue has no text to scan.

@@ -28,7 +28,9 @@ serve that a runtime should trust.
 Newline-delimited JSON, UTF-8, one object per line, both directions.
 Requests carry `id` (any string unique to the connection) and `op`;
 responses echo `id` with `ok: true` and the result fields, or `ok: false`
-and `error`. The daemon may also send **events** (no `id`) at any time.
+and `error` — plus `reason` when the refusal has a name a client can act on
+(a store error code such as `release_staged` or `no_previous_release` on
+`rollback`; optional, additive). The daemon may also send **events** (no `id`) at any time.
 
 ```
 → {"id":"1","op":"hello","sdk":"agent-sdk-ts/0.1.0"}

@@ -228,7 +228,7 @@ class SlotStore:
         if not self._file.get("active"):
             raise StoreError("no_release", "nothing is active")
         if self._file.get("staged"):
-            raise StoreError("release_staged", "the other slot holds a staged release, not a previous one: unlock it, or discard it, before rolling back")
+            raise StoreError("release_staged", "the other slot holds a staged release, not a previous one: unlock it first (a runtime can also discard it)")
         previous = _other_slot(self._file["active"])
         if not os.path.exists(os.path.join(self.dir, "slots", previous, "manifest.json")):
             raise StoreError("no_previous_release", "this host has held one release only; there is nothing to go back to")

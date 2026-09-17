@@ -83,6 +83,8 @@ export class DaemonError extends Error {
   constructor(
     readonly code: DaemonErrorCode,
     message: string,
+    /** The daemon's own reason for a refusal when it named one (a store error code such as `release_staged`). */
+    readonly reason?: string,
   ) {
     super(message);
     this.name = "DaemonError";
@@ -198,7 +200,7 @@ export class DaemonClient {
       if (!pending) return;
       this.pending.delete(message.id);
       if (message.ok === true) pending.resolve(message);
-      else pending.reject(new DaemonError("refused", String(message.error ?? "refused")));
+      else pending.reject(new DaemonError("refused", String(message.error ?? "refused"), typeof message.reason === "string" ? message.reason : undefined));
       return;
     }
     if (typeof message.event === "string") for (const listener of this.listeners) listener(message);

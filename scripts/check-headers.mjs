@@ -8,8 +8,8 @@
  * indented snippet. Tests, generated declarations and vendored code are exempt. Plain Node, no dependencies, so
  * it runs anywhere CI does:
  *
- *   node scripts/check-headers.mjs            # lists every file that misses the rule; exit 1 when any does
- *   node scripts/check-headers.mjs --list     # also lists the files that pass
+ *   $ node scripts/check-headers.mjs            # lists every file that misses the rule; exit 1 when any does
+ *   $ node scripts/check-headers.mjs --list     # also lists the files that pass
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";

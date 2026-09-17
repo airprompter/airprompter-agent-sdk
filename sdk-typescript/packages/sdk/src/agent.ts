@@ -1470,7 +1470,11 @@ export class AirPrompterAgent {
     return { generation: this.active.generation };
   }
 
-  /** Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence. Host-wide when attached to a daemon. */
+  /**
+   * Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence.
+   * Host-wide when attached to a daemon. Throws `StoreError` `release_staged` while a release is staged (a rollback
+   * is never a quiet unlock) and `no_previous_release` when this host has held one release only.
+   */
   async rollback(): Promise<{ generation: number; forced: boolean }> {
     if (this.daemon) {
       const result = (await this.daemon.request("rollback")) as { generation: number; forced: boolean };

@@ -2,7 +2,7 @@
 
 `@airprompter/protocol-conformance` runs every vector in `protocol/vectors`
 against an SDK it never imports. The SDK answers through an **adapter**:
-nineteen operations, JSON in, JSON out. The harness owns the vectors and
+twenty-one operations, JSON in, JSON out. The harness owns the vectors and
 the verdicts; the adapter owns only the answers.
 
 ```sh

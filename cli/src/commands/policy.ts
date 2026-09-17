@@ -81,7 +81,7 @@ export async function policy(argv: string[], ctx: Context): Promise<number> {
     out.field("via", "store");
     out.field("previous", before);
     out.field("applyPolicy", store.state.applyPolicyPin, "apply policy");
-    out.line(`policy set to ${wanted} on this host (was ${before ? `${before.value}, ${before.source}` : "not pinned"}); a resident runtime reads it on its next pass`);
+    out.line(`policy set to ${wanted} on this host (was ${before ? `${before.value}, ${before.source}` : "not pinned"}); a runtime started from now runs under it (a runtime already running in-process does not — use the daemon on a shared host)`);
     out.flush();
     return EXIT.ok;
   }

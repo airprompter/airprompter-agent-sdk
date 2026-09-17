@@ -24,7 +24,7 @@
  */
 
 import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
+import { DaemonClient, daemonSocketPath, isDaemonError } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
 import { CLI_VERSION } from "../version.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { EXIT, Output, refused, type Context } from "../io.js";
@@ -52,7 +52,14 @@ export async function rollback(argv: string[], ctx: Context): Promise<number> {
   const client = await DaemonClient.connect({ socketPath, agentId: scope.agentId, target: scope.target, sdk: `airprompter-cli/${CLI_VERSION}` }).catch(() => null);
   if (client) {
     try {
-      const result = (await client.request("rollback")) as { generation: number; forced: boolean };
+      let result: { generation: number; forced: boolean };
+      try {
+        result = (await client.request("rollback")) as { generation: number; forced: boolean };
+      } catch (error) {
+        // The daemon's store refused (nothing to go back to, a staged release): the same refusal, by the same name.
+        if (isDaemonError(error) && error.code === "refused" && typeof error.reason === "string") throw refused(`store: ${error.message}`, { reason: error.reason });
+        throw error;
+      }
       out.field("via", "daemon");
       out.field("generation", result.generation);
       out.field("forced", result.forced);

@@ -50,13 +50,13 @@ from .protocol import (
 from .release.bundle_release import BundleRelease, BundleReleaseRefused
 from .release.reader import LoadedRelease, ReleaseReader, ReleaseSlot
 from .render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
-from .render.template import Delimiters, MissingVariableError, UnknownVariableError, placeholders_of, render_template, xml_delimiters
+from .render.template import Delimiters, MissingVariableError, UnknownVariableError, default_of, placeholders_of, render_template, xml_delimiters
 from .telemetry.feedback import NormalizedFeedback, normalize_feedback
 from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
-PROTOCOL_VERSION = "0.3.3"
-SDK_VERSION = "0.2.11"
+PROTOCOL_VERSION = "0.3.4"
+SDK_VERSION = "0.2.12"
 
 __all__ = [
     "APBUNDLE_INFO",
@@ -154,6 +154,7 @@ __all__ = [
     "referenced_payloads",
     "release_digest",
     "release_digest_input",
+    "default_of",
     "placeholders_of",
     "render_template",
     "rubric_from_prompt",

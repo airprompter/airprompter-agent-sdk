@@ -228,6 +228,16 @@
                 "$ref": "manifest.schema.json#/$defs/modelId"
               }
             },
+            "variables": {
+              "description": "0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) — names only, never values. The seal warns when a pin declares a `source: runtime` variable no live instance can fill.",
+              "type": "array",
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_.-]{1,64}$"
+              }
+            },
             "reportedAt": {
               "$ref": "manifest.schema.json#/$defs/timestamp"
             }

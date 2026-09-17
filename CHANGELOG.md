@@ -10,6 +10,16 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.2.12 — 2026-09-17 (protocol 0.3.4)
+
+### Added
+- Protocol 0.3.4: a slot variable's `default` (an optional `operator` variable's last resort, rendered by `renderTemplate` / `render_template` when neither the call site nor a source supplies a value — `defaultOf` / `default_of` say where one counts) and `source` (`caller` | `runtime`, a hint); both digest-bound when present. `SlotVariable` carries them in TypeScript; the Python projection agrees; the trust vectors seal both.
+- The heartbeat reports `catalog.variables`: the names this application can fill from its registered sources (`ap.variables.names()`), never a value — so a seal can warn about a `source: runtime` variable no live instance fills.
+- `airprompter dev`: `variables:` front matter takes `name=default` (an optional operator variable's default; no comma in it), `name~` (filled by the application's source) and `name~=default`; a default on a required or end-user variable is refused as the control plane refuses it.
+
+### Changed
+- Precedence at render is now the full ladder: the call site's value → a registered source → the declared default → empty (optional) or `MissingVariableError` (required). `plan_fill` / `planFill` are unchanged: a default is applied by the render itself, so a source is still consulted first for a variable the text uses.
+
 ## 0.2.11 — 2026-09-17 (protocol 0.3.3) — the Python SDK catches up with 0.2.10; TypeScript republished unchanged to keep the lockstep
 
 ### Added (Python)

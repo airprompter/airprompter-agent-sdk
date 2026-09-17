@@ -13,7 +13,7 @@ import pytest
 from airprompter_agent_core.bundle.apbundle import BundleError, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle, DistributionKey
 from airprompter_agent_core.bundle.hpke import AEAD_AES_128_GCM, AEAD_AES_256_GCM, X25519KeyPair, decap, encap, generate_x25519_key_pair, key_schedule, open_, open_from, seal, seal_to, x25519_private_key_from_raw
 from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
-from airprompter_agent_core.render.template import Delimiters, MissingVariableError, UnknownVariableError, render_template, xml_delimiters
+from airprompter_agent_core.render.template import default_of, Delimiters, MissingVariableError, UnknownVariableError, render_template, xml_delimiters
 
 VARIABLES = [
     {"name": "team", "required": True, "trust": "operator"},
@@ -31,6 +31,22 @@ def test_optional_absent_values_and_stringification():
     assert render_template(tag="t", text="[{{tone}}]", variables=VARIABLES, values={"team": "x", "ticket": "y"}) == "[]"
     assert render_template(tag="t", text="[{{tone}}]", variables=VARIABLES, values={"team": "x", "ticket": "y", "tone": None}) == "[]"
     assert render_template(tag="t", text="{{team}} {{ticket}}", variables=VARIABLES, values={"team": 42, "ticket": True}) == "42 <ticket>true</ticket>"
+
+
+def test_optional_operator_default_is_the_last_resort():
+    with_defaults = [
+        {"name": "team", "required": True, "trust": "operator", "default": "never used"},
+        {"name": "ticket", "required": True, "trust": "end_user"},
+        {"name": "tone", "required": False, "trust": "operator", "default": "warm", "source": "runtime"},
+        {"name": "note", "required": False, "trust": "end_user", "default": "ignored"},
+    ]
+    assert render_template(tag="t", text="[{{tone}}][{{note}}]", variables=with_defaults, values={"team": "x", "ticket": "y"}) == "[warm][]"
+    assert render_template(tag="t", text="[{{tone}}]", variables=with_defaults, values={"team": "x", "ticket": "y", "tone": "curt"}) == "[curt]"
+    assert render_template(tag="t", text="[{{tone}}]", variables=with_defaults, values={"team": "x", "ticket": "y", "tone": None}) == "[warm]"
+    with pytest.raises(MissingVariableError) as missing:
+        render_template(tag="t", text="", variables=with_defaults, values={"ticket": "y"})
+    assert missing.value.missing == ["team"], "a default on a required variable does not excuse it"
+    assert default_of(with_defaults[2]) == "warm" and default_of(with_defaults[0]) is None and default_of(with_defaults[3]) is None
 
 
 def test_missing_required_and_undeclared_values_raise():

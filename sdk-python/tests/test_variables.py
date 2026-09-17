@@ -377,6 +377,10 @@ def test_agent_renders_from_sources_fenced_by_the_stricter_trust(state_dir):
         sourced = ap.prompt("support.triage", subject="cust-6").render()
         assert "<ticket>sourced &lt;/ticket> ticket</ticket>" in sourced.text
         ap.variables.revoke("ticket")
+        # 0.3.4: the heartbeat names what this application can fill — names only.
+        ap.heartbeat_now()
+        assert plane.heartbeats[-1]["catalog"]["variables"] == ["customer_tier", "team"]
+        assert "gold" not in json.dumps(plane.heartbeats[-1]), "never a value"
         # The registry is the agent's: a wrapped client finds the render by its text.
         assert ap.attribution_for({"messages": [{"role": "user", "content": caller.text}]}) is not None
     finally:

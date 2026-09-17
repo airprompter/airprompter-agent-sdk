@@ -2,7 +2,7 @@
   "schema": "heartbeat-request",
   "reason": "the apply policy's source is a closed set (S4)",
   "document": {
-    "protocol": "0.3.3",
+    "protocol": "0.3.4",
     "instanceId": "inst_5f3c9a2b7e1d4c08",
     "sdk": {
       "name": "airprompterd",
@@ -20,7 +20,7 @@
       "staged": 42
     },
     "activeReleaseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "stagedReleaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
+    "stagedReleaseDigest": "sha256:528680a15cb512714c8328f1a3ba634a64e359b0c11686c1abbe4396a27267eb",
     "applyState": "awaiting_unlock",
     "signingKeyId": "d248f03be9e1629a74451cb3b5de16e0809bcf35db684b71b6f935231e756cc8",
     "storageProtection": "kms",
@@ -28,6 +28,9 @@
       "models": [
         "claude-sonnet-5",
         "gpt-5"
+      ],
+      "variables": [
+        "customer_name"
       ],
       "reportedAt": "2026-09-12T10:04:00Z"
     },

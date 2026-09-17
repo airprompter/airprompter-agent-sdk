@@ -1249,7 +1249,9 @@ export class AirPrompterAgent {
       ...(status.applyState === "refused" && status.lastRefusal === "model_unavailable" && this.unavailableModels.length > 0 ? { unavailableModels: this.unavailableModels.slice(0, 16) } : {}),
       ...(status.signingKeyId ? { signingKeyId: status.signingKeyId } : {}),
       storageProtection: status.storageProtection === "daemon" ? "custom" : status.storageProtection,
-      catalog: { models: [...new Set(models)].slice(0, 256), reportedAt: this.nowIso() },
+      // 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
+      // can warn about a `source: runtime` variable no live instance fills before the promotion, not after.
+      catalog: { models: [...new Set(models)].slice(0, 256), ...(this.variables.names().length > 0 ? { variables: this.variables.names().slice(0, 256) } : {}), reportedAt: this.nowIso() },
       lease: { ...(status.leaseExpiresAt ? { expiresAt: status.leaseExpiresAt } : {}), expired: status.leaseExpired },
       ...(store ? { localRollback: { active: store.heldBackBelow !== undefined, forced: store.forcedDowngrade === true } } : {}),
       spool: {

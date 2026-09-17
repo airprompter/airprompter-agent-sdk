@@ -11,7 +11,10 @@
  * the relative path without the extension, `/` as `.`, lower-cased
  * (`support/Triage.md` → `support.triage`). Front matter may name `model:`,
  * `variables:` (comma-separated; `name!` is required, `name?` is end-user
- * text; without the line every `{{placeholder}}` is an optional operator
+ * text, `name=some default` gives an optional operator variable its default
+ * (0.3.4; a default holds no comma), `name~` marks it as filled by the
+ * application's own source (`source: runtime`) — `name~=default` combines
+ * the two; without the line every `{{placeholder}}` is an optional operator
  * variable), `version:`. An optional `release.json` beside them carries the
  * manifest's `applyPolicy`, `leaseSeconds`, `onLeaseExpiry`, `unlockWindow`,
  * `experiment` and `directives`.
@@ -98,14 +101,31 @@ export function tagFromPath(relativePath: string): string {
   return relativePath.replace(PROMPT_FILE, "").split(sep).join("/").split("/").join(".").toLowerCase();
 }
 
-/** `name!` required operator text, `name?` end-user text (fenced), `name` optional operator text. */
+/**
+ * `name!` required operator text, `name?` end-user text (fenced), `name` optional operator text; `name=default` an
+ * optional operator variable with its default (0.3.4), `name~` one the application fills from its own source
+ * (`source: runtime`), `name~=default` both. A default on a required or end-user variable is refused here, as the
+ * control plane refuses it.
+ */
 export function parseVariables(spec: string | undefined): SlotVariable[] {
   if (!spec?.trim()) return [];
   return spec.split(",").map((raw) => raw.trim()).filter(Boolean).map((raw) => {
-    const required = raw.endsWith("!");
-    const endUser = raw.endsWith("?");
-    const name = raw.replace(/[!?]$/, "");
-    return { name, required: required || endUser, trust: endUser ? "end_user" : "operator" };
+    const eq = raw.indexOf("=");
+    const head = eq === -1 ? raw : raw.slice(0, eq).trim();
+    const defaultValue = eq === -1 ? undefined : raw.slice(eq + 1).trim();
+    const runtime = head.endsWith("~");
+    const marker = head.replace(/~$/, "");
+    const required = marker.endsWith("!");
+    const endUser = marker.endsWith("?");
+    const name = marker.replace(/[!?]$/, "");
+    if (defaultValue !== undefined && (required || endUser)) throw new Error(`variable ${name}: a default belongs to an optional operator variable only`);
+    return {
+      name,
+      required: required || endUser,
+      trust: endUser ? "end_user" : "operator",
+      ...(defaultValue !== undefined ? { default: defaultValue } : {}),
+      ...(runtime ? { source: "runtime" as const } : {}),
+    };
   });
 }
 

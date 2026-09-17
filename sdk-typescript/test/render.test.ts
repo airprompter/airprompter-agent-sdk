@@ -28,6 +28,19 @@ test("an optional variable left out renders empty; null and undefined count as a
   assert.equal(renderTemplate({ tag: "t", text: "{{team}} {{ticket}}", variables, values: { team: 42, ticket: true } }), "42 <ticket>true</ticket>");
 });
 
+test("0.3.4: an optional operator variable renders its declared default when nothing fills it; a default elsewhere is ignored", () => {
+  const withDefaults = [
+    { name: "team", required: true, trust: "operator" as const, default: "never used" },
+    { name: "ticket", required: true, trust: "end_user" as const },
+    { name: "tone", required: false, trust: "operator" as const, default: "warm", source: "runtime" as const },
+    { name: "note", required: false, trust: "end_user" as const, default: "ignored" },
+  ];
+  assert.equal(renderTemplate({ tag: "t", text: "[{{tone}}][{{note}}]", variables: withDefaults, values: { team: "x", ticket: "y" } }), "[warm][]", "the default is the last resort for an optional operator variable; an end-user one never has one");
+  assert.equal(renderTemplate({ tag: "t", text: "[{{tone}}]", variables: withDefaults, values: { team: "x", ticket: "y", tone: "curt" } }), "[curt]", "a value wins over the default");
+  assert.equal(renderTemplate({ tag: "t", text: "[{{tone}}]", variables: withDefaults, values: { team: "x", ticket: "y", tone: null } }), "[warm]", "null is not a value");
+  assert.throws(() => renderTemplate({ tag: "t", text: "", variables: withDefaults, values: { ticket: "y" } }), (e: unknown) => e instanceof MissingVariableError && e.missing.join() === "team", "a default on a required variable does not excuse it");
+});
+
 test("a missing required variable throws naming every missing one; an undeclared value throws unless strictVariables is off", () => {
   assert.throws(() => renderTemplate({ tag: "support.triage", text: "", variables, values: {} }), (e: unknown) => e instanceof MissingVariableError && e.tag === "support.triage" && e.missing.join() === "team,ticket");
   assert.throws(() => renderTemplate({ tag: "t", text: "", variables, values: { team: "x", ticket: "y", typo: "z" } }), (e: unknown) => e instanceof UnknownVariableError && e.unknown.join() === "typo");

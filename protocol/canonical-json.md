@@ -32,7 +32,7 @@ Only the pins, sorted by `tag`, each projected to exactly these members:
 tag, kind, artifactId, versionId, versionOrdinal (integer or null),
 contentHash, byteLength, model, modelRequired (only when true),
 outputChecks[{ kind, name, …the kind's own members }]   (only when present; checks.md),
-variables[{ name, required, trust }],
+variables[{ name, required, trust, default (only when present), source (only when present) }],
 goldenSet{ setId, cases, contentHash, byteLength, minPassBps }   (only when present; golden-sets.md),
 inference{ maxOutputTokens, reasoningEffort, stopSequences, temperatureMilli, topPBps }   (only when present; each key only when set),
 steps[{ stepId, ordinal, promptArtifactId, promptVersionId, contentHash, byteLength, inference{…} }]   (workflow pins only; a step's inference as above)

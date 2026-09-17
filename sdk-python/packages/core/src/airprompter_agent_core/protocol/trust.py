@@ -341,7 +341,11 @@ def release_digest_input(slots: list[Mapping[str, Any]]) -> list[dict[str, Any]]
             "contentHash": slot["contentHash"],
             "byteLength": slot["byteLength"],
             "model": slot["model"],
-            "variables": [{"name": v["name"], "required": v["required"], "trust": v["trust"]} for v in slot.get("variables", [])],
+            # 0.3.4: `default` and `source` ride the digest only when the pin carries them, so a slot without them keeps its digest.
+            "variables": [
+                {"name": v["name"], "required": v["required"], "trust": v["trust"], **({"default": v["default"]} if v.get("default") is not None else {}), **({"source": v["source"]} if v.get("source") is not None else {})}
+                for v in slot.get("variables", [])
+            ],
         }
         if slot.get("modelRequired") is True:
             entry["modelRequired"] = True

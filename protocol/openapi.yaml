@@ -766,6 +766,12 @@ components:
                     name: { type: string, pattern: "^[a-zA-Z0-9_.-]{1,64}$" }
                     required: { type: boolean }
                     trust: { type: string }
+                    default:
+                      description: "0.3.4: rendered by the run route when the caller passes nothing for an optional operator variable."
+                      type: string
+                    source:
+                      description: "0.3.4: who the author expects to fill it (caller | runtime); a hint."
+                      type: string
               inference:
                 description: "0.3.1: how the model is called for the slot, as the release sealed it — what a hosted run uses; the caller's own values are ignored."
                 $ref: "schemas/manifest.schema.json#/$defs/inference"

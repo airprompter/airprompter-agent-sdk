@@ -87,6 +87,12 @@ if (inferenceDigest === digest) throw new Error("inference must change the relea
 if (releaseDigest([slots[0], { ...slots[1], inference: { maxOutputTokens: 800, temperatureMilli: 200, stopSequences: ["\n\nHuman:"] } }]) !== inferenceDigest) throw new Error("the inference digest input is order-free");
 // A JSON null in the block is unset, in every implementation: the digest is the one without the key.
 if (releaseDigest([slots[0], { ...slots[1], inference: { temperatureMilli: 200, topPBps: null } }]) !== releaseDigest([slots[0], { ...slots[1], inference: { temperatureMilli: 200 } }])) throw new Error("a null inference key is unset");
+// 0.3.4: a variable's default and source are in the digest input when present — and only then, so a slot without them
+// keeps its digest; a null is unset, as it is for an inference key.
+const variableSlots = [slots[0], { ...slots[1], variables: [{ name: "ticket_body", required: true, trust: "end_user", source: "caller" }, { name: "tone", required: false, trust: "operator", default: "warm", source: "runtime" }] }];
+const variableDigest = releaseDigest(variableSlots);
+if (variableDigest === digest) throw new Error("a variable's default and source must change the release digest");
+if (releaseDigest([slots[0], { ...slots[1], variables: [{ name: "ticket_body", required: true, trust: "end_user", default: null, source: null }] }]) !== digest) throw new Error("a null default or source is unset");
 // 0.3.2: a workflow step's own settings are in the digest input when present, projected as a slot's are.
 const stepText = Buffer.from("Summarise {{document}} in three sentences.\n", "utf8");
 const workflowSlot = {
@@ -192,6 +198,7 @@ const manifestCases = [
   { name: "a golden set's payload is referenced like any other: not fetched is refused (T34)", ...base, root: rootV1, manifest: manifest(payload({ slots: goldenSlots, releaseDigest: goldenDigest })), payloads: payloadsOk, expected: { ok: false, reason: "payload_missing" } },
   { name: "a slot with inference settings verifies, and the settings are in its release digest (0.3.1)", ...base, root: rootV1, manifest: manifest(payload({ slots: inferenceSlots, releaseDigest: inferenceDigest })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   { name: "a workflow step with inference settings verifies, and the step's settings are in the release digest (0.3.2)", ...base, root: rootV1, manifest: manifest(payload({ slots: stepInferenceSlots, releaseDigest: stepInferenceDigest })), payloads: payloadsWithStep, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
+  { name: "a slot variable with a default and a source verifies, and both are in the release digest (0.3.4)", ...base, root: rootV1, manifest: manifest(payload({ slots: variableSlots, releaseDigest: variableDigest })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   { name: "a directive of a kind the runtime does not honour refuses the whole manifest before any payload is fetched (S4)", ...base, root: rootV1, manifest: manifest(payload({ directives: [{ kind: "reboot", issuedAt: "2026-09-12T10:00:00Z" }, { kind: "disable", scope: "agent", issuedAt: "2026-09-12T10:00:00Z" }] })), payloads: payloadsOk, expected: { ok: false, reason: "directive_unknown" } },
   { name: "the two kinds the runtime honours verify (S4): disable acts without a local act, request_unlock only asks", ...base, root: rootV1, manifest: manifest(payload({ directives: [{ kind: "disable", scope: "slot", tag: "support.reply", issuedAt: "2026-09-12T10:00:00Z", reason: "incident" }, { kind: "request_unlock", releaseDigest: digest, requestedBy: "usr_console", requestedAt: "2026-09-12T10:00:00Z", expiresAt: "2026-09-12T14:00:00Z" }] })), payloads: payloadsOk, expected: { ok: true, signingKeyId: id.targets, generation: 42 } },
   // S16 (M15): per-prompt experiments — a well-formed experiments[] verifies; the conflicts are refused before any payload.

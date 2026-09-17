@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/otel-bridge",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "The AirPrompter agent SDK's telemetry spool as an OpenTelemetry exporter: minute windows become OTLP metrics (gen_ai.client.operation.duration, tokens, checks, feedback, refusals) shipped to the collector you already run — no AirPrompter grant at all. An UploadSink for @airprompter/agent-telemetry's uploader, in airprompterd or in-process.",
   "keywords": [
     "airprompter",
@@ -47,7 +47,7 @@
     "sizeBudgetBytes": 80000
   },
   "dependencies": {
-    "@airprompter/agent-core": "0.2.11"
+    "@airprompter/agent-core": "0.2.12"
   },
   "publishConfig": {
     "access": "public",

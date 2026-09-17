@@ -1278,7 +1278,9 @@ class AirPrompterAgent:
             "generation": {"active": status.generation, **({"staged": status.staged_generation} if status.staged_generation is not None else {})},
             "applyState": apply_state,
             "storageProtection": "custom" if status.storage_protection == "daemon" else status.storage_protection,
-            "catalog": {"models": list(dict.fromkeys(models))[:256], "reportedAt": self._now_iso()},
+            # 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
+            # can warn about a `source: runtime` variable no live instance fills before the promotion, not after.
+            "catalog": {"models": list(dict.fromkeys(models))[:256], **({"variables": self.variables.names()[:256]} if self.variables.names() else {}), "reportedAt": self._now_iso()},
             "lease": {**({"expiresAt": status.lease_expires_at} if status.lease_expires_at else {}), "expired": status.lease_expired},
             "spool": {
                 "depthSegments": status.spool["depth_segments"],

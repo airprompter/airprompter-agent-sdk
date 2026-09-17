@@ -92,7 +92,8 @@ export function releaseDigestInput(slots) {
       ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
       // 0.3.1: the inference block is digest-bound when present — its known keys, each only when set (a JSON null is unset).
       ...(slot.inference ? { inference: inferenceDigestInput(slot.inference) } : {}),
-      variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
+      // 0.3.4: `default` and `source` ride the digest only when the pin carries them, so a slot without them keeps its digest.
+      variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust, ...(v.default !== undefined && v.default !== null ? { default: v.default } : {}), ...(v.source !== undefined && v.source !== null ? { source: v.source } : {}) })),
       ...(slot.steps
         ? {
             steps: slot.steps.map((s) => ({

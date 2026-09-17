@@ -59,7 +59,11 @@ this order, and stop at the first that answers:
 1. **the call site's value** — the caller knows more than a source;
 2. **a registered source** — consulted only for a declared variable that is
    *required or present in the text* and that the call site did not pass;
-3. **nothing** — a required variable is then `MissingVariableError` (the
+3. **the declared default** (protocol 0.3.4) — an optional `operator`
+   variable may carry one in AirPrompter (Slots › Variables); the render uses
+   it when nothing above answered. A required or end-user variable never has
+   one (the seal refuses it);
+4. **nothing** — a required variable is then `MissingVariableError` (the
    render refuses; that is your bug, not an empty string in a prompt). An
    **optional** variable nobody fills renders empty, exactly as it did when
    the call site left it out — so declare a variable required in AirPrompter
@@ -155,8 +159,12 @@ Declarations only, no payload read. Names only, never values.
 - **Fleet runtimes and vendored bundles**: sources are in-process registration and do not care where the release came
   from.
 
-## Coming next
+## What the control plane knows (protocol 0.3.4)
 
-Protocol 0.3.4 adds `default` and `source: caller | runtime` to a slot's variable declarations, a Slots-page editor
-for them, and a seal-time check that every placeholder in the pinned version's text is declared; the heartbeat then
-reports the names a runtime can fill so a promotion warns "uncovered on 0 of 4 instances" before it happens.
+A slot's variable declarations are edited in AirPrompter (Slots › Variables) and sealed into the release: `name`,
+`required`, `trust`, and now `default` (optional operator variables only) and `source: caller | runtime` — a
+statement of who is expected to fill the variable. The seal refuses a version whose text uses a placeholder the
+slot does not declare (`variable_undeclared`, so a runtime never renders a literal `{{name}}`), and warns when a
+`source: runtime` variable is filled by no live instance of the environment: every runtime's heartbeat carries
+`catalog.variables` — the names `ap.variables.names()` answers, never a value — and the warning reads
+"uncovered on 0 of 4 instances" before the promotion, not after.

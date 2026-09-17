@@ -186,6 +186,10 @@ test("on the agent: a version without the placeholder never calls the source; th
   const sourcedTicket = await ap.prompt("support.triage", { subject: "cust-4" }).renderAsync({});
   assert.match(sourcedTicket.text, /<ticket>sourced &lt;\/ticket> ticket<\/ticket>/);
   ap.variables.revoke("ticket");
+  // 0.3.4: the heartbeat names what this application can fill — names only.
+  await ap.heartbeatNow();
+  assert.deepEqual((plane.heartbeats.at(-1) as { catalog: { variables?: string[] } }).catalog.variables, ["customer_tier", "team"]);
+  assert.ok(!JSON.stringify(plane.heartbeats.at(-1)).includes("gold"), "never a value");
   // No prompt text or value ever reaches the log.
   for (const e of events) assert.equal(JSON.stringify(e).includes("gold") || JSON.stringify(e).includes("printer"), false);
   await ap.stop();

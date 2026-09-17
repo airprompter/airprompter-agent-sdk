@@ -26,7 +26,8 @@ def digest_input(slots):
     out = []
     for s in sorted(slots, key=lambda s: s["tag"]):
         p = {k: s[k] for k in ("tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model")}
-        p["variables"] = [{"name": v["name"], "required": v["required"], "trust": v["trust"]} for v in s["variables"]]
+        # 0.3.4: default and source are digest-bound when present.
+        p["variables"] = [{"name": v["name"], "required": v["required"], "trust": v["trust"], **({"default": v["default"]} if v.get("default") is not None else {}), **({"source": v["source"]} if v.get("source") is not None else {})} for v in s["variables"]]
         if "steps" in s:
             p["steps"] = [{**{k: st[k] for k in ("stepId", "ordinal", "promptArtifactId", "promptVersionId", "contentHash", "byteLength")}, **({"inference": inference_input(st["inference"])} if st.get("inference") is not None else {})} for st in s["steps"]]
         if s.get("inference") is not None:
@@ -82,8 +83,9 @@ slots = [
         "byteLength": len(reply_text),
         "model": "gpt-5",
         "variables": [
-            {"name": "customer_name", "required": True, "trust": "operator"},
-            {"name": "topic", "required": False, "trust": "operator"},
+            {"name": "customer_name", "required": True, "trust": "operator", "source": "runtime"},
+            # 0.3.4: an optional operator variable may carry a default, rendered when nothing else fills it.
+            {"name": "topic", "required": False, "trust": "operator", "default": "your recent order"},
         ],
         # 0.3.1: how the model is called, as the version declared it — sealed into the digest, applied by the wrappers.
         # A reasoning model takes an effort and a cap, not a temperature (the control plane refuses what the model cannot take).
@@ -273,7 +275,8 @@ heartbeat_request = {
     "applyState": "awaiting_unlock",
     "signingKeyId": key_platform,
     "storageProtection": "kms",
-    "catalog": {"models": ["claude-sonnet-5", "gpt-5"], "reportedAt": "2026-09-12T10:04:00Z"},
+    # 0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) — names only.
+    "catalog": {"models": ["claude-sonnet-5", "gpt-5"], "variables": ["customer_name"], "reportedAt": "2026-09-12T10:04:00Z"},
     "lease": {"expiresAt": "2026-09-12T11:00:00Z", "expired": False},
     "localRollback": {"active": False, "forced": False},
     "spool": {"depthSegments": 3, "depthBytes": 41210, "droppedSegments": 0, "quarantinedSegments": 0, "lastUploadAt": "2026-09-12T10:03:30Z"},

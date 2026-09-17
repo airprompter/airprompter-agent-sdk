@@ -316,6 +316,13 @@ test("the managed client fills required declared variables from its sources befo
   // A call-site value for that variable makes the source irrelevant, so the run goes.
   await agent.stream("support.triage", { ticket: "x", customer_tier: "gold" }).catch(() => undefined);
   assert.deepEqual(posted.at(-1)?.variables, { ticket: "x", customer_tier: "gold", team: "Billing" });
+  // An optional variable no hosted run posts is never refused, whatever its source's trust.
+  const optionalPlane = new FakeControlPlane(scope);
+  optionalPlane.promote(slots(optionalPlane, { tierInText: true, tierRequired: false }));
+  const optionalFetch: typeof inner = async (url, init) => (url.endsWith("/run") ? fetchImpl(url, init) : optionalPlane.fetch()(url, init));
+  const optionalAgent = await ManagedAgent.start({ agentId: scope.agentId, target: scope.target, apiKey: optionalPlane.apiKey, baseUrl: "https://api.test", fetch: optionalFetch as never, variables: { team: "Billing", customer_tier: { resolve: async () => "gold", trust: "end_user" } } });
+  await optionalAgent.stream("support.triage", { ticket: "x" }).catch((e: unknown) => { if (isVariableSourceError(e)) throw e; });
+  assert.deepEqual(posted.at(-1)?.variables, { ticket: "x", team: "Billing" }, "the optional, unfenceable variable is simply not filled");
   // An aborted run is not filled.
   agent.variables.provide("customer_tier", { resolve: async () => { looked += 1; return "gold"; }, trust: "operator" });
   const controller = new AbortController();

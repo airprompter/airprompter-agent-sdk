@@ -113,13 +113,14 @@ export async function fillAsync(plan: FillPlan, context: Omit<VariableSourceCont
   const results = await Promise.all(
     [...plan.literal, ...plan.async].map(async (name) => {
       const entry = registry.get(name);
-      if (!entry) return { name, value: undefined as string | undefined, from: "source" as const, trust: "operator" as const };
+      if (!entry) return { name, value: undefined as string | undefined, from: "revoked" as const, trust: "operator" as const };
       if (entry.kind === "literal") return { name, value: entry.value, from: "literal" as const, trust: entry.trust };
       return { name, value: await resolveOne(plan.tag, name, entry, { ...context, name }), from: "source" as const, trust: entry.trust };
     }),
   );
   for (const result of results) {
     const variable = byName.get(result.name);
+    if (result.from === "revoked") continue; // revoked since the plan: the render decides, exactly as fillSync does
     if (result.value === undefined) {
       if (variable?.required) throw new VariableSourceError(plan.tag, result.name, "empty");
       continue; // optional and unanswered: the render leaves it empty, as a call site would have

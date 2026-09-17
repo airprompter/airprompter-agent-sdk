@@ -328,10 +328,12 @@ export class ManagedAgent {
     const slot = this.catalogue.slots.find((s) => s.tag === tag);
     if (!slot || this.variables.names().length === 0) return values;
     const declared = slot.variables as readonly SlotVariable[];
-    const unfenceable = stricterSources(declared, this.variables).filter((name) => !supplied(values, name));
-    if (unfenceable.length > 0) throw new VariableSourceError(tag, unfenceable[0]!, "unfenceable");
     const plan = planFill({ tag, variables: declared, text: null, values, registry: this.variables });
     if (plan.literal.length === 0 && plan.async.length === 0) return values;
+    // Only what this run would actually fill can be unfenceable: an optional variable no run posts is not refused.
+    const planned = new Set([...plan.literal, ...plan.async]);
+    const unfenceable = stricterSources(declared, this.variables).filter((name) => planned.has(name));
+    if (unfenceable.length > 0) throw new VariableSourceError(tag, unfenceable[0]!, "unfenceable");
     if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("run aborted");
     const filled = await fillAsync(plan, { tag, subject, versionId: null, arm: null }, this.variables);
     return Object.fromEntries(Object.entries(filled.values).filter(([name]) => supplied(filled.values, name)).map(([k, v]) => [k, String(v)]));

@@ -93,8 +93,21 @@
           "description": "D55: `end_user` values are rendered only inside the delimiters the author declared and never in an instruction-role position without an explicit acknowledgement at seal time.",
           "type": "string",
           "enum": ["operator", "end_user"]
+        },
+        "default": {
+          "description": "0.3.4: the text rendered when neither the call site nor a source supplies a value. Only on an optional `operator` variable (the schema and the control plane refuse a default on a required or an end-user one; a runtime ignores it there), and never empty. In the digest input when present; a runtime treats a JSON null as unset, the schema refuses one.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "source": {
+          "description": "0.3.4: who the author expects to fill the variable — `caller` (the code that renders passes it) or `runtime` (the application registers a source for it; `docs/variables.md`). A hint reviewers and the seal read; a runtime does not act on it. In the digest input when present.",
+          "type": "string",
+          "enum": ["caller", "runtime"]
         }
-      }
+      },
+      "if": { "required": ["default"] },
+      "then": { "properties": { "required": { "const": false }, "trust": { "const": "operator" } } }
     },
     "goldenSetRef": {
       "description": "T34: what a slot carries for its golden set (golden-sets.md) — the cases themselves are the payload under `contentHash`, encrypted at rest like a prompt.",

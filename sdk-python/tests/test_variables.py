@@ -23,7 +23,7 @@ from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import SyncOptions
 from airprompter_agent_core._util import instant
 from airprompter_agent_core.protocol.trust import public_jwk_of, release_digest
-from airprompter_agent_core.render.template import MissingVariableError, UnknownVariableError, placeholders_of
+from airprompter_agent_core.render.template import MissingVariableError, UnknownVariableError, placeholders_of, render_template
 from airprompter_agent_runtime.managed import ManagedAgent
 from airprompter_agent_runtime.variables import (
     VariableSource,
@@ -377,6 +377,15 @@ def test_agent_renders_from_sources_fenced_by_the_stricter_trust(state_dir):
         sourced = ap.prompt("support.triage", subject="cust-6").render()
         assert "<ticket>sourced &lt;/ticket> ticket</ticket>" in sourced.text
         ap.variables.revoke("ticket")
+        # 0.3.4: the heartbeat names what this application can fill — names only — once the release it serves was
+        # sealed at 0.3.4; a service still at 0.3.3 would refuse the whole heartbeat over the key, so it is withheld.
+        ap.heartbeat_now()
+        assert plane.heartbeats[-1]["catalog"]["variables"] == ["customer_tier", "team"]
+        assert "gold" not in json.dumps(plane.heartbeats[-1]), "never a value"
+        plane.promote(slots(plane, tier_in_text=True, version_id="ver_3"), protocol="0.3.3")
+        ap.sync_now()
+        ap.heartbeat_now()
+        assert "variables" not in plane.heartbeats[-1]["catalog"], "withheld from a 0.3.3 service"
         # The registry is the agent's: a wrapped client finds the render by its text.
         assert ap.attribution_for({"messages": [{"role": "user", "content": caller.text}]}) is not None
     finally:
@@ -484,6 +493,18 @@ def test_workflow_steps_fill_per_step_and_the_row_names_the_slot(state_dir):
         assert [(r["tag"], r["errorClass"]) for r in error_rows(ap)] == [("docs.flow", "render_missing_variable")], "one window row for the slot, both failures counted in it"
     finally:
         ap.stop()
+
+
+def test_a_source_answering_nothing_yields_to_the_default_and_managed_plans_source_runtime():
+    variables = [{"name": "ticket", "required": True, "trust": "end_user"}, {"name": "tone", "required": False, "trust": "operator", "default": "warm", "source": "runtime"}]
+    registry = VariableSourceRegistry({"tone": {"resolve": lambda ctx: None, "trust": "operator"}})
+    plan = plan_fill(tag="t", variables=variables, text="{{ticket}} {{tone}}", values={"ticket": "x"}, registry=registry)
+    assert plan.async_ == ["tone"], "the source is consulted first"
+    filled = fill_sync(plan, CTX, registry)
+    assert "tone" not in filled.values
+    assert render_template(tag="t", text="[{{tone}}]", variables=variables, values=filled.values) == "[warm]", "the default is the last resort"
+    managed = plan_fill(tag="t", variables=[*variables, {"name": "note", "required": False, "trust": "operator"}], text=None, values={"ticket": "x"}, registry=registry)
+    assert (managed.literal, managed.async_) == ([], ["tone"]), "no text: a source: runtime variable is planned as a required one would be"
 
 
 # ----------------------------------------------------------------------------- managed mode

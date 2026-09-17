@@ -166,12 +166,12 @@ class FakeControlPlane:
                 slot["steps"].append({"stepId": f"{tag}#{index + 1}", "ordinal": index + 1, "promptArtifactId": f"art_{tag}_{index + 1}", "promptVersionId": step.get("versionId") or f"ver_{tag}_step{index + 1}", "contentHash": step_hash, "byteLength": len(step_bytes), **({"inference": step["inference"]} if step.get("inference") else {})})
         return slot
 
-    def promote(self, slots: list[dict[str, Any]], *, apply_policy: str = "auto", lease_seconds: int = 3600, experiment: Optional[dict] = None, experiments: Optional[list[dict]] = None, directives: Optional[list] = None, on_lease_expiry: str = "degrade", unlock_window: Optional[dict] = None, sign_with: Optional[dict] = None, generation: Optional[int] = None) -> dict[str, Any]:
-        """Seal and promote: generation + 1, signed with the signing key."""
+    def promote(self, slots: list[dict[str, Any]], *, apply_policy: str = "auto", lease_seconds: int = 3600, experiment: Optional[dict] = None, experiments: Optional[list[dict]] = None, directives: Optional[list] = None, on_lease_expiry: str = "degrade", unlock_window: Optional[dict] = None, sign_with: Optional[dict] = None, generation: Optional[int] = None, protocol: Optional[str] = None) -> dict[str, Any]:
+        """Seal and promote: generation + 1, signed with the signing key. ``protocol`` seals as an older service would."""
         ordered = sorted(slots, key=lambda s: s["tag"])
         self.generation = generation if generation is not None else self.generation + 1
         payload: dict[str, Any] = {
-            "protocol": PROTOCOL,
+            "protocol": protocol or PROTOCOL,
             **self.scope,
             "generation": self.generation,
             "releaseDigest": release_digest(ordered),

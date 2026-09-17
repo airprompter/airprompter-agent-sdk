@@ -72,7 +72,7 @@ from airprompter_agent_core import SDK_VERSION  # one constant, pinned to pyproj
 SDK_NAME = "agent-sdk-python"
 #: The protocol this SDK speaks; the heartbeat names it (the manifest carries its own). One constant, core's — a
 #: second copy here drifted a whole protocol bump behind it.
-from airprompter_agent_core import PROTOCOL_VERSION  # noqa: E402
+from airprompter_agent_core import PROTOCOL_VERSION, protocol_at_least  # noqa: E402
 # A vendored bundle this close to its notAfter logs vendored_bundle_expiring_soon at start (the platform warns at the same distance).
 VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30
 _USER_AGENT = f"{SDK_NAME}/{SDK_VERSION}"
@@ -1267,6 +1267,7 @@ class AirPrompterAgent:
         if status.apply_state == "awaiting_unlock" and self._staged_manifest is not None:
             apply_state = "awaiting_countersign" if self._o.get("require_countersign") and not self._staged_manifest.get("countersignatures") else "awaiting_unlock"
         mode = self._sync_options.mode
+        source_names = self.variables.names()
         body: dict[str, Any] = {
             "protocol": PROTOCOL_VERSION,
             "instanceId": self._own_instance_id,
@@ -1278,7 +1279,11 @@ class AirPrompterAgent:
             "generation": {"active": status.generation, **({"staged": status.staged_generation} if status.staged_generation is not None else {})},
             "applyState": apply_state,
             "storageProtection": "custom" if status.storage_protection == "daemon" else status.storage_protection,
-            "catalog": {"models": list(dict.fromkeys(models))[:256], "reportedAt": self._now_iso()},
+            # 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
+            # can warn about a `source: runtime` variable no live instance fills before the promotion, not after. Sent only
+            # once the control plane has shown it speaks 0.3.4 (the active manifest's protocol): an older service refuses
+            # the whole heartbeat over an unknown key, and a refused heartbeat is worse than an unreported name.
+            "catalog": {"models": list(dict.fromkeys(models))[:256], **({"variables": source_names[:256]} if source_names and protocol_at_least(str((self._active.manifest["payload"] if self._active else {}).get("protocol", "0.0.0")), "0.3.4") else {}), "reportedAt": self._now_iso()},
             "lease": {**({"expiresAt": status.lease_expires_at} if status.lease_expires_at else {}), "expired": status.lease_expired},
             "spool": {
                 "depthSegments": status.spool["depth_segments"],

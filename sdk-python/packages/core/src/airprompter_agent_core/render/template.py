@@ -5,8 +5,15 @@
 delimiters declared for it — by default an XML-style element named after
 the variable — so the model sees where untrusted input starts and stops,
 and the assurance lens can find it. A missing required variable raises:
-that is the customer's bug and silence would ship a broken prompt.
+that is the customer's bug and silence would ship a broken prompt. An
+optional variable nobody supplied renders its declared ``default`` (0.3.4)
+when it has one, and nothing otherwise.
 Sync and telemetry failures degrade; render contract failures raise.
+
+Example::
+
+    render_template(tag="support.reply", text="Reply to {{customer_name}} about {{topic}}.", variables=slot["variables"], values={"customer_name": "Ada"})
+    # → "Reply to Ada about your recent order." when ``topic`` declares default "your recent order"
 """
 
 from __future__ import annotations
@@ -66,6 +73,12 @@ def _stringify(value: Any) -> str:
     return str(value)
 
 
+def default_of(variable: Mapping[str, Any]) -> Optional[str]:
+    """0.3.4: a default counts only where the control plane allows one — an optional ``operator`` variable; elsewhere it is ignored."""
+    default = variable.get("default")
+    return default if not variable.get("required") and variable.get("trust") == "operator" and isinstance(default, str) else None
+
+
 def _escape_fence(value: str, close: str) -> str:
     return value.replace(close, close.replace("<", "&lt;", 1)) if close else value
 
@@ -96,6 +109,8 @@ def render_template(
         if variable is None:
             return match.group(0)  # an undeclared placeholder in the text is left for the author to see
         value = values.get(name)
+        if value is None:
+            value = default_of(variable)
         if value is None:
             return ""
         rendered = _stringify(value)

@@ -84,7 +84,8 @@ def supplied(values: RenderValues, name: str) -> bool:
 def plan_fill(*, tag: str, variables: Sequence[Mapping[str, Any]], text: Optional[str], values: RenderValues, registry: VariableSourceRegistry) -> FillPlan:
     """Which declared variables a render must fill from a source: required ones, and any the text uses — never one
     the current version dropped (a source is not called for a variable no longer in the prompt). ``text`` is None in
-    managed mode, where only the declarations are known; then the required ones are the whole set."""
+    managed mode, where only the declarations are known; then the required ones and those the author marked
+    ``source: runtime`` (0.3.4 — "the application fills this") are the set."""
     used = None if text is None else placeholders_of(text)
     literal: list[str] = []
     async_: list[str] = []
@@ -93,7 +94,7 @@ def plan_fill(*, tag: str, variables: Sequence[Mapping[str, Any]], text: Optiona
         name = str(variable["name"])
         if supplied(values, name):
             continue
-        needed = bool(variable.get("required")) or (used is not None and name in used)
+        needed = bool(variable.get("required")) or (variable.get("source") == "runtime" if used is None else name in used)
         if not needed:
             continue
         entry = registry.get(name)
@@ -193,7 +194,7 @@ def _collect(plan: FillPlan, results: list[tuple[str, Optional[str], str, str]])
         if value is None:
             if variable is not None and variable.get("required"):
                 raise VariableSourceError(plan.tag, name, "empty")
-            continue
+            continue  # optional and unanswered: the render uses the declared default (0.3.4) or leaves it empty, as a call site would have
         values[name] = value
         stricter = trust == "end_user" and (variable is None or variable.get("trust") != "end_user")
         if stricter:

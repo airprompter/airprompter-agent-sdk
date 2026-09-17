@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AirPrompter Agent routes (customer-v1)
-  version: 0.3.3
+  version: 0.3.4
   summary: The routes an agent runtime calls. Pull only; the control plane never opens a connection to you.
   description: |
     Every route is called by the customer's runtime over outbound HTTPS with an
@@ -766,6 +766,15 @@ components:
                     name: { type: string, pattern: "^[a-zA-Z0-9_.-]{1,64}$" }
                     required: { type: boolean }
                     trust: { type: string }
+                    default:
+                      description: "0.3.4: the text an optional operator variable renders when the caller passes nothing for it (the run route applies it once the service speaks 0.3.4)."
+                      type: string
+                      minLength: 1
+                      maxLength: 4096
+                    source:
+                      description: "0.3.4: who the author expects to fill it (caller | runtime); a hint."
+                      type: string
+                      enum: [caller, runtime]
               inference:
                 description: "0.3.1: how the model is called for the slot, as the release sealed it — what a hosted run uses; the caller's own values are ignored."
                 $ref: "schemas/manifest.schema.json#/$defs/inference"

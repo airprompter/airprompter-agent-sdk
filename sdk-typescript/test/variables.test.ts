@@ -19,6 +19,7 @@ import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
 import { ManagedAgent } from "../packages/runtime/src/managed/client.js";
 import { VariableSourceRegistry, isVariableSourceError, isVariableSourceRequiredError } from "../packages/runtime/src/variables/sources.js";
 import { fillAsync, fillSync, planFill, stricterSources, unsourced } from "../packages/runtime/src/variables/fill.js";
+import { renderTemplate } from "../packages/core/src/render/template.js";
 import { releaseDigest } from "../packages/core/src/protocol/trust.js";
 import type { WindowRow } from "../packages/telemetry/src/spool/writer.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
@@ -27,7 +28,7 @@ const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as con
 const tempDir = () => mkdtempSync(join(tmpdir(), "ap-variables-"));
 
 /** A slot whose text uses `team` and `ticket`; `customer_tier` is declared optional and NOT used by this version. */
-function slots(plane: FakeControlPlane, options: { tierInText?: boolean; tierRequired?: boolean } = {}) {
+function slots(plane: FakeControlPlane, options: { tierInText?: boolean; tierRequired?: boolean; versionId?: string } = {}) {
   const tier = options.tierInText ? " The customer is on the {{customer_tier}} plan." : "";
   return [
     plane.slot({
@@ -39,7 +40,7 @@ function slots(plane: FakeControlPlane, options: { tierInText?: boolean; tierReq
         { name: "ticket", required: true, trust: "end_user" },
         { name: "customer_tier", required: options.tierRequired ?? false, trust: "operator" },
       ],
-      versionId: options.tierInText ? "ver_2" : "ver_1",
+      versionId: options.versionId ?? (options.tierInText ? "ver_2" : "ver_1"),
     }),
   ];
 }
@@ -186,6 +187,15 @@ test("on the agent: a version without the placeholder never calls the source; th
   const sourcedTicket = await ap.prompt("support.triage", { subject: "cust-4" }).renderAsync({});
   assert.match(sourcedTicket.text, /<ticket>sourced &lt;\/ticket> ticket<\/ticket>/);
   ap.variables.revoke("ticket");
+  // 0.3.4: the heartbeat names what this application can fill — names only — once the release it serves was sealed
+  // at 0.3.4; a service still at 0.3.3 would refuse the whole heartbeat over the key, so it is withheld until then.
+  await ap.heartbeatNow();
+  assert.deepEqual((plane.heartbeats.at(-1) as { catalog: { variables?: string[] } }).catalog.variables, ["customer_tier", "team"]);
+  assert.ok(!JSON.stringify(plane.heartbeats.at(-1)).includes("gold"), "never a value");
+  plane.promote(slots(plane, { tierInText: true, versionId: "ver_3" }), { protocol: "0.3.3" });
+  await ap.syncNow();
+  await ap.heartbeatNow();
+  assert.equal((plane.heartbeats.at(-1) as { catalog: { variables?: string[] } }).catalog.variables, undefined, "withheld from a 0.3.3 service");
   // No prompt text or value ever reaches the log.
   for (const e of events) assert.equal(JSON.stringify(e).includes("gold") || JSON.stringify(e).includes("printer"), false);
   await ap.stop();
@@ -329,4 +339,20 @@ test("the managed client fills required declared variables from its sources befo
   controller.abort(new Error("caller gave up"));
   await assert.rejects(agent.stream("support.triage", { ticket: "x" }, { signal: controller.signal }), /caller gave up/);
   assert.equal(looked, 0);
+});
+
+test("0.3.4: a source that answers nothing yields to the declared default; managed mode fills a source: runtime variable, required or not", async () => {
+  const variables = [
+    { name: "ticket", required: true, trust: "end_user" as const },
+    { name: "tone", required: false, trust: "operator" as const, default: "warm", source: "runtime" as const },
+  ];
+  const registry = new VariableSourceRegistry({ tone: { resolve: async () => undefined, trust: "operator" } });
+  const plan = planFill({ tag: "t", variables, text: "{{ticket}} {{tone}}", values: { ticket: "x" }, registry });
+  assert.deepEqual(plan.async, ["tone"], "the source is consulted first");
+  const filled = await fillAsync(plan, { tag: "t", subject: undefined, versionId: "v", arm: "none" }, registry);
+  assert.equal("tone" in filled.values, false, "nothing from the source");
+  assert.equal(renderTemplate({ tag: "t", text: "[{{tone}}]", variables, values: filled.values }), "[warm]", "the default is the last resort");
+  // Managed mode has no text: a `source: runtime` variable is planned as a required one would be; a plain optional one is not.
+  const managed = planFill({ tag: "t", variables: [...variables, { name: "note", required: false, trust: "operator" as const }], text: null, values: { ticket: "x" }, registry });
+  assert.deepEqual([managed.literal, managed.async], [[], ["tone"]]);
 });

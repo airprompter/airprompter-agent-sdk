@@ -26,7 +26,8 @@ def digest_input(slots):
     out = []
     for s in sorted(slots, key=lambda s: s["tag"]):
         p = {k: s[k] for k in ("tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model")}
-        p["variables"] = [{"name": v["name"], "required": v["required"], "trust": v["trust"]} for v in s["variables"]]
+        # 0.3.4: default and source are digest-bound when present.
+        p["variables"] = [{"name": v["name"], "required": v["required"], "trust": v["trust"], **({"default": v["default"]} if v.get("default") is not None else {}), **({"source": v["source"]} if v.get("source") is not None else {})} for v in s["variables"]]
         if "steps" in s:
             p["steps"] = [{**{k: st[k] for k in ("stepId", "ordinal", "promptArtifactId", "promptVersionId", "contentHash", "byteLength")}, **({"inference": inference_input(st["inference"])} if st.get("inference") is not None else {})} for st in s["steps"]]
         if s.get("inference") is not None:
@@ -82,8 +83,9 @@ slots = [
         "byteLength": len(reply_text),
         "model": "gpt-5",
         "variables": [
-            {"name": "customer_name", "required": True, "trust": "operator"},
-            {"name": "topic", "required": False, "trust": "operator"},
+            {"name": "customer_name", "required": True, "trust": "operator", "source": "runtime"},
+            # 0.3.4: an optional operator variable may carry a default, rendered when nothing else fills it.
+            {"name": "topic", "required": False, "trust": "operator", "default": "your recent order"},
         ],
         # 0.3.1: how the model is called, as the version declared it — sealed into the digest, applied by the wrappers.
         # A reasoning model takes an effort and a cap, not a temperature (the control plane refuses what the model cannot take).
@@ -273,7 +275,8 @@ heartbeat_request = {
     "applyState": "awaiting_unlock",
     "signingKeyId": key_platform,
     "storageProtection": "kms",
-    "catalog": {"models": ["claude-sonnet-5", "gpt-5"], "reportedAt": "2026-09-12T10:04:00Z"},
+    # 0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) — names only.
+    "catalog": {"models": ["claude-sonnet-5", "gpt-5"], "variables": ["customer_name"], "reportedAt": "2026-09-12T10:04:00Z"},
     "lease": {"expiresAt": "2026-09-12T11:00:00Z", "expired": False},
     "localRollback": {"active": False, "forced": False},
     "spool": {"depthSegments": 3, "depthBytes": 41210, "droppedSegments": 0, "quarantinedSegments": 0, "lastUploadAt": "2026-09-12T10:03:30Z"},
@@ -312,6 +315,10 @@ refused = {
     "manifest.no-signature.json": {"schema": "manifest", "reason": "an unsigned envelope is not a manifest", "document": {**manifest, "signatures": []}},
     "manifest.generation-zero.json": {"schema": "manifest", "reason": "generation starts at 1", "document": {**manifest, "payload": {**manifest_payload, "generation": 0}}},
     "manifest.uppercase-tag.json": {"schema": "manifest", "reason": "slot tags follow the tag grammar", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[0], "tag": "Support.Triage"}]}}},
+    # 0.3.4: a default belongs to an optional operator variable only; a source is one of two words.
+    "manifest.variable-default-on-required.json": {"schema": "manifest", "reason": "a default belongs to an optional variable (0.3.4)", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[1], "variables": [{"name": "customer_name", "required": True, "trust": "operator", "default": "there"}]}]}}},
+    "manifest.variable-default-on-end-user.json": {"schema": "manifest", "reason": "an end-user variable never carries a default (0.3.4)", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[0], "variables": [{"name": "ticket_body", "required": False, "trust": "end_user", "default": "no ticket"}]}]}}},
+    "manifest.variable-source-unknown.json": {"schema": "manifest", "reason": "a variable's source is caller or runtime (0.3.4)", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[1], "variables": [{"name": "customer_name", "required": True, "trust": "operator", "source": "seal"}]}]}}},
     "manifest.slot-disable-without-tag.json": {"schema": "manifest", "reason": "a slot-scoped disable names the slot", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "slot", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
     "manifest.arm-disable-without-arm.json": {"schema": "manifest", "reason": "an arm-scoped disable names the arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "arm", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
     "manifest.ramp-step-one-weight.json": {"schema": "manifest", "reason": "a ramp step carries one weight per arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "experiment": {**manifest_payload["experiment"], "ramp": [{"notBefore": "2026-09-13T02:00:00Z", "weightBps": [10000]}]}}}},

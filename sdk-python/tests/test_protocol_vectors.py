@@ -138,3 +138,14 @@ def test_examples_digest_reproduces():
     with open(os.path.join(VECTORS, "..", "examples", "manifest.json"), encoding="utf-8") as f:
         manifest = json.load(f)
     assert release_digest(manifest["payload"]["slots"]) == manifest["payload"]["releaseDigest"]
+
+
+def test_variable_default_and_source_are_digest_bound_only_when_present():
+    """0.3.4: parity with the reference and TypeScript — a null is unset; a default or a source changes the digest."""
+    from airprompter_agent_core.protocol.trust import release_digest
+
+    slot = {"tag": "a", "kind": "prompt", "artifactId": "prm_1", "versionId": "v1", "versionOrdinal": 1, "contentHash": "sha256:" + "a" * 64, "byteLength": 1, "model": "gpt-5", "variables": [{"name": "tone", "required": False, "trust": "operator"}]}
+    plain = release_digest([slot])
+    assert release_digest([{**slot, "variables": [{**slot["variables"][0], "default": None, "source": None}]}]) == plain
+    assert release_digest([{**slot, "variables": [{**slot["variables"][0], "default": "warm"}]}]) != plain
+    assert release_digest([{**slot, "variables": [{**slot["variables"][0], "source": "runtime"}]}]) != plain

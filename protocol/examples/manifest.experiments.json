@@ -1,12 +1,12 @@
 {
   "payload": {
-    "protocol": "0.3.3",
+    "protocol": "0.3.4",
     "organizationId": "org_7d3f9a2b",
     "agentId": "agt_4e8c1b6d",
     "target": "prod",
     "generation": 43,
-    "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
-    "previousReleaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
+    "releaseDigest": "sha256:528680a15cb512714c8328f1a3ba634a64e359b0c11686c1abbe4396a27267eb",
+    "previousReleaseDigest": "sha256:528680a15cb512714c8328f1a3ba634a64e359b0c11686c1abbe4396a27267eb",
     "issuedAt": "2026-09-12T11:00:00Z",
     "leaseSeconds": 3600,
     "onLeaseExpiry": "degrade",
@@ -70,12 +70,14 @@
           {
             "name": "customer_name",
             "required": true,
-            "trust": "operator"
+            "trust": "operator",
+            "source": "runtime"
           },
           {
             "name": "topic",
             "required": false,
-            "trust": "operator"
+            "trust": "operator",
+            "default": "your recent order"
           }
         ],
         "inference": {
@@ -121,13 +123,13 @@
           {
             "arm": "control",
             "weightBps": 9000,
-            "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
+            "releaseDigest": "sha256:528680a15cb512714c8328f1a3ba634a64e359b0c11686c1abbe4396a27267eb",
             "overrides": []
           },
           {
             "arm": "candidate",
             "weightBps": 1000,
-            "releaseDigest": "sha256:47e4731f529c1234e26bc0a7c5709f552efddc6f4dbe8aee2563506c8fc947a6",
+            "releaseDigest": "sha256:4a021b3b0aec82bbebd74f1cc63f0caae75f97e5064d3e0bb5f40dcc58505318",
             "overrides": [
               {
                 "tag": "support.triage",
@@ -182,13 +184,13 @@
           {
             "arm": "control",
             "weightBps": 5000,
-            "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
+            "releaseDigest": "sha256:528680a15cb512714c8328f1a3ba634a64e359b0c11686c1abbe4396a27267eb",
             "overrides": []
           },
           {
             "arm": "candidate",
             "weightBps": 5000,
-            "releaseDigest": "sha256:2b2a4f536224bfd045bce834efe6415b717770fddcd21b5b36cf829d3465fe08",
+            "releaseDigest": "sha256:45fe853738eef72f42208ae9ad47297c9addfbcee9e4dc01bfa3b1283a2aa93a",
             "overrides": [
               {
                 "tag": "support.reply",
@@ -203,12 +205,14 @@
                   {
                     "name": "customer_name",
                     "required": true,
-                    "trust": "operator"
+                    "trust": "operator",
+                    "source": "runtime"
                   },
                   {
                     "name": "topic",
                     "required": false,
-                    "trust": "operator"
+                    "trust": "operator",
+                    "default": "your recent order"
                   }
                 ],
                 "inference": {
@@ -233,21 +237,21 @@
     {
       "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
       "alg": "ES256",
-      "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
+      "releaseDigest": "sha256:528680a15cb512714c8328f1a3ba634a64e359b0c11686c1abbe4396a27267eb",
       "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
       "signedAt": "2026-09-12T09:30:00Z"
     },
     {
       "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
       "alg": "ES256",
-      "releaseDigest": "sha256:47e4731f529c1234e26bc0a7c5709f552efddc6f4dbe8aee2563506c8fc947a6",
+      "releaseDigest": "sha256:4a021b3b0aec82bbebd74f1cc63f0caae75f97e5064d3e0bb5f40dcc58505318",
       "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
       "signedAt": "2026-09-12T09:31:00Z"
     },
     {
       "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",
       "alg": "ES256",
-      "releaseDigest": "sha256:2b2a4f536224bfd045bce834efe6415b717770fddcd21b5b36cf829d3465fe08",
+      "releaseDigest": "sha256:45fe853738eef72f42208ae9ad47297c9addfbcee9e4dc01bfa3b1283a2aa93a",
       "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw",
       "signedAt": "2026-09-12T10:31:00Z"
     }

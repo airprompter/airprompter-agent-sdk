@@ -6,8 +6,16 @@
  * delimiters declared for it — by default an XML-style element named after
  * the variable — so the model sees where untrusted input starts and stops,
  * and the assurance lens can find it. A missing required variable throws:
- * that is the customer's bug and silence would ship a broken prompt.
+ * that is the customer's bug and silence would ship a broken prompt. An
+ * optional variable nobody supplied renders its declared `default` (0.3.4)
+ * when it has one, and nothing otherwise.
  * Sync and telemetry failures degrade; render contract failures throw.
+ *
+ * @example
+ * ```ts
+ * renderTemplate({ tag: "support.reply", text: "Reply to {{customer_name}} about {{topic}}.", variables: slot.variables, values: { customer_name: "Ada" } });
+ * // → "Reply to Ada about your recent order." when `topic` declares default "your recent order"
+ * ```
  */
 
 import type { SlotVariable } from "../protocol/types.js";
@@ -78,12 +86,17 @@ export function renderTemplate(input: RenderInput): string {
   return input.text.replace(PLACEHOLDER, (whole, name: string) => {
     const variable = declared.get(name);
     if (!variable) return whole; // an undeclared placeholder in the text is left for the author to see
-    const value = input.values[name];
+    const value = input.values[name] ?? defaultOf(variable);
     if (value === undefined || value === null) return "";
     const rendered = String(value);
     // End-user text is fenced; a value that carries the closing fence cannot break out of it.
     return variable.trust === "end_user" ? `${delimiters.open(name)}${escapeFence(rendered, delimiters.close(name))}${delimiters.close(name)}` : rendered;
   });
+}
+
+/** 0.3.4: a default counts only where the control plane allows one — an optional `operator` variable; elsewhere it is ignored. */
+export function defaultOf(variable: SlotVariable): string | undefined {
+  return !variable.required && variable.trust === "operator" && typeof variable.default === "string" ? variable.default : undefined;
 }
 
 function escapeFence(value: string, close: string): string {

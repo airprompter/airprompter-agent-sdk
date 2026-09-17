@@ -12,7 +12,7 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
-import { errorNamed, experimentForTag, experimentsOf } from "@airprompter/agent-core";
+import { errorNamed, experimentForTag, experimentsOf, protocolAtLeast } from "@airprompter/agent-core";
 import type { FsPort } from "@airprompter/agent-core";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1249,7 +1249,11 @@ export class AirPrompterAgent {
       ...(status.applyState === "refused" && status.lastRefusal === "model_unavailable" && this.unavailableModels.length > 0 ? { unavailableModels: this.unavailableModels.slice(0, 16) } : {}),
       ...(status.signingKeyId ? { signingKeyId: status.signingKeyId } : {}),
       storageProtection: status.storageProtection === "daemon" ? "custom" : status.storageProtection,
-      catalog: { models: [...new Set(models)].slice(0, 256), reportedAt: this.nowIso() },
+      // 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
+      // can warn about a `source: runtime` variable no live instance fills before the promotion, not after. Sent only
+      // once the control plane has shown it speaks 0.3.4 (the active manifest's protocol): an older service refuses
+      // the whole heartbeat over an unknown key, and a refused heartbeat is worse than an unreported name.
+      catalog: { models: [...new Set(models)].slice(0, 256), ...(this.variables.names().length > 0 && protocolAtLeast(this.active?.manifest.payload.protocol ?? "0.0.0", "0.3.4") ? { variables: this.variables.names().slice(0, 256) } : {}), reportedAt: this.nowIso() },
       lease: { ...(status.leaseExpiresAt ? { expiresAt: status.leaseExpiresAt } : {}), expired: status.leaseExpired },
       ...(store ? { localRollback: { active: store.heldBackBelow !== undefined, forced: store.forcedDowngrade === true } } : {}),
       spool: {

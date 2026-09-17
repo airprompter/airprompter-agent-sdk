@@ -10,6 +10,16 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.2.12 — 2026-09-17 (protocol 0.3.4)
+
+### Added
+- Protocol 0.3.4: a slot variable's `default` (an optional `operator` variable's last resort, rendered by `renderTemplate` / `render_template` when neither the call site nor a source supplies a value — `defaultOf` / `default_of` say where one counts) and `source` (`caller` | `runtime`); both digest-bound when present. `SlotVariable` carries them in TypeScript (`ManagedSlot.variables` too); the Python projection agrees; the trust vectors seal both. In managed mode a `source: runtime` variable is filled from the registered source before the run is posted, required or not.
+- The heartbeat reports `catalog.variables`: the names this application can fill from its registered sources (`ap.variables.names()`), never a value — sent only once the active release was sealed at protocol ≥ 0.3.4 (`protocolAtLeast` / `protocol_at_least` in core), because a service at 0.3.3 refuses the whole heartbeat over the unknown key. Upgrading the SDK ahead of the service is safe.
+- `airprompter dev`: `variables:` front matter takes `name=default` (an optional operator variable's default; never empty, no comma in it), `name~` (filled by the application's source), `name!~` / `name?~` and `name~=default`; a default on a required or end-user variable is refused as the schema refuses it, and a name outside the grammar is an error rather than a variable called `name~`.
+
+### Changed
+- Precedence at render is now the full ladder: the call site's value → a registered source → the declared default → empty (optional) or `MissingVariableError` (required). `plan_fill` / `planFill` are unchanged: a default is applied by the render itself, so a source is still consulted first for a variable the text uses.
+
 ## 0.2.11 — 2026-09-17 (protocol 0.3.3) — the Python SDK catches up with 0.2.10; TypeScript republished unchanged to keep the lockstep
 
 ### Added (Python)

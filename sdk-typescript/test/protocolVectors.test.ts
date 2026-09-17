@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { releaseDigest as digestOf } from "../packages/core/src/protocol/trust.js";
 
 import { assignArm, AssignmentError, orderedSteps, StepError } from "../packages/core/src/protocol/assignment.js";
 import { canonicalJson, CanonicalJsonError, sha256Prefixed } from "../packages/core/src/protocol/canonicalJson.js";
@@ -89,4 +90,12 @@ test("checks.json: evaluations, patterns, declarations and the projection", () =
   for (const v of file.declarations) assert.deepEqual(checksRefusals(v.checks), v.refusals, v.name);
   assert.deepEqual(projectChecks(file.projection.checks), file.projection.expected);
   assert.ok(file.evaluations.length >= 20);
+});
+
+test("0.3.4: a variable's default and source are in the release digest only when present; a null is unset", () => {
+  const slot = { tag: "a", kind: "prompt" as const, artifactId: "prm_1", versionId: "v1", versionOrdinal: 1, contentHash: `sha256:${"a".repeat(64)}` as const, byteLength: 1, model: "gpt-5", variables: [{ name: "tone", required: false, trust: "operator" as const }] };
+  const plain = digestOf([slot]);
+  assert.equal(digestOf([{ ...slot, variables: [{ ...slot.variables[0]!, default: null as unknown as string, source: null as unknown as "caller" }] }]), plain, "a null is unset");
+  assert.notEqual(digestOf([{ ...slot, variables: [{ ...slot.variables[0]!, default: "warm" }] }]), plain, "a default changes the digest");
+  assert.notEqual(digestOf([{ ...slot, variables: [{ ...slot.variables[0]!, source: "runtime" }] }]), plain, "a source changes the digest");
 });

@@ -73,7 +73,7 @@ from airprompter_agent_core.protocol import (
     verify_root_metadata,
 )
 from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
-from airprompter_agent_core.render.template import Delimiters, MissingVariableError, UnknownVariableError, render_template, xml_delimiters
+from airprompter_agent_core.render.template import Delimiters, MissingVariableError, UnknownVariableError, default_of, placeholders_of, render_template, xml_delimiters
 from airprompter_agent_core.telemetry.feedback import NormalizedFeedback, normalize_feedback
 from airprompter_agent_telemetry.spool.writer import (
     ERROR_CLASSES,
@@ -273,6 +273,7 @@ __all__ = [
     "custom_key_provider",
     "daemon_socket_path",
     "decrypt_payload",
+    "default_of",
     "default_state_dir",
     "disabled_from",
     "distribution_key_id",
@@ -313,6 +314,7 @@ __all__ = [
     "parse_window",
     "pass_bps_of",
     "pattern_refusal",
+    "placeholders_of",
     "payload_aad",
     "post_segment",
     "project_checks",

@@ -11,8 +11,8 @@
  * run is silent until the model finishes — and `run()` assembles the `done`
  * frame for callers who did not ask to stream. Variable sources the
  * application registered (`start({ variables })`) fill required declared
- * variables here, before the POST — the hosted route has no way into your
- * systems; this process does.
+ * variables, and any marked `source: runtime`, here, before the POST — the
+ * hosted route has no way into your systems; this process does.
  */
 
 import type { SlotInference, SlotVariable } from "@airprompter/agent-core";
@@ -49,8 +49,9 @@ export interface ManagedStartOptions {
   /**
    * How this process fills a slot's declared variables from its own system before a run is posted (the hosted
    * endpoint has no way into your systems; this process does). A literal per name, or `{ resolve, trust, … }` — see
-   * `variables/sources.ts`. Consulted for every required declared variable the call site did not pass (the
-   * catalogue names the declarations, not the text, so "used in the text" cannot be known here).
+   * `variables/sources.ts`. Consulted for every required declared variable the call site did not pass, and for one
+   * the author marked `source: runtime` (the catalogue names the declarations, not the text, so "used in the text"
+   * cannot be known here).
    */
   variables?: Record<string, VariableSourceInput>;
   /** Retries on 429 only; each waits `Retry-After` (or a second). Default 2. */
@@ -66,7 +67,8 @@ export interface ManagedSlot {
   tag: string;
   kind: "prompt" | "workflow";
   model: string;
-  variables: ReadonlyArray<{ name: string; required: boolean; trust: string }>;
+  /** The slot's declarations as the catalogue names them (0.3.4: with `default` and `source` when the author set them). */
+  variables: readonly SlotVariable[];
   /** 0.3.1: how the model is called for the slot, as the release sealed it — what a hosted run uses. */
   inference?: SlotInference;
   steps: ReadonlyArray<{ stepId: string; inference?: SlotInference }> | null;
@@ -314,20 +316,20 @@ export class ManagedAgent {
   needs(tag: string, values: RenderValues = {}): string[] {
     const slot = this.catalogue.slots.find((s) => s.tag === tag);
     if (!slot) throw new Error(`no slot ${tag} in the catalogue`);
-    return unsourced({ variables: slot.variables as readonly SlotVariable[], values, registry: this.variables });
+    return unsourced({ variables: slot.variables, values, registry: this.variables });
   }
 
   /**
    * The values a run posts: the call site's, then the application's sources for required declared variables it left
    * unfilled. Trust cannot be tightened here — the hosted run fences by the slot's declaration — so a source stricter
    * than the declaration is refused BEFORE any lookup (`VariableSourceError`, reason `unfenceable`), never sent raw.
-   * The catalogue types trust as a string; anything but `end_user` counts as the looser declaration, which is the
-   * safe direction. An aborted run is not filled.
+   * The catalogue is parsed JSON the type only asserts; anything but `end_user` counts as the looser declaration,
+   * which is the safe direction. An aborted run is not filled.
    */
   private async fillForRun(tag: string, values: Record<string, string>, subject: string | undefined, signal: AbortSignal | undefined): Promise<Record<string, string>> {
     const slot = this.catalogue.slots.find((s) => s.tag === tag);
     if (!slot || this.variables.names().length === 0) return values;
-    const declared = slot.variables as readonly SlotVariable[];
+    const declared = slot.variables;
     const plan = planFill({ tag, variables: declared, text: null, values, registry: this.variables });
     if (plan.literal.length === 0 && plan.async.length === 0) return values;
     // Only what this run would actually fill can be unfenceable: an optional variable no run posts is not refused.

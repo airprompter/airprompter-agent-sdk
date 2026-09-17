@@ -50,13 +50,24 @@ from .protocol import (
 from .release.bundle_release import BundleRelease, BundleReleaseRefused
 from .release.reader import LoadedRelease, ReleaseReader, ReleaseSlot
 from .render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
-from .render.template import Delimiters, MissingVariableError, UnknownVariableError, placeholders_of, render_template, xml_delimiters
+from .render.template import Delimiters, MissingVariableError, UnknownVariableError, default_of, placeholders_of, render_template, xml_delimiters
 from .telemetry.feedback import NormalizedFeedback, normalize_feedback
 from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
-PROTOCOL_VERSION = "0.3.3"
-SDK_VERSION = "0.2.11"
+PROTOCOL_VERSION = "0.3.4"
+
+
+def protocol_at_least(version: str, floor: str) -> bool:
+    """Whether a protocol version string is at least another (``major.minor.patch``, numerically). The manifest a
+    control plane sealed names the protocol it speaks; a runtime that must send a newer optional member reads that
+    before sending it, so a 0.3.4 SDK talking to a 0.3.3 service never trips its strict schemas."""
+    import re as _re
+
+    if not isinstance(version, str) or not isinstance(floor, str) or not _re.fullmatch(r"\d+\.\d+\.\d+", version) or not _re.fullmatch(r"\d+\.\d+\.\d+", floor):
+        return False
+    return [int(part) for part in version.split(".")] >= [int(part) for part in floor.split(".")]
+SDK_VERSION = "0.2.12"
 
 __all__ = [
     "APBUNDLE_INFO",
@@ -92,6 +103,7 @@ __all__ = [
     "OsFs",
     "PROTECTION_CRITERIA",
     "PROTOCOL_VERSION",
+    "protocol_at_least",
     "RAMP_MAX_STEPS",
     "RAMP_MIN_STEP_MS",
     "ReleaseReader",
@@ -154,6 +166,7 @@ __all__ = [
     "referenced_payloads",
     "release_digest",
     "release_digest_input",
+    "default_of",
     "placeholders_of",
     "render_template",
     "rubric_from_prompt",

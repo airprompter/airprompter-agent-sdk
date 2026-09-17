@@ -1,6 +1,6 @@
 {
   "schema": "manifest",
-  "reason": "an unsigned envelope is not a manifest",
+  "reason": "an end-user variable never carries a default (0.3.4)",
   "document": {
     "payload": {
       "protocol": "0.3.4",
@@ -27,14 +27,10 @@
           "model": "claude-sonnet-5",
           "variables": [
             {
-              "name": "document",
-              "required": true,
-              "trust": "end_user"
-            },
-            {
-              "name": "language",
-              "required": true,
-              "trust": "operator"
+              "name": "ticket_body",
+              "required": false,
+              "trust": "end_user",
+              "default": "no ticket"
             }
           ],
           "steps": [
@@ -57,51 +53,6 @@
                 "temperatureMilli": 0,
                 "maxOutputTokens": 1200
               }
-            }
-          ]
-        },
-        {
-          "tag": "support.reply",
-          "kind": "prompt",
-          "artifactId": "prm_1c4d5e6f7a8b",
-          "versionId": "ver_01j9x4k2n0aa",
-          "versionOrdinal": 3,
-          "contentHash": "sha256:0034486e0f7b7390756a2d7a5596a8a5d023894c2566c91a78dc9007cef81c6b",
-          "byteLength": 53,
-          "model": "gpt-5",
-          "variables": [
-            {
-              "name": "customer_name",
-              "required": true,
-              "trust": "operator",
-              "source": "runtime"
-            },
-            {
-              "name": "topic",
-              "required": false,
-              "trust": "operator",
-              "default": "your recent order"
-            }
-          ],
-          "inference": {
-            "maxOutputTokens": 800,
-            "reasoningEffort": "low"
-          }
-        },
-        {
-          "tag": "support.triage",
-          "kind": "prompt",
-          "artifactId": "prm_8b2f3c1d9e4a",
-          "versionId": "ver_01j9x4k2m7q8",
-          "versionOrdinal": 7,
-          "contentHash": "sha256:5457fbcd983010938f27756efd7c81ea2aabe39fdacd99af0b4479585c231129",
-          "byteLength": 96,
-          "model": "claude-sonnet-5",
-          "variables": [
-            {
-              "name": "ticket_body",
-              "required": true,
-              "trust": "end_user"
             }
           ]
         }
@@ -177,7 +128,13 @@
         }
       ]
     },
-    "signatures": [],
+    "signatures": [
+      {
+        "keyId": "d248f03be9e1629a74451cb3b5de16e0809bcf35db684b71b6f935231e756cc8",
+        "alg": "ES256",
+        "sig": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-Pw"
+      }
+    ],
     "countersignatures": [
       {
         "keyId": "7856bef51f6e273e3343b0030e9ad2d8fde5a6fa3c30953dd9ed5d275b169ef1",

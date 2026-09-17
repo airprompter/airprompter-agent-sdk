@@ -197,11 +197,11 @@ export class FakeControlPlane {
     return { status: 204, body: "" };
   }
 
-  promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "experiments" | "directives" | "onLeaseExpiry" | "unlockWindow">> & { signWith?: P256PrivateJwk; generation?: number } = {}): Manifest {
+  promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "experiments" | "directives" | "onLeaseExpiry" | "unlockWindow">> & { signWith?: P256PrivateJwk; generation?: number; /** Seal as an older service would (same major): what a runtime sends depends on it. */ protocol?: string } = {}): Manifest {
     const sorted = [...slots].sort((a, b) => (a.tag < b.tag ? -1 : 1));
     this.generation = options.generation ?? this.generation + 1;
     const payload: ManifestPayload = {
-      protocol: PROTOCOL,
+      protocol: options.protocol ?? PROTOCOL,
       ...this.scope,
       generation: this.generation,
       releaseDigest: releaseDigest(sorted),

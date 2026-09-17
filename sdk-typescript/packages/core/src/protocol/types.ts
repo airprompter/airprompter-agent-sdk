@@ -11,6 +11,10 @@ export interface SlotVariable {
   name: string;
   required: boolean;
   trust: "operator" | "end_user";
+  /** 0.3.4: rendered when neither the call site nor a source supplies a value; only meaningful on an optional `operator` variable. */
+  default?: string;
+  /** 0.3.4: who the author expects to fill it — the code that renders, or a source the application registers. A hint; a runtime does not act on it. */
+  source?: "caller" | "runtime";
 }
 
 export interface SlotStep {

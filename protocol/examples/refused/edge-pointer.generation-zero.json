@@ -3,7 +3,7 @@
   "reason": "the pointer exists only after the first promotion",
   "document": {
     "generation": 0,
-    "releaseDigest": "sha256:f2ae9117cfb14b9133308e80864c366318b03046fd93538d02893b571693b1a1",
+    "releaseDigest": "sha256:528680a15cb512714c8328f1a3ba634a64e359b0c11686c1abbe4396a27267eb",
     "leaseSeconds": 3600,
     "issuedAt": "2026-09-12T10:00:00Z"
   }

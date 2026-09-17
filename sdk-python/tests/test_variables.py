@@ -294,6 +294,29 @@ def test_each_source_has_its_own_timeout_and_the_first_failure_ends_the_fill():
             asyncio.run(fill_async(plan, CTX, registry))
         assert (late.value.variable, late.value.reason) == ("a", "timeout") and time.monotonic() - started < 0.6, source.__name__
 
+    # A sibling's failure cancels a coroutine source still in flight: it does not run on to its own end.
+    async def first_failure_cancels_the_rest():
+        seen: list[str] = []
+
+        async def long(ctx):
+            try:
+                await asyncio.sleep(1.0)
+                seen.append("ran to completion")
+            except asyncio.CancelledError:
+                seen.append("cancelled")
+                raise
+            return "late"
+
+        registry.provide("a", VariableSource(resolve=long, trust="operator", timeout_seconds=2.0))
+        registry.provide("b", {"resolve": lambda ctx: (_ for _ in ()).throw(RuntimeError("no")), "trust": "operator"})
+        with pytest.raises(VariableSourceError) as sibling:
+            await fill_async(plan, CTX, registry)
+        assert (sibling.value.variable, sibling.value.reason) == ("b", "threw")
+        await asyncio.sleep(0.05)  # on the SAME loop: teardown is not what cancels it
+        assert seen == ["cancelled"]
+
+    asyncio.run(first_failure_cancels_the_rest())
+
     # A KeyboardInterrupt raised while a coroutine source's frame is on top is the process's, never "the source threw".
     async def interrupted(ctx):
         raise KeyboardInterrupt

@@ -303,11 +303,19 @@ async def fill_async(plan: FillPlan, context: VariableSourceContext, registry: V
         (exactly as the sync fill treats an answer after the bound). The cancelled task is left to finish on its own;
         whatever it raises then is retrieved so the loop never logs it as unhandled."""
         task = asyncio.ensure_future(pending)
-        done, _ = await asyncio.wait({task}, timeout=max(0.0, deadline - time.monotonic()))
-        if task in done:
+        answered = False
+        try:
+            done, _ = await asyncio.wait({task}, timeout=max(0.0, deadline - time.monotonic()))
+            answered = task in done
+        finally:
+            if not answered:
+                # The deadline passed, or this lookup was cancelled by a sibling's failure (asyncio.wait never cancels
+                # what it waits on): cancel the source's task — a no-op once it is done — and retrieve whatever it ends
+                # with, so the loop never logs it as unhandled.
+                task.cancel()
+                task.add_done_callback(lambda finished: finished.cancelled() or finished.exception())
+        if answered:
             return task.result()
-        task.cancel()
-        task.add_done_callback(lambda finished: finished.cancelled() or finished.exception())
         raise VariableSourceError(plan.tag, name, "timeout")
 
     async def one(name: str) -> tuple[str, Optional[str], str, str]:

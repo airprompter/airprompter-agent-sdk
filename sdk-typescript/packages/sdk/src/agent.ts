@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "@airprompter/agent-core";
 import { rampWeightsAt } from "@airprompter/agent-core";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
-import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, Target, UploadSink } from "@airprompter/agent-core";
+import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, SlotVariable, Target, UploadSink } from "@airprompter/agent-core";
 import { parseRunRef } from "@airprompter/agent-core";
 import type { Delimiters } from "@airprompter/agent-core";
 import { normalizeFeedback } from "@airprompter/agent-core";
@@ -28,6 +28,7 @@ import { requiredModelsMissing } from "@airprompter/agent-sync";
 import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "@airprompter/agent-sync";
 import { observeCall, type ObserveOptions } from "@airprompter/agent-runtime";
 import { ReleaseResolver, disabledFrom, type Rendered } from "@airprompter/agent-runtime";
+import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, uncovered, type RenderValues, type VariableSourceInput } from "@airprompter/agent-runtime";
 import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "@airprompter/agent-runtime";
 import { wrapClient, type WrapHooks } from "@airprompter/agent-runtime";
 import { aiSdkMiddleware, type AiSdkMiddleware, type AiSdkMiddlewareOptions } from "@airprompter/agent-runtime";
@@ -40,7 +41,7 @@ import { SyncClient, type FetchLike } from "@airprompter/agent-core";
 import { DaemonClient, DaemonError, daemonSocketPath } from "@airprompter/agent-sync";
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "@airprompter/agent-sync";
 
-import { PROTOCOL_VERSION, SDK_VERSION } from "@airprompter/agent-core";
+import { PROTOCOL_VERSION, SDK_VERSION, renderTemplate } from "@airprompter/agent-core";
 
 export const SDK_NAME = "agent-sdk-ts";
 /** This package's version and the protocol it speaks (`protocol/version.ts`); the heartbeat names both, store.json records the first (S8). */
@@ -103,6 +104,12 @@ export interface StartOptions {
   heartbeatSeconds?: number;
   /** The models this application can actually call, as the provider names them (reported on heartbeat; promotion refuses a slot whose model is absent). */
   models?: Record<string, unknown> | string[];
+  /**
+   * How this application fills prompt variables from its own system: a literal per name, or a source
+   * (`{ resolve, trust, timeoutMs?, maxBytes? }`) called at `renderAsync()` for a declared variable the version uses
+   * and the call site did not pass. `ap.variables.provide()` adds more after start. See `variables/sources.ts`.
+   */
+  variables?: Record<string, VariableSourceInput>;
   delimiters?: Delimiters;
   telemetry?: {
     sink?: "directory" | "memory";
@@ -220,6 +227,13 @@ export interface AgentStatus {
   lastSyncAt: string | null;
   /** T34: the last golden-set run before activation — counts only; null until one ran. */
   golden: { generation: number; met: boolean; reports: Array<{ tag: string; arm: string; cases: number; passed: number; minPassBps: number }> } | null;
+  /**
+   * Prompt variables and where they come from: the names this application can fill (registered sources), and per
+   * slot and arm of the active release the required names no source fills — the ones every call site must pass.
+   * Compare with what your code passes at start-up (`ap.prompt(tag).needs(values)` does exactly that for one call
+   * site) and a version this application cannot render is found there, not on the first request. Names only.
+   */
+  variables: { sources: string[]; unsourced: Array<{ tag: string; arm: string; names: string[] }> };
   /** S5: this process's own uploader (a resident host with no daemon); null when a daemon, a memory sink or `telemetry.upload: false` owns the spool. */
   upload: UploaderStatus | null;
   lastSyncOutcome: string | null;
@@ -418,6 +432,9 @@ export class AirPrompterAgent {
   private readonly runRefKey: Buffer;
   /** T33: the last renders by text hash, so a wrapped client can tell which slot a call is. */
   private readonly renders = new RenderRegistry();
+  /** The application's variable sources (`start({ variables })`, `ap.variables.provide()`). */
+  readonly variables: VariableSourceRegistry;
+  private readonly stricterSaid = new Set<string>();
   readonly spool: SpoolWriter;
   private readonly sink: SpoolSink;
   private readonly client: SyncClient | null;
@@ -444,6 +461,7 @@ export class AirPrompterAgent {
     const serverless = (options.sync?.mode ?? "resident") === "on_invoke";
     this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink({ instanceId: ownInstanceId }, options.telemetry?.bufferBytes) : new DirectorySink(spoolDir, ownInstanceId, options.telemetry?.spoolBudgetBytes, options.fs);
     this.spool = new SpoolWriter(this.sink, { instanceId: ownInstanceId, instanceClass: options.telemetry?.instanceClass ?? (serverless ? "ephemeral" : "resident"), sdk: `${SDK_NAME}/${SDK_VERSION}` });
+    this.variables = new VariableSourceRegistry(options.variables);
     this.client =
       options.apiKey && options.sync?.mode !== "offline" && options.sync?.mode !== "daemon"
         ? new SyncClient({ baseUrl: options.baseUrl ?? "https://api.airprompter.com", agentId: options.agentId, target: options.target, apiKey: options.apiKey, ...(options.fetch ? { fetch: options.fetch } : {}), userAgent: `${SDK_NAME}/${SDK_VERSION}` })
@@ -1501,13 +1519,66 @@ export class AirPrompterAgent {
   }
 
   prompt(tag: string, options: { subject?: string } = {}) {
-    const render = (values: Record<string, string | number | boolean | null | undefined> = {}): Rendered => {
-      const resolved = this.resolveSlot(tag, options.subject);
-      const rendered = this.resolver().render(resolved, values);
+    // Every path captures the resolver and the resolved slot FIRST: a release that activates while a source is being
+    // awaited must not mix generation N+1's text with generation N's run reference.
+    const register = (rendered: Rendered) => {
       this.renders.register(rendered.text, { tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
       return rendered;
     };
-    return { render, variables: () => this.resolveSlot(tag, options.subject).slot.variables };
+    /** Synchronous: the call site's values and literal sources. A callable source in the way is `VariableSourceRequiredError`. */
+    const render = (values: RenderValues = {}): Rendered => {
+      const resolver = this.resolver();
+      const resolved = this.resolveSlot(tag, options.subject);
+      const plan = planFill({ tag, variables: resolved.slot.variables, text: resolver.textOf(resolved.slot), values, registry: this.variables });
+      const filled = fillSync(plan, this.variables);
+      return register(this.renderFilled(resolver, resolved, filled.values, filled.variables, tag));
+    };
+    /** The same render, with callable sources awaited (each under its own timeout), values fenced by the stricter trust. */
+    const renderAsync = async (values: RenderValues = {}): Promise<Rendered> => {
+      const resolver = this.resolver();
+      const resolved = this.resolveSlot(tag, options.subject);
+      const plan = planFill({ tag, variables: resolved.slot.variables, text: resolver.textOf(resolved.slot), values, registry: this.variables });
+      const filled = await this.fillWithSources(plan, { tag, subject: options.subject, versionId: resolved.slot.versionId, arm: resolved.arm }, resolved.slot);
+      return register(this.renderFilled(resolver, resolved, filled.values, filled.variables, tag));
+    };
+    /** The required names a render would still lack after these values and the registered sources — check it at start-up. */
+    const needs = (values: RenderValues = {}): string[] => {
+      const resolver = this.resolver();
+      const resolved = this.resolveSlot(tag, options.subject);
+      return uncovered({ variables: resolved.slot.variables, text: resolver.textOf(resolved.slot), values, registry: this.variables });
+    };
+    return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, options.subject).slot.variables };
+  }
+
+  /** Render with the effective declarations; a `MissingVariableError` is also one content-free error row, so the board sees a version this host cannot render. */
+  private renderFilled(resolver: ReleaseResolver, resolved: { slot: ManifestSlot; arm: string; bucket: number | null }, values: RenderValues, variables: readonly SlotVariable[], tag: string): Rendered {
+    try {
+      return resolver.render(resolved, values, { variables });
+    } catch (error) {
+      if (errorNamed(error, "MissingVariableError")) this.spool.observe({ tag, versionId: resolved.slot.versionId, arm: resolved.arm, model: resolved.slot.model, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
+      throw error;
+    }
+  }
+
+  /** Sources run here; the outcome is logged by name only, and a source stricter than the prompt's declaration is said once per slot and name. */
+  private async fillWithSources(plan: ReturnType<typeof planFill>, context: { tag: string; subject: string | undefined; versionId: string; arm: string }, slot: ManifestSlot) {
+    try {
+      const filled = await fillAsync(plan, context, this.variables);
+      for (const entry of filled.filled) {
+        if (entry.stricter && !this.stricterSaid.has(`${context.tag}\u0000${entry.name}`)) {
+          this.stricterSaid.add(`${context.tag}\u0000${entry.name}`);
+          this.log({ event: "variable_source_trust_stricter", tag: context.tag, name: entry.name, declared: slot.variables.find((v) => v.name === entry.name)?.trust ?? null });
+        }
+      }
+      return filled;
+    } catch (error) {
+      if (isVariableSourceError(error)) {
+        const failed = error;
+        this.log({ event: "variable_source_failed", tag: context.tag, name: failed.variable, reason: failed.reason });
+        this.spool.observe({ tag: context.tag, versionId: context.versionId, arm: context.arm, model: slot.model, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
+      }
+      throw error;
+    }
   }
 
   /** A workflow slot's steps in ordinal order, each with its prompt text. */
@@ -1515,7 +1586,20 @@ export class AirPrompterAgent {
     const resolved = this.resolveSlot(tag, options.subject);
     const workflow = this.resolver().workflow(resolved);
     for (const step of workflow.steps) this.renders.register(step.text, { tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
-    return workflow;
+    /**
+     * A step's text with its variables filled — the workflow's declarations, the same precedence as a prompt, each
+     * step scanned on its own (a source is called for step 3 and not for step 1 when only step 3 uses it).
+     */
+    const renderStepAsync = async (stepId: string, values: RenderValues = {}): Promise<string> => {
+      const step = workflow.steps.find((entry) => entry.stepId === stepId);
+      if (!step) throw new Error(`no step ${stepId} on ${tag}`);
+      const plan = planFill({ tag: step.stepId, variables: resolved.slot.variables, text: step.text, values, registry: this.variables });
+      const filled = await this.fillWithSources(plan, { tag: step.stepId, subject: options.subject, versionId: step.versionId, arm: workflow.arm }, resolved.slot);
+      const text = renderTemplate({ tag: step.stepId, text: step.text, variables: filled.variables, values: filled.values, ...(this.options.delimiters ? { delimiters: this.options.delimiters } : {}) });
+      this.renders.register(text, { tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
+      return text;
+    };
+    return { ...workflow, renderStepAsync };
   }
 
   /** Content-free measurements for one model call. */
@@ -1719,6 +1803,32 @@ export class AirPrompterAgent {
     };
   }
 
+  /**
+   * Per slot and arm of the active release: the required variables neither a literal nor a source fills, so the
+   * call site must. Computed over the slot's own text and every arm override for its tag, since a subject may land
+   * on any arm.
+   */
+  private variablesStatus(): AgentStatus["variables"] {
+    const sources = this.variables.names();
+    const payload = this.active?.manifest.payload;
+    if (!payload) return { sources, unsourced: [] };
+    const resolver = this.resolver();
+    const seen = new Map<string, { tag: string; arm: string; names: string[] }>();
+    const consider = (slot: ManifestSlot, arm: string) => {
+      let text: string | null = null;
+      try {
+        text = slot.kind === "prompt" ? resolver.textOf(slot) : null;
+      } catch {
+        text = null;
+      }
+      const names = uncovered({ variables: slot.variables, text, values: {}, registry: this.variables });
+      if (names.length > 0) seen.set(`${slot.tag}\u0000${arm}`, { tag: slot.tag, arm, names });
+    };
+    for (const slot of payload.slots) consider(slot, "none");
+    for (const experiment of experimentsOf(payload)) for (const arm of experiment.arms) for (const override of arm.overrides) consider(override, arm.arm);
+    return { sources, unsourced: [...seen.values()].sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : a.arm < b.arm ? -1 : 1)) };
+  }
+
   status(): AgentStatus {
     const state = this.store?.state ?? null;
     const manifest = this.active?.manifest.payload;
@@ -1766,6 +1876,7 @@ export class AirPrompterAgent {
       daemon: this.daemonSocket ? { attached: this.daemon !== null, socketPath: this.daemonSocket } : null,
       lastSyncAt: this.lastSyncMs === null ? null : new Date(this.lastSyncMs).toISOString(),
       golden: this.lastGolden,
+      variables: this.variablesStatus(),
       upload: this.uploader?.status() ?? null,
       lastSyncOutcome: this.lastSyncOutcome,
       consecutiveSyncFailures: this.consecutiveSyncFailures,

@@ -12,7 +12,7 @@
  * refused and why; the facade decides what to record.
  */
 
-import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type Target } from "@airprompter/agent-core";
+import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";
 
 export interface Rendered {
   text: string;
@@ -154,11 +154,15 @@ export class ReleaseResolver {
     return Buffer.from(bytes).toString("utf8");
   }
 
-  /** Render a prompt slot the resolver already resolved. */
-  render(resolved: ReleaseSlot, values: Record<string, string | number | boolean | null | undefined> = {}): Rendered {
+  /**
+   * Render a prompt slot the resolver already resolved. `variables` overrides the slot's declarations for this
+   * render — the facade passes the slot's list tightened to `end_user` where a source that filled a value said so;
+   * it can never loosen a declaration (the caller builds it from the slot's own).
+   */
+  render(resolved: ReleaseSlot, values: Record<string, string | number | boolean | null | undefined> = {}, options: { variables?: readonly SlotVariable[] } = {}): Rendered {
     const { slot, arm, bucket } = resolved;
     const generation = this.input.release.generation;
-    const text = renderTemplate({ tag: slot.tag, text: this.textOf(slot), variables: slot.variables, values, ...(this.input.delimiters ? { delimiters: this.input.delimiters } : {}) });
+    const text = renderTemplate({ tag: slot.tag, text: this.textOf(slot), variables: options.variables ?? slot.variables, values, ...(this.input.delimiters ? { delimiters: this.input.delimiters } : {}) });
     const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, versionId: slot.versionId, arm, generation, bucket };
     return { text, model: slot.model, ...(slot.inference ? { inference: frozenInference(slot.inference) } : {}), versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag };
   }

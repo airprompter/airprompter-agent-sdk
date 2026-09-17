@@ -22,7 +22,7 @@ export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, val
 export { keyThumbprint, publicJwkOf, signBytes, verifyBytes, trustedRootFromPinnedKey, verifyRootMetadata, verifyManifest, referencedPayloads, releaseDigest, releaseDigestInput, instant } from "./protocol/trust.js";
 export type { Verdict, VerifyManifestInput } from "./protocol/trust.js";
 
-export { renderTemplate, xmlDelimiters, MissingVariableError, UnknownVariableError } from "./render/template.js";
+export { renderTemplate, placeholdersOf, xmlDelimiters, MissingVariableError, UnknownVariableError } from "./render/template.js";
 export type { Delimiters, RenderInput } from "./render/template.js";
 export { mintRunRef, parseRunRef } from "./render/runRef.js";
 export type { RunRefFacts } from "./render/runRef.js";

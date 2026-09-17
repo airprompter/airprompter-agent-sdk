@@ -15,6 +15,7 @@ them. Both cite the design revision they follow.
 | [change-control.md](change-control.md) | How your change control, update windows, CI, golden sets, countersign, freeze and rollback plug into activation | §6.2–6.5, §8.2 (5-D) |
 | [telemetry.md](telemetry.md) | The spool contract in one table and the field → OpenTelemetry mapping | §9, §9.3 |
 | [ingest.md](ingest.md) | Your prompts (a git directory, a database table, an export) become reviewable versions: `airprompter login` + `airprompter import`, the derived id, what a re-run does | S11 |
+| [variables.md](variables.md) | Variables filled from your own system at render time: sources, precedence, trust (the stricter wins), `renderAsync`, `needs()`, workflows and managed mode | 0.2.10 |
 | [change-notification.md](change-notification.md) | How a fleet learns a release moved: the pointer-first pull (a CDN 304 per idle interval, the API only on a promotion) and the proposed nudge on a channel the customer owns (SQS / SNS / EventBridge / webhook) — pull-and-verify stays the only source of truth | 0.2.8 |
 | [operator-tooling.md](operator-tooling.md) | `airprompter doctor` (every reason a host is not serving, with the remedy), the in-process `healthz`, `telemetry validate`, the verify GitHub Action, the published conformance harness and its adapter contract | S14 |
 | [`../protocol/trust-chain.md`](../protocol/trust-chain.md) | Root metadata acceptance (R1–R5), manifest verification (M1–M12), refusal vocabulary, rotation | §5 |

@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in the SDK, CLI, daemon or protocol behaves wrongly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. Please keep keys, prompt text and anything from a real workspace out of this form —
+        `airprompter doctor` and `healthz()` are content-free and are what we need.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - "@airprompter/agent-sdk (TypeScript)"
+        - "airprompter-agent (Python)"
+        - "airprompter CLI / airprompterd"
+        - "protocol / conformance"
+        - "docs"
+        - "other"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`npm ls @airprompter/agent-sdk`, `pip show airprompter-agent`, `airprompter --version`, and the protocol version the runtime reports"
+      placeholder: "agent-sdk 0.2.9, protocol 0.3.3"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: The smallest thing that shows it — ideally against the fake control plane in the repo's testing kit.
+      render: shell
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`airprompter doctor` / `healthz()` output"
+      render: text
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Node 22 / Python 3.12, macOS 15 / Ubuntu 24.04 / Windows 11, resident | daemon | fleet | hosted"

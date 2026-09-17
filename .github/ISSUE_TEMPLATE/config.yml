@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or design discussion
+    url: https://github.com/airprompter/airprompter-agent-sdk/discussions
+    about: Ask how something works, or propose an idea before writing an issue.
+  - name: Security vulnerability
+    url: https://github.com/airprompter/airprompter-agent-sdk/blob/main/SECURITY.md
+    about: Email security@airprompter.com. Please do not open a public issue for anything exploitable.
+  - name: Help with your AirPrompter workspace or account
+    url: https://github.com/airprompter/airprompter-agent-sdk/blob/main/SUPPORT.md
+    about: Promotions, keys, billing and anything that needs your data go to AirPrompter support, not a public issue.

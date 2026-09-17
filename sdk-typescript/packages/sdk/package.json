@@ -2,6 +2,21 @@
   "name": "@airprompter/agent-sdk",
   "version": "0.2.9",
   "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry.",
+  "keywords": [
+    "airprompter",
+    "prompts",
+    "llm",
+    "agent",
+    "governance",
+    "prompt-management",
+    "openai",
+    "anthropic",
+    "ab-testing"
+  ],
+  "homepage": "https://github.com/airprompter/airprompter-agent-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/airprompter/airprompter-agent-sdk/issues"
+  },
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",

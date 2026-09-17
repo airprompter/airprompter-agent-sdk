@@ -1,7 +1,20 @@
 {
   "name": "@airprompter/otel-bridge",
   "version": "0.2.9",
-  "description": "The AirPrompter agent SDK's telemetry spool as an OpenTelemetry exporter: minute windows become OTLP metrics (gen_ai.client.operation.duration, tokens, checks, feedback, refusals) shipped to the collector you already run — no AirPrompter grant at all. An UploadSink for @airprompter/agent-telemetry's uploader, in airprompterd or in-process.",
+  "description": "The AirPrompter agent SDK's telemetry spool as an OpenTelemetry exporter: minute windows become OTLP metrics (gen_ai.client.operation.duration, tokens, checks, feedback, refusals) shipped to the collector you already run \u2014 no AirPrompter grant at all. An UploadSink for @airprompter/agent-telemetry's uploader, in airprompterd or in-process.",
+  "keywords": [
+    "airprompter",
+    "prompts",
+    "llm",
+    "agent",
+    "opentelemetry",
+    "otlp",
+    "metrics"
+  ],
+  "homepage": "https://github.com/airprompter/airprompter-agent-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/airprompter/airprompter-agent-sdk/issues"
+  },
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",

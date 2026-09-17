@@ -1,0 +1,8 @@
+# Reviews are requested from the owners of what a change touches.
+*                 @lexerio-seth
+/protocol/        @lexerio-seth
+/conformance/     @lexerio-seth
+/sdk-typescript/  @lexerio-seth
+/sdk-python/      @lexerio-seth
+/cli/             @lexerio-seth
+/.github/         @lexerio-seth

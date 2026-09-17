@@ -10,6 +10,8 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.2.14 — 2026-09-17 (protocol 0.3.4)
+
 ### Added
 - `airprompter rollback`: the previous release on this host live again, now and offline — the store's other slot, through the daemon when one runs. A step below the stored generation is a forced downgrade, recorded and reported on the next heartbeat, and sync holds the newer generation back until the control plane moves past it. The README and `docs/change-control.md` had named the command since the first release; it exists now.
 - `fileKey(path, fs?)` takes the filesystem port the store uses, and the facade passes its `fs` option through, so an application running the store on a memory or custom filesystem keeps the key file there too; the vendored bundle path is read through the same port.

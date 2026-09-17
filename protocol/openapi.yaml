@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AirPrompter Agent routes (customer-v1)
-  version: 0.3.2
+  version: 0.3.3
   summary: The routes an agent runtime calls. Pull only; the control plane never opens a connection to you.
   description: |
     Every route is called by the customer's runtime over outbound HTTPS with an
@@ -58,8 +58,11 @@ paths:
         25 s, held only while the runtime already has the current envelope (or
         nothing is promoted yet); it is bounded by a per-organization
         concurrency cap and refused with `429` above it. Idle runtimes should
-        poll the edge pointer (`edgePointerUrl` from the heartbeat) and call
-        this only when the generation moved.
+        poll the edge pointer and call this only when the generation moved:
+        every answer (`200` and `304`) names it in `x-agent-edge-pointer-url`
+        (0.3.3; the heartbeat carries the same `edgePointerUrl`), so a puller
+        that never heartbeats learns it from its first pull. A deployment
+        without an edge omits the header.
       parameters:
         - $ref: "#/components/parameters/agentId"
         - $ref: "#/components/parameters/target"
@@ -90,12 +93,29 @@ paths:
               schema:
                 type: integer
                 minimum: 1
+            x-agent-edge-pointer-url:
+              description: "0.3.3: the target's edge pointer (`generation.json` behind the CDN) — poll this, not the route, while idle. Omitted on a deployment without an edge."
+              schema:
+                type: string
+                format: uri
           content:
             application/json:
               schema:
                 $ref: "schemas/manifest.schema.json"
         "304":
           description: The envelope in `If-None-Match` is still current
+          headers:
+            ETag:
+              schema:
+                $ref: "schemas/manifest.schema.json#/$defs/sha256"
+            x-agent-generation:
+              schema:
+                type: integer
+                minimum: 1
+            x-agent-edge-pointer-url:
+              schema:
+                type: string
+                format: uri
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404":

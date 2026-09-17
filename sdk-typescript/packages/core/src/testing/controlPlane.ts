@@ -121,6 +121,8 @@ export class FakeControlPlane {
    * `<grantBaseUrl>/s3/agent-telemetry` checks the policy the way the bucket would and keeps the objects by key.
    */
   grantBaseUrl: string | null = null;
+  /** The pointer URL the manifest answer names (`x-agent-edge-pointer-url`); null = a deployment with no edge. */
+  edgePointerUrl: string | null = "https://edge.test/g/target-token/generation.json";
   /** S3: a party between the fleet and the edge pins the pointer at this generation; the origin moves on regardless. */
   pinnedPointer: { generation: number } | null = null;
   /** S3: whether the heartbeat answer names the origin's generation (an older service does not). */
@@ -302,8 +304,10 @@ export class FakeControlPlane {
         if (manifestMatch[1] !== this.scope.agentId) return respond(403, JSON.stringify({ error: "x", details: { code: "agent_mismatch" } }));
         if (manifestMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "x", details: { code: "target_mismatch" } }));
         if (!this.current) return respond(404, JSON.stringify({ error: "Not found" }));
-        if (init?.headers?.["if-none-match"] === this.current.etag) return respond(304, "", { etag: this.current.etag });
-        return respond(200, this.current.bytes, { etag: this.current.etag, "x-agent-generation": String(this.current.manifest.payload.generation), "content-type": "application/json" });
+        // The answer names the edge pointer, as the service does (a deployment without an edge omits the header).
+        const pointerHeader = this.edgePointerUrl ? { "x-agent-edge-pointer-url": this.edgePointerUrl } : {};
+        if (init?.headers?.["if-none-match"] === this.current.etag) return respond(304, "", { etag: this.current.etag, ...pointerHeader });
+        return respond(200, this.current.bytes, { etag: this.current.etag, "x-agent-generation": String(this.current.manifest.payload.generation), "content-type": "application/json", ...pointerHeader });
       }
       const payloadMatch = /^\/v1\/agents\/([^/]+)\/payloads\/(sha256:[0-9a-f]{64})$/.exec(parsed.pathname);
       if (payloadMatch) {

@@ -18,7 +18,7 @@ import { createEncryptedBundle } from "../packages/core/src/bundle/apbundle.js";
 import { AgentStartError } from "../packages/sdk/src/agent.js";
 import { SyncClient } from "../packages/core/src/control/client.js";
 import { publicJwkOf, trustedRootFromPinnedKey } from "../packages/core/src/protocol/trust.js";
-import { pullBundle } from "../packages/sync/src/sync/pullBundle.js";
+import { pullBundle, nextPullDelayMs } from "../packages/sync/src/sync/pullBundle.js";
 import { FakeControlPlane, newKey } from "./helpers/controlPlane.js";
 
 const scope: { organizationId: string; agentId: string; target: "dev" | "staging" | "prod" } = { organizationId: "org_1", agentId: "agt_1", target: "prod" };
@@ -136,7 +136,7 @@ test("applyBundle under unlock_required stages and waits; unlock() makes it live
 
   const client = new SyncClient({ baseUrl: "https://api.test", agentId: scope.agentId, target: scope.target, apiKey: plane.apiKey, fetch: plane.fetch() });
   const plaintext = await pullBundle({ client, scope, trustedRoot: trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: publicJwkOf(plane.rootKey) }), now: () => new Date().toISOString(), distributionPublicKey: null });
-  assert.deepEqual(plaintext, { status: "refused", reason: "plaintext_not_allowed" });
+  assert.deepEqual(plaintext, { status: "refused", reason: "plaintext_not_allowed", edge: { pointerUrl: null, pointerEtag: null, manifestEtag: null } });
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -270,4 +270,68 @@ test("an applyBundle chained behind an in-flight sync keeps the store to one pas
   // A second sync started while the apply held the guard would have been the apply's own promise, not a new pass.
   await ap.stop();
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("a puller that hands its edge state back polls the CDN pointer, not the origin: a 304 or a held generation ends the pull at the edge; a moved pointer reaches the API once, conditionally; the interval stretches while nothing changes", async () => {
+  const plane = new FakeControlPlane(scope);
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply politely.", versionId: "ver_1" })]);
+  const fleetKey = generateX25519KeyPair();
+  const client = new SyncClient({ baseUrl: "https://api.test", agentId: scope.agentId, target: scope.target, apiKey: plane.apiKey, fetch: plane.fetch() });
+  const trustedRoot = trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: publicJwkOf(plane.rootKey) });
+  const fetchRoot = async () => JSON.parse(await (await plane.fetch()("https://edge.test/roots/prod/root.json", {})).text());
+  const originCalls = () => plane.requests.filter((u) => u.includes("/manifest")).length;
+  const pointerCalls = () => plane.requests.filter((u) => u.endsWith("/generation.json")).length;
+  const base = { client, scope, trustedRoot, fetchRoot, now: () => new Date().toISOString(), distributionPublicKey: fleetKey.publicRaw };
+
+  // First pull: no edge state, the origin answers and names the pointer.
+  const first = await pullBundle(base);
+  assert.equal(first.status, "ok");
+  if (first.status !== "ok") throw new Error("unreachable");
+  assert.equal(first.edge.pointerUrl, "https://edge.test/g/target-token/generation.json", "the origin named the pointer");
+  assert.ok(first.edge.manifestEtag, "the manifest's ETag is remembered");
+  assert.equal(pointerCalls(), 0);
+  let edge = first.edge;
+  let held = first.generation;
+
+  // Nothing moved: the pointer (fresh: 200 with the held generation; then 304 on its ETag) — the origin is never asked.
+  const before = originCalls();
+  const second = await pullBundle({ ...base, edge, minimumGeneration: held });
+  assert.deepEqual([second.status, (second as { via?: string }).via], ["unchanged", "pointer"]);
+  edge = second.edge;
+  assert.ok(edge.pointerEtag, "the pointer's ETag is remembered");
+  const third = await pullBundle({ ...base, edge, minimumGeneration: held });
+  assert.deepEqual([third.status, (third as { via?: string }).via], ["unchanged", "pointer"]);
+  assert.equal(originCalls(), before, "two idle pulls, zero origin calls");
+  assert.equal(pointerCalls(), 2);
+
+  // A promotion moves the pointer: one origin read, a new row.
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply warmly.", versionId: "ver_2" })]);
+  const fourth = await pullBundle({ ...base, edge: third.edge, minimumGeneration: held });
+  assert.equal(fourth.status, "ok");
+  if (fourth.status !== "ok") throw new Error("unreachable");
+  assert.equal(fourth.generation, held + 1);
+  assert.equal(originCalls(), before + 1);
+  held = fourth.generation;
+
+  // skipPointer (a nudge said "check now"): the origin, conditionally — a 304 is "unchanged via origin".
+  const nudged = await pullBundle({ ...base, edge: fourth.edge, minimumGeneration: held, skipPointer: true });
+  assert.deepEqual([nudged.status, (nudged as { via?: string }).via], ["unchanged", "origin"]);
+  assert.equal(originCalls(), before + 2);
+
+  // The interval stretches while nothing changes and snaps back on anything else.
+  assert.equal(nextPullDelayMs({ outcome: "unchanged", unchangedStreak: 0, intervalMs: 10_000 }), 10_000);
+  assert.equal(nextPullDelayMs({ outcome: "unchanged", unchangedStreak: 3, intervalMs: 10_000 }), 80_000);
+  assert.equal(nextPullDelayMs({ outcome: "unchanged", unchangedStreak: 12, intervalMs: 10_000 }), 300_000, "capped at five minutes");
+  assert.equal(nextPullDelayMs({ outcome: "unchanged", unchangedStreak: 12, intervalMs: 10_000, capMs: 60_000 }), 60_000);
+  assert.equal(nextPullDelayMs({ outcome: "ok", unchangedStreak: 12, intervalMs: 10_000 }), 10_000);
+  assert.equal(nextPullDelayMs({ outcome: "unavailable", unchangedStreak: 12, intervalMs: 10_000 }), 10_000);
+
+  // A deployment with no edge: the origin every time, still conditional.
+  plane.edgePointerUrl = null;
+  const bare = await pullBundle(base);
+  assert.equal(bare.status, "ok");
+  if (bare.status !== "ok") throw new Error("unreachable");
+  assert.equal(bare.edge.pointerUrl, null);
+  const bareAgain = await pullBundle({ ...base, edge: bare.edge, minimumGeneration: held });
+  assert.deepEqual([bareAgain.status, (bareAgain as { via?: string }).via], ["unchanged", "origin"]);
 });

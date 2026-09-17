@@ -6,6 +6,15 @@
  * this function with files around it; a puller job is this function with a
  * database around it. The bundle is sealed to the fleet's distribution key
  * unless the caller asks for plaintext, which only the dev target permits.
+ *
+ * The cheap path: the control plane names an edge pointer (a few hundred
+ * bytes behind a CDN, `generation.json`) in its manifest answer; a puller
+ * that hands back `edge` from the last result reads the pointer first — a
+ * 304, or a generation it already holds, means nothing moved and the origin
+ * is never called. Only a moved pointer (or none known) reaches the API,
+ * and that read is conditional too (`manifestEtag`). Steady state costs a
+ * CDN 304 per interval, not an API request; `nextPullDelayMs` stretches the
+ * interval while nothing changes.
  */
 
 import { createEncryptedBundle, createPlaintextBundle, referencedPayloads, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
@@ -38,52 +47,97 @@ export interface PullBundleInput {
   notAfterDays?: number;
   countersignRoot?: RootMetadata | null;
   requireCountersign?: boolean;
+  /**
+   * What the last result handed back: the pointer URL the control plane named, the pointer's ETag, and the ETag of the
+   * manifest last read. Pass it back verbatim; the first pull has none and goes to the origin once.
+   */
+  edge?: PullEdgeState | null;
+  /** Skip the pointer for this pull (a nudge said "check now", or the operator asked): the origin is read, conditionally. */
+  skipPointer?: boolean;
 }
 
+/** The puller's memory between pulls: content-free, safe to persist beside the table. */
+export interface PullEdgeState {
+  pointerUrl: string | null;
+  pointerEtag: string | null;
+  manifestEtag: string | null;
+}
+
+const NO_EDGE: PullEdgeState = { pointerUrl: null, pointerEtag: null, manifestEtag: null };
+
 export type PullBundleResult =
-  | { status: "ok"; bundle: Bundle; manifest: Manifest; generation: number; releaseDigest: string; createdAt: string; notAfter: string; trustedRoot: RootMetadata }
-  | { status: "nothing_promoted" }
-  | { status: "refused"; reason: RefusalCode | "payload_missing" | "payload_length_mismatch" | "plaintext_not_allowed" | "root_refused" | "generation_rollback"; contentHash?: string; detail?: string; held?: number }
-  | { status: "unavailable"; reason: "unauthorized" | "forbidden" | "network" | `http_${number}`; detail?: string };
+  | { status: "ok"; bundle: Bundle; manifest: Manifest; generation: number; releaseDigest: string; createdAt: string; notAfter: string; trustedRoot: RootMetadata; edge: PullEdgeState }
+  /** Nothing moved: the pointer (a CDN read, no origin call) or the origin's 304 said so. */
+  | { status: "unchanged"; via: "pointer" | "origin"; edge: PullEdgeState }
+  | { status: "nothing_promoted"; edge: PullEdgeState }
+  | { status: "refused"; reason: RefusalCode | "payload_missing" | "payload_length_mismatch" | "plaintext_not_allowed" | "root_refused" | "generation_rollback"; contentHash?: string; detail?: string; held?: number; edge: PullEdgeState }
+  | { status: "unavailable"; reason: "unauthorized" | "forbidden" | "network" | `http_${number}`; detail?: string; edge: PullEdgeState };
+
+/**
+ * How long to wait before the next pull: the interval while things change, stretching by doubling while nothing does
+ * (a pointer 304 costs little, but a thousand pullers asking every ten seconds for a release that moved last week is
+ * waste), never past `capMs`; back to the interval on any change, refusal or outage — those are what a puller is for.
+ */
+export function nextPullDelayMs(input: { outcome: PullBundleResult["status"]; unchangedStreak: number; intervalMs: number; capMs?: number }): number {
+  const cap = input.capMs ?? 5 * 60 * 1000;
+  if (input.outcome !== "unchanged") return input.intervalMs;
+  const stretched = input.intervalMs * 2 ** Math.min(input.unchangedStreak, 20);
+  return Math.min(Math.max(input.intervalMs, stretched), Math.max(cap, input.intervalMs));
+}
 
 export async function pullBundle(input: PullBundleInput): Promise<PullBundleResult> {
   const now = input.now();
-  if (input.distributionPublicKey === null && input.scope.target !== "dev") return { status: "refused", reason: "plaintext_not_allowed" };
+  const edge: PullEdgeState = { ...NO_EDGE, ...(input.edge ?? {}) };
+  if (input.distributionPublicKey === null && input.scope.target !== "dev") return { status: "refused", reason: "plaintext_not_allowed", edge };
   const days = input.notAfterDays ?? 90;
   if (!Number.isFinite(days) || days <= 0 || days > 365) throw new Error("notAfterDays must be a positive number of days, 365 at most");
+  const held = input.minimumGeneration ?? 0;
 
   let trustedRoot = input.trustedRoot;
   try {
+    // The pointer first: unsigned and cacheable, it can only say "nothing moved" — never extend trust. A 304, or a
+    // generation the caller already holds, ends the pull at the CDN. Anything else (moved, unknown, unreachable) goes on
+    // to the origin, which is what a pointer can never replace.
+    if (edge.pointerUrl && !input.skipPointer) {
+      const pointer = await input.client.edgePointer(edge.pointerUrl, edge.pointerEtag);
+      if (pointer.status === "not_modified") return { status: "unchanged", via: "pointer", edge };
+      if (pointer.status === "ok") {
+        edge.pointerEtag = pointer.etag;
+        if (held > 0 && pointer.pointer.generation <= held) return { status: "unchanged", via: "pointer", edge };
+      }
+    }
     if (input.fetchRoot) {
       const candidate = await input.fetchRoot();
       if (candidate) {
         const verdict = verifyRootMetadata({ candidate, trusted: trustedRoot, now });
         // A root that does not descend from the trusted one is the finding, not a detail behind unknown_signing_key.
-        if (!verdict.ok) return { status: "refused", reason: "root_refused", detail: verdict.reason };
+        if (!verdict.ok) return { status: "refused", reason: "root_refused", detail: verdict.reason, edge };
         trustedRoot = candidate;
       }
     }
-    const fetched = await input.client.manifest({});
-    if (fetched.status === "not_found") return { status: "nothing_promoted" };
-    if (fetched.status === "unauthorized") return { status: "unavailable", reason: "unauthorized" };
-    if (fetched.status === "forbidden") return { status: "unavailable", reason: "forbidden", ...(fetched.code ? { detail: fetched.code } : {}) };
-    if (fetched.status === "error") return { status: "unavailable", reason: `http_${fetched.httpStatus}` };
-    if (fetched.status === "not_modified") return { status: "unavailable", reason: "http_304" };
+    // Conditional: the origin answers 304 to the ETag it last gave, and names the pointer either way.
+    const fetched = await input.client.manifest({ ifNoneMatch: edge.manifestEtag });
+    if (fetched.status === "not_found") return { status: "nothing_promoted", edge };
+    if (fetched.status === "unauthorized") return { status: "unavailable", reason: "unauthorized", edge };
+    if (fetched.status === "forbidden") return { status: "unavailable", reason: "forbidden", ...(fetched.code ? { detail: fetched.code } : {}), edge };
+    if (fetched.status === "error") return { status: "unavailable", reason: `http_${fetched.httpStatus}`, edge };
+    if (fetched.edgePointerUrl) edge.pointerUrl = fetched.edgePointerUrl;
+    if (fetched.status === "not_modified") return { status: "unchanged", via: "origin", edge };
+    edge.manifestEtag = fetched.etag;
     const manifest = fetched.manifest;
-    const held = input.minimumGeneration ?? 0;
-    if (manifest.payload.generation < held) return { status: "refused", reason: "generation_rollback", held, detail: `the control plane answered generation ${manifest.payload.generation}; the caller holds ${held}` };
+    if (manifest.payload.generation < held) return { status: "refused", reason: "generation_rollback", held, detail: `the control plane answered generation ${manifest.payload.generation}; the caller holds ${held}`, edge };
 
     const payloads = new Map<string, Uint8Array>();
     for (const [hash, byteLength] of referencedPayloads(manifest.payload)) {
       const bytes = await input.client.payload(hash);
-      if (!bytes) return { status: "refused", reason: "payload_missing", contentHash: hash };
-      if (bytes.length !== byteLength) return { status: "refused", reason: "payload_length_mismatch", contentHash: hash };
+      if (!bytes) return { status: "refused", reason: "payload_missing", contentHash: hash, edge };
+      if (bytes.length !== byteLength) return { status: "refused", reason: "payload_length_mismatch", contentHash: hash, edge };
       payloads.set(hash, bytes);
     }
     // No stored generation here: a puller has no host to move backwards. Anti-rollback is the store's rule, applied
     // by every runtime that opens this bundle.
     const verdict = verifyManifest({ manifest, root: trustedRoot, now, scope: input.scope, storedGeneration: 0, payloads, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) });
-    if (!verdict.ok) return { status: "refused", reason: verdict.reason };
+    if (!verdict.ok) return { status: "refused", reason: verdict.reason, edge };
 
     const notAfter = new Date(Date.parse(now) + days * 86_400_000).toISOString();
     const contents: BundleContents = {
@@ -94,8 +148,8 @@ export async function pullBundle(input: PullBundleInput): Promise<PullBundleResu
       payloads: [...payloads].map(([contentHash, bytes]) => ({ contentHash: contentHash as `sha256:${string}`, byteLength: bytes.length, bytes: Buffer.from(bytes).toString("base64url") })),
     };
     const bundle = input.distributionPublicKey ? createEncryptedBundle(contents, input.distributionPublicKey) : createPlaintextBundle(contents);
-    return { status: "ok", bundle, manifest, generation: manifest.payload.generation, releaseDigest: manifest.payload.releaseDigest, createdAt: now, notAfter, trustedRoot };
+    return { status: "ok", bundle, manifest, generation: manifest.payload.generation, releaseDigest: manifest.payload.releaseDigest, createdAt: now, notAfter, trustedRoot, edge };
   } catch (error) {
-    return { status: "unavailable", reason: "network", detail: (error as Error).message };
+    return { status: "unavailable", reason: "network", detail: (error as Error).message, edge };
   }
 }

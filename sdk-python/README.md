@@ -133,6 +133,12 @@ update-window timers on daemon threads.
    generation, the apply policy deciding. How a runtime learns the row
    changed is yours (poll, `LISTEN`, your bus). `fetch_root` is not
    optional in practice: a pinned key names the root, not the signing keys.
+   Hand the last result's `edge` back on the next pull and the puller polls
+   the CDN pointer, not the API: `status == "unchanged"`, `via == "pointer"`
+   is one 304 and no origin call; only a promotion reaches the API.
+   `next_pull_delay_ms` stretches the interval while nothing changes;
+   `skip_pointer=True` is the "check now" a nudge or an operator uses
+   ([docs/change-notification.md](../docs/change-notification.md)).
 5. One shape is not a failure: the sync found a release **staged under
    `unlock_required`** and nothing active — a first production release,
    or a restart whose active slot is unusable beside a staged one. The
@@ -326,7 +332,7 @@ tests/test_wrap_live.py` locally).
 
 ## Parity with the TypeScript SDK
 
-Same protocol version (`0.3.2`), same vectors, same store layout. The
+Same protocol version (`0.3.3`), same vectors, same store layout. The
 conformance suite (`tests/test_protocol_vectors.py`, `tests/test_spool.py`)
 runs every vector the TypeScript SDK runs, and `tests/test_interop.py`
 opens a store the TypeScript SDK wrote (encrypted A slot, spool segment,

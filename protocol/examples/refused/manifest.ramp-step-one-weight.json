@@ -3,7 +3,7 @@
   "reason": "a ramp step carries one weight per arm (S9)",
   "document": {
     "payload": {
-      "protocol": "0.3.2",
+      "protocol": "0.3.3",
       "organizationId": "org_7d3f9a2b",
       "agentId": "agt_4e8c1b6d",
       "target": "prod",

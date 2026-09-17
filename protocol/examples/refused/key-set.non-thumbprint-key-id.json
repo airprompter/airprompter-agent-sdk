@@ -4,7 +4,7 @@
   "document": {
     "signed": {
       "type": "root",
-      "protocol": "0.3.2",
+      "protocol": "0.3.3",
       "purpose": "platform",
       "environment": "prod",
       "version": 3,

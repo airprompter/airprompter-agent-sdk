@@ -59,6 +59,8 @@ class FakeControlPlane:
         self._current: Optional[dict[str, Any]] = None
         self.generation = 0
         self.edge_etag = 0
+        #: The pointer URL the manifest answer names; None = a deployment with no edge.
+        self.edge_pointer_url: Optional[str] = "https://edge.test/g/target-token/generation.json"
         self.require_countersign = False
         # T9: every heartbeat body the fake accepted, and what it answers (a test may change the cadence).
         self.heartbeats: list[dict[str, Any]] = []
@@ -276,9 +278,11 @@ class FakeControlPlane:
                     return httpx.Response(403, json={"error": "x", "details": {"code": "target_mismatch"}})
                 if not self._current:
                     return httpx.Response(404, json={"error": "Not found"})
+                # The answer names the edge pointer, as the service does (a deployment without an edge omits the header).
+                pointer_header = {"x-agent-edge-pointer-url": self.edge_pointer_url} if self.edge_pointer_url else {}
                 if request.headers.get("if-none-match") == self._current["etag"]:
-                    return httpx.Response(304, headers={"etag": self._current["etag"]})
-                return httpx.Response(200, content=self._current["bytes"], headers={"etag": self._current["etag"], "x-agent-generation": str(self._current["manifest"]["payload"]["generation"]), "content-type": "application/json"})
+                    return httpx.Response(304, headers={"etag": self._current["etag"], **pointer_header})
+                return httpx.Response(200, content=self._current["bytes"], headers={"etag": self._current["etag"], "x-agent-generation": str(self._current["manifest"]["payload"]["generation"]), "content-type": "application/json", **pointer_header})
             payload_match = re.match(r"^/v1/agents/([^/]+)/payloads/(sha256:[0-9a-f]{64})$", path)
             if payload_match:
                 data = self.payloads.get(payload_match.group(2))

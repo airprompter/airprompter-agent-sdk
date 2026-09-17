@@ -20,7 +20,7 @@ from airprompter_agent_core.bundle.apbundle import DistributionKey
 from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
 from airprompter_agent_core.control.client import SyncClient
 from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key
-from airprompter_agent_sync import pull_bundle
+from airprompter_agent_sync import next_pull_delay_ms, pull_bundle
 
 from .control_plane import FakeControlPlane
 
@@ -221,3 +221,54 @@ def test_rollback_holds_back_a_row_until_a_newer_generation():
         ap.stop()
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_pointer_first_pull_polls_the_cdn_not_the_origin():
+    plane = FakeControlPlane(SCOPE)
+    plane.promote([plane.slot(tag="support.reply", text="Reply politely.", version_id="ver_1")])
+    fleet_key = generate_x25519_key_pair()
+    client = SyncClient(base_url="https://api.test", agent_id=SCOPE["agentId"], target=SCOPE["target"], api_key=plane.api_key, transport=plane.transport())
+    trusted_root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=public_jwk_of(plane.root_key))
+    edge_http = httpx.Client(transport=plane.transport())
+    fetch_root = lambda: edge_http.get("https://edge.test/roots/prod/root.json").json()  # noqa: E731
+    origin_calls = lambda: sum(1 for u in plane.requests if "/manifest" in u)  # noqa: E731
+    pointer_calls = lambda: sum(1 for u in plane.requests if u.endswith("/generation.json"))  # noqa: E731
+    base = dict(client=client, scope=SCOPE, trusted_root=trusted_root, fetch_root=fetch_root, now=lambda: "2026-09-17T00:00:00.000Z", distribution_public_key=fleet_key.public_raw)
+
+    first = pull_bundle(**base)
+    assert first.status == "ok"
+    assert first.edge.pointer_url == "https://edge.test/g/target-token/generation.json"
+    assert first.edge.manifest_etag
+    assert pointer_calls() == 0
+    held = first.generation
+
+    before = origin_calls()
+    second = pull_bundle(**base, edge=first.edge, minimum_generation=held)
+    assert (second.status, second.via) == ("unchanged", "pointer")
+    assert second.edge.pointer_etag
+    third = pull_bundle(**base, edge=second.edge, minimum_generation=held)
+    assert (third.status, third.via) == ("unchanged", "pointer")
+    assert origin_calls() == before, "two idle pulls, zero origin calls"
+    assert pointer_calls() == 2
+
+    plane.promote([plane.slot(tag="support.reply", text="Reply warmly.", version_id="ver_2")])
+    fourth = pull_bundle(**base, edge=third.edge, minimum_generation=held)
+    assert fourth.status == "ok" and fourth.generation == held + 1
+    assert origin_calls() == before + 1
+    held = fourth.generation
+
+    nudged = pull_bundle(**base, edge=fourth.edge, minimum_generation=held, skip_pointer=True)
+    assert (nudged.status, nudged.via) == ("unchanged", "origin")
+    assert origin_calls() == before + 2
+
+    assert next_pull_delay_ms(outcome="unchanged", unchanged_streak=0, interval_ms=10_000) == 10_000
+    assert next_pull_delay_ms(outcome="unchanged", unchanged_streak=3, interval_ms=10_000) == 80_000
+    assert next_pull_delay_ms(outcome="unchanged", unchanged_streak=12, interval_ms=10_000) == 300_000
+    assert next_pull_delay_ms(outcome="unchanged", unchanged_streak=12, interval_ms=10_000, cap_ms=60_000) == 60_000
+    assert next_pull_delay_ms(outcome="ok", unchanged_streak=12, interval_ms=10_000) == 10_000
+
+    plane.edge_pointer_url = None
+    bare = pull_bundle(**base)
+    assert bare.status == "ok" and bare.edge.pointer_url is None
+    bare_again = pull_bundle(**base, edge=bare.edge, minimum_generation=held)
+    assert (bare_again.status, bare_again.via) == ("unchanged", "origin")

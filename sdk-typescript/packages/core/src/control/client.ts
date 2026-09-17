@@ -24,8 +24,8 @@ export interface SyncClientOptions {
 }
 
 export type ManifestFetch =
-  | { status: "ok"; manifest: Manifest; etag: string | null; generation: number | null }
-  | { status: "not_modified" }
+  | { status: "ok"; manifest: Manifest; etag: string | null; generation: number | null; edgePointerUrl: string | null }
+  | { status: "not_modified"; edgePointerUrl: string | null }
   | { status: "not_found" }
   | { status: "unauthorized" }
   | { status: "forbidden"; code: string | null }
@@ -80,13 +80,16 @@ export class SyncClient {
     const url = new URL(`${this.options.baseUrl}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/manifest`);
     if (input.wait) url.searchParams.set("wait", String(input.wait));
     const response = await this.fetchImpl(url.toString(), { headers: this.headers(input.ifNoneMatch ? { "if-none-match": input.ifNoneMatch } : {}) });
-    if (response.status === 304) return { status: "not_modified" };
+    // The answer names the edge pointer for this target (`x-agent-edge-pointer-url`): the few hundred bytes an idle
+    // puller polls at the CDN instead of here. Null on a deployment without an edge.
+    const edgePointerUrl = response.headers.get("x-agent-edge-pointer-url");
+    if (response.status === 304) return { status: "not_modified", edgePointerUrl };
     if (response.status === 404) return { status: "not_found" };
     if (response.status === 401) return { status: "unauthorized" };
     if (response.status === 403) return { status: "forbidden", code: (await readControlPlaneRefusal(response)).code };
     if (response.status !== 200) return { status: "error", httpStatus: response.status };
     const generation = response.headers.get("x-agent-generation");
-    return { status: "ok", manifest: JSON.parse(await response.text()) as Manifest, etag: response.headers.get("etag"), generation: generation ? Number(generation) : null };
+    return { status: "ok", manifest: JSON.parse(await response.text()) as Manifest, etag: response.headers.get("etag"), generation: generation ? Number(generation) : null, edgePointerUrl };
   }
 
   /** T9: the heartbeat. Content-free by schema; the response carries the cadence, the expiry and (T12) the upload grant. */

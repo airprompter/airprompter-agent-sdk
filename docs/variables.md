@@ -71,13 +71,16 @@ variables — use `renderAsync()`. Sources run concurrently, each under its
 own timeout and byte bound (64 KiB by default).
 
 In Python the SDK is synchronous by design, so `render()` *does* run a
-plain-callable source — each on its own worker thread, all at once, under
-its timeout — and holds none of the agent's locks while it does; it refuses
-only a **coroutine-function** source, with the same
+plain-callable source — each on a daemon thread of its own, all at once,
+under its own timeout measured from its start, the first failure ending the
+render — and holds none of the agent's locks while it does; it refuses only
+a **coroutine-function** source, with the same
 `VariableSourceRequiredError` — use `await ….render_async()`, which awaits
-those and runs plain callables on a thread. A source that outlives its
-timeout keeps its thread until it returns (a thread cannot be killed); the
-render has already failed by name. A source that throws, times
+those and runs plain callables on a daemon thread (never the event loop's
+default executor, which `asyncio.run()` would wait for at exit). A source
+that outlives its timeout keeps its thread until it returns (a thread cannot
+be killed); the render has already failed by name, and the interpreter's
+exit is never held up by it — bound your own I/O inside the source. A source that throws, times
 out, answers more than its bound, or answers nothing for a required
 variable, or answers something other than text, is
 `VariableSourceError { tag, variable, reason }` (`threw` · `timeout` ·
@@ -135,8 +138,9 @@ Declarations only, no payload read. Names only, never values.
   fills a step with the same precedence — each step scanned on its own, so a source is called for the step that uses
   the variable and not for the one that does not. A source sees the step id (`docs.flow#2`) as its `tag`.
 - **Managed mode** (`ManagedAgent`, the hosted `/run` route) runs in your process, so `ManagedAgent.start({ variables })`
-  (Python: `ManagedAgent.start(variables=...)`) fills required declared variables before the run is posted, and
-  `agent.needs(tag, values)` answers the same question. The catalogue names declarations, not text, so "used in the text" cannot be known there: required ones are
+  (Python: `ManagedAgent.start(variables=...)`; that client is synchronous throughout, so its sources must be plain
+  callables — a coroutine function is refused by name) fills required declared variables before the run is posted,
+  and `agent.needs(tag, values)` answers the same question. The catalogue names declarations, not text, so "used in the text" cannot be known there: required ones are
   filled, optional ones are not; the context a source sees carries `versionId: null` and `arm: null` (the run route
   resolves them). A hosted run fences by the slot's declaration alone, so an `end_user` source for a variable the slot
   declares `operator` is refused before any lookup (`VariableSourceError`, reason `unfenceable`) rather than sent raw —

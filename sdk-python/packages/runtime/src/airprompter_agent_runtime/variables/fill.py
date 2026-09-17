@@ -7,10 +7,12 @@ or present in the text — and only when the call site did not pass it; what is 
 problem, and ``render_template`` says so loudly. Trust comes out stricter than it went in: a value a source of
 ``end_user`` trust filled is named in ``fenced``, and the resolver renders it fenced whatever the prompt declared.
 
-Two fills, one plan. ``fill_sync`` runs literals and plain callables (each on a worker thread under its own
-timeout, all at once) and refuses a coroutine-function source with ``VariableSourceRequiredError``;
-``fill_async`` runs every kind under an asyncio timeout. Neither holds any lock of the agent's: a source is the
-customer's code and may take its time.
+Two fills, one plan. ``fill_sync`` runs literals and plain callables (each on a daemon thread of its own under
+its own timeout, all at once, the first failure ending the fill) and refuses a coroutine-function source with
+``VariableSourceRequiredError``; ``fill_async`` runs every kind under an asyncio timeout. Neither holds any lock of
+the agent's: a source is the customer's code and may take its time. A source that ignores its timeout keeps its
+daemon thread until it returns — a thread cannot be killed — but the render has already failed by name, and the
+interpreter's exit is never held up by it.
 
 Example::
 
@@ -26,11 +28,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import queue
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal, Mapping, Optional, Sequence
+from typing import Any, Callable, Literal, Mapping, Optional, Sequence
 
 from airprompter_agent_core.render.template import placeholders_of
 
@@ -122,16 +124,52 @@ def unsourced(*, variables: Sequence[Mapping[str, Any]], values: RenderValues, r
     return [str(v["name"]) for v in variables if v.get("required") and not supplied(values, str(v["name"])) and not registry.has(str(v["name"]))]
 
 
-def _bounded(tag: str, name: str, entry: RegisteredSource, value: Any) -> Optional[str]:
-    """One answer, checked: text only and within the byte bound. ``[object Object]`` never reaches a prompt."""
+
+
+# ----------------------------------------------------------------------------- one lookup, bounded
+
+#: What one lookup came back with: ("ok", value) from the source, or ("err", exception) raised inside it. The wrapper
+#: below is the only code that runs on the source's thread, so a failure there is always the source's own — never a
+#: KeyboardInterrupt delivered to the thread that waits, never the SDK's own deadline.
+_Outcome = tuple[str, Any]
+
+
+def _guarded(resolve: Callable[[VariableSourceContext], Any], context: VariableSourceContext) -> _Outcome:
+    try:
+        return ("ok", resolve(context))
+    except BaseException as error:  # noqa: BLE001 — every failure of the source is reported by name, not raised raw
+        return ("err", error)
+
+
+async def _await_guarded(awaitable: Any) -> _Outcome:
+    """The asynchronous twin of ``_guarded``: a cancellation is the caller's and passes through."""
+    try:
+        return ("ok", await awaitable)
+    except asyncio.CancelledError:
+        raise
+    except BaseException as error:  # noqa: BLE001
+        return ("err", error)
+
+
+def _bounded(tag: str, name: str, entry: RegisteredSource, outcome: _Outcome, *, awaited: bool) -> Optional[str]:
+    """One answer, checked: the source's own failure is ``threw`` (its own ``TimeoutError`` included — the SDK's
+    deadline is the only ``timeout``); text only; within the byte bound. ``[object Object]`` never reaches a prompt."""
+    kind, value = outcome
+    if kind == "err":
+        if is_variable_source_error(value):
+            raise value
+        raise VariableSourceError(tag, name, "threw", value) from value
     if value is None:
         return None
     if inspect.isawaitable(value):
-        # A plain callable handed back a coroutine: not text, and closed so it never warns about being un-awaited.
+        # A plain callable handed back a coroutine (a callable object with ``async __call__``, a sync decorator over an
+        # async function): the async fill awaits it; the sync fill cannot, and says so by the true reason.
         close = getattr(value, "close", None)
         if callable(close):
             close()
-        raise VariableSourceError(tag, name, "not_text")
+        if awaited:
+            raise VariableSourceError(tag, name, "not_text")
+        raise VariableSourceRequiredError(tag, [name])
     if not isinstance(value, str):
         raise VariableSourceError(tag, name, "not_text")
     if len(value.encode("utf-8")) > entry.max_bytes:
@@ -162,51 +200,97 @@ def _collect(plan: FillPlan, results: list[tuple[str, Optional[str], str, str]])
     return FilledRender(values=values, fenced=frozenset(fenced), filled=filled)
 
 
+def _entries(plan: FillPlan, registry: VariableSourceRegistry) -> dict[str, Optional[RegisteredSource]]:
+    """Everything the plan named, re-read now: a literal that became a source is looked up; a source that became a
+    literal is used as one; anything revoked is left to the render."""
+    return {name: registry.get(name) for name in [*plan.literal, *plan.async_]}
+
+
+def _spawn(name: str, entry: RegisteredSource, context: VariableSourceContext, deliver: Callable[[str, _Outcome], None]) -> None:
+    """One lookup on its own DAEMON thread: a source that ignores its timeout keeps the thread until it returns (a
+    thread cannot be killed), but never blocks the interpreter's exit — every other thread the SDK runs is a daemon
+    too. ``deliver`` is called from the source's thread, so it must be thread-safe."""
+    assert entry.source is not None
+    resolve = entry.source.resolve
+
+    def run() -> None:
+        deliver(name, _guarded(resolve, replace(context, name=name)))
+
+    threading.Thread(target=run, name=f"airprompter-variable-source:{name}", daemon=True).start()
+
+
+# ----------------------------------------------------------------------------- the fills
+
+
 def fill_sync(plan: FillPlan, context: VariableSourceContext, registry: VariableSourceRegistry) -> FilledRender:
-    """Literals and plain-callable sources — the synchronous path. Every callable runs on its own worker thread,
-    all at once, each under its own timeout; a coroutine-function source is refused (``VariableSourceRequiredError``):
-    that is what ``fill_async`` is for. The registry is re-read at fill time, so a source registered since the plan
-    is treated as it stands now, never as a quiet ``MissingVariableError``."""
-    names = [*plan.literal, *plan.async_]
-    entries = {name: registry.get(name) for name in names}
+    """Literals and plain-callable sources — the synchronous path. Every callable runs on its own daemon thread, all
+    at once, each under its OWN timeout measured from the moment it started; the first failure (a throw, or a
+    deadline passed) ends the fill at once rather than after the sources named before it. A coroutine-function
+    source is refused (``VariableSourceRequiredError``): that is what ``fill_async`` is for. The registry is re-read
+    at fill time, so a source registered since the plan is treated as it stands now, never as a quiet
+    ``MissingVariableError``."""
+    entries = _entries(plan, registry)
     must_await = [name for name, entry in entries.items() if entry is not None and entry.kind == "source" and entry.awaitable]
     if must_await:
         raise VariableSourceRequiredError(plan.tag, must_await)
-    callable_names = [name for name, entry in entries.items() if entry is not None and entry.kind == "source"]
     results: dict[str, tuple[str, Optional[str], str, str]] = {}
     for name, entry in entries.items():
         if entry is None:
             results[name] = (name, None, "revoked", "operator")
         elif entry.kind == "literal":
             results[name] = (name, entry.value, "literal", entry.trust)
-    if callable_names:
-        # One pool per fill, sized to the lookups: a source that outlives its timeout keeps its thread until it
-        # returns (a thread cannot be killed), but the render has already failed by name and moved on.
-        executor = ThreadPoolExecutor(max_workers=len(callable_names), thread_name_prefix="airprompter-variable-source")
+    pending = {name: entry for name, entry in entries.items() if entry is not None and entry.kind == "source"}
+    if pending:
+        inbox: "queue.Queue[tuple[str, _Outcome]]" = queue.Queue()
         started = time.monotonic()
-        futures = {name: executor.submit(entries[name].source.resolve, replace(context, name=name)) for name in callable_names}  # type: ignore[union-attr]
-        try:
-            for name, future in futures.items():
-                entry = entries[name]
-                assert entry is not None
-                try:
-                    value = future.result(timeout=max(0.0, started + entry.timeout_seconds - time.monotonic()))
-                except FutureTimeoutError as error:
-                    raise VariableSourceError(plan.tag, name, "timeout") from error
-                except BaseException as error:  # noqa: BLE001 — the source's failure is the render's, named
-                    if is_variable_source_error(error):
-                        raise
-                    raise VariableSourceError(plan.tag, name, "threw", error) from error
-                results[name] = (name, _bounded(plan.tag, name, entry, value), "source", entry.trust)
-        finally:
-            executor.shutdown(wait=False)
-    return _collect(plan, [results[name] for name in names])
+        for name, entry in pending.items():
+            _spawn(name, entry, context, lambda n, outcome: inbox.put((n, outcome)))
+        deadlines = {name: started + entry.timeout_seconds for name, entry in pending.items()}
+        while pending:
+            # Wait for the next answer, but no longer than the nearest deadline still open.
+            nearest = min(deadlines[name] for name in pending)
+            try:
+                name, outcome = inbox.get(timeout=max(0.0, nearest - time.monotonic()))
+            except queue.Empty:
+                overdue = next(name for name in pending if deadlines[name] <= time.monotonic())
+                raise VariableSourceError(plan.tag, overdue, "timeout") from None
+            entry = pending.pop(name)
+            if time.monotonic() > deadlines[name]:
+                # It answered, but after its bound: a slow source is a timed-out source, whatever it eventually said.
+                raise VariableSourceError(plan.tag, name, "timeout")
+            results[name] = (name, _bounded(plan.tag, name, entry, outcome, awaited=False), "source", entry.trust)
+    return _collect(plan, [results[name] for name in entries])
 
 
 async def fill_async(plan: FillPlan, context: VariableSourceContext, registry: VariableSourceRegistry) -> FilledRender:
-    """Literals and every kind of source — coroutine functions awaited, plain callables run on a worker thread —
-    concurrently, each under its own timeout and byte bound."""
-    names = [*plan.literal, *plan.async_]
+    """Literals and every kind of source — coroutine functions awaited, plain callables run on a daemon thread of
+    their own (never the loop's default executor, which ``asyncio.run`` joins at exit) — concurrently, each under
+    its own timeout and byte bound. The first failure ends the fill."""
+    loop = asyncio.get_running_loop()
+
+    def on_thread(name: str, entry: RegisteredSource) -> "asyncio.Future[_Outcome]":
+        future: "asyncio.Future[_Outcome]" = loop.create_future()
+
+        def deliver(_name: str, outcome: _Outcome) -> None:
+            def settle() -> None:
+                if not future.done():
+                    future.set_result(outcome)
+
+            try:
+                loop.call_soon_threadsafe(settle)
+            except RuntimeError:
+                pass  # the loop is closed: the render that wanted this answer is long gone
+
+        _spawn(name, entry, context, deliver)
+        return future
+
+    async def awaited(entry: RegisteredSource, name: str) -> _Outcome:
+        assert entry.source is not None
+        try:
+            coroutine = entry.source.resolve(replace(context, name=name))
+        except BaseException as error:  # noqa: BLE001 — raised before a coroutine existed: still the source's failure
+            return ("err", error)
+        return await _await_guarded(coroutine)
 
     async def one(name: str) -> tuple[str, Optional[str], str, str]:
         entry = registry.get(name)
@@ -214,22 +298,23 @@ async def fill_async(plan: FillPlan, context: VariableSourceContext, registry: V
             return (name, None, "revoked", "operator")
         if entry.kind == "literal":
             return (name, entry.value, "literal", entry.trust)
-        assert entry.source is not None
-        ctx = replace(context, name=name)
+        started = time.monotonic()
         try:
-            if entry.awaitable:
-                value = await asyncio.wait_for(entry.source.resolve(ctx), entry.timeout_seconds)
-            else:
-                value = await asyncio.wait_for(asyncio.to_thread(entry.source.resolve, ctx), entry.timeout_seconds)
+            # Everything the source can raise is caught INSIDE the wrapper: the only timeout that can escape here is asyncio's.
+            outcome = await asyncio.wait_for(awaited(entry, name) if entry.awaitable else on_thread(name, entry), entry.timeout_seconds)
+            if outcome[0] == "ok" and inspect.isawaitable(outcome[1]):
+                # A plain callable that handed back a coroutine: await it under what is left of the same bound.
+                outcome = await asyncio.wait_for(_await_guarded(outcome[1]), max(0.0, started + entry.timeout_seconds - time.monotonic()))
         except asyncio.TimeoutError as error:
             raise VariableSourceError(plan.tag, name, "timeout") from error
-        except asyncio.CancelledError:
-            raise
-        except BaseException as error:  # noqa: BLE001 — the source's failure is the render's, named
-            if is_variable_source_error(error):
-                raise
-            raise VariableSourceError(plan.tag, name, "threw", error) from error
-        return (name, _bounded(plan.tag, name, entry, value), "source", entry.trust)
+        return (name, _bounded(plan.tag, name, entry, outcome, awaited=True), "source", entry.trust)
 
-    results = await asyncio.gather(*(one(name) for name in names))
+    tasks = [asyncio.ensure_future(one(name)) for name in [*plan.literal, *plan.async_]]
+    try:
+        results = await asyncio.gather(*tasks)
+    except BaseException:
+        # The first failure ends the fill: the other lookups are cancelled rather than awaited to their own ends.
+        for task in tasks:
+            task.cancel()
+        raise
     return _collect(plan, list(results))

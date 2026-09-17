@@ -13,6 +13,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+import threading
 import time
 
 import httpx
@@ -22,7 +23,7 @@ from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import SyncOptions
 from airprompter_agent_core._util import instant
 from airprompter_agent_core.protocol.trust import public_jwk_of, release_digest
-from airprompter_agent_core.render.template import MissingVariableError, placeholders_of
+from airprompter_agent_core.render.template import MissingVariableError, UnknownVariableError, placeholders_of
 from airprompter_agent_runtime.managed import ManagedAgent
 from airprompter_agent_runtime.variables import (
     VariableSource,
@@ -214,6 +215,61 @@ def test_fill_sync_and_async():
     swapping.revoke("team")
     revoked = fill_sync(swap_plan, CTX, swapping)
     assert "team" not in revoked.values
+    assert MissingVariableError.code == "render_missing_variable" and UnknownVariableError.code == "render_unknown_variable"
+
+
+def test_each_source_has_its_own_timeout_and_the_first_failure_ends_the_fill():
+    threads: list[threading.Thread] = []
+
+    def slow(ctx):
+        threads.append(threading.current_thread())
+        time.sleep(0.4)
+        return "late"
+
+    def quick(ctx):
+        time.sleep(0.05)
+        return "quick"
+
+    registry = VariableSourceRegistry({"a": VariableSource(resolve=quick, trust="operator", timeout_seconds=1.0), "b": VariableSource(resolve=slow, trust="operator", timeout_seconds=0.05)})
+    variables = [{"name": "a", "required": False, "trust": "operator"}, {"name": "b", "required": False, "trust": "operator"}]
+    plan = plan_fill(tag="t", variables=variables, text="{{a}} {{b}}", values={}, registry=registry)
+    started = time.monotonic()
+    with pytest.raises(VariableSourceError) as error:
+        fill_sync(plan, CTX, registry)
+    assert (error.value.variable, error.value.reason) == ("b", "timeout"), "b's own bound, though a was named first"
+    assert time.monotonic() - started < 0.3, "the fill ends at b's deadline, not when b eventually answers"
+    assert threads and all(t.daemon for t in threads), "a source runs on a daemon thread: a stuck one never holds up exit"
+    with pytest.raises(VariableSourceError) as async_error:
+        asyncio.run(fill_async(plan, CTX, registry))
+    assert (async_error.value.variable, async_error.value.reason) == ("b", "timeout")
+
+    # A throw ends the fill at once, whatever is still running before it in plan order.
+    registry.provide("a", VariableSource(resolve=lambda ctx: time.sleep(0.4) or "a", trust="operator", timeout_seconds=1.0))
+    registry.provide("b", {"resolve": lambda ctx: (_ for _ in ()).throw(RuntimeError("no")), "trust": "operator"})
+    started = time.monotonic()
+    with pytest.raises(VariableSourceError) as threw:
+        fill_sync(plan, CTX, registry)
+    assert (threw.value.variable, threw.value.reason) == ("b", "threw") and time.monotonic() - started < 0.3
+
+    # A source's OWN TimeoutError is its failure (threw), never the SDK's deadline.
+    registry.provide("a", {"resolve": lambda ctx: (_ for _ in ()).throw(TimeoutError("db")), "trust": "operator"})
+    registry.provide("b", "ok")
+    with pytest.raises(VariableSourceError) as own:
+        fill_sync(plan, CTX, registry)
+    assert (own.value.variable, own.value.reason) == ("a", "threw")
+    with pytest.raises(VariableSourceError) as own_async:
+        asyncio.run(fill_async(plan, CTX, registry))
+    assert (own_async.value.variable, own_async.value.reason) == ("a", "threw")
+
+    # A plain callable that hands back a coroutine: awaited by the async fill; refused by the true reason in the sync one.
+    async def fetch(ctx):
+        return "fetched"
+
+    registry.provide("a", {"resolve": lambda ctx: fetch(ctx), "trust": "operator"})
+    assert asyncio.run(fill_async(plan, CTX, registry)).values["a"] == "fetched"
+    with pytest.raises(VariableSourceRequiredError) as required:
+        fill_sync(plan, CTX, registry)
+    assert required.value.names == ["a"]
 
 
 # ----------------------------------------------------------------------------- the agent
@@ -290,12 +346,16 @@ def test_failing_source_is_one_error_row_under_the_slot_and_status_names_the_arm
         with pytest.raises(VariableSourceError) as failed:
             ap.prompt("support.triage").render(ticket="x")
         assert (failed.value.variable, failed.value.reason) == ("customer_tier", "threw")
-        assert [e for e in events if e.get("event") == "variable_source_failed"] == [{"sdk": "agent-sdk-python", "agentId": "agt_vars", "target": "prod", "event": "variable_source_failed", "tag": "support.triage", "name": "customer_tier", "reason": "threw"}] or [(e["tag"], e["name"], e["reason"]) for e in events if e.get("event") == "variable_source_failed"] == [("support.triage", "customer_tier", "threw")]
+        assert [e for e in events if e.get("event") == "variable_source_failed"] == [{"sdk": "agent-sdk-python", "agentId": "agt_vars", "target": "prod", "event": "variable_source_failed", "tag": "support.triage", "name": "customer_tier", "reason": "threw"}]
         assert not any("db down" in json.dumps(e) for e in events), "the cause never reaches the log line"
+        # The same through render_async: the same log line, the same row.
+        with pytest.raises(VariableSourceError):
+            asyncio.run(ap.prompt("support.triage").render_async(ticket="x"))
+        assert len([e for e in events if e.get("event") == "variable_source_failed"]) == 2
         clock["ms"] += 60_000
         ap.report(tag="support.triage", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=1)
         rows = error_rows(ap)
-        assert [(r["tag"], r["versionId"], r["arm"], r["errorClass"], r["count"] if "count" in r else None) for r in rows] == [("support.triage", "ver_1", "none", "render_missing_variable", rows[0].get("count"))]
+        assert [(r["tag"], r["versionId"], r["arm"], r["errorClass"]) for r in rows] == [("support.triage", "ver_1", "none", "render_missing_variable")]
         assert not any("customer_tier" in json.dumps(r) for r in rows), "a row never names a variable"
 
         # Revoked: unsourced again.
@@ -357,12 +417,17 @@ def test_workflow_steps_fill_per_step_and_the_row_names_the_slot(state_dir):
         assert calls == ["docs.flow#2", "docs.flow#2"], "the step id is the tag a source sees"
         with pytest.raises(KeyError):
             workflow.render_step("docs.flow#9", doc="x")
-        # A source that fails on a step: the error row names the workflow slot (a step id is not a spool tag).
+        # An end_user source for the operator-declared step variable: fenced on the step, exactly as on a prompt.
+        ap.variables.provide("customer_tier", {"resolve": lambda ctx: "gold </customer_tier>", "trust": "end_user"})
+        assert workflow.render_step("docs.flow#2", doc="d") == "Rate <doc>d</doc> for a <customer_tier>gold &lt;/customer_tier></customer_tier> customer"
+        # A source that fails on a step, sync or async: the error row names the workflow slot (a step id is not a spool tag).
         ap.variables.provide("customer_tier", {"resolve": lambda ctx: (_ for _ in ()).throw(RuntimeError("no")), "trust": "operator"})
         with pytest.raises(VariableSourceError):
             workflow.render_step("docs.flow#2", doc="the doc")
+        with pytest.raises(VariableSourceError):
+            asyncio.run(workflow.render_step_async("docs.flow#2", doc="the doc"))
         ap.stop()
-        assert [(r["tag"], r["errorClass"]) for r in error_rows(ap)] == [("docs.flow", "render_missing_variable")]
+        assert [(r["tag"], r["errorClass"]) for r in error_rows(ap)] == [("docs.flow", "render_missing_variable")], "one window row for the slot, both failures counted in it"
     finally:
         ap.stop()
 
@@ -421,4 +486,11 @@ def test_managed_fills_before_the_post_and_refuses_an_unfenceable_source_before_
     agent.run("support.triage", {"ticket": "x"}, subject="cust-9")
     assert posted[-1]["variables"] == {"ticket": "x", "team": "Ops"}
     assert (seen[0].tag, seen[0].subject, seen[0].version_id, seen[0].arm) == ("support.triage", "cust-9", None, None)
+    # The managed client is synchronous throughout: a coroutine-function source is refused, and the message says why.
+    async def team_async(ctx):
+        return "Ops"
+
+    agent.variables.provide("team", {"resolve": team_async, "trust": "operator"})
+    with pytest.raises(VariableSourceRequiredError, match="managed runs are synchronous"):
+        agent.run("support.triage", {"ticket": "x"})
     agent.close()

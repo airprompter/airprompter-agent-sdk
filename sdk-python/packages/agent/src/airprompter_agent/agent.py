@@ -349,7 +349,8 @@ class PromptHandle:
         return await self._agent._render_async(self._tag, self._subject, merged)
 
     def needs(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> list[str]:
-        """The required names a render would still lack after these values and the registered sources — check it at start-up."""
+        """The required names a render would still lack after these values and the registered sources — check it at
+        start-up. Resolves the slot as a render would, so a disabled slot raises ``RenderRefusedError`` here too."""
         merged = {**(values or {}), **kwargs}
         return unsourced(variables=self.variables(), values=merged, registry=self._agent.variables)
 
@@ -1661,9 +1662,10 @@ class AirPrompterAgent:
             if not entry.stricter:
                 continue
             key = f"{tag}\u0000{entry.name}"
-            if key in self._stricter_said:
-                continue
-            self._stricter_said.add(key)
+            with self._lock:  # check-and-add as one step: two first renders on two threads say it once, not twice
+                if key in self._stricter_said:
+                    continue
+                self._stricter_said.add(key)
             declared = next((v.get("trust") for v in slot.get("variables", []) if v["name"] == entry.name), None)
             self._log({"event": "variable_source_trust_stricter", "tag": tag, "name": entry.name, "declared": declared})
 

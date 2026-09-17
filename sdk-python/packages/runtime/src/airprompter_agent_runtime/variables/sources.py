@@ -94,9 +94,9 @@ class VariableSourceRequiredError(Exception):
 
     code = "variable_source_required"
 
-    def __init__(self, tag: str, names: list[str]):
+    def __init__(self, tag: str, names: list[str], hint: str = "use render_async()"):
         verb = "come" if len(names) > 1 else "comes"
-        super().__init__(f"render {tag}: {', '.join(names)} {verb} from a source that must be awaited — use render_async()")
+        super().__init__(f"render {tag}: {', '.join(names)} {verb} from a source that must be awaited — {hint}")
         self.tag = tag
         self.names = list(names)
 

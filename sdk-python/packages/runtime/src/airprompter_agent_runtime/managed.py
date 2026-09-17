@@ -38,7 +38,7 @@ import httpx
 from airprompter_agent_core.protocol.assignment import subject_hash as salted_subject_hash
 
 from .variables.fill import fill_sync, plan_fill, stricter_sources, supplied, unsourced
-from .variables.sources import VariableSourceContext, VariableSourceError, VariableSourceInput, VariableSourceRegistry
+from .variables.sources import VariableSourceContext, VariableSourceError, VariableSourceInput, VariableSourceRegistry, VariableSourceRequiredError
 
 MANAGED_SDK_USER_AGENT = "airprompter-agent-sdk-python/managed"
 
@@ -249,7 +249,8 @@ class ManagedAgent:
     def start(cls, *, agent_id: str, target: str, api_key: str, base_url: str, transport: Optional[httpx.BaseTransport] = None, max_rate_limit_retries: int = 2, sleep: Optional[Callable[[float], None]] = None, instance_id: Optional[str] = None, user_agent: str = MANAGED_SDK_USER_AGENT, timeout: float = 120.0, variables: Optional[Mapping[str, VariableSourceInput]] = None) -> "ManagedAgent":
         """Reads the catalogue once; refuses (typed) when the key, the target or the promotion is not there.
         ``api_key`` is a run key (``agent_run`` kind, ``agent.run`` scope); ``base_url`` the run route's origin (the AgentRunUrl output of the execution stack).
-        ``variables`` registers how this process fills declared variables from its own system (a literal, or a source with its trust)."""
+        ``variables`` registers how this process fills declared variables from its own system (a literal, or a source with its
+        trust). This client is synchronous, so a source must be a plain callable: a coroutine function is refused at run time."""
         agent = cls(agent_id=agent_id, target=target, api_key=api_key, base_url=base_url, catalogue={}, transport=transport, max_rate_limit_retries=max_rate_limit_retries, sleep=sleep or time.sleep, instance_id=instance_id, user_agent=user_agent, timeout=timeout, variables=variables)
         agent._catalogue = agent._read_catalogue()
         return agent
@@ -335,6 +336,11 @@ class ManagedAgent:
         unfenceable = [name for name in stricter_sources(declared, self.variables) if name in planned]
         if unfenceable:
             raise VariableSourceError(tag, unfenceable[0], "unfenceable")
+        # The managed client is synchronous throughout (there is no run_async): a coroutine-function source cannot be
+        # run here, and the refusal says so rather than pointing at a render_async() this client does not have.
+        awaitable = [name for name in planned if (entry := self.variables.get(name)) is not None and entry.kind == "source" and entry.awaitable]
+        if awaitable:
+            raise VariableSourceRequiredError(tag, awaitable, hint="managed runs are synchronous; register a plain callable for it")
         filled = fill_sync(plan, VariableSourceContext(tag=tag, name="", subject=subject, version_id=None, arm=None), self.variables)
         return {name: str(value) for name, value in filled.values.items() if supplied(filled.values, name)}
 

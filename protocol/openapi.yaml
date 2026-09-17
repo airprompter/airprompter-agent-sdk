@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AirPrompter Agent routes (customer-v1)
-  version: 0.3.3
+  version: 0.3.4
   summary: The routes an agent runtime calls. Pull only; the control plane never opens a connection to you.
   description: |
     Every route is called by the customer's runtime over outbound HTTPS with an

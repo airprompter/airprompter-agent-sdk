@@ -5,7 +5,19 @@ the last verified release (other slot → vendored bundle → refuse to start
 when nothing verifies); sync runs in the background per mode. ``prompt(tag)``
 renders with trust-aware variables and hands back a content-free ``run_ref``;
 ``workflow(tag)`` yields steps in order; ``report()``, ``observe()`` and
-``feedback()`` feed the spool. Zero network on the render path, ever.
+``feedback()`` feed the spool. Zero network to AirPrompter on the render
+path, ever; the application's own variable sources (``start(variables=)``,
+``docs/variables.md``) run on ``render()`` — plain callables, on worker
+threads under their timeouts — and on ``render_async()``, which also awaits
+coroutine-function sources. Neither holds the agent's lock while a source runs.
+
+Example::
+
+    ap = AirPrompterAgent.start(organization_id="org_…", agent_id="agt_…", target="prod", api_key=os.environ["AIRPROMPTER_AGENT_KEY"],
+                                root={"pinned": PINNED_ROOT_JWK},
+                                variables={"customer_tier": {"resolve": lambda ctx: crm.tier_of(ctx.subject), "trust": "operator"}})
+    rendered = ap.prompt("support.triage", subject=customer_id).render(ticket=ticket_text)   # customer_tier looked up only if this version uses it
+    ap.status().variables                                                                    # {"sources": ["customer_tier"], "unsourced": []}
 
 Threads: resident mode runs its sync, heartbeat and window timers on daemon
 threads; every public method is safe to call from any thread. ``stop()``
@@ -53,6 +65,7 @@ from airprompter_agent_core.judge import JUDGE_RUBRICS, JudgeResult, JudgeRubric
 from airprompter_agent_runtime.observe import PendingObservation, ObserveTarget, observe_call, observe_call_async
 from airprompter_agent_core.release.reader import ReleaseSlot
 from airprompter_agent_runtime.release.resolver import ReleaseResolver, Rendered, Workflow, WorkflowStep, copy_inference, disabled_from
+from airprompter_agent_runtime.variables import FilledRender, FillPlan, VariableSourceContext, VariableSourceInput, VariableSourceRegistry, fill_async, fill_sync, is_variable_source_error, plan_fill, unsourced
 
 from airprompter_agent_core import SDK_VERSION  # one constant, pinned to pyproject by tests/test_package_split.py
 
@@ -177,6 +190,10 @@ class AgentStatus:
     ramp: Optional[dict[str, Any]] = None
     #: S16: one entry per experiment the active manifest carries (per slot); ``ramp`` is the first of them.
     ramps: list[dict[str, Any]] = field(default_factory=list)
+    #: 0.2.11: prompt variables and where they come from — ``{"sources": [names this application can fill],
+    #: "unsourced": [{"tag", "arm", "names"}]}``: per slot and arm, the required variables neither a literal nor a
+    #: source fills, so the call site must. Declarations only; no payload is read.
+    variables: dict[str, Any] = field(default_factory=lambda: {"sources": [], "unsourced": []})
 
 
 @dataclass(frozen=True)
@@ -312,17 +329,52 @@ class _Timer:
 
 
 class PromptHandle:
+    """One prompt slot for one subject: ``render()`` (the call site's values, literals, and plain-callable sources
+    on worker threads), ``render_async()`` (coroutine-function sources too), ``needs()`` and ``variables()``."""
+
     def __init__(self, agent: "AirPrompterAgent", tag: str, subject: Optional[str]):
         self._agent = agent
         self._tag = tag
         self._subject = subject
 
     def render(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> Rendered:
+        """Synchronous: the call site's values, literal sources and plain-callable sources (each on a worker thread
+        under its timeout). A coroutine-function source in the way is ``VariableSourceRequiredError``."""
         merged = {**(values or {}), **kwargs}
         return self._agent._render(self._tag, self._subject, merged)
 
+    async def render_async(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> Rendered:
+        """The same render with every source awaited (each under its own timeout), values fenced by the stricter trust."""
+        merged = {**(values or {}), **kwargs}
+        return await self._agent._render_async(self._tag, self._subject, merged)
+
+    def needs(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> list[str]:
+        """The required names a render would still lack after these values and the registered sources — check it at
+        start-up. Resolves the slot as a render would, so a disabled slot raises ``RenderRefusedError`` here too."""
+        merged = {**(values or {}), **kwargs}
+        return unsourced(variables=self.variables(), values=merged, registry=self._agent.variables)
+
     def variables(self) -> list[Mapping[str, Any]]:
         return list(self._agent._resolve_slot(self._tag, self._subject)[0].get("variables", []))
+
+
+@dataclass(frozen=True)
+class WorkflowHandle(Workflow):
+    """A workflow as the facade hands it out: the runtime's ``Workflow`` plus ``render_step()`` /
+    ``render_step_async()`` — a step's text with its variables filled under the workflow's declarations, the same
+    precedence and the same fencing as a prompt (the resolver renders both), each step scanned on its own: a source
+    is called for step 3 and not for step 1 when only step 3 uses it."""
+
+    _render_step: Optional[Callable[[str, Mapping[str, Any]], str]] = field(default=None, repr=False, compare=False)
+    _render_step_async: Optional[Callable[[str, Mapping[str, Any]], Awaitable[str]]] = field(default=None, repr=False, compare=False)
+
+    def render_step(self, step_id: str, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> str:
+        assert self._render_step is not None
+        return self._render_step(step_id, {**(values or {}), **kwargs})
+
+    async def render_step_async(self, step_id: str, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> str:
+        assert self._render_step_async is not None
+        return await self._render_step_async(step_id, {**(values or {}), **kwargs})
 
 
 class AirPrompterAgent:
@@ -396,6 +448,10 @@ class AirPrompterAgent:
         self._run_ref_key = hmac.new((run_ref_seed or own_instance_id).encode("utf-8"), b"runRef", hashlib.sha256).digest()
         # T33: the last renders by text hash, so a wrapped client can tell which slot a call is.
         self._renders = RenderRegistry()
+        #: The application's variable sources (``start(variables=...)``, ``ap.variables.provide()``).
+        self.variables = VariableSourceRegistry(options.get("variables"))
+        # A source stricter than the prompt's declaration is said once per slot and name for the life of the process.
+        self._stricter_said: set[str] = set()
         serverless = self._sync_options.mode == "on_invoke"
         sink_kind = self._telemetry.sink or ("memory" if serverless else "directory")
         self._sink: SpoolSink = MemorySink({"instanceId": own_instance_id}, self._telemetry.buffer_bytes or 256 * 1024) if sink_kind == "memory" else DirectorySink(spool_dir, own_instance_id, self._telemetry.spool_budget_bytes or 100 * 1024 * 1024)
@@ -433,9 +489,13 @@ class AirPrompterAgent:
         transport: Optional[httpx.BaseTransport] = None,
         random: Optional[Callable[[], float]] = None,
         logger: Optional[Callable[[dict[str, Any]], None]] = None,
+        variables: Optional[Mapping[str, VariableSourceInput]] = None,
     ) -> "AirPrompterAgent":
         """``root`` is ``{"pinned": <P-256 public JWK>}`` for this environment, or a full root document (from the bundle or a previous accept).
-        ``api_key`` absent means offline: serve the store or the vendored bundle, never call home."""
+        ``api_key`` absent means offline: serve the store or the vendored bundle, never call home.
+        ``variables`` is how this application fills prompt variables from its own system: a literal per name, or a
+        source (``{"resolve": callable, "trust": "operator"|"end_user", ...}``) consulted for a declared variable the
+        version's text uses and the call site did not pass. ``ap.variables.provide()`` adds more after start."""
         sync_options = _coerce(SyncOptions, sync)
         options: dict[str, Any] = {
             "organization_id": organization_id,
@@ -460,6 +520,7 @@ class AirPrompterAgent:
             "transport": transport,
             "random": random,
             "logger": logger,
+            "variables": variables,
         }
         resolved_state_dir = state_dir or default_state_dir()
         # The root is scoped to the HOSTED environment (the public service is "prod"), never to this app's target.
@@ -1515,22 +1576,163 @@ class AirPrompterAgent:
     def prompt(self, tag: str, *, subject: Optional[str] = None) -> PromptHandle:
         return PromptHandle(self, tag, subject)
 
-    def _render(self, tag: str, subject: Optional[str], values: Mapping[str, Any]) -> Rendered:
+    @dataclass(frozen=True)
+    class _Prepared:
+        """Everything a render captured under the lock, before any source runs: a release that activates while a
+        source is being looked up must not mix generation N+1's text with generation N's run reference."""
+
+        resolver: ReleaseResolver
+        resolved: ReleaseSlot
+        text: str
+        plan: FillPlan
+
+        @property
+        def row(self) -> dict[str, Any]:
+            return {"tag": self.resolved.slot["tag"], "version_id": self.resolved.slot["versionId"], "arm": self.resolved.arm, "model": self.resolved.slot["model"]}
+
+    def _prepare(self, tag: str, subject: Optional[str], values: Mapping[str, Any]) -> "AirPrompterAgent._Prepared":
         with self._lock:
+            resolver = self._resolver()
             slot, arm, bucket = self._resolve_slot(tag, subject)
-            rendered = self._resolver().render(ReleaseSlot(slot, arm, bucket), values)
+            resolved = ReleaseSlot(slot, arm, bucket)
+            text = resolver.text_of(slot)
+            plan = plan_fill(tag=tag, variables=slot.get("variables", []), text=text, values=values, registry=self.variables)
+            return AirPrompterAgent._Prepared(resolver, resolved, text, plan)
+
+    def _finish(self, prepared: "AirPrompterAgent._Prepared", filled: FilledRender) -> Rendered:
+        rendered = self._render_observed(lambda: prepared.resolver.render(prepared.resolved, filled.values, fenced=filled.fenced, text=prepared.text), prepared.row)
         # The registry keeps its own copy of the block: the one handed out is the caller's to edit.
-        self._renders.register(rendered.text, Attribution(tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference)))
+        self._renders.register(rendered.text, Attribution(rendered.tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference)))
+        self._say_stricter(rendered.tag, prepared.resolved.slot, filled)
         return rendered
 
-    def workflow(self, tag: str, *, subject: Optional[str] = None) -> Workflow:
-        """A workflow slot's steps in ordinal order, each with its prompt text."""
+    def _context(self, prepared: "AirPrompterAgent._Prepared", tag: str, subject: Optional[str]) -> VariableSourceContext:
+        return VariableSourceContext(tag=tag, name="", subject=subject, version_id=prepared.resolved.slot["versionId"], arm=prepared.resolved.arm)
+
+    def _render(self, tag: str, subject: Optional[str], values: Mapping[str, Any]) -> Rendered:
+        prepared = self._prepare(tag, subject, values)
+        # The lock is released here: a source is the customer's code and may take its time.
+        return self._finish(prepared, self._fill_observed(lambda: fill_sync(prepared.plan, self._context(prepared, tag, subject), self.variables), tag, prepared.row))
+
+    async def _render_async(self, tag: str, subject: Optional[str], values: Mapping[str, Any]) -> Rendered:
+        prepared = self._prepare(tag, subject, values)
+        filled = await self._fill_observed_async(lambda: fill_async(prepared.plan, self._context(prepared, tag, subject), self.variables), tag, prepared.row)
+        return self._finish(prepared, filled)
+
+    def _render_observed(self, render: Callable[[], T], row: Mapping[str, Any]) -> T:
+        """A render, observed: a ``MissingVariableError`` is also one content-free error row (``render_missing_variable``),
+        so the board sees a version this host cannot render. The row names the slot, never a step (a step id is not
+        a spool tag) and never a variable."""
+        try:
+            return render()
+        except Exception as error:
+            if type(error).__name__ == "MissingVariableError" or getattr(error, "code", None) == "render_missing_variable":
+                self._missing_row(row)
+            raise
+
+    def _missing_row(self, row: Mapping[str, Any]) -> None:
+        self.spool.observe(Observation(tag=row["tag"], version_id=row["version_id"], arm=row["arm"], model=row["model"], status="error", error_class="render_missing_variable", latency_ms=0, usage_source="unavailable"), self._now_ms())
+
+    def _source_failed(self, error: BaseException, tag: str, row: Mapping[str, Any]) -> None:
+        """A failed source is logged by name and reason only and counted as the same error row as a missing variable —
+        the window schema has no class for "a source failed" (a protocol 0.3.4 note), and to the board the outcome is
+        the same: this host could not render the version."""
+        if is_variable_source_error(error):
+            self._log({"event": "variable_source_failed", "tag": tag, "name": getattr(error, "variable", None), "reason": getattr(error, "reason", None)})
+            self._missing_row(row)
+
+    def _fill_observed(self, fill: Callable[[], FilledRender], tag: str, row: Mapping[str, Any]) -> FilledRender:
+        try:
+            return fill()
+        except Exception as error:
+            self._source_failed(error, tag, row)
+            raise
+
+    async def _fill_observed_async(self, fill: Callable[[], Awaitable[FilledRender]], tag: str, row: Mapping[str, Any]) -> FilledRender:
+        try:
+            return await fill()
+        except Exception as error:
+            self._source_failed(error, tag, row)
+            raise
+
+    def _say_stricter(self, tag: str, slot: Mapping[str, Any], filled: FilledRender) -> None:
+        """A source stricter than the prompt's declaration is said once per slot and name for the life of the process —
+        bounded by declared names; a declaration that later loosens again is not said a second time, by design."""
+        for entry in filled.filled:
+            if not entry.stricter:
+                continue
+            key = f"{tag}\u0000{entry.name}"
+            with self._lock:  # check-and-add as one step: two first renders on two threads say it once, not twice
+                if key in self._stricter_said:
+                    continue
+                self._stricter_said.add(key)
+            declared = next((v.get("trust") for v in slot.get("variables", []) if v["name"] == entry.name), None)
+            self._log({"event": "variable_source_trust_stricter", "tag": tag, "name": entry.name, "declared": declared})
+
+    def workflow(self, tag: str, *, subject: Optional[str] = None) -> WorkflowHandle:
+        """A workflow slot's steps in ordinal order, each with its prompt text, and ``render_step()`` /
+        ``render_step_async()`` to fill a step's variables. A source sees the step id as its tag; the error row, when
+        there is one, names the workflow slot."""
         with self._lock:
+            resolver = self._resolver()
             slot, arm, bucket = self._resolve_slot(tag, subject)
-            workflow = self._resolver().workflow(ReleaseSlot(slot, arm, bucket))
+            resolved = ReleaseSlot(slot, arm, bucket)
+            workflow = resolver.workflow(resolved)
             for step in workflow.steps:
                 self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference)))
-            return workflow
+        row = {"tag": tag, "version_id": slot["versionId"], "arm": workflow.arm, "model": workflow.model}
+        declared = list(slot.get("variables", []))
+
+        def step_of(step_id: str) -> WorkflowStep:
+            step = next((entry for entry in workflow.steps if entry.step_id == step_id), None)
+            if step is None:
+                raise KeyError(f"no step {step_id} on {tag}")
+            return step
+
+        def finish(step: WorkflowStep, filled: FilledRender) -> str:
+            text = self._render_observed(lambda: resolver.render_text(tag=step.step_id, text=step.text, variables=declared, values=filled.values, fenced=filled.fenced), row)
+            self._renders.register(text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference)))
+            self._say_stricter(step.step_id, slot, filled)
+            return text
+
+        def context(step: WorkflowStep) -> VariableSourceContext:
+            return VariableSourceContext(tag=step.step_id, name="", subject=subject, version_id=step.version_id, arm=workflow.arm)
+
+        def render_step(step_id: str, values: Mapping[str, Any]) -> str:
+            step = step_of(step_id)
+            plan = plan_fill(tag=step.step_id, variables=declared, text=step.text, values=values, registry=self.variables)
+            return finish(step, self._fill_observed(lambda: fill_sync(plan, context(step), self.variables), step.step_id, row))
+
+        async def render_step_async(step_id: str, values: Mapping[str, Any]) -> str:
+            step = step_of(step_id)
+            plan = plan_fill(tag=step.step_id, variables=declared, text=step.text, values=values, registry=self.variables)
+            return finish(step, await self._fill_observed_async(lambda: fill_async(plan, context(step), self.variables), step.step_id, row))
+
+        return WorkflowHandle(model=workflow.model, arm=workflow.arm, steps=workflow.steps, variables=workflow.variables, _render_step=render_step, _render_step_async=render_step_async)
+
+    def _variables_status(self) -> dict[str, Any]:
+        """Per slot and arm of the active release: the required variables neither a literal nor a source fills, so the
+        call site must. Declarations only — a required variable is needed whether or not the text uses it — so no
+        payload is read; ``status()`` stays cheap for a probe. Every arm override for a tag counts, since a subject may
+        land on any arm."""
+        sources = self.variables.names()
+        payload = self._active.manifest["payload"] if self._active else None
+        if not payload:
+            return {"sources": sources, "unsourced": []}
+        seen: dict[str, dict[str, Any]] = {}
+
+        def consider(slot: Mapping[str, Any], arm: str) -> None:
+            names = unsourced(variables=slot.get("variables", []), values={}, registry=self.variables)
+            if names:
+                seen[f"{slot['tag']}\u0000{arm}"] = {"tag": slot["tag"], "arm": arm, "names": names}
+
+        for slot in payload["slots"]:
+            consider(slot, "none")
+        for experiment in experiments_of(payload):
+            for arm in experiment["arms"]:
+                for override in arm.get("overrides", []):
+                    consider(override, str(arm["arm"]))
+        return {"sources": sources, "unsourced": sorted(seen.values(), key=lambda entry: (entry["tag"], entry["arm"]))}
 
     # ------------------------------------------------------------------ telemetry
 
@@ -1790,6 +1992,7 @@ class AirPrompterAgent:
             upload=self._uploader.status() if self._uploader is not None else None,
             ramp=self._ramp_status(manifest),
             ramps=self._ramp_statuses(manifest),
+            variables=self._variables_status(),
         )
 
     @property

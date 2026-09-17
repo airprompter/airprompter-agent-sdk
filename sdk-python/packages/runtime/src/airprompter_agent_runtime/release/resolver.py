@@ -9,7 +9,7 @@ says *what* would be refused and why; the facade decides what to record."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, ordered_steps
 from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of
@@ -202,13 +202,23 @@ class ReleaseResolver:
             raise KeyError(f"payload {slot['contentHash']} not loaded")
         return data.decode("utf-8")
 
-    def render(self, resolved: ReleaseSlot, values: Optional[Mapping[str, Any]] = None) -> Rendered:
-        """Render a prompt slot the resolver already resolved."""
+    def render(self, resolved: ReleaseSlot, values: Optional[Mapping[str, Any]] = None, *, fenced: Optional[Iterable[str]] = None, text: Optional[str] = None) -> Rendered:
+        """Render a prompt slot the resolver already resolved. ``fenced`` names variables a source of ``end_user``
+        trust filled: they are fenced whatever the slot declared. ``text`` is the payload already decoded by a caller
+        that scanned it for placeholders, so it is not decoded twice."""
         slot = resolved.slot
         generation = self.release.generation
-        text = render_template(tag=slot["tag"], text=self.text_of(slot), variables=slot.get("variables", []), values=dict(values or {}), delimiters=self._delimiters)
+        rendered_text = self.render_text(tag=slot["tag"], text=self.text_of(slot) if text is None else text, variables=slot.get("variables", []), values=values or {}, fenced=fenced)
         facts = RunRefFacts(self._agent_id, self._target, slot["tag"], slot["versionId"], resolved.arm, generation, resolved.bucket)
-        return Rendered(text=text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")))
+        return Rendered(text=rendered_text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")))
+
+    def render_text(self, *, tag: str, text: str, variables: Sequence[Mapping[str, Any]], values: Mapping[str, Any], fenced: Optional[Iterable[str]] = None) -> str:
+        """The one render path: a prompt's text or a workflow step's, with the slot's declarations and this
+        resolver's delimiters, so both fence the same way. ``fenced`` tightens declarations to ``end_user``;
+        nothing here can loosen one."""
+        tighten = set(fenced or ())
+        declared = [({**v, "trust": "end_user"} if v["name"] in tighten and v.get("trust") != "end_user" else v) for v in variables] if tighten else list(variables)
+        return render_template(tag=tag, text=text, variables=declared, values=dict(values), delimiters=self._delimiters)
 
     def workflow(self, resolved: ReleaseSlot) -> Workflow:
         """A workflow slot's steps in ordinal order, each with its prompt text and run reference."""

@@ -9,6 +9,17 @@ only retry is a 429 honouring ``Retry-After``. Every run streams under the
 hood — the run route sits behind an edge that closes a silent connection
 at 60 s, and a JSON run is silent until the model finishes — and ``run()``
 assembles the ``done`` frame for callers who did not ask to stream.
+Sources the application registered (``start(variables=...)``) fill required
+declared variables here, before the POST — the hosted route has no way into
+your systems, and a source stricter than the slot's declaration is refused
+rather than sent raw.
+
+Example::
+
+    agent = ManagedAgent.start(agent_id="agt_…", target="prod", api_key=os.environ["AIRPROMPTER_RUN_KEY"], base_url=RUN_URL,
+                               variables={"customer_tier": {"resolve": lambda ctx: crm.tier_of(ctx.subject), "trust": "operator"}})
+    agent.needs("support.triage", {"ticket": text})     # [] — everything required is covered
+    result = agent.run("support.triage", {"ticket": text}, subject=customer_id)
 """
 
 from __future__ import annotations
@@ -25,6 +36,9 @@ from urllib.parse import quote
 import httpx
 
 from airprompter_agent_core.protocol.assignment import subject_hash as salted_subject_hash
+
+from .variables.fill import fill_sync, plan_fill, stricter_sources, supplied, unsourced
+from .variables.sources import VariableSourceContext, VariableSourceError, VariableSourceInput, VariableSourceRegistry, VariableSourceRequiredError
 
 MANAGED_SDK_USER_AGENT = "airprompter-agent-sdk-python/managed"
 
@@ -201,6 +215,9 @@ class ManagedRunStream:
         return self._result
 
 
+_MANAGED_SYNC_HINT = "managed runs are synchronous; register a plain callable for it"
+
+
 class ManagedWorkflow:
     def __init__(self, agent: "ManagedAgent", tag: str, subject: Optional[str]):
         self._agent = agent
@@ -215,7 +232,11 @@ class ManagedWorkflow:
 
 
 class ManagedAgent:
-    def __init__(self, *, agent_id: str, target: str, api_key: str, base_url: str, catalogue: dict[str, Any], transport: Optional[httpx.BaseTransport], max_rate_limit_retries: int, sleep: Callable[[float], None], instance_id: Optional[str], user_agent: str, timeout: float):
+    def __init__(self, *, agent_id: str, target: str, api_key: str, base_url: str, catalogue: dict[str, Any], transport: Optional[httpx.BaseTransport], max_rate_limit_retries: int, sleep: Callable[[float], None], instance_id: Optional[str], user_agent: str, timeout: float, variables: Optional[Mapping[str, VariableSourceInput]] = None):
+        #: The application's variable sources (``start(variables=...)``, ``agent.variables.provide()``): consulted for
+        #: every required declared variable a call site did not pass, before the run is posted — the hosted route has
+        #: no way into the application's systems. See ``variables/sources.py``.
+        self.variables = VariableSourceRegistry(variables)
         self._agent_id = agent_id
         self._target = target
         self._api_key = api_key
@@ -228,10 +249,12 @@ class ManagedAgent:
         self._user_agent = user_agent
 
     @classmethod
-    def start(cls, *, agent_id: str, target: str, api_key: str, base_url: str, transport: Optional[httpx.BaseTransport] = None, max_rate_limit_retries: int = 2, sleep: Optional[Callable[[float], None]] = None, instance_id: Optional[str] = None, user_agent: str = MANAGED_SDK_USER_AGENT, timeout: float = 120.0) -> "ManagedAgent":
+    def start(cls, *, agent_id: str, target: str, api_key: str, base_url: str, transport: Optional[httpx.BaseTransport] = None, max_rate_limit_retries: int = 2, sleep: Optional[Callable[[float], None]] = None, instance_id: Optional[str] = None, user_agent: str = MANAGED_SDK_USER_AGENT, timeout: float = 120.0, variables: Optional[Mapping[str, VariableSourceInput]] = None) -> "ManagedAgent":
         """Reads the catalogue once; refuses (typed) when the key, the target or the promotion is not there.
-        ``api_key`` is a run key (``agent_run`` kind, ``agent.run`` scope); ``base_url`` the run route's origin (the AgentRunUrl output of the execution stack)."""
-        agent = cls(agent_id=agent_id, target=target, api_key=api_key, base_url=base_url, catalogue={}, transport=transport, max_rate_limit_retries=max_rate_limit_retries, sleep=sleep or time.sleep, instance_id=instance_id, user_agent=user_agent, timeout=timeout)
+        ``api_key`` is a run key (``agent_run`` kind, ``agent.run`` scope); ``base_url`` the run route's origin (the AgentRunUrl output of the execution stack).
+        ``variables`` registers how this process fills declared variables from its own system (a literal, or a source with its
+        trust). This client is synchronous, so a source must be a plain callable: a coroutine function is refused at run time."""
+        agent = cls(agent_id=agent_id, target=target, api_key=api_key, base_url=base_url, catalogue={}, transport=transport, max_rate_limit_retries=max_rate_limit_retries, sleep=sleep or time.sleep, instance_id=instance_id, user_agent=user_agent, timeout=timeout, variables=variables)
         agent._catalogue = agent._read_catalogue()
         return agent
 
@@ -291,9 +314,47 @@ class ManagedAgent:
     def workflow(self, tag: str, *, subject: Optional[str] = None) -> ManagedWorkflow:
         return ManagedWorkflow(self, tag, subject)
 
+    def needs(self, tag: str, values: Optional[Mapping[str, Any]] = None) -> list[str]:
+        """The required declared variables a run of this slot would still lack after these values and the registered sources."""
+        slot = next((s for s in self._catalogue.get("slots", []) if s.get("tag") == tag), None)
+        if slot is None:
+            raise KeyError(f"no slot {tag} in the catalogue")
+        return unsourced(variables=slot.get("variables") or [], values=values or {}, registry=self.variables)
+
+    def _fill_for_run(self, tag: str, values: Mapping[str, str], subject: Optional[str]) -> dict[str, str]:
+        """The values a run posts: the call site's, then the application's sources for required declared variables it
+        left unfilled. Trust cannot be tightened here — the hosted run fences by the slot's declaration — so a source
+        stricter than the declaration is refused BEFORE any lookup (``VariableSourceError``, reason ``unfenceable``),
+        never sent raw. Only what this run would actually fill can be unfenceable: an optional variable no run posts
+        is not refused. The catalogue types trust as a string; anything but ``end_user`` counts as the looser
+        declaration, which is the safe direction."""
+        slot = next((s for s in self._catalogue.get("slots", []) if s.get("tag") == tag), None)
+        if slot is None or not self.variables.names():
+            return dict(values)
+        declared = slot.get("variables") or []
+        plan = plan_fill(tag=tag, variables=declared, text=None, values=values, registry=self.variables)
+        if not plan.literal and not plan.async_:
+            return dict(values)
+        planned = {*plan.literal, *plan.async_}
+        unfenceable = [name for name in stricter_sources(declared, self.variables) if name in planned]
+        if unfenceable:
+            raise VariableSourceError(tag, unfenceable[0], "unfenceable")
+        # The managed client is synchronous throughout (there is no run_async): a coroutine-function source cannot be
+        # run here, and the refusal says so rather than pointing at a render_async() this client does not have.
+        awaitable = [name for name in planned if (entry := self.variables.get(name)) is not None and entry.kind == "source" and entry.awaitable]
+        if awaitable:
+            raise VariableSourceRequiredError(tag, awaitable, hint=_MANAGED_SYNC_HINT)
+        try:
+            filled = fill_sync(plan, VariableSourceContext(tag=tag, name="", subject=subject, version_id=None, arm=None), self.variables)
+        except VariableSourceRequiredError as error:
+            # A plain callable that handed back a coroutine: the same refusal, with the hint that applies here.
+            raise VariableSourceRequiredError(tag, error.names, hint=_MANAGED_SYNC_HINT) from None
+        return {name: str(value) for name, value in filled.values.items() if supplied(filled.values, name)}
+
     def stream(self, tag: str, variables: Mapping[str, str], *, subject: Optional[str] = None, step_id: Optional[str] = None, idempotency_key: Optional[str] = None, max_output_tokens: Optional[int] = None, metadata: Optional[Mapping[str, str]] = None) -> ManagedRunStream:
-        """The run as SSE: iterate the deltas, read ``result``."""
-        body: dict[str, Any] = {"tag": tag, "variables": dict(variables), "stream": True}
+        """The run as SSE: iterate the deltas, read ``result``. Declared variables the call site left unfilled are
+        filled from the application's sources first (``_fill_for_run``)."""
+        body: dict[str, Any] = {"tag": tag, "variables": self._fill_for_run(tag, variables, subject), "stream": True}
         subject_digest = self.subject_hash_for(subject, tag)
         if subject_digest:
             body["subjectHash"] = subject_digest

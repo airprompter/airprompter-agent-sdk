@@ -56,6 +56,20 @@ from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation,
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
 PROTOCOL_VERSION = "0.3.4"
+
+
+def protocol_at_least(version: str, floor: str) -> bool:
+    """Whether a protocol version string is at least another (``major.minor.patch``, numerically). The manifest a
+    control plane sealed names the protocol it speaks; a runtime that must send a newer optional member reads that
+    before sending it, so a 0.3.4 SDK talking to a 0.3.3 service never trips its strict schemas."""
+    try:
+        a = [int(part) for part in version.split(".")]
+        b = [int(part) for part in floor.split(".")]
+    except (ValueError, AttributeError):
+        return False
+    if len(a) != 3 or len(b) != 3:
+        return False
+    return a >= b
 SDK_VERSION = "0.2.12"
 
 __all__ = [
@@ -92,6 +106,7 @@ __all__ = [
     "OsFs",
     "PROTECTION_CRITERIA",
     "PROTOCOL_VERSION",
+    "protocol_at_least",
     "RAMP_MAX_STEPS",
     "RAMP_MIN_STEP_MS",
     "ReleaseReader",

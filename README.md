@@ -50,7 +50,7 @@ your application ──(render / wrap)──▶ SDK ──▶ encrypted slot sto
 
 ## Protocol compatibility
 
-The hosted service vendors `protocol/v0.3.4` (manifest, payload and key
+The hosted service vendors `protocol/v0.3.3` today (0.3.4 lands with its next release) (manifest, payload and key
 routes shipped). The `airprompter` CLI on `main` — pull, verify, apply,
 status, diff, keygen, daemon — is built and smoke-tested on three
 platforms in CI (release tag pending signing identities). The packages:

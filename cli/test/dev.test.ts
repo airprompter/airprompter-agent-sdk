@@ -86,6 +86,10 @@ test("the directory reads as a release: tags from paths, front matter for model 
   ]);
   assert.throws(() => parseVariables("ticket!=x"), /a default belongs to an optional operator variable only/);
   assert.throws(() => parseVariables("customer?=x"), /a default belongs to an optional operator variable only/);
+  assert.deepEqual(parseVariables("ticket!~, customer?~"), [{ name: "ticket", required: true, trust: "operator", source: "runtime" }, { name: "customer", required: true, trust: "end_user", source: "runtime" }], "the markers go in one order");
+  assert.throws(() => parseVariables("ticket~!"), /the name must match/, "the other order is not a variable called ticket~");
+  assert.throws(() => parseVariables("~"), /the name must match/);
+  assert.throws(() => parseVariables("tone="), /a default is never empty/);
   const spec = parsePromptFile("support/Triage.md", "---\nmodel: gpt-5\nversion: rev-3\n---\nHello {{name}}");
   assert.deepEqual({ tag: spec.tag, model: spec.model, versionId: spec.versionId, text: spec.text }, { tag: "support.triage", model: "gpt-5", versionId: "rev-3", text: "Hello {{name}}" });
   assert.throws(() => parsePromptFile("Bad Name.md", "x"), /not a slot tag/);

@@ -95,8 +95,9 @@
           "enum": ["operator", "end_user"]
         },
         "default": {
-          "description": "0.3.4: the text rendered when neither the call site nor a source supplies a value. Only on an optional `operator` variable (the control plane refuses a default on a required or an end-user one; a runtime ignores it there). In the digest input when present.",
+          "description": "0.3.4: the text rendered when neither the call site nor a source supplies a value. Only on an optional `operator` variable (the schema and the control plane refuse a default on a required or an end-user one; a runtime ignores it there), and never empty. In the digest input when present; a runtime treats a JSON null as unset, the schema refuses one.",
           "type": "string",
+          "minLength": 1,
           "maxLength": 4096
         },
         "source": {

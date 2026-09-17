@@ -66,7 +66,8 @@ export interface ManagedSlot {
   tag: string;
   kind: "prompt" | "workflow";
   model: string;
-  variables: ReadonlyArray<{ name: string; required: boolean; trust: string }>;
+  /** The slot's declarations as the catalogue names them (0.3.4: with `default` and `source` when the author set them). */
+  variables: readonly SlotVariable[];
   /** 0.3.1: how the model is called for the slot, as the release sealed it — what a hosted run uses. */
   inference?: SlotInference;
   steps: ReadonlyArray<{ stepId: string; inference?: SlotInference }> | null;

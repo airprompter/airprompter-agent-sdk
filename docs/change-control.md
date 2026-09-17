@@ -208,8 +208,9 @@ embedded `airprompterd` attached to the server serves the host's SDKs over
 the local socket, and every promotion reaches them as a `generation`
 event within one poll (S3). A file's front matter names the slot's
 `model:`, `variables:` (`name!` required, `name?` end-user text — fenced
-exactly as in production; without the line every `{{placeholder}}` is an
-optional operator variable) and `version:`; `release.json` carries the
+exactly as in production; `name=default` and `name~` from 0.3.4; without
+the line every `{{placeholder}}` is an optional operator variable) and
+`version:`; `release.json` carries the
 manifest's policy, lease, window, experiment and directives.
 
 The same server is the **conformance target**: `node conformance/live.mjs

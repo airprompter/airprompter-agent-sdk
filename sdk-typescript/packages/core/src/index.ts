@@ -10,7 +10,7 @@
  * the direction).
  */
 
-export { PROTOCOL_VERSION, SDK_VERSION } from "./protocol/version.js";
+export { PROTOCOL_VERSION, SDK_VERSION, protocolAtLeast } from "./protocol/version.js";
 export type * from "./protocol/types.js";
 export { DIRECTIVE_KINDS, experimentConflict, experimentForTag, experimentsOf } from "./protocol/types.js";
 export { errorNamed } from "./protocol/errors.js";

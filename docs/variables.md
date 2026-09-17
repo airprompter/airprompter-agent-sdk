@@ -60,9 +60,10 @@ this order, and stop at the first that answers:
 2. **a registered source** — consulted only for a declared variable that is
    *required or present in the text* and that the call site did not pass;
 3. **the declared default** (protocol 0.3.4) — an optional `operator`
-   variable may carry one in AirPrompter (Slots › Variables); the render uses
+   variable may carry one (`airprompter dev` front matter today; AirPrompter's
+   Slots › Variables editor with the service's 0.3.4 release); the render uses
    it when nothing above answered. A required or end-user variable never has
-   one (the seal refuses it);
+   one (the schema refuses it);
 4. **nothing** — a required variable is then `MissingVariableError` (the
    render refuses; that is your bug, not an empty string in a prompt). An
    **optional** variable nobody fills renders empty, exactly as it did when
@@ -159,12 +160,16 @@ Declarations only, no payload read. Names only, never values.
 - **Fleet runtimes and vendored bundles**: sources are in-process registration and do not care where the release came
   from.
 
-## What the control plane knows (protocol 0.3.4)
+## What the protocol now carries, and what the service will do with it (protocol 0.3.4)
 
-A slot's variable declarations are edited in AirPrompter (Slots › Variables) and sealed into the release: `name`,
-`required`, `trust`, and now `default` (optional operator variables only) and `source: caller | runtime` — a
-statement of who is expected to fill the variable. The seal refuses a version whose text uses a placeholder the
-slot does not declare (`variable_undeclared`, so a runtime never renders a literal `{{name}}`), and warns when a
-`source: runtime` variable is filled by no live instance of the environment: every runtime's heartbeat carries
-`catalog.variables` — the names `ap.variables.names()` answers, never a value — and the warning reads
-"uncovered on 0 of 4 instances" before the promotion, not after.
+A slot's variable declarations are sealed into the release: `name`, `required`, `trust`, and from protocol 0.3.4
+`default` (optional operator variables only; never empty) and `source: caller | runtime` — a statement of who is
+expected to fill the variable. In managed mode a `source: runtime` variable is filled from your registered source
+before the run is posted, required or not (the catalogue has no text to scan). Every runtime's heartbeat carries
+`catalog.variables` — the names `ap.variables.names()` answers, never a value — once the release it serves was
+sealed at 0.3.4 (an older service refuses a key it does not know, so the SDK waits for that signal).
+
+What lands with the service's 0.3.4 release, not yet live: the Slots › Variables editor for these fields; a seal
+that refuses a version whose text uses a placeholder the slot does not declare (`variable_undeclared`, so a runtime
+never renders a literal `{{name}}`); a warning when a `source: runtime` variable is filled by no live instance
+("uncovered on 0 of 4 instances", before the promotion, not after); and the hosted run route applying defaults.

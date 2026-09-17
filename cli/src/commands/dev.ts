@@ -13,9 +13,9 @@
  * `variables:` (comma-separated; `name!` is required, `name?` is end-user
  * text, `name=some default` gives an optional operator variable its default
  * (0.3.4; a default holds no comma), `name~` marks it as filled by the
- * application's own source (`source: runtime`) — `name~=default` combines
- * the two; without the line every `{{placeholder}}` is an optional operator
- * variable), `version:`. An optional `release.json` beside them carries the
+ * application's own source (`source: runtime`) — the markers go in that
+ * order, `name!~` and `name~=default`; without the line every
+ * `{{placeholder}}` is an optional operator variable), `version:`. An optional `release.json` beside them carries the
  * manifest's `applyPolicy`, `leaseSeconds`, `onLeaseExpiry`, `unlockWindow`,
  * `experiment` and `directives`.
  *
@@ -101,11 +101,15 @@ export function tagFromPath(relativePath: string): string {
   return relativePath.replace(PROMPT_FILE, "").split(sep).join("/").split("/").join(".").toLowerCase();
 }
 
+const VARIABLE_NAME = /^[a-zA-Z0-9_.-]{1,64}$/;
+
 /**
  * `name!` required operator text, `name?` end-user text (fenced), `name` optional operator text; `name=default` an
  * optional operator variable with its default (0.3.4), `name~` one the application fills from its own source
- * (`source: runtime`), `name~=default` both. A default on a required or end-user variable is refused here, as the
- * control plane refuses it.
+ * (`source: runtime`), `name~=default` both. The markers go in one order — `name!~`, `name?~`, then `=default` —
+ * and the name is checked against the protocol's grammar, so `name~!` is an error rather than a variable called
+ * `name~`. A default on a required or end-user variable is refused here, as the control plane refuses it; so is an
+ * empty one.
  */
 export function parseVariables(spec: string | undefined): SlotVariable[] {
   if (!spec?.trim()) return [];
@@ -118,7 +122,9 @@ export function parseVariables(spec: string | undefined): SlotVariable[] {
     const required = marker.endsWith("!");
     const endUser = marker.endsWith("?");
     const name = marker.replace(/[!?]$/, "");
+    if (!VARIABLE_NAME.test(name)) throw new Error(`variable ${JSON.stringify(raw)}: the name must match ${VARIABLE_NAME} — write the markers as name!, name?, name~ or name!~ / name?~, then =default`);
     if (defaultValue !== undefined && (required || endUser)) throw new Error(`variable ${name}: a default belongs to an optional operator variable only`);
+    if (defaultValue === "") throw new Error(`variable ${name}: a default is never empty`);
     return {
       name,
       required: required || endUser,

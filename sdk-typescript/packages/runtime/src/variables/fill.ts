@@ -52,7 +52,8 @@ export const supplied = (values: RenderValues, name: string): boolean => values[
 /**
  * Which declared variables a render must fill from a source: required ones, and any the text uses — never one the
  * current version dropped (a source is not called for a variable no longer in the prompt). `text` is null in
- * managed mode, where only the declarations are known; then the required ones are the whole set.
+ * managed mode, where only the declarations are known; then the required ones and those the author marked
+ * `source: runtime` (0.3.4 — "the application fills this") are the set.
  */
 export function planFill(input: { tag: string; variables: readonly SlotVariable[]; text: string | null; values: RenderValues; registry: VariableSourceRegistry }): FillPlan {
   const used = input.text === null ? null : placeholdersOf(input.text);
@@ -61,7 +62,7 @@ export function planFill(input: { tag: string; variables: readonly SlotVariable[
   const missing: string[] = [];
   for (const variable of input.variables) {
     if (supplied(input.values, variable.name)) continue;
-    const needed = variable.required || (used !== null && used.has(variable.name));
+    const needed = variable.required || (used === null ? variable.source === "runtime" : used.has(variable.name));
     if (!needed) continue;
     const entry = input.registry.get(variable.name);
     if (!entry) {
@@ -123,7 +124,7 @@ export async function fillAsync(plan: FillPlan, context: Omit<VariableSourceCont
     if (result.from === "revoked") continue; // revoked since the plan: the render decides, exactly as fillSync does
     if (result.value === undefined) {
       if (variable?.required) throw new VariableSourceError(plan.tag, result.name, "empty");
-      continue; // optional and unanswered: the render leaves it empty, as a call site would have
+      continue; // optional and unanswered: the render uses the declared default (0.3.4) or leaves it empty, as a call site would have
     }
     values[result.name] = result.value;
     const stricter = result.trust === "end_user" && variable?.trust !== "end_user";

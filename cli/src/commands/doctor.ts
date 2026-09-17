@@ -8,6 +8,12 @@
  * daemon (reachable and its healthz), the policy pin. Reads only — nothing
  * here creates a store, writes a file or sends a heartbeat. Exit 0 when no
  * check fails (warnings are printed, not fatal); `refused` (1) otherwise.
+ *
+ * @example
+ * ```sh
+ * AIRPROMPTER_AGENT_KEY=… airprompter doctor --org org_… --agent agt_… --environment prod --root ./airprompter-root.jwk.json
+ * airprompter doctor --org org_… --agent agt_… --environment prod --json     # no key set: the source check is skipped, the host checks still run
+ * ```
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";

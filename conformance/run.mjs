@@ -3,6 +3,9 @@
 // ones do not), the semantic rules the schema cannot express hold on every
 // example manifest, and the reference implementations pass every vector.
 // Exit code 1 on the first failing section; every check in a section runs.
+//
+//   $ cd conformance && npm ci && node run.mjs
+//   $ npm test     # run.mjs, then the harness's own tests
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, basename } from "node:path";

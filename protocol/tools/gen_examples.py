@@ -1,7 +1,12 @@
 """Generate protocol/examples/*.json with digests computed by the independent
 Python canonical encoder, so every example manifest carries a releaseDigest
 that the vectors' rules would reproduce. Signatures are structurally valid
-placeholders: real signing vectors arrive with the trust-chain ticket."""
+placeholders: real signing vectors arrive with the trust-chain ticket.
+Writes every example (and refused/*.json) under the directory given; CI
+regenerates them and diffs against the committed tree. Usage::
+
+    python3 protocol/tools/gen_examples.py protocol/examples
+"""
 import base64
 import hashlib
 import json

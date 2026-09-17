@@ -11,6 +11,15 @@
  *
  * Content is read here only to be hashed: the registry keeps hashes and
  * dimension names, never a prompt.
+ *
+ * @example
+ * ```ts
+ * const registry = new RenderRegistry(); // the last 256 renders, by text hash
+ * registry.register(r.text, { tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model });
+ * // What a wrapped client asks on every call: the enclosing scope first, then the request's own text.
+ * const attribution = currentAttribution() ?? registry.match(requestTexts(params)); // undefined: pass the call through
+ * withAttribution({ tag, versionId, arm, model }, () => openai.chat.completions.create(params)); // follows the call through awaits
+ * ```
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -79,6 +88,7 @@ export function requestTexts(params: unknown): string[] {
   const out: string[] = [];
   if (typeof params !== "object" || params === null) return out;
   const collect = (value: unknown, depth: number): void => {
+    // messages → message → content parts → text is the deepest documented shape; a bound also keeps a cyclic object from trapping the wrapper.
     if (depth > 4) return;
     if (typeof value === "string") {
       if (value.length > 0) out.push(value);

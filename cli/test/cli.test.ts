@@ -331,6 +331,20 @@ test("refusals: a tampered payload, a foreign signing key, another target, plain
   assert.equal(await run(["status", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.ok);
   assert.equal(dev.json().forcedDowngrade, true);
   assert.equal(dev.json().generation, 1);
+  dev.reset();
+  // `airprompter rollback`: the other slot (generation 2) comes back — forward this time, so not a forced downgrade;
+  // a second rollback steps below the stored generation and says so.
+  assert.equal(await run(["rollback", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.ok);
+  assert.deepEqual({ generation: dev.json().generation, previousGeneration: dev.json().previousGeneration, forced: dev.json().forced, outcome: dev.json().outcome, via: dev.json().via }, { generation: 2, previousGeneration: 1, forced: false, outcome: "rolled_back", via: "store" });
+  dev.reset();
+  assert.equal(await run(["rollback", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.ok);
+  assert.deepEqual({ generation: dev.json().generation, forced: dev.json().forced }, { generation: 1, forced: true });
+  dev.reset();
+  assert.equal(await run(["status", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.ok);
+  assert.equal(dev.json().generation, 1);
+  dev.reset();
+  // A store that never held a second release has nothing to go back to.
+  assert.equal(await run(["rollback", "--agent", "agt_never", "--environment", "dev", "--state-dir", join(work, "empty-state"), "--json"], dev.ctx), EXIT.refused);
   void stateDir;
   rmSync(work, { recursive: true, force: true });
 });

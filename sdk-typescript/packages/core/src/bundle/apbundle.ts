@@ -4,6 +4,14 @@
  * Encrypted to the target's X25519 distribution key by default; plaintext
  * is a `dev` opt-in. `open` runs the identical verification the sync path
  * runs, so a bundle is never a way around the trust chain.
+ *
+ * @example
+ * ```ts
+ * const bundle = createEncryptedBundle(contents, fleetPublicRaw); // contents: { createdAt, notAfter, manifest, keySet, payloads }
+ * // On the target: the AAD binds the bundle to this agent and target, so one relabelled for another target does not open.
+ * const opened = openBundle(bundle, { agentId, target: "prod" }, distributionKey);
+ * const payloads = bundlePayloadBytes(opened); // contentHash → bytes, still to be verified against the manifest
+ * ```
  */
 
 import { createHash, type KeyObject } from "node:crypto";

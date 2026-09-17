@@ -12,6 +12,14 @@
  * want to know what a hosted app may call before it runs.
  *
  * Nothing this command prints is payload text, at any verbosity.
+ *
+ * @example
+ * ```sh
+ * AIRPROMPTER_AGENT_KEY=… airprompter pull --org org_… --agent agt_… --environment prod \
+ *   --root ./airprompter-root.jwk.json --root-url https://<edge>/roots/prod/root.json \
+ *   --distribution-key ./prod.pub.json --out airprompter.bundle.apbundle
+ * AIRPROMPTER_AGENT_KEY=… airprompter pull --check --max-behind 2 --org org_… --agent agt_… --environment prod --out airprompter.bundle.apbundle
+ * ```
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

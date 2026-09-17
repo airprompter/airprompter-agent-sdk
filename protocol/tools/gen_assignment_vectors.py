@@ -2,6 +2,9 @@
 
 Deliberately written from the prose in assignment-hash.md, not from any
 TypeScript; the point of the vectors is that two implementations agree.
+CI regenerates the file and diffs it against the committed one. Usage::
+
+    python3 protocol/tools/gen_assignment_vectors.py protocol/vectors/assignment.json
 """
 import base64
 import hashlib

@@ -4,6 +4,13 @@
  * mode — the same verification, store and apply policy every SDK
  * process runs in-process — and serves it. Logs are one JSON object per
  * line on stderr, never with prompt text. Stops on SIGINT / SIGTERM.
+ *
+ * @example
+ * ```sh
+ * AIRPROMPTER_AGENT_KEY=… airprompter daemon --org org_… --agent agt_… --environment prod \
+ *   --root ./airprompter-root.jwk.json --root-url https://<edge>/roots/prod/root.json \
+ *   --edge-pointer-url https://<edge>/g/<token>/generation.json --poll-seconds 30 --json
+ * ```
  */
 
 import { join } from "node:path";

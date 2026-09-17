@@ -40,6 +40,13 @@
  *   fixed dev key (`apa_dev_local`), the root is self-made, the listener is
  *   loopback unless `--host` says otherwise; a manifest signed here never
  *   verifies against a production root.
+ *
+ * @example
+ * ```sh
+ * airprompter dev ./prompts --port 4180 --daemon
+ * AIRPROMPTER_AGENT_KEY=apa_dev_local airprompter pull --org org_dev --agent agt_dev --environment dev \
+ *   --root ./prompts/.airprompter-dev/root.pub.json --base-url http://127.0.0.1:4180 --out ./release.apbundle --plaintext
+ * ```
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";

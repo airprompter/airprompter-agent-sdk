@@ -166,3 +166,15 @@ test("KEK rotation re-wraps the DEK: payloads stay readable, nothing is re-encry
   await assert.rejects(openStore(stateDir), (e: unknown) => e instanceof StoreError && e.code === "kek_unavailable");
   rmSync(stateDir, { recursive: true, force: true });
 });
+
+test("the file key provider goes through the filesystem port, so a store on a memory filesystem keeps its key there too", async () => {
+  const { MemoryFs } = await import("../packages/core/src/testing/memoryFs.js");
+  const { fileKey } = await import("../packages/sync/src/store/keyProvider.js");
+  const fs = new MemoryFs();
+  const provider = fileKey("/keys/store.key", fs);
+  const wrapped = await provider.wrap(new Uint8Array(32).fill(7));
+  assert.deepEqual([...(await provider.unwrap(wrapped))], [...new Uint8Array(32).fill(7)]);
+  assert.equal(fs.exists("/keys/store.key"), true, "the KEK file is on the port's filesystem");
+  assert.equal(fs.readFile("/keys/store.key").length, 32);
+  assert.equal(existsSync("/keys/store.key"), false, "and nowhere on the real disk");
+});

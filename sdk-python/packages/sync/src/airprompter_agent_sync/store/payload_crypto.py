@@ -4,6 +4,13 @@ is ``agentId ‖ target ‖ generation ‖ contentHash`` joined by NUL bytes
 be moved between slots or targets and swapping the A and B directories on
 disk cannot roll the store back: decryption fails, the slot is corrupt,
 and the fallback chain runs.
+
+Example::
+
+    aad = payload_aad(agent_id="agt_1", target="prod", generation=12, content_hash="sha256:…")
+    sealed = encrypt_payload(dek, plaintext, aad)   # iv ‖ tag ‖ ciphertext
+    decrypt_payload(dek, sealed, aad)               # the bytes back
+    decrypt_payload(dek, sealed, payload_aad(agent_id="agt_1", target="staging", generation=12, content_hash="sha256:…"))   # PayloadDecryptError: moved between targets
 """
 
 from __future__ import annotations

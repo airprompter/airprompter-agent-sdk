@@ -7,6 +7,14 @@ show a ``file_key`` host as a finding instead of hiding it (D15).
 ``vault()`` (hvac) and ``os_keystore()`` (keyring) import their client
 lazily so the SDK installs without them; ``custom()`` wraps anything that
 can wrap and unwrap 32 bytes.
+
+Example::
+
+    provider = kms("arn:aws:kms:us-east-1:123456789012:key/…")     # boto3, imported on first use
+    provider = vault("airprompter-store", mount_point="transit")   # hvac
+    provider = file_key("/var/lib/acme/store.key")                 # 0600 beside the store; reported as a finding, never silent
+    provider.storage_protection                                    # "kms" | "vault" | "os_keystore" | "custom" | "file_key": what the heartbeat reports
+    store = SlotStore.open(state_dir=state_dir, agent_id="agt_1", target="prod", key_provider=provider)
 """
 
 from __future__ import annotations

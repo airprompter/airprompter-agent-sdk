@@ -14,6 +14,13 @@
  * Private keys are refused inside a git worktree unless `--allow-worktree`
  * says so: the one way a key ends up in a repository is by being written
  * next to the code.
+ *
+ * @example
+ * ```ts
+ * const { keyId, privatePath, publicPath } = generateDistributionKeyFiles("~/.config/airprompter/prod", now);   // prod.key.json (0600), prod.pub.json
+ * const key = loadDistributionPrivateKey(privatePath);                  // what verify / apply / diff take as --distribution-key
+ * const root = loadRoot("./airprompter-root.jwk.json", "prod");       // { kind: "pinned" } for a JWK, { kind: "document" } for root.json
+ * ```
  */
 
 import { createHash, generateKeyPairSync, type KeyObject } from "node:crypto";

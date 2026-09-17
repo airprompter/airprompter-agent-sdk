@@ -3,6 +3,13 @@
  * A bundle is opened (decrypted with `--distribution-key` when sealed) and
  * verified against `--root`; a state directory has its active and staged
  * slots re-verified the way the runtime does at start.
+ *
+ * @example
+ * ```sh
+ * airprompter verify airprompter.bundle.apbundle --org org_… --agent agt_… --environment prod \
+ *   --root ./airprompter-root.jwk.json --distribution-key ~/.config/airprompter/prod.key.json
+ * airprompter verify /var/lib/airprompter --org org_… --agent agt_… --environment prod --root ./airprompter-root.jwk.json     # a state directory: the active and staged slots
+ * ```
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";

@@ -6,6 +6,13 @@ judge is asked for one verdict per criterion. The score is the share of
 resolved task criteria that passed, in [0, 1], and lands as ``judgeScore`` on
 the run's arm window through ``ap.feedback()``. The output, the rubric text
 and the judge's reasoning never reach the spool.
+
+Example::
+
+    rubric = JudgeRubric(name="support.reply", criteria=tuple(rubric_from_prompt(prompt_text)), protection=PROTECTION_CRITERIA)
+    reply = my_model(judge_prompt(rubric, output))      # the customer's own model call
+    result = parse_judge_reply(reply, rubric)           # anything unparseable is "unclear", never a pass
+    ap.feedback(run_ref, judge_signals_of(result))      # {"flagged": False, "judgeScore": 0.5} — never the reasoning
 """
 
 from __future__ import annotations

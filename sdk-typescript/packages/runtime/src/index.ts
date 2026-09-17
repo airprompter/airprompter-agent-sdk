@@ -8,6 +8,18 @@
  * or a bundle the customer loaded — and never imports the sync or the
  * telemetry package (S10). `variables/` is how the application fills a
  * prompt's variables from its own system at render time.
+ *
+ * @example
+ * ```ts
+ * import { ReleaseResolver, observeCall } from "@airprompter/agent-runtime";
+ *
+ * const runtime = new ReleaseResolver({ release, runRefKey, agentId, target: "prod", instanceId, nowMs: Date.now });
+ * const slot = runtime.resolve("support.triage", userId); // { ok: true, slot, arm, bucket } or why not
+ * if (slot.ok) {
+ *   const r = runtime.render(slot, { team: "Billing", ticket: userMessage }); // { text, model, versionId, arm, generation, runRef, tag }
+ *   await observeCall(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }), record);
+ * }
+ * ```
  */
 
 export { ReleaseResolver, disabledFrom } from "./release/resolver.js";

@@ -5,6 +5,14 @@ port of ``conformance/checks.mjs``; ``vectors/checks.json`` pins the two.
 Regex safety rule: RE2-class syntax only — no backreferences, no lookaround, no atomic or possessive groups, no
 quantified group whose body is itself quantified — patterns of at most 256 characters, and an output over 64 KiB
 fails a pattern check closed rather than being scanned in part.
+
+Example::
+
+    checks = [{"name": "is-json", "kind": "json_schema", "schema": {"type": "object"}},
+              {"name": "short", "kind": "length", "maxTokens": 200}]
+    checks_refusals(checks)                                            # [] — within CHECK_BOUNDS and RE2-safe
+    outcome = evaluate_checks(checks, output_text, output_tokens=None)   # None: tokens are estimated from the bytes
+    outcome["passed"], outcome["failed"]                               # the window's two counters; outcome["results"] names each verdict
 """
 
 from __future__ import annotations

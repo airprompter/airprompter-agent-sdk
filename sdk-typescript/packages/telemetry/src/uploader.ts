@@ -24,6 +24,19 @@
  * `grantFor(instanceId)` is the daemon's heartbeat carrying that writer's
  * instance id. The serverless path uses the same `postSegment` with the
  * runtime's own grant at invocation end.
+ *
+ * @example
+ * ```ts
+ * const uploader = new SpoolUploader({
+ *   dir: join(storeDir, "spool", "telemetry"),
+ *   instanceId, // the daemon's own: the budget sweep's `dropped` rows name it
+ *   grantFor: async (writerId) => heartbeatFor(writerId), // { kind: "grant", grant } | { kind: "hold", retryAfterSeconds } | { kind: "unavailable", reason }
+ *   fetch,
+ *   logger: (event) => console.log(event),
+ * });
+ * uploader.start(); // one pass in flight per host, oldest segment first, backoff with full jitter
+ * await uploader.stop();
+ * ```
  */
 
 import { nodeFs } from "@airprompter/agent-core";

@@ -3,6 +3,8 @@ approved `support.triage` prompt rendered per ticket with the ticket text
 fenced as end-user input, the Anthropic call observed (latency, usage,
 error class — never text), feedback filed later against the run_ref.
 
+Usage::
+
     pip install airprompter-agent[anthropic]
     AIRPROMPTER_AGENT_KEY=apa_… AIRPROMPTER_ROOT_JWK='{"kty":"EC",…}' ANTHROPIC_API_KEY=… python worker.py
 """

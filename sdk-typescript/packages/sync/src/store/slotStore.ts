@@ -14,6 +14,15 @@
  * against the stored root document and every payload's hash after decrypt.
  * Any failure marks the slot corrupt and the caller falls back: other slot
  * → vendored bundle → refuse to start. Render never serves unverified bytes.
+ *
+ * @example
+ * ```ts
+ * const store = await SlotStore.open({ stateDir, agentId, target: "prod", keyProvider: fileKey(join(stateDir, "store.key")) });
+ * store.acceptRoot(root); // the root document every later load verifies against
+ * const slot = store.stage({ manifest, payloads }); // "A" or "B": the inactive slot, fsynced
+ * store.activate(); // one rename of store.json flips it
+ * const loaded = store.load(slot, { now: new Date().toISOString() }); // throws StoreError("slot_corrupt") rather than serve unverified bytes
+ * ```
  */
 
 import { randomBytes } from "node:crypto";

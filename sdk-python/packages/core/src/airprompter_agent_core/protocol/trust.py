@@ -2,6 +2,15 @@
 canonical bytes, root-metadata acceptance R1–R5 and manifest verification
 M1–M12. Pure over its inputs; ``now`` is always passed in. This is what
 decides whether bytes go live, so it never reads the network or the disk.
+
+Example::
+
+    trusted = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=pinned_jwk)   # the ROOT alone; signing keys come with the root document
+    if verify_root_metadata(candidate=fetched_root, trusted=trusted, now=now_iso).ok:                    # R1–R5, else root_rollback, root_expired …
+        trusted = fetched_root
+    verdict = verify_manifest(manifest=manifest, root=trusted, now=now_iso, scope=scope, stored_generation=held_generation, payloads=payloads)   # M1–M12
+    if not verdict.ok:
+        refuse(verdict.reason)   # "unknown_signing_key", "generation_rollback", "payload_hash_mismatch" …
 """
 
 from __future__ import annotations

@@ -13,6 +13,15 @@
  * application registered (`start({ variables })`) fill required declared
  * variables, and any marked `source: runtime`, here, before the POST — the
  * hosted route has no way into your systems; this process does.
+ *
+ * @example
+ * ```ts
+ * const agent = await ManagedAgent.start({ agentId, target: "prod", apiKey: process.env.AIRPROMPTER_RUN_KEY!, baseUrl: "https://d123.cloudfront.net" });
+ * const result = await agent.run("support.triage", { team: "Billing", ticket: userMessage }, { subject: userId }); // subject is hashed, never sent
+ * result.output; result.runRef; result.priceMicros;
+ * const stream = await agent.stream("support.triage", { team: "Billing", ticket: userMessage });
+ * for await (const delta of stream) process.stdout.write(delta);
+ * ```
  */
 
 import type { SlotInference, SlotVariable } from "@airprompter/agent-core";

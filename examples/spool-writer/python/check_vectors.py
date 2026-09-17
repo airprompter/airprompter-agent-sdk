@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drives spool_writer.py through protocol/vectors/spool.json: buckets, minutes, segment names, rotation, and the
 minute-window aggregation (compared as sets), then writes one case to a temp directory and reads the sealed segment
-back. Exit 1 on the first mismatch. Run by conformance/run.mjs; standalone::
+back. Exit 1 on the first mismatch. Run by conformance/run.mjs; standalone. Usage::
 
     python3 examples/spool-writer/python/check_vectors.py protocol/vectors/spool.json
 """

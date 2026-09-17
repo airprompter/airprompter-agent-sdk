@@ -6,6 +6,15 @@
  * tests use (`FakeControlPlane`: signed manifests, refusals, lease and a
  * 15-minute upload grant that expires). Nothing here is ever loaded by the
  * runtime.
+ *
+ * @example
+ * ```ts
+ * import { FakeClock, FakeControlPlane, MemoryFs } from "@airprompter/agent-sdk/testing";
+ *
+ * const plane = new FakeControlPlane({ organizationId: "org_1", agentId: "agt_1", target: "prod" });
+ * plane.promote([plane.slot({ tag: "support.reply", text: "Reply politely." })]); // generation 1, signed
+ * const ap = await AirPrompterAgent.start({ ...plane.scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, fetch: plane.fetch() });
+ * ```
  */
 
 import type { ClockPort } from "../protocol/ports.js";

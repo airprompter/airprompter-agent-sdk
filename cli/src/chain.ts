@@ -3,6 +3,13 @@
  * then the manifest envelope, then every payload against its hash and
  * length. The report names the step that refused and why, and describes
  * the release in counts, hashes and ids — never in text.
+ *
+ * @example
+ * ```ts
+ * const opened = openBundleFile(bundle, scope, loadDistributionPrivateKey("prod.key.json"), now);
+ * const report = verifyChain({ manifest: opened.contents.manifest, keySet: opened.contents.keySet, payloads: payloadsOf(opened.contents), root, scope, now, storedGeneration: 0 });
+ * if (!report.ok) ctx.stderr(`refused at ${report.step}: ${report.reason}`);   // step is root | manifest | payloads; complete when ok
+ * ```
  */
 
 import { openBundle, bundlePayloadBytes, type DistributionKey } from "../../sdk-typescript/packages/core/src/bundle/apbundle.js";

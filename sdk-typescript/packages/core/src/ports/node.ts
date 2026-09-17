@@ -2,6 +2,13 @@
  * The Node filesystem and clock behind the ports (S2). Thin: every method is
  * one `node:fs` call, so a failure surfaces with Node's own `code`
  * (`ENOSPC`, `EIO`, `ENOENT`, …) and the caller decides what it means.
+ *
+ * @example
+ * ```ts
+ * // The defaults every I/O module falls back to; a test hands in a MemoryFs / FakeClock instead.
+ * const sink = new DirectorySink(dir, instanceId, HOST_SPOOL_BUDGET_BYTES, nodeFs);
+ * const uploader = new SpoolUploader({ dir, instanceId, grantFor, fetch, fs: nodeFs, now: systemClock.nowMs });
+ * ```
  */
 
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";

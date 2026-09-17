@@ -5,6 +5,14 @@
  * 0600 local socket, forwards unlock / rollback / sync / policy, pushes
  * `generation`, `lease` and `policy` events, and answers `GET /healthz`
  * for probes.
+ *
+ * @example
+ * ```ts
+ * const server = new DaemonServer(agent, { socketPath, version: CLI_VERSION, protocol: PROTOCOL_VERSION, agentId: scope.agentId, target: scope.target, logger: log, uploader });
+ * await server.listen();   // refuses when another daemon answers on the socket; a stale socket file is removed
+ * // … until SIGINT / SIGTERM
+ * await server.close();
+ * ```
  */
 
 import { chmodSync, existsSync, unlinkSync } from "node:fs";

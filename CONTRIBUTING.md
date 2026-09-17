@@ -70,6 +70,17 @@ expects.
 - Commit messages and PR titles say what changed in plain words, as a
   sentence; the body says why. See `git log` for the house style.
 
+### File headers
+
+Every source file opens with a header that a reader who has never seen the
+repository can act on: what the file is for, the rule it enforces or the
+decision it embodies, and **one small example of how to use it** — a
+`@example` block in TypeScript, an `Example::` block in a Python docstring.
+Inline comments say *why*, at the places a human reviewer would pause: a
+bound, a refusal, an order of operations, a trade-off. `node
+scripts/check-headers.mjs` enforces the header and the example on every
+non-test file, and CI runs it.
+
 ## Sending the change
 
 1. Fork, branch from `main`, make the change with its tests.

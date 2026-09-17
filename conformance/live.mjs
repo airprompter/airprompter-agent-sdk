@@ -8,7 +8,7 @@
 // the heartbeat's answer is schema-valid, and the refusals are the ones the
 // OpenAPI promises.
 //
-//   node live.mjs --base-url http://127.0.0.1:4180 --agent agt_dev --environment dev \
+//   $ node live.mjs --base-url http://127.0.0.1:4180 --agent agt_dev --environment dev \
 //     --api-key apa_dev_local --root ./prompts/.airprompter-dev/root.pub.json \
 //     [--org org_dev] [--edge-pointer-url …] [--root-url …] [--json]
 //

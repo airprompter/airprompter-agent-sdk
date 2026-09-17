@@ -1,7 +1,15 @@
 """``airprompter_agent_telemetry`` — the content-free spool and its uploader: minute windows written as append-only
 segments (or held in memory on a serverless host), the host budget, and the direct-to-object-store upload under a
 grant. Builds on the row schemas in ``airprompter_agent_core`` and never imports the sync or the runtime package
-(S10): a customer's own instrumentation can write the spool with this package alone."""
+(S10): a customer's own instrumentation can write the spool with this package alone.
+
+Example::
+
+    from airprompter_agent_telemetry import DirectorySink, Observation, SpoolWriter, WriterIdentity
+
+    writer = SpoolWriter(DirectorySink(spool_dir, "i-hostprocess000"), WriterIdentity("i-hostprocess000", "resident", "acme/1.0"))
+    writer.observe(Observation(tag="support.reply", version_id="ver_9", arm="none", model="gpt-5", status="ok", latency_ms=812), now_ms)
+"""
 
 from .spool.writer import (
     ERROR_CLASSES,

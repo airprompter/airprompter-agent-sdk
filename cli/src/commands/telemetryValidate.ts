@@ -10,6 +10,12 @@
  *
  * Exit 0 when every segment fits; `refused` (1) when any line does not or a
  * segment is over the cap.
+ *
+ * @example
+ * ```sh
+ * airprompter telemetry validate spool/seg-i-abc123-29821660-0.ndjson
+ * airprompter telemetry validate ./out.ndjson --instance-id i-abc123 --json     # a file not named seg-<instanceId>-<minute>-<n>.ndjson
+ * ```
  */
 
 import { readFileSync, statSync } from "node:fs";

@@ -13,6 +13,15 @@
  * OpenAI reasoning model takes neither), so they go only on a call to the
  * release's model: a call site that names another model keeps its own
  * parameters and is told why.
+ *
+ * @example
+ * ```ts
+ * // The slot sealed { temperatureMilli: 200, maxOutputTokens: 800 }; the call site wrote temperature: 0.7.
+ * const applied = applyInference("chat", params, r.inference!, { model: r.model });
+ * applied.params; // { ...params, temperature: 0.2, max_completion_tokens: 800 } — a copy; params is untouched
+ * applied.overridden; // ["temperature"]: logged once, never a failure
+ * applied.skipped; // "model_mismatch" when params.model is not the release's: nothing applied
+ * ```
  */
 import type { SlotInference } from "@airprompter/agent-core";
 import type { StreamKind } from "./client.js";

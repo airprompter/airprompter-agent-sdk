@@ -7,6 +7,11 @@
  * store's staged slot directly, which a resident SDK notices on its next
  * pass. `--generation N` refuses to unlock anything but generation N, so a
  * change ticket names exactly what went live.
+ *
+ * @example
+ * ```sh
+ * airprompter unlock --agent agt_… --environment prod --generation 12
+ * ```
  */
 
 import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";

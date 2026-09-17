@@ -4,6 +4,13 @@
  * to the target's X25519 distribution key with AES-256-GCM; AES-128-GCM is
  * here only so the implementation can be checked against RFC 9180's A.1
  * test vector, which uses that AEAD with the same KEM and KDF.
+ *
+ * @example
+ * ```ts
+ * const recipient = generateX25519KeyPair();
+ * const sealed = sealTo(recipient.publicRaw, info, aad, plaintext); // { enc, ciphertext }, AES-256-GCM
+ * const opened = openFrom({ enc: sealed.enc, recipientPrivateKey: recipient.privateKey, recipientPublicRaw: recipient.publicRaw, info, aad, ciphertext: sealed.ciphertext });
+ * ```
  */
 
 import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, type KeyObject } from "node:crypto";
@@ -21,6 +28,7 @@ const kemSuiteId = Buffer.concat([utf8("KEM"), i2osp2(KEM_X25519)]);
 const hpkeSuiteId = (aead: number) => Buffer.concat([utf8("HPKE"), i2osp2(KEM_X25519), i2osp2(KDF_HKDF_SHA256), i2osp2(aead)]);
 
 function hkdfExtract(salt: Buffer, ikm: Buffer): Buffer {
+  // RFC 5869: an absent salt is HashLen zero bytes, not an empty key.
   return createHmac("sha256", salt.length ? salt : Buffer.alloc(32)).update(ikm).digest();
 }
 

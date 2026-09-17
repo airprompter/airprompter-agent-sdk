@@ -4,7 +4,7 @@ Written from the prose in spool-format.md and the schemas, not from any
 SDK: latency bucket edges, minute formatting, segment naming, rotation at
 the minute boundary and 1 MiB, minute-window aggregation (feedback rides
 on a run's window without counting as a run), and the feedback catalogue
-normalisation. Two implementations agreeing on these files is the point.
+normalisation. Two implementations agreeing on these files is the point. Usage::
 
     python3 protocol/tools/gen_spool_vectors.py protocol/vectors
 """

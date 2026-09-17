@@ -3,9 +3,20 @@
 The filesystem, the clock and the network are reached through these so a fake can
 *fill* (ENOSPC), *fail* (EIO), *lose a file* (ENOENT) or *skew* — our own rule:
 a forgiving fake hides every budget bug. ``OsFs`` is the real filesystem;
-``airprompter_agent.testing.MemoryFs`` is the fake. Every method raises an
+``airprompter_agent_core.testing.MemoryFs`` is the fake. Every method raises an
 ``OSError`` whose ``errno`` names the failure; the *caller* decides what a failure
 means (the spool counts and carries on; the store refuses).
+
+Example::
+
+    fs = fs_or_default(None)           # OS_FS; a test passes airprompter_agent_core.testing.MemoryFs()
+    try:
+        fd = fs.open(path, "a")        # append, create, 0600
+        fs.write(fd, line)
+        fs.fsync(fd)
+        fs.close(fd)
+    except OSError as error:
+        code = fs_failure_code(error)  # "ENOSPC", "EIO", "ENOENT" …: the caller decides what it means
 """
 
 from __future__ import annotations

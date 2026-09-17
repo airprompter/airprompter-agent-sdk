@@ -18,6 +18,16 @@
  *
  * A result with no usage is reported as `usageSource: "unavailable"` with
  * zero tokens — the window still counts the run and its latency.
+ *
+ * @example
+ * ```ts
+ * const reply = await observeCall(
+ *   { tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model },
+ *   () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }),
+ *   (observation) => writer.observe(observation, Date.now()), // content-free: status, errorClass, latency, tokens
+ * );
+ * // A thrown provider error is observed (classifyError → "provider_rate_limited", "provider_timeout", …) and re-thrown.
+ * ```
  */
 
 import type { ErrorClass, Observation } from "@airprompter/agent-core";

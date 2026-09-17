@@ -1,10 +1,22 @@
-/** Sticky assignment (`protocol/assignment-hash.md`): SHA-256(salt ‖ subject), first 8 bytes big-endian mod 10000, cumulative weights. */
+/**
+ * Sticky assignment (`protocol/assignment-hash.md`): SHA-256(salt ‖ subject), first 8 bytes big-endian mod 10000,
+ * cumulative weights. The same subject lands in the same bucket on every host and in every SDK, so an A/B is one A/B
+ * wherever it runs; the signed ramp plan (S9) only moves the weights the bucket is read against.
+ *
+ * @example
+ * ```ts
+ * const arms = effectiveArms({ arms: experiment.arms, ramp: experiment.ramp, disabledArms, nowMs: Date.now() });
+ * if (arms === null) return refuse("disabled"); // every arm disabled: the slot is frozen
+ * const { arm, bucket } = assignArm({ salt: experiment.salt, subject: userId, arms }); // bucket in 0…9999, arm by cumulative weight
+ * ```
+ */
 
 import { createHash } from "node:crypto";
 
 import type { ExperimentArm, RampStep } from "./types.js";
 
 export const ASSIGNMENT_MODULUS = 10000;
+// 128 bits of salt: a bucket that leaks cannot be reversed by hashing candidate subjects.
 const MIN_SALT_BYTES = 16;
 /** S9: ramp steps are at least this far apart, and at most this many. */
 export const RAMP_MIN_STEP_MS = 60 * 60 * 1000;

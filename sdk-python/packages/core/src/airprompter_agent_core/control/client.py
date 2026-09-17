@@ -2,6 +2,14 @@
 the edge pointer (no key), the manifest (ETag / 304), and payloads by
 content hash (inline or a presigned redirect, which the client follows).
 Nothing here decides anything; the trust chain runs on what comes back.
+
+Example::
+
+    client = SyncClient(base_url="https://api.airprompter.com", agent_id="agt_1", target="prod", api_key=agent_key)
+    fetched = client.manifest(if_none_match=last_etag)   # status: ok | not_modified | not_found | unauthorized | forbidden | error
+    if fetched.status == "ok":
+        data = client.payload(fetched.manifest["payload"]["slots"][0]["contentHash"])   # bytes, or None for a 404
+    client.close()
 """
 
 from __future__ import annotations

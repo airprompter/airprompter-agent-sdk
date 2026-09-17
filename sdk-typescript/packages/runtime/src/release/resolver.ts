@@ -10,6 +10,16 @@
  * The lease, the spool's refusal rows and the daemon's contact are the
  * facade's (`@airprompter/agent-sdk`): this class says *what* would be
  * refused and why; the facade decides what to record.
+ *
+ * @example
+ * ```ts
+ * const runtime = new ReleaseResolver({ release, runRefKey, agentId, target: "prod", instanceId, nowMs: Date.now });
+ * const resolved = runtime.resolve("support.triage", userId); // sticky: the same user gets the same arm on every host
+ * if (!resolved.ok) return refuse(resolved.reason); // "disabled" (a directive) | "no_slot"
+ * const r = runtime.render(resolved, { team: "Billing", ticket: userMessage }); // ticket is end_user: fenced in the text
+ * const flow = runtime.resolve("onboarding.flow");
+ * if (flow.ok) runtime.workflow(flow).steps; // in ordinal order, each with its own text and runRef
+ * ```
  */
 
 import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";

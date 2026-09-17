@@ -6,6 +6,12 @@
  * operator's act on the host, logged, host-wide through the daemon when
  * one runs. `policy show` prints what is in force and where it came from;
  * `policy set auto|unlock_required` records the operator's choice.
+ *
+ * @example
+ * ```sh
+ * airprompter policy show --agent agt_… --environment prod
+ * airprompter policy set auto --agent agt_… --environment prod --by "CHG-4821"
+ * ```
  */
 
 import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";

@@ -8,7 +8,16 @@ The cheap path: the control plane names an edge pointer (a few hundred bytes beh
 its manifest answer; a puller that hands back ``edge`` from the last result reads the pointer first — a 304, or a
 generation it already holds, means nothing moved and the origin is never called. Only a moved pointer (or none known)
 reaches the API, and that read is conditional too. Steady state costs a CDN 304 per interval, not an API request;
-``next_pull_delay_ms`` stretches the interval while nothing changes."""
+``next_pull_delay_ms`` stretches the interval while nothing changes.
+
+Example::
+
+    result = pull_bundle(client=client, scope=scope, trusted_root=root, fetch_root=fetch_root, now=now_iso,
+                         distribution_public_key=fleet_public_raw, minimum_generation=newest_held, edge=last_edge)
+    if result.status == "ok":
+        rows.insert(result.generation, json.dumps(result.bundle), result.release_digest, result.edge)   # the edge state in the SAME transaction
+    delay = next_pull_delay_ms(outcome=result.status, unchanged_streak=streak, interval_ms=60_000)   # doubles while nothing moves
+"""
 
 from __future__ import annotations
 

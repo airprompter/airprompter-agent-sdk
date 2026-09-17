@@ -3,6 +3,11 @@
  * a keypair in the customer's chosen place. The private half is written
  * 0600, never overwritten, and refused inside a git worktree unless
  * `--allow-worktree` says the customer knows what they are doing.
+ *
+ * @example
+ * ```sh
+ * airprompter keygen --purpose distribution --out ~/.config/airprompter/prod     # writes prod.key.json (0600) and prod.pub.json
+ * ```
  */
 
 import { dirname, resolve } from "node:path";

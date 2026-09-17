@@ -2,6 +2,14 @@
  * What every command shares: the exit-code contract, the two output modes
  * (human lines or one JSON document), and the rule that nothing printed
  * ever includes payload text. `Context` is what tests inject.
+ *
+ * @example
+ * ```ts
+ * const out = new Output(ctx, flag(parsed, "json"));
+ * out.field("generation", store.state.generation);        // a `key: value` line, or a member of the one JSON document
+ * if (!ok) throw refused("the Agent key was not accepted", { reason: "unauthorized" });   // exit 1, reason on stderr / in `error`
+ * out.flush();
+ * ```
  */
 
 import type { FetchLike } from "../../sdk-typescript/packages/core/src/control/client.js";

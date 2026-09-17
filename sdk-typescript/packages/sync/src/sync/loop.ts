@@ -13,6 +13,19 @@
  * manifest goes through the trust chain before a byte is staged; payloads
  * already held for unchanged hashes are reused, so a pass fetches only what
  * moved.
+ *
+ * @example
+ * ```ts
+ * let state = { active: null as LoadedSlot | null, etag: null as string | null, edgeEtag: null as string | null, trustedRoot };
+ * const pass = await syncOnce({
+ *   store, client, now: () => new Date().toISOString(), scope, ...state,
+ *   edgePointerUrl, // the CDN pointer read first; its silence never moves the lease
+ *   applyPolicy: (manifest) => (manifest.payload.applyPolicy === "auto" ? "activated" : "staged"),
+ *   onRefusal: (reason, generation) => log({ event: "sync_refused", reason, generation }),
+ * });
+ * state = { active: pass.active, etag: pass.etag, edgeEtag: pass.edgeEtag, trustedRoot: pass.trustedRoot }; // hand back verbatim next time
+ * setTimeout(tick, jitteredDelayMs(pollSeconds)); // ±20 %, so a fleet restarted together does not poll together
+ * ```
  */
 
 import { referencedPayloads, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";

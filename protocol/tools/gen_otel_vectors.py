@@ -6,7 +6,7 @@ OTLP/HTTP JSON ExportMetricsServiceRequest — the resource, the scope, the
 duration histogram in seconds with the spool's fixed buckets, the token,
 check, feedback, refusal and dropped sums (delta, monotonic), the attribute
 names, the minute's start and end in nanoseconds. Two implementations
-agreeing on this file is the point.
+agreeing on this file is the point. Usage::
 
     python3 protocol/tools/gen_otel_vectors.py protocol/vectors/otel-mapping.json
 """

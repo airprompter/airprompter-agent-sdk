@@ -3,6 +3,15 @@
  * `airprompterd`, `hello`, fetch the active slot, listen for `generation`
  * events, forward unlock / rollback / sync. Absent socket → `null`, and
  * the runtime syncs in-process instead.
+ *
+ * @example
+ * ```ts
+ * const socketPath = daemonSocketPath({ stateDir, agentId, target: "prod" });
+ * const daemon = await DaemonClient.connect({ socketPath, agentId, target: "prod", sdk: "agent-sdk-ts/0.2.13" });
+ * if (daemon === null) return syncInProcess(); // no daemon on this host
+ * const active = await daemon.slot(); // the verified release the daemon holds: manifest, payloads, lease
+ * daemon.onEvent((event) => { if (event.event === "generation") reload(); });
+ * ```
  */
 
 import { createHash } from "node:crypto";

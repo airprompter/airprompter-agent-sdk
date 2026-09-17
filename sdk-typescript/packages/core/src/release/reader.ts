@@ -6,6 +6,14 @@
  * (`loadBundleRelease`); `@airprompter/agent-runtime` renders and assigns
  * over either without knowing which. Structural, never a class: two copies
  * of a package in one lockfile must agree on it (S1, the discriminant rule).
+ *
+ * @example
+ * ```ts
+ * // A reader over a release the application already holds — a database row, a config entry — with no store or daemon.
+ * const reader: ReleaseReader = { kind: "bundle", current: () => held }; // held: LoadedRelease | null
+ * const release = reader.current();
+ * if (release) new ReleaseResolver({ release, runRefKey, agentId, target, instanceId, nowMs: Date.now });
+ * ```
  */
 
 import type { Manifest } from "../protocol/types.js";

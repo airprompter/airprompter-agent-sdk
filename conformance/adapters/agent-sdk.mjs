@@ -5,7 +5,8 @@
 // sdk-typescript/scripts/build.mjs`. What `run.mjs` proves for the reference,
 // this proves for the packages a customer installs.
 //
-//   node conformance/harness.mjs --adapter conformance/adapters/agent-sdk.mjs
+//   $ node sdk-typescript/scripts/build.mjs
+//   $ node conformance/harness.mjs --adapter conformance/adapters/agent-sdk.mjs
 
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";

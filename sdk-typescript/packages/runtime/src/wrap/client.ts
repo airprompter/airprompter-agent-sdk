@@ -13,6 +13,17 @@
  * A wrapper failure never fails the customer's call: attribution and
  * tapping are guarded, an unattributed call passes straight through, and
  * a stream left unfinished reports what was seen.
+ *
+ * @example
+ * ```ts
+ * const openai = wrapClient(new OpenAI(), {
+ *   attribute: (params) => currentAttribution() ?? registry.match(requestTexts(params)), // undefined: the call is not observed
+ *   observe: (target, call, options) => observeCall(target, call, record, options),
+ *   log: (event) => console.log(event),
+ * });
+ * // Unchanged at the call site: the system message is a recent render, so the call is that render's.
+ * await openai.chat.completions.create({ model: r.model, messages: [{ role: "system", content: r.text }, { role: "user", content: userMessage }] });
+ * ```
  */
 
 import type { ObserveOptions, ObserveTarget } from "../observe.js";

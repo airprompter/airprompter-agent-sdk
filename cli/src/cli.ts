@@ -3,6 +3,13 @@
  * call it with a fake fetch and captured output; `main.ts` calls it with
  * the process. Exit codes come from `EXIT`; a `CliError` is reported on
  * stderr (and as `{ ok: false, error, ... }` in `--json` mode).
+ *
+ * @example
+ * ```ts
+ * const lines: string[] = [];
+ * const code = await run(["status", "--agent", "agt_…", "--environment", "prod", "--json"], { ...defaultContext(), stdout: (line) => lines.push(line) });
+ * // code is EXIT.ok (0) and lines[0] is the one JSON document
+ * ```
  */
 
 import { apply } from "./commands/apply.js";
@@ -19,6 +26,7 @@ import { status } from "./commands/status.js";
 import { exportTelemetry, importTelemetry } from "./commands/telemetry.js";
 import { telemetryValidate } from "./commands/telemetryValidate.js";
 import { telemetryVerify } from "./commands/telemetryVerify.js";
+import { rollback } from "./commands/rollback.js";
 import { unlock } from "./commands/unlock.js";
 import { verify } from "./commands/verify.js";
 import { CliError, EXIT, type Context, isCliError } from "./io.js";
@@ -31,6 +39,7 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   status: { run: status, summary: "Active and staged generation, lease, storage protection, spool depth, last upload" },
   doctor: { run: doctor, summary: "Every reason this host is not serving the release it should, with the remedy: source, root, store, lease, key protection, spool vs budget, daemon, policy pin" },
   unlock: { run: unlock, summary: "Make the staged release live on this host (the operator's unlock; --generation N to name it)" },
+  rollback: { run: rollback, summary: "Make the previous release on this host live again, now and offline (the other slot); a step below the stored generation is a forced downgrade, reported" },
   policy: { run: policy, summary: "Show or set the apply policy this host holds (an update may tighten it; only this loosens it)" },
   diff: { run: diff, summary: "What a bundle would change against the active release on this host" },
   keygen: { run: keygen, summary: "Generate a distribution or countersign keypair" },

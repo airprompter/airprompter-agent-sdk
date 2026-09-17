@@ -3,7 +3,16 @@ canonical JSON, arm assignment and the ramp walk), rendering, output checks, gol
 the telemetry row schemas, the control-plane HTTP client, the port protocols and their OS adapters. Nothing here opens
 a file, a socket or a thread at import time, and nothing here imports a sibling package: ``airprompter_agent_sync``,
 ``airprompter_agent_runtime`` and ``airprompter_agent_telemetry`` all build on this one and never on each other (S10;
-``tools/lint_imports.py`` pins the direction)."""
+``tools/lint_imports.py`` pins the direction).
+
+Example::
+
+    from airprompter_agent_core import BundleRelease, PROTOCOL_VERSION, protocol_at_least
+
+    reader = BundleRelease.load(bundle=bundle, root=pinned_root, scope=scope, now="2026-09-17T00:00:00Z")   # refuses before it holds a byte
+    reader.current().generation                    # the verified release a runtime serves
+    protocol_at_least(PROTOCOL_VERSION, "0.3.4")   # True: this SDK speaks the 0.3.4 members
+"""
 
 from .bundle.apbundle import APBUNDLE_INFO, BundleError, DistributionKey, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle
 from .bundle.hpke import X25519KeyPair, generate_x25519_key_pair, x25519_private_key_from_raw, x25519_public_key_from_raw

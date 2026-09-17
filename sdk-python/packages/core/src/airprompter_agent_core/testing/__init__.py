@@ -2,6 +2,14 @@
 
 What our own tests run over, and what a customer's CI can import to prove the same things about their host.
 Nothing here is loaded by the runtime.
+
+Example::
+
+    fs = MemoryFs(capacity_bytes=4096)   # full at 4 KiB: the next write raises OSError(ENOSPC)
+    fs.fail_next("fsync", "EIO")         # the next fsync fails, once
+    clock = FakeClock(0)
+    sink = DirectorySink("/spool", "i-testinstance", fs=fs)   # airprompter_agent_telemetry, over the fake
+    clock.advance(60_000)                # the minute turns; nothing waits on wall time
 """
 
 from __future__ import annotations

@@ -7,11 +7,12 @@
 // the SDK owns only the answers. `run.mjs` (schemas, examples, the
 // reference) stays the protocol's own gate; this is the gate an SDK ships.
 //
-//   npx @airprompter/protocol-conformance --adapter ./adapter.mjs
-//   npx @airprompter/protocol-conformance --adapter-command "python3 adapter.py"
-//   … [--vectors <dir>] [--only <section>[,<section>]] [--json]
+//   $ npx @airprompter/protocol-conformance --adapter ./adapter.mjs
+//   $ npx @airprompter/protocol-conformance --adapter-command "python3 adapter.py" --only trust-manifest,otel
+//   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs --json     # in this repository
+//     … [--vectors <dir>] [--allow-skips]
 //
-// The adapter contract is ADAPTER.md: fourteen operations, JSON in, JSON
+// The adapter contract is ADAPTER.md: the operations it lists, JSON in, JSON
 // out, an error as `{ error: { reason } }` where the protocol names a
 // refusal. `capabilities` lists what the adapter implements; a section
 // whose operation is missing is reported as skipped, never as passed. Exit

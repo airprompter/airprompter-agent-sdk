@@ -1,4 +1,15 @@
-/** The protocol this SDK speaks (`protocol/VERSION`); the manifest carries it and the heartbeat reports it. */
+/**
+ * The protocol this SDK speaks (`protocol/VERSION`) and this package's own version: the manifest carries the first,
+ * the heartbeat reports both, and `protocolAtLeast` is how a runtime asks whether the service that sealed a manifest
+ * can take a member newer than it.
+ *
+ * @example
+ * ```ts
+ * // A 0.3.4 SDK against a service that sealed at 0.3.3: the newer optional member is sent only when it is understood.
+ * if (protocolAtLeast(manifest.payload.protocol, "0.3.4")) body.catalog.variables = registry.names();
+ * protocolAtLeast("0.3.10", "0.3.9"); // true — numeric per part, never a string compare
+ * ```
+ */
 export const PROTOCOL_VERSION = "0.3.4";
 /** This package's own version, as the heartbeat and store.json (S8: the writer) record it. */
 export const SDK_VERSION = "0.2.13";

@@ -5,6 +5,15 @@
  * under a grant. Builds on the row schemas in `@airprompter/agent-core`
  * and never imports the sync or the runtime package (S10): a customer's
  * own instrumentation can write the spool with this package alone.
+ *
+ * @example
+ * ```ts
+ * import { DirectorySink, SpoolWriter } from "@airprompter/agent-telemetry";
+ *
+ * const writer = new SpoolWriter(new DirectorySink(dir, instanceId), { instanceId, instanceClass: "resident", sdk: "my-service/1.4.0" });
+ * writer.observe({ tag: "support.triage", versionId, arm: "none", model: "gpt-5", status: "ok", latencyMs: 412, tokens: { input: 120, output: 40 } }, Date.now());
+ * writer.closeWindows(Date.now()); // at shutdown: the open minute becomes window rows in a closed segment
+ * ```
  */
 
 export { SpoolWriter, DirectorySink, MemorySink, SegmentPlanner, segmentName, SEGMENT_MAX_BYTES, HOST_SPOOL_BUDGET_BYTES, SERVERLESS_BUFFER_BYTES } from "./spool/writer.js";

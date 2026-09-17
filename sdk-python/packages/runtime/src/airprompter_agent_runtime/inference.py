@@ -6,7 +6,15 @@ wrote — and a call site that wrote a different value is told once, in the log,
 
 Settings sealed for one model are refused by another (Anthropic Messages takes one of ``temperature`` / ``top_p``, and
 none beside ``thinking``; an OpenAI reasoning model takes neither), so they go only on a call to the release's model: a
-call site that names another model keeps its own parameters and is told why."""
+call site that names another model keeps its own parameters and is told why.
+
+Example::
+
+    applied = apply_inference("chat", {"model": "gpt-5", "temperature": 1, "max_tokens": 900}, {"temperatureMilli": 200, "maxOutputTokens": 400}, model="gpt-5")
+    applied.params       # {"model": "gpt-5", "temperature": 0.2, "max_completion_tokens": 400} — max_tokens dropped: one lever, not two
+    applied.overridden   # ["temperature", "max_tokens"]: told once in the log, never failed
+    apply_inference("chat", {"model": "gpt-5-mini"}, inference, model="gpt-5").skipped   # "model_mismatch": another model keeps its own
+"""
 
 from __future__ import annotations
 

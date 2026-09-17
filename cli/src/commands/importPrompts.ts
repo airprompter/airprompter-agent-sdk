@@ -24,6 +24,13 @@
  * Exit status: 0 when every item landed (or, on --dry-run, when the plan was
  * printed); 1 (refused) when the route refused the request; 4 when one or more
  * items failed — the others still landed, and the output names each.
+ *
+ * @example
+ * ```sh
+ * eval "$(airprompter login --email you@example.com)"
+ * airprompter import --workspace ws_… --collection col_… --from ./prompts --key git:prompts --category support --platform claude --dry-run
+ * airprompter import --workspace ws_… --collection col_… --from rows.json --key postgres:prompts --map key=slug,title=name,content=body --platform claude
+ * ```
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";

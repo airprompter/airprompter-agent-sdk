@@ -3,6 +3,14 @@ serialized — manifest, every payload, the root document(s), a ``notAfter``.
 Encrypted to the target's X25519 distribution key by default; plaintext
 is a ``dev`` opt-in. ``open_bundle`` runs the identical verification the
 sync path runs, so a bundle is never a way around the trust chain.
+
+Example::
+
+    recipient = generate_x25519_key_pair()                              # the fleet's distribution key (hpke.py)
+    sealed = create_encrypted_bundle(contents, recipient.public_raw)    # what the puller writes out
+    key = DistributionKey(recipient.private_key, recipient.public_raw)
+    contents = open_bundle(sealed, {"agentId": "agt_1", "target": "prod"}, key)   # BundleError: wrong_recipient, relabelled, decrypt_failed, malformed
+    payloads = bundle_payload_bytes(contents)                           # {"sha256:…": b"…"} for the trust chain to verify
 """
 
 from __future__ import annotations

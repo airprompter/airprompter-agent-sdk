@@ -3,6 +3,13 @@
  * trace to attach feedback later. `agent·target·slot·versionId·arm·generation·bucket`,
  * HMAC-signed with a per-store key so a forged ref cannot file signals
  * against a version that was never run here. Carries no subject and no text.
+ *
+ * @example
+ * ```ts
+ * const runRef = mintRunRef({ agentId, target: "prod", tag: "support.triage", versionId, arm: "none", generation: 7, bucket: null }, runRefKey);
+ * // Later, beside the customer's own trace: null for a ref minted under another key or edited in transit.
+ * const facts = parseRunRef(runRef, runRefKey); // { agentId, target, tag, versionId, arm, generation, bucket } | null
+ * ```
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -21,6 +28,7 @@ const SEP = "·";
 
 export function mintRunRef(facts: RunRefFacts, key: Uint8Array): string {
   const body = [facts.agentId, facts.target, facts.tag, facts.versionId, facts.arm, String(facts.generation), facts.bucket === null ? "-" : String(facts.bucket)].join(SEP);
+  // 22 base64url characters (132 bits) of the MAC: a forgery stays infeasible and the ref stays short enough to keep beside a trace.
   const mac = createHmac("sha256", key).update(body, "utf8").digest("base64url").slice(0, 22);
   return `${Buffer.from(body, "utf8").toString("base64url")}.${mac}`;
 }

@@ -2,7 +2,16 @@
 daemon, no network — renders and assigns over it. The same chain as OTA runs before a byte is served: the bundle's key
 set must descend from the pinned root (or be it), and the manifest's signatures, scope, expiry and every payload hash
 must verify. There is no anti-rollback here because there is no stored generation; that is the slot store's rule
-(``airprompter_agent_sync``)."""
+(``airprompter_agent_sync``).
+
+Example::
+
+    try:
+        reader = BundleRelease.load(bundle=bundle, root=pinned_root, scope={"organizationId": "org_1", "agentId": "agt_1", "target": "prod"}, now=now_iso, distribution_key=key)
+    except BundleReleaseRefused as refused:
+        refused.reason               # "bundle_wrong_recipient", "unknown_signing_key", "payload_hash_mismatch" …
+    reader.current().generation      # what ReleaseResolver renders over; reader.key_set is what to pin next
+"""
 
 from __future__ import annotations
 

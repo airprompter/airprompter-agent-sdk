@@ -7,11 +7,20 @@ in flight per host, oldest first, exponential backoff with full jitter
 (1 s → 5 min), acknowledged segments moved to ``sent/``, ``sent/`` and
 ``quarantine/`` swept after 24 h, the host budget enforced across writers
 with the loss written as a ``dropped`` row. Nothing here reads a row for
-anything but its shape. Parity with ``sdk-typescript/src/telemetry/uploader.py``.
+anything but its shape. Parity with ``sdk-typescript/packages/telemetry/src/uploader.ts``.
 
 A grant is per INSTANCE prefix (``org/{org}/agent/{agent}/{target}/{instance}/``):
 ``grant_for(instance_id)`` is the heartbeat carrying that writer's instance
 id — the runtime's own on a host with no daemon (S5).
+
+Example::
+
+    uploader = SpoolUploader(directory=spool_dir, instance_id="i-hostprocess000",
+                             grant_for=lambda instance_id: ap.request_upload_grant(instance_id=instance_id, instance_class="resident"),   # a heartbeat per writer
+                             interval_seconds=300)
+    uploader.start()                 # a pass every interval, phase-jittered so a fleet does not upload together
+    result = uploader.run_once()     # or one pass now: result.uploaded, result.quarantined, result.dropped, result.held
+    uploader.stop()
 """
 
 from __future__ import annotations

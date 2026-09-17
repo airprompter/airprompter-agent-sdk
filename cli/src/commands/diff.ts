@@ -10,6 +10,12 @@
  * are verified (scope, and the distribution key when sealed) before they
  * are compared; a bundle that goes BACKWARDS in generation is named as
  * such, because merging it would be refused on every host.
+ *
+ * @example
+ * ```sh
+ * airprompter diff airprompter.bundle.apbundle --org org_… --agent agt_… --environment prod --distribution-key ~/.config/airprompter/prod.key.json
+ * airprompter diff new.apbundle --against old.apbundle --org org_… --agent agt_… --environment prod --json     # a pull request's before and after
+ * ```
  */
 
 import { existsSync, readFileSync } from "node:fs";

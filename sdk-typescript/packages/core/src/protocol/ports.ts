@@ -7,6 +7,18 @@
  * implementations live in `../ports/node.js`; the fakes in `../testing/`.
  *
  * Pure types; nothing here imports Node.
+ *
+ * @example
+ * ```ts
+ * // A fake clock is the whole port; a filesystem fake is `MemoryFs` in ../testing (it fills, fails and loses files).
+ * const clock: ClockPort = { nowMs: () => fixedMs };
+ * const fs: FsPort = new MemoryFs(64 * 1024); // 64 KiB of "disk": the 65th KiB throws ENOSPC
+ * try {
+ *   fs.writeFile("/spool/seg.ndjson", bytes, 0o600);
+ * } catch (error) {
+ *   fsFailureCode(error); // "ENOSPC" — the spool counts it; the store would refuse
+ * }
+ * ```
  */
 
 /** A filesystem error the port surfaces: the same `code` Node uses, never a class. */

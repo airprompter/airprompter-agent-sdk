@@ -22,6 +22,8 @@ class ManifestFetch:
     generation: Optional[int] = None
     code: Optional[str] = None
     http_status: Optional[int] = None
+    #: The edge pointer this target's answers name (``x-agent-edge-pointer-url``); None on a deployment without an edge.
+    edge_pointer_url: Optional[str] = None
 
 
 @dataclass
@@ -80,8 +82,9 @@ class SyncClient:
         headers = self._headers(**({"if-none-match": if_none_match} if if_none_match else {}))
         response = self._client.get(url, headers=headers, params=params)
         status = response.status_code
+        edge_pointer_url = response.headers.get("x-agent-edge-pointer-url")
         if status == 304:
-            return ManifestFetch("not_modified")
+            return ManifestFetch("not_modified", edge_pointer_url=edge_pointer_url)
         if status == 404:
             return ManifestFetch("not_found")
         if status == 401:
@@ -91,7 +94,7 @@ class SyncClient:
         if status != 200:
             return ManifestFetch("error", http_status=status)
         generation = response.headers.get("x-agent-generation")
-        return ManifestFetch("ok", manifest=json.loads(response.text), etag=response.headers.get("etag"), generation=int(generation) if generation else None)
+        return ManifestFetch("ok", manifest=json.loads(response.text), etag=response.headers.get("etag"), generation=int(generation) if generation else None, edge_pointer_url=edge_pointer_url)
 
     def heartbeat(self, body: dict[str, Any]) -> HeartbeatResult:
         """T9: the heartbeat. Content-free by schema; the response carries the cadence, the expiry and (T12) the upload grant."""

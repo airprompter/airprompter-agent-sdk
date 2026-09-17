@@ -14,7 +14,7 @@ export type { KeyProvider, StorageProtection } from "./store/keyProvider.js";
 export { encryptPayload, decryptPayload, payloadAad, PayloadDecryptError, isPayloadDecryptError } from "./store/payloadCrypto.js";
 
 export { syncOnce, jitteredDelayMs, requiredModelsMissing } from "./sync/loop.js";
-export { pullBundle, nextPullDelayMs } from "./sync/pullBundle.js";
+export { pullBundle, nextPullDelayMs, DEFAULT_MAX_POINTER_AGE_MS } from "./sync/pullBundle.js";
 export type { PullBundleInput, PullBundleResult, PullEdgeState } from "./sync/pullBundle.js";
 export type { SyncPassInput, SyncPassOutput, SyncPassResult, ApplyPolicyDecision } from "./sync/loop.js";
 export { DaemonClient, DaemonError, isDaemonError, daemonSocketPath, DAEMON_MAX_LINE_BYTES, UNIX_SOCKET_PATH_MAX } from "./sync/daemon.js";

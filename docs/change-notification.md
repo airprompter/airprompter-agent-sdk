@@ -44,7 +44,26 @@ result's `edge` state back:
 
 `nextPullDelayMs` stretches the interval while nothing changes (doubling,
 capped at five minutes by default) and snaps back on any change, refusal or
-outage. For scale: a puller at a 30 s base interval that has seen no change
+outage.
+
+Three rules keep the pointer honest, since it is unsigned and a CDN (or a
+party between the fleet and the edge) can pin it:
+
+- **A stuck pointer has a bound.** The puller trusts "nothing moved" only
+  for `maxPointerAgeMs` (one hour by default) after the origin last
+  answered; past that it reads the origin once, conditionally — one API
+  304 per puller per hour when nothing moved. A pinned pointer, or one the
+  control plane failed to write, can hide a promotion for at most that long.
+- **Nothing advances past an answer the origin did not confirm.** The
+  pointer's ETag is kept only when the pull ends in `unchanged` or `ok`; a
+  pull that fails after the pointer moved returns the state it was given, so
+  the next pull sees the move again instead of a 304 that hides it.
+- **A CDN outage or a malformed pointer is not an answer.** Either falls
+  through to the origin.
+
+And one rule for the caller: persist `edge` **with** the row it came back
+beside, never before it — a saved manifest ETag for a row that was never
+written makes the next origin read a 304. For scale: a puller at a 30 s base interval that has seen no change
 for an hour makes ~12 CDN requests an hour; ten thousand of them cost
 roughly $3 a month at CDN rates, against ~$3,000 for the same cadence
 against API Gateway + Lambda. The API sees one request per puller per

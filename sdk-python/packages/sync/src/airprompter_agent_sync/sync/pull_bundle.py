@@ -22,13 +22,20 @@ from airprompter_agent_core.control.client import SyncClient
 from airprompter_agent_core.protocol.trust import referenced_payloads, verify_manifest, verify_root_metadata
 
 
+DEFAULT_MAX_POINTER_AGE_MS = 60 * 60 * 1000
+
+
 @dataclass
 class PullEdgeState:
-    """The puller's memory between pulls: content-free, safe to persist beside the table."""
+    """The puller's memory between pulls: content-free. Persist it WITH the row it was returned beside (the same
+    transaction), never before it — a saved ``manifest_etag`` for a row that was never written makes the next origin
+    read a 304 and the row is never written."""
 
     pointer_url: Optional[str] = None
     pointer_etag: Optional[str] = None
     manifest_etag: Optional[str] = None
+    #: When the origin last answered (ISO); the pointer is trusted to say "nothing moved" only for ``max_pointer_age_ms`` after it.
+    last_origin_at: Optional[str] = None
 
 
 def next_pull_delay_ms(*, outcome: str, unchanged_streak: int, interval_ms: int, cap_ms: int = 5 * 60 * 1000) -> int:
@@ -61,6 +68,17 @@ class PullBundleResult:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+def _age_ms(now_iso: str, then_iso: Optional[str]) -> float:
+    if not then_iso:
+        return float("inf")
+    try:
+        now_dt = datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+        then_dt = datetime.fromisoformat(then_iso.replace("Z", "+00:00"))
+        return (now_dt - then_dt).total_seconds() * 1000
+    except ValueError:
+        return float("inf")
+
+
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
@@ -79,6 +97,7 @@ def pull_bundle(
     require_countersign: Optional[bool] = None,
     edge: Optional[PullEdgeState] = None,
     skip_pointer: bool = False,
+    max_pointer_age_ms: int = DEFAULT_MAX_POINTER_AGE_MS,
 ) -> PullBundleResult:
     """``distribution_public_key``: the fleet's X25519 public key (32 raw bytes) the bundle is sealed to; ``None`` writes
     plaintext, allowed for the dev target only. ``fetch_root``: the environment's root document — a pinned key alone
@@ -88,64 +107,81 @@ def pull_bundle(
     result handed back (the pointer URL the control plane named and the ETags); ``skip_pointer``: a nudge said "check
     now" — read the origin, conditionally."""
     at = now()
-    state = PullEdgeState(edge.pointer_url, edge.pointer_etag, edge.manifest_etag) if edge else PullEdgeState()
+    # What the caller handed back is returned unchanged on every failure: an ETag advanced past an answer the origin
+    # never confirmed would make the next pull a 304 and hide the promotion until the one after it.
+    given = PullEdgeState(edge.pointer_url, edge.pointer_etag, edge.manifest_etag, edge.last_origin_at) if edge else PullEdgeState()
+    state = PullEdgeState(given.pointer_url, given.pointer_etag, given.manifest_etag, given.last_origin_at)
     if distribution_public_key is None and scope["target"] != "dev":
-        return PullBundleResult(status="refused", reason="plaintext_not_allowed", edge=state)
+        return PullBundleResult(status="refused", reason="plaintext_not_allowed", edge=given)
     if not (0 < not_after_days <= 365):
         raise ValueError("not_after_days must be a positive number of days, 365 at most")
     root = trusted_root
     try:
         # The pointer first: unsigned and cacheable, it can only say "nothing moved" — never extend trust. A 304, or a
-        # generation the caller already holds, ends the pull at the CDN. Anything else goes on to the origin.
-        if state.pointer_url and not skip_pointer:
-            pointer = client.edge_pointer(state.pointer_url, state.pointer_etag)
-            if pointer.status == "not_modified":
-                return PullBundleResult(status="unchanged", via="pointer", edge=state)
-            if pointer.status == "ok":
-                state.pointer_etag = pointer.etag
-                if minimum_generation > 0 and int((pointer.pointer or {}).get("generation", 0)) <= minimum_generation:
-                    return PullBundleResult(status="unchanged", via="pointer", edge=state)
+        # generation the caller already holds, ends the pull at the CDN. Anything else (moved, unknown, unreachable,
+        # malformed) goes on to the origin — and so does a pointer that has said "nothing moved" for longer than
+        # ``max_pointer_age_ms``, the bound on a stuck one.
+        origin_age_ms = _age_ms(at, given.last_origin_at)
+        pointer_etag: Optional[str] = None
+        pointer_answered = False
+        if given.pointer_url and not skip_pointer and origin_age_ms <= max_pointer_age_ms:
+            try:
+                pointer = client.edge_pointer(given.pointer_url, given.pointer_etag)
+                if pointer.status == "not_modified":
+                    return PullBundleResult(status="unchanged", via="pointer", edge=given)
+                if pointer.status == "ok":
+                    pointer_etag, pointer_answered = pointer.etag, True
+                    generation = (pointer.pointer or {}).get("generation") if isinstance(pointer.pointer, Mapping) else None
+                    if minimum_generation > 0 and isinstance(generation, int) and generation <= minimum_generation:
+                        return PullBundleResult(status="unchanged", via="pointer", edge=PullEdgeState(given.pointer_url, pointer.etag, given.manifest_etag, given.last_origin_at))
+            except Exception:  # noqa: BLE001 — a CDN outage or a malformed pointer is not an answer: the origin is asked
+                pass
         if fetch_root is not None:
             candidate = fetch_root()
             if candidate is not None:
                 verdict = verify_root_metadata(candidate=candidate, trusted=root, now=at)
                 # A root that does not descend from the trusted one is the finding, not a detail behind unknown_signing_key.
                 if not verdict.ok:
-                    return PullBundleResult(status="refused", reason="root_refused", detail=verdict.reason, edge=state)
+                    return PullBundleResult(status="refused", reason="root_refused", detail=verdict.reason, edge=given)
                 root = candidate
         # Conditional: the origin answers 304 to the ETag it last gave, and names the pointer either way.
-        fetched = client.manifest(if_none_match=state.manifest_etag)
+        fetched = client.manifest(if_none_match=given.manifest_etag)
         if fetched.status == "not_found":
-            return PullBundleResult(status="nothing_promoted", edge=state)
+            return PullBundleResult(status="nothing_promoted", edge=given)
         if fetched.status == "unauthorized":
-            return PullBundleResult(status="unavailable", reason="unauthorized", edge=state)
+            return PullBundleResult(status="unavailable", reason="unauthorized", edge=given)
         if fetched.status == "forbidden":
-            return PullBundleResult(status="unavailable", reason="forbidden", detail=fetched.code, edge=state)
+            return PullBundleResult(status="unavailable", reason="forbidden", detail=fetched.code, edge=given)
         if fetched.status == "error":
-            return PullBundleResult(status="unavailable", reason=f"http_{fetched.http_status}", edge=state)
+            return PullBundleResult(status="unavailable", reason=f"http_{fetched.http_status}", edge=given)
+        # The origin answered: the pointer it names, the ETag it moved to, and the moment — the pointer's trust starts here.
         if fetched.edge_pointer_url:
             state.pointer_url = fetched.edge_pointer_url
+        if pointer_answered:
+            state.pointer_etag = pointer_etag
+        state.last_origin_at = at
         if fetched.status == "not_modified":
             return PullBundleResult(status="unchanged", via="origin", edge=state)
-        state.manifest_etag = fetched.etag
         manifest = fetched.manifest
         assert manifest is not None
         if int(manifest["payload"]["generation"]) < minimum_generation:
-            return PullBundleResult(status="refused", reason="generation_rollback", detail=f"the control plane answered generation {manifest['payload']['generation']}; the caller holds {minimum_generation}", held=minimum_generation, edge=state)
+            return PullBundleResult(status="refused", reason="generation_rollback", detail=f"the control plane answered generation {manifest['payload']['generation']}; the caller holds {minimum_generation}", held=minimum_generation, edge=given)
 
         payloads: dict[str, bytes] = {}
         for content_hash, byte_length in referenced_payloads(manifest["payload"]).items():
             data = client.payload(content_hash)
             if data is None:
-                return PullBundleResult(status="refused", reason="payload_missing", content_hash=content_hash, edge=state)
+                return PullBundleResult(status="refused", reason="payload_missing", content_hash=content_hash, edge=given)
             if len(data) != byte_length:
-                return PullBundleResult(status="refused", reason="payload_length_mismatch", content_hash=content_hash, edge=state)
+                return PullBundleResult(status="refused", reason="payload_length_mismatch", content_hash=content_hash, edge=given)
             payloads[content_hash] = data
         # No stored generation here: a puller has no host to move backwards. Anti-rollback is the store's rule, applied
         # by every runtime that opens this bundle.
         verdict = verify_manifest(manifest=manifest, root=root, now=at, scope=scope, stored_generation=0, payloads=payloads, countersign_root=countersign_root, require_countersign=require_countersign)
         if not verdict.ok:
-            return PullBundleResult(status="refused", reason=verdict.reason, edge=state)
+            return PullBundleResult(status="refused", reason=verdict.reason, edge=given)
+        # The bundle is built: the manifest's ETag is the caller's to keep — with the row, never before it.
+        state.manifest_etag = fetched.etag
 
         not_after = _iso(datetime.fromisoformat(at.replace("Z", "+00:00")) + timedelta(days=not_after_days))
         contents = {
@@ -168,4 +204,4 @@ def pull_bundle(
             edge=state,
         )
     except Exception as error:  # noqa: BLE001 — a puller reports, it does not crash the job
-        return PullBundleResult(status="unavailable", reason="network", detail=str(error), edge=state)
+        return PullBundleResult(status="unavailable", reason="network", detail=str(error), edge=given)

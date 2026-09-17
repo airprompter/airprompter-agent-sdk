@@ -10,6 +10,11 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.2.13 — 2026-09-17 (protocol 0.3.4)
+
+### Changed
+- The heartbeat's `catalog.variables` is sent whenever the active release was sealed at protocol ≥ 0.3.4 — an empty list when the application registered no source. An empty list is a report ("I fill nothing"); an absent key says nothing, and the service counts only reporting instances in "filled on X of Y", so a 0.3.4 fleet with no sources now reads as uncovered rather than unknown.
+
 ## 0.2.12 — 2026-09-17 (protocol 0.3.4)
 
 ### Added

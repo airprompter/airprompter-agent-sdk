@@ -167,8 +167,9 @@ A slot's variable declarations are sealed into the release: `name`, `required`, 
 `default` (optional operator variables only; never empty) and `source: caller | runtime` — a statement of who is
 expected to fill the variable. In managed mode a `source: runtime` variable is filled from your registered source
 before the run is posted, required or not (the catalogue has no text to scan). Every runtime's heartbeat carries
-`catalog.variables` — the names `ap.variables.names()` answers, never a value — once the release it serves was
-sealed at 0.3.4 (an older service refuses a key it does not know, so the SDK waits for that signal). A host whose
+`catalog.variables` — the names `ap.variables.names()` answers, never a value, an empty list when there are none —
+once the release it serves was sealed at 0.3.4 (an older service refuses a key it does not know, so the SDK waits
+for that signal). A host whose
 SDKs attach to `airprompterd` is the exception for now: the daemon heartbeats for them and knows no sources, so it
 reports no names — attached SDKs will hand theirs over in `hello` with the service's 0.3.4 release.
 

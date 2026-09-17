@@ -1282,8 +1282,9 @@ class AirPrompterAgent:
             # 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
             # can warn about a `source: runtime` variable no live instance fills before the promotion, not after. Sent only
             # once the control plane has shown it speaks 0.3.4 (the active manifest's protocol): an older service refuses
-            # the whole heartbeat over an unknown key, and a refused heartbeat is worse than an unreported name.
-            "catalog": {"models": list(dict.fromkeys(models))[:256], **({"variables": source_names[:256]} if source_names and protocol_at_least(str((self._active.manifest["payload"] if self._active else {}).get("protocol", "0.0.0")), "0.3.4") else {}), "reportedAt": self._now_iso()},
+            # the whole heartbeat over an unknown key, and a refused heartbeat is worse than an unreported name. Past that
+            # gate the key is always sent — an empty list says "I fill nothing", which is a report; absence says nothing.
+            "catalog": {"models": list(dict.fromkeys(models))[:256], **({"variables": source_names[:256]} if protocol_at_least(str((self._active.manifest["payload"] if self._active else {}).get("protocol", "0.0.0")), "0.3.4") else {}), "reportedAt": self._now_iso()},
             "lease": {**({"expiresAt": status.lease_expires_at} if status.lease_expires_at else {}), "expired": status.lease_expired},
             "spool": {
                 "depthSegments": status.spool["depth_segments"],

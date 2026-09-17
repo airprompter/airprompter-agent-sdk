@@ -386,6 +386,13 @@ def test_agent_renders_from_sources_fenced_by_the_stricter_trust(state_dir):
         ap.sync_now()
         ap.heartbeat_now()
         assert "variables" not in plane.heartbeats[-1]["catalog"], "withheld from a 0.3.3 service"
+        # Past the gate the key is always there: an application with no sources reports an empty list, not silence.
+        plane.promote(slots(plane, tier_in_text=True, version_id="ver_4"))
+        ap.sync_now()
+        for name in ap.variables.names():
+            ap.variables.revoke(name)
+        ap.heartbeat_now()
+        assert plane.heartbeats[-1]["catalog"]["variables"] == [], "an empty list is a report"
         # The registry is the agent's: a wrapped client finds the render by its text.
         assert ap.attribution_for({"messages": [{"role": "user", "content": caller.text}]}) is not None
     finally:

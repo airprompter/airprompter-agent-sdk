@@ -196,6 +196,12 @@ test("on the agent: a version without the placeholder never calls the source; th
   await ap.syncNow();
   await ap.heartbeatNow();
   assert.equal((plane.heartbeats.at(-1) as { catalog: { variables?: string[] } }).catalog.variables, undefined, "withheld from a 0.3.3 service");
+  // Past the gate the key is always there: an application with no sources reports an empty list, not silence.
+  plane.promote(slots(plane, { tierInText: true, versionId: "ver_4" }));
+  await ap.syncNow();
+  for (const name of ap.variables.names()) ap.variables.revoke(name);
+  await ap.heartbeatNow();
+  assert.deepEqual((plane.heartbeats.at(-1) as { catalog: { variables?: string[] } }).catalog.variables, [], "an empty list is a report");
   // No prompt text or value ever reaches the log.
   for (const e of events) assert.equal(JSON.stringify(e).includes("gold") || JSON.stringify(e).includes("printer"), false);
   await ap.stop();

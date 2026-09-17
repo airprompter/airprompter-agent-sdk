@@ -1252,8 +1252,9 @@ export class AirPrompterAgent {
       // 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
       // can warn about a `source: runtime` variable no live instance fills before the promotion, not after. Sent only
       // once the control plane has shown it speaks 0.3.4 (the active manifest's protocol): an older service refuses
-      // the whole heartbeat over an unknown key, and a refused heartbeat is worse than an unreported name.
-      catalog: { models: [...new Set(models)].slice(0, 256), ...(this.variables.names().length > 0 && protocolAtLeast(this.active?.manifest.payload.protocol ?? "0.0.0", "0.3.4") ? { variables: this.variables.names().slice(0, 256) } : {}), reportedAt: this.nowIso() },
+      // the whole heartbeat over an unknown key, and a refused heartbeat is worse than an unreported name. Past that
+      // gate the key is always sent — an empty list says "I fill nothing", which is a report; absence says nothing.
+      catalog: { models: [...new Set(models)].slice(0, 256), ...(protocolAtLeast(this.active?.manifest.payload.protocol ?? "0.0.0", "0.3.4") ? { variables: this.variables.names().slice(0, 256) } : {}), reportedAt: this.nowIso() },
       lease: { ...(status.leaseExpiresAt ? { expiresAt: status.leaseExpiresAt } : {}), expired: status.leaseExpired },
       ...(store ? { localRollback: { active: store.heldBackBelow !== undefined, forced: store.forcedDowngrade === true } } : {}),
       spool: {

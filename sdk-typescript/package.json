@@ -22,8 +22,8 @@
     "version:lockstep": "node scripts/version-lockstep.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.16.5",
+    "@types/node": "^26.5.1",
     "tsx": "^4.20.3",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }

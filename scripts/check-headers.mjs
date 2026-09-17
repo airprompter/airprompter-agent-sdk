@@ -4,7 +4,7 @@
  *
  * The rule (CONTRIBUTING.md › "File headers"): a TypeScript / JavaScript file starts with a `/** … *\/` block (or a
  * run of `//` lines) and a Python file with a module docstring; the header explains the file in a sentence or
- * more and carries one small usage example — a `@example` fenced block, an `Example::` / `Usage:` block, or an
+ * more and carries one small usage example — a `@example` fenced block, an `Example::` block, a `$ command` line, or an
  * indented snippet. Tests, generated declarations and vendored code are exempt. Plain Node, no dependencies, so
  * it runs anywhere CI does:
  *
@@ -17,7 +17,7 @@ import { join, relative, basename, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(fileURLToPath(import.meta.url), "..", "..");
-const ROOTS = ["sdk-typescript/packages", "sdk-python/packages", "cli/src", "conformance", "examples", "action", "protocol/tools", "deploy", "scripts"];
+const ROOTS = ["sdk-typescript/packages", "sdk-typescript/scripts", "sdk-python/packages", "sdk-python/tools", "cli/src", "cli/scripts", "conformance", "examples", "action", "protocol/tools", "deploy", "docs", "scripts"];
 const SKIP_DIRS = new Set(["node_modules", "dist", ".venv", "__pycache__", "cdk.out", ".airprompter-dev", "vendor"]);
 const EXT = new Set([".ts", ".mjs", ".js", ".py"]);
 const list = process.argv.includes("--list");
@@ -55,7 +55,8 @@ function headerOf(source, isPython) {
   }
   if (text.startsWith("/*")) {
     const end = text.indexOf("*/");
-    return end === -1 ? null : text.slice(2, end);
+    // Without the ` * ` gutter, so an indented snippet or a `$ ` line inside a JSDoc block is seen as one.
+    return end === -1 ? null : text.slice(2, end).replace(/^[ \t]*\*(?!\/)/gm, "");
   }
   if (text.startsWith("//")) {
     const lines = [];
@@ -68,7 +69,7 @@ function headerOf(source, isPython) {
   return null;
 }
 
-const EXAMPLE = /@example|@usage|Example::|Examples::|Usage::|Usage:|```|^\s*\$ |^ {2,}\S+.*\(/m;
+const EXAMPLE = /@example|@usage|Example::|Examples::|Usage::|```|^\s*\$ |^ {2,}\S+.*\(/m;
 
 const failures = [];
 let passed = 0;
@@ -82,7 +83,7 @@ for (const dir of ROOTS) {
       continue;
     }
     if (!EXAMPLE.test(header)) {
-      failures.push(`${rel}: the header has no usage example (@example, Example::, Usage:, a fenced or indented snippet)`);
+      failures.push(`${rel}: the header has no usage example (@example, Example::, a $ command line, a fenced or indented snippet)`);
       continue;
     }
     passed += 1;

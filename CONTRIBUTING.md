@@ -79,7 +79,8 @@ decision it embodies, and **one small example of how to use it** — a
 Inline comments say *why*, at the places a human reviewer would pause: a
 bound, a refusal, an order of operations, a trade-off. `node
 scripts/check-headers.mjs` enforces the header and the example on every
-non-test file, and CI runs it.
+non-test source file — the packages, the CLI, the conformance kit, the
+examples, the tools and the scripts — and CI runs it.
 
 ## Sending the change
 

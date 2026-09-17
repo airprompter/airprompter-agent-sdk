@@ -138,10 +138,13 @@ your unlock like any release.
   before staging or anti-rollback decide anything — so a frozen fleet
   stops rendering even when nobody unlocks.
 - **Rollback**: `airprompter rollback` / `ap.rollback()` flips to the
-  other slot instantly. Below the stored generation it is a forced
-  downgrade, stamped in the store and on the spool, and the control
-  plane's current generation is held back until something newer is
-  promoted. A server-side rollback is a **new** generation pointing at an
+  other slot instantly — the previous release, never a release that is
+  staged and waiting for an unlock (that is refused: a rollback is not a
+  quiet unlock). Below the stored generation it is a forced downgrade,
+  stamped in the store (`ap.rollback()` also writes the spool's
+  `forced_downgrade` row; the CLI leaves the spool to the runtime) and
+  reported on the next heartbeat, and the control plane's current
+  generation is held back until something newer is promoted. A server-side rollback is a **new** generation pointing at an
   older release, so anti-rollback never blocks it.
 
 ## 7. Bundles in git (the pull request is the review)

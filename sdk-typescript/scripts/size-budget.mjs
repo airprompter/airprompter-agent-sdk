@@ -2,6 +2,8 @@
 // What each package publishes, against its budget (`airprompter.sizeBudgetBytes`
 // in the package's package.json): the bytes of every .js under dist/esm and
 // dist/cjs. Exit 1 over budget; `--json` prints the numbers.
+//
+//   $ npm run size                              # from sdk-typescript/, after npm run build
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";

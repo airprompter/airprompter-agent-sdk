@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """One version across the five distributions, siblings exact-pinned to it (S10).
 
-  python tools/version_lockstep.py             check
-  python tools/version_lockstep.py --expect V  check, and V must be the version
-  python tools/version_lockstep.py --set V     rewrite every pyproject.toml to V
+Usage::
+
+    $ python tools/version_lockstep.py             # check
+    $ python tools/version_lockstep.py --expect V  # check, and V must be the version
+    $ python tools/version_lockstep.py --set V     # rewrite every pyproject.toml (and SDK_VERSION) to V
 """
 
 from __future__ import annotations

@@ -51,6 +51,7 @@ class LoadedSlot:
 class StoreError(Exception):
     def __init__(self, code: str, message: str, detail: Optional[str] = None):
         # code: "kek_unavailable" | "store_corrupt" | "store_newer" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged"
+        #       | "release_staged" | "no_previous_release"
         super().__init__(message)
         self.code = code
         self.detail = detail
@@ -221,10 +222,16 @@ class SlotStore:
         return slot
 
     def rollback_local(self) -> SlotName:
-        """Instant local rollback: the previous release is the other slot. Stamped on evidence by the caller."""
+        """Instant local rollback: the previous release is the other slot. Stamped on evidence by the caller. Refused
+        while the other slot holds a STAGED release — flipping to it would be a silent unlock, not a rollback — and
+        when this host has only ever held one release."""
         if not self._file.get("active"):
             raise StoreError("no_release", "nothing is active")
+        if self._file.get("staged"):
+            raise StoreError("release_staged", "the other slot holds a staged release, not a previous one: unlock it, or discard it, before rolling back")
         previous = _other_slot(self._file["active"])
+        if not os.path.exists(os.path.join(self.dir, "slots", previous, "manifest.json")):
+            raise StoreError("no_previous_release", "this host has held one release only; there is nothing to go back to")
         generation = self._read_manifest(previous)["payload"]["generation"]
         downgrade = generation < self._file["generation"]
         next_file = {**self._file, "active": previous, "staged": None, "generation": generation, "forcedDowngrade": downgrade}

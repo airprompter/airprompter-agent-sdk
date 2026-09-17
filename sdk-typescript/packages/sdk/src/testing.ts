@@ -4,6 +4,7 @@
  *
  * @example
  * ```ts
+ * import { AirPrompterAgent, publicJwkOf } from "@airprompter/agent-sdk";
  * import { FakeControlPlane } from "@airprompter/agent-sdk/testing";
  *
  * const plane = new FakeControlPlane({ organizationId: "org_1", agentId: "agt_1", target: "prod" });

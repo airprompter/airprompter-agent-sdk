@@ -12,7 +12,7 @@ reaches the API, and that read is conditional too. Steady state costs a CDN 304 
 
 Example::
 
-    result = pull_bundle(client=client, scope=scope, trusted_root=root, fetch_root=fetch_root, now=now_iso,
+    result = pull_bundle(client=client, scope=scope, trusted_root=root, fetch_root=fetch_root, now=lambda: now_iso,
                          distribution_public_key=fleet_public_raw, minimum_generation=newest_held, edge=last_edge)
     if result.status == "ok":
         rows.insert(result.generation, json.dumps(result.bundle), result.release_digest, result.edge)   # the edge state in the SAME transaction

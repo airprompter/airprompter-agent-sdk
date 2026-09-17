@@ -9,6 +9,9 @@ airprompter pull     Fetch and verify the current release; write an encrypted .a
 airprompter verify   Run the verification chain on a bundle or a state directory and print the reasons
 airprompter apply    Stage a bundle into the store and activate it per the environment's policy
 airprompter status   Active and staged generation, lease, storage protection, spool depth, last upload
+airprompter unlock   Make the staged release live on this host (the operator's unlock; --generation N to name it)
+airprompter rollback The previous release on this host live again, now and offline (the other slot; a step below the stored generation is a forced downgrade, reported)
+airprompter policy   Show or set the apply policy this host holds (an update may tighten it; only this loosens it)
 airprompter doctor   Every reason this host is not serving the release it should, with the remedy (source, root, store, lease, key protection, spool, daemon, policy pin)
 airprompter diff     What a bundle would change against the active release on this host, or against another bundle (--against)
 airprompter keygen   Generate a distribution or countersign keypair
@@ -17,6 +20,9 @@ airprompter export-telemetry   Pack the spool's unsent segments into one file fo
 airprompter import-telemetry   Upload an exported telemetry file through the grant path on a connected host (idempotent)
 airprompter telemetry verify   Prove the spool's disk budget is an invariant, on this machine, with no registry
 airprompter telemetry validate <segment>…   A third-party writer's segments against the spool contract, line by line
+airprompter dev <dir>   Serve a directory of prompts as a registry over the protocol's routes (dev key, dev root, hot reload; --daemon serves the host's SDKs too)
+airprompter login    Sign in as a workspace member and print the session token the write commands read (never an API key)
+airprompter import   A directory, a JSON/CSV export or a SQL query result becomes workspace prompts with reviewable versions (--dry-run plans)
 ```
 
 `doctor`, `telemetry validate`, the in-process `healthz`, the verify

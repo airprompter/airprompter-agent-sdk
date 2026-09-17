@@ -5,6 +5,9 @@
 // `sdk-typescript/README.md` and the repository README; `--check` exits 1
 // when either file is stale (CI runs the check; a contributor runs the
 // generator).
+//
+//   $ npm run compat-table                      # regenerate both tables after a version bump
+//   $ node scripts/compat-table.mjs --check     # what CI runs: exit 1 when a table is stale
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";

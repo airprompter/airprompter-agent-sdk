@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Generates protocol/vectors/checks.json from the reference evaluator (conformance/checks.mjs):
 // per kind, outputs that pass and fail with the reason; patterns the regex safety rule refuses;
-// the projection a pin carries. Deterministic. Usage: gen_check_vectors.mjs <out.json>
+// the projection a pin carries. Deterministic.
+//
+//   $ node protocol/tools/gen_check_vectors.mjs protocol/vectors/checks.json
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

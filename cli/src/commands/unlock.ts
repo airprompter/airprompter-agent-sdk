@@ -4,9 +4,11 @@
  * under `unlock_required` activates (the others: the update window and the
  * runtime's `apply.onStaged` hook). Goes through the host daemon when one
  * runs (so every attached SDK switches at once); otherwise activates the
- * store's staged slot directly, which a resident SDK notices on its next
- * pass. `--generation N` refuses to unlock anything but generation N, so a
- * change ticket names exactly what went live.
+ * store's staged slot directly — a runtime started after that serves it; a
+ * runtime already running in-process on the same state directory keeps its
+ * own copy of the store and does not (on a shared host, run the daemon).
+ * `--generation N` refuses to unlock anything but generation N, so a change
+ * ticket names exactly what went live.
  *
  * @example
  * ```sh
@@ -80,7 +82,7 @@ export async function unlock(argv: string[], ctx: Context): Promise<number> {
   out.field("generation", staged.generation);
   out.field("previousGeneration", state.generation, "previous generation");
   out.field("outcome", "activated");
-  out.line(`unlocked generation ${staged.generation} (slot ${slot}); a resident runtime picks it up on its next pass`);
+  out.line(`unlocked generation ${staged.generation} (slot ${slot}); a runtime started from now serves it (a runtime already running in-process does not — use the daemon on a shared host)`);
   out.flush();
   return EXIT.ok;
 }

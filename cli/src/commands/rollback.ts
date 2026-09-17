@@ -3,9 +3,11 @@
  * now, without the control plane. The store keeps two slots; the other one
  * is the release this host served before, and flipping to it is instant and
  * offline. Goes through the host daemon when one runs (so every attached SDK
- * switches at once); otherwise flips the store directly, which a resident
- * SDK notices on its next pass — exactly what `ap.rollback()` does in
- * process.
+ * switches at once); otherwise flips the store directly — exactly what
+ * `ap.rollback()` does in process. A runtime started after the flip serves
+ * the previous release; a runtime already running in-process on the same
+ * state directory keeps its own copy of the store and does not (on a shared
+ * host, run the daemon so every runtime follows one store).
  *
  * The rules a rollback keeps: a step BELOW the stored generation is a forced
  * downgrade, recorded in `store.json` (`forcedDowngrade`) and reported on the
@@ -75,7 +77,8 @@ export async function rollback(argv: string[], ctx: Context): Promise<number> {
   try {
     slot = store.rollbackLocal();
   } catch (error) {
-    // The store has only ever held one release: there is nothing to go back to.
+    // `release_staged`: the other slot is a release waiting for an unlock, not a previous one; `no_previous_release`:
+    // this host has held one release only; `no_release`: nothing was ever applied. Each is a refusal by name.
     if (isStoreError(error)) throw refused(`store: ${error.message}`, { reason: error.code });
     throw error;
   }
@@ -87,7 +90,7 @@ export async function rollback(argv: string[], ctx: Context): Promise<number> {
   out.field("previousGeneration", before, "previous generation");
   out.field("forced", forced);
   out.field("outcome", "rolled_back");
-  out.line(`rolled back to generation ${after} (slot ${slot}) from ${before}${forced ? "; a forced downgrade: reported on the next heartbeat, and sync holds generation " + before + " back" : ""}; a resident runtime picks it up on its next pass`);
+  out.line(`rolled back to generation ${after} (slot ${slot}) from ${before}${forced ? "; a forced downgrade: reported on the next heartbeat, and sync holds generation " + before + " back" : ""}; a runtime started from now serves it (a runtime already running in-process does not — use the daemon on a shared host)`);
   out.flush();
   return EXIT.ok;
 }

@@ -3,7 +3,7 @@
 // fake control plane sealed and the pinned root it verifies against, written
 // to the directory given, with the action's inputs on GITHUB_OUTPUT.
 //
-//   node scripts/action-fixture.mjs <dir>
+//   $ node scripts/action-fixture.mjs <dir>
 //
 // Runs the TypeScript sources through tsx (a devDependency of the CLI) so
 // the fixture is the same one cli/test/action.test.ts uses.

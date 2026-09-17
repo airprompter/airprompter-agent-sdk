@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Install the five distributions editable, in dependency order, plus the test extras — one command for a
-contributor or CI: ``python tools/install_dev.py [pip args...]``."""
+contributor or CI.
+
+Usage::
+
+    $ python tools/install_dev.py                  # the five packages, editable, with the test extras
+    $ python tools/install_dev.py pyflakes build   # plus anything else pip should install
+"""
 
 from __future__ import annotations
 

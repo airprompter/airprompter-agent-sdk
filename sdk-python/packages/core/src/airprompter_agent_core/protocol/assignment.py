@@ -6,7 +6,7 @@ Example::
     assignment = assign_arm(salt=experiment["salt"], subject="user-42", arms=arms)
     assignment.arm["arm"], assignment.bucket   # ("a", 3729) — the same subject lands here on every host
     effective_arms(arms=arms, ramp=experiment.get("ramp"), disabled_arms=["b"], now_ms=now_ms)   # b's share goes to the control
-    ordered_steps("onboarding.flow", slot["steps"])   # "onboarding.flow#1", "#2", … or StepError
+    ordered_steps("onboarding.flow", slot["steps"])   # the steps sorted by ordinal (ids onboarding.flow#1, #2, …), or StepError
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@
 // executable: version, help, keygen (files, modes, worktree refusal), a
 // verify refusal with the exit-code contract, and --json output shape.
 //
-//   node scripts/smoke.mjs <path-to-binary>
+//   $ node scripts/smoke.mjs <path-to-binary>
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";

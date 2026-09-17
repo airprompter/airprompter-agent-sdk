@@ -17,6 +17,9 @@ may change a public shape and says so here.
 ### Changed
 - Every source file opens with a header that says what the file is for and shows one usage example (CONTRIBUTING.md › File headers); `scripts/check-headers.mjs` enforces it in CI.
 
+### Fixed
+- A local rollback (`SlotStore.rollbackLocal` / `rollback_local`, `ap.rollback()`, `airprompter rollback`) is refused while the other slot holds a STAGED release — flipping to it was a silent unlock, not a rollback (`release_staged`) — and when the host has only ever held one release (`no_previous_release`, where the error used to say `slot_corrupt`).
+
 ## 0.2.13 — 2026-09-17 (protocol 0.3.4)
 
 ### Changed

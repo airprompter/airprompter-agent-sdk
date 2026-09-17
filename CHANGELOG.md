@@ -10,6 +10,19 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.2.11 — 2026-09-17 (protocol 0.3.3) — the Python SDK catches up with 0.2.10; TypeScript republished unchanged to keep the lockstep
+
+### Added (Python)
+- Variable sources: `AirPrompterAgent.start(variables=...)` and `ap.variables.provide(name, value_or_source)` / `revoke(name)` — a literal, a `VariableSource(resolve, trust, timeout_seconds=2.0, max_bytes=65536)`, or that as a mapping — with the same precedence, the same "consulted only when this version's text uses it", and the same stricter-trust fencing as TypeScript (`variable_source_trust_stricter` logged once per slot and name).
+- `render()` is synchronous and RUNS a plain-callable source — on a worker thread, all sources at once, each under its own timeout — holding none of the agent's locks; a coroutine-function source is refused with `VariableSourceRequiredError` (use `await ap.prompt(tag).render_async(...)`, which awaits those and runs plain callables on a thread). Failures are `VariableSourceError(tag, variable, reason)` (`threw` · `timeout` · `too_large` · `not_text` · `empty` · `unfenceable`), plus `variable_source_failed` in the log and one content-free `render_missing_variable` error row under the slot's tag. The slot is captured before any source runs, so a release activating mid-lookup never mixes generations.
+- `ap.prompt(tag).needs(values)` and `AgentStatus.variables` (`{"sources": [...], "unsourced": [{"tag", "arm", "names"}]}`), from declarations alone.
+- `ap.workflow(tag)` returns a `WorkflowHandle` (a `Workflow`) with `render_step(step_id, values)` / `render_step_async`; `ManagedAgent.start(variables=...)` and `agent.needs(tag, values)` fill required declared variables before a hosted run is posted, an `end_user` source for an `operator`-declared variable refused before any lookup (`unfenceable`).
+- `ReleaseResolver.render_text()` (one render path for prompts and steps; `render()` takes `fenced=` and an already-decoded `text=`); `placeholders_of(text)` in `airprompter_agent_core`; `MissingVariableError.code` / `UnknownVariableError.code`.
+- `airprompter_agent_runtime.variables` is the new subpackage; every name is re-exported from `airprompter_agent`.
+
+### Changed
+- TypeScript: no functional change; 0.2.11 is the same code as 0.2.10.
+
 ## 0.2.10 — 2026-09-17 (protocol 0.3.3) — TypeScript only; Python follows in 0.2.11
 
 ### Added

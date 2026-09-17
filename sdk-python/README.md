@@ -84,11 +84,22 @@ ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="
 ap.feedback(r.run_ref, thumbs="up")
 ```
 
-`render()` never touches the network. A variable declared `end_user` is
+`render()` never touches AirPrompter's network. A variable declared `end_user` is
 fenced (`<ticket>…</ticket>`) so the model sees where untrusted input
 starts and stops; a missing required variable raises
 `MissingVariableError`; a value for a variable the slot did not declare
 raises `UnknownVariableError`.
+
+Values your own system holds can be registered once instead of passed at
+every call site — `AirPrompterAgent.start(..., variables={"customer_tier":
+{"resolve": lambda ctx: crm.tier_of(ctx.subject), "trust": "operator"}})`,
+or `ap.variables.provide(...)` later. A source is consulted only for a
+declared variable this version's text uses (or that is required) and the
+call site did not pass; its trust can only tighten the prompt's. Plain
+callables run on `render()` (worker threads, each under its timeout);
+coroutine functions need `await ….render_async()`. `ap.prompt(tag).needs()`
+and `ap.status().variables` name what no source fills. See
+[docs/variables.md](../docs/variables.md).
 
 Async applications use `await ap.observe_async(r, lambda: client.messages.create(...))`
 (and `chat_completion_async` / `messages_create_async`). Everything else
@@ -352,6 +363,7 @@ a `run_ref` minted there).
 | Apply control: update window (DST-safe), `on_staged` hook, Freeze precedence, heartbeat | ✓ | ✓ (`zoneinfo`) |
 | `observe()`: OpenAI / Anthropic / Bedrock usage, error classes | ✓ | ✓ + SDK objects, async variant |
 | Managed mode (catalogue, run, stream, typed refusals, 429 retry) | ✓ | ✓ |
+| Variable sources (`variables`, `needs()`, `status().variables`, fenced by the stricter trust, workflow steps, managed fill) | ✓ (`renderAsync`) | ✓ (`render()` runs plain callables on threads; `render_async()` awaits coroutine functions) |
 | Provider wrappers | `ap.wrap()` for openai / Anthropic, AI SDK middleware | `ap.wrap()` for openai / anthropic (sync + async), explicit helpers, LiteLLM callback |
 | Spool upload on hosts | `airprompterd` uploads every writer's segments (T26); with no daemon the runtime uploads its own (S5) | ✓ (`SpoolUploader`, `upload_now()`, `TelemetryOptions(upload=False)`) |
 | Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓, awaited before `invoke()` returns (S5) | ✓ (`flush_telemetry()`, `request_upload_grant()`, `TelemetryOptions(flush="background")` opt-out) |

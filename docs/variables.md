@@ -28,8 +28,24 @@ ap.variables.provide("region", process.env.REGION!);            // later is fine
 ap.variables.revoke("region");
 ```
 
-Python: the same shape lands in `airprompter-agent` 0.2.11 (this page is
-updated with it).
+Python — the same registry, with the language's own shape:
+
+```python
+ap = AirPrompterAgent.start(
+    ...,
+    variables={
+        "brand": "Acme",                                                        # a literal: always this, operator trust
+        "customer_tier": {                                                      # a source: your system, asked at render time
+            "resolve": lambda ctx: crm.tier_of(ctx.subject),                    # None = "I have none"; a plain callable or a coroutine function
+            "trust": "operator",                                                # required — see "Trust" below
+            "timeout_seconds": 0.5,                                             # default 2 s
+        },
+        "last_ticket": VariableSource(resolve=tickets.latest_async, trust="end_user"),   # a coroutine function: render_async() only
+    },
+)
+ap.variables.provide("region", os.environ["REGION"])                            # later is fine
+ap.variables.revoke("region")
+```
 
 The context a source receives — `{ tag, name, subject, versionId, arm }` —
 is content-free: never the prompt text, never other values. A source that
@@ -52,7 +68,16 @@ this order, and stop at the first that answers:
 `render()` is synchronous and uses literals only; if a callable source
 would be needed it throws `VariableSourceRequiredError` naming the
 variables — use `renderAsync()`. Sources run concurrently, each under its
-own timeout and byte bound (64 KiB by default). A source that throws, times
+own timeout and byte bound (64 KiB by default).
+
+In Python the SDK is synchronous by design, so `render()` *does* run a
+plain-callable source — each on its own worker thread, all at once, under
+its timeout — and holds none of the agent's locks while it does; it refuses
+only a **coroutine-function** source, with the same
+`VariableSourceRequiredError` — use `await ….render_async()`, which awaits
+those and runs plain callables on a thread. A source that outlives its
+timeout keeps its thread until it returns (a thread cannot be killed); the
+render has already failed by name. A source that throws, times
 out, answers more than its bound, or answers nothing for a required
 variable, or answers something other than text, is
 `VariableSourceError { tag, variable, reason }` (`threw` · `timeout` ·
@@ -91,6 +116,11 @@ if (missing.length) throw new Error(`support.triage needs ${missing.join(", ")}`
 ap.status().variables;   // { sources: [...names], unsourced: [{ tag, arm, names }] } — per slot and arm, required names no source fills
 ```
 
+```python
+missing = ap.prompt("support.triage").needs(ticket="")
+ap.status().variables    # {"sources": [...], "unsourced": [{"tag", "arm", "names"}]}
+```
+
 `needs(values)` takes the values your call site will pass and returns what
 would still be missing; run it at start-up for every slot you render.
 `status().variables.unsourced` is the same answer per slot without knowing
@@ -101,12 +131,12 @@ Declarations only, no payload read. Names only, never values.
 ## Workflows, managed mode, golden sets
 
 - **Workflow steps** in client mode are handed back as raw text; `const flow = ap.workflow(tag)` now also has
-  `flow.renderStepAsync(stepId, values)`, which fills a step with the same precedence — each step scanned on its own,
-  so a source is called for the step that uses the variable and not for the one that does not. A source sees the
-  step id (`docs.flow#2`) as its `tag`.
+  `flow.renderStepAsync(stepId, values)` (Python: `flow.render_step(step_id, values)` and `render_step_async`), which
+  fills a step with the same precedence — each step scanned on its own, so a source is called for the step that uses
+  the variable and not for the one that does not. A source sees the step id (`docs.flow#2`) as its `tag`.
 - **Managed mode** (`ManagedAgent`, the hosted `/run` route) runs in your process, so `ManagedAgent.start({ variables })`
-  fills required declared variables before the run is posted, and `agent.needs(tag, values)` answers the same
-  question. The catalogue names declarations, not text, so "used in the text" cannot be known there: required ones are
+  (Python: `ManagedAgent.start(variables=...)`) fills required declared variables before the run is posted, and
+  `agent.needs(tag, values)` answers the same question. The catalogue names declarations, not text, so "used in the text" cannot be known there: required ones are
   filled, optional ones are not; the context a source sees carries `versionId: null` and `arm: null` (the run route
   resolves them). A hosted run fences by the slot's declaration alone, so an `end_user` source for a variable the slot
   declares `operator` is refused before any lookup (`VariableSourceError`, reason `unfenceable`) rather than sent raw —

@@ -9,9 +9,9 @@ export const SDK_VERSION = "0.2.12";
  * sending it, so a 0.3.4 SDK talking to a 0.3.3 service never trips its strict schemas.
  */
 export function protocolAtLeast(version: string, floor: string): boolean {
-  const parse = (value: string) => value.split(".").map((part) => Number.parseInt(part, 10));
+  const parse = (value: string) => (/^\d+\.\d+\.\d+$/.test(value) ? value.split(".").map((part) => Number.parseInt(part, 10)) : []);
   const [a, b] = [parse(version), parse(floor)];
-  if (a.length !== 3 || b.length !== 3 || a.some(Number.isNaN) || b.some(Number.isNaN)) return false;
+  if (a.length !== 3 || b.length !== 3) return false;
   for (let index = 0; index < 3; index += 1) {
     if (a[index]! !== b[index]!) return a[index]! > b[index]!;
   }

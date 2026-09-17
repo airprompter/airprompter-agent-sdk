@@ -62,14 +62,11 @@ def protocol_at_least(version: str, floor: str) -> bool:
     """Whether a protocol version string is at least another (``major.minor.patch``, numerically). The manifest a
     control plane sealed names the protocol it speaks; a runtime that must send a newer optional member reads that
     before sending it, so a 0.3.4 SDK talking to a 0.3.3 service never trips its strict schemas."""
-    try:
-        a = [int(part) for part in version.split(".")]
-        b = [int(part) for part in floor.split(".")]
-    except (ValueError, AttributeError):
+    import re as _re
+
+    if not isinstance(version, str) or not isinstance(floor, str) or not _re.fullmatch(r"\d+\.\d+\.\d+", version) or not _re.fullmatch(r"\d+\.\d+\.\d+", floor):
         return False
-    if len(a) != 3 or len(b) != 3:
-        return False
-    return a >= b
+    return [int(part) for part in version.split(".")] >= [int(part) for part in floor.split(".")]
 SDK_VERSION = "0.2.12"
 
 __all__ = [

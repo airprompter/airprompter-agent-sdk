@@ -2,6 +2,20 @@
   "name": "@airprompter/agent-runtime",
   "version": "0.2.9",
   "description": "Serve a verified AirPrompter agent release: slot resolution under the ramp and any retreat, rendered text with run references, provider wrappers, and the hosted-execution client. Renders and assigns over a bundle the customer loads with no store, daemon or network.",
+  "keywords": [
+    "airprompter",
+    "prompts",
+    "llm",
+    "agent",
+    "governance",
+    "openai",
+    "anthropic",
+    "ab-testing"
+  ],
+  "homepage": "https://github.com/airprompter/airprompter-agent-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/airprompter/airprompter-agent-sdk/issues"
+  },
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",

@@ -134,6 +134,10 @@ jobs:
           v="${GITHUB_REF_NAME#sdk-typescript/v}"
           node scripts/version-lockstep.mjs --expect "$v"
         working-directory: sdk-typescript
+      - name: CHANGELOG.md describes this version
+        run: |
+          v="${GITHUB_REF_NAME#sdk-typescript/v}"
+          grep -Eq "^## ${v//./\\.} — " CHANGELOG.md || { echo "CHANGELOG.md has no '## $v — <date>' entry; write one before tagging"; exit 1; }
       - name: SBOM
         uses: anchore/sbom-action@v0
         with:
@@ -177,6 +181,10 @@ jobs:
           v="${GITHUB_REF_NAME#sdk-python/v}"
           python tools/version_lockstep.py --expect "$v"
         working-directory: sdk-python
+      - name: CHANGELOG.md describes this version
+        run: |
+          v="${GITHUB_REF_NAME#sdk-python/v}"
+          grep -Eq "^## ${v//./\\.} — " CHANGELOG.md || { echo "CHANGELOG.md has no '## $v — <date>' entry; write one before tagging"; exit 1; }
       - name: SBOM
         uses: anchore/sbom-action@v0
         with:

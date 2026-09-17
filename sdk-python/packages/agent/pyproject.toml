@@ -44,6 +44,8 @@ litellm = ["litellm>=1.50"]
 Homepage = "https://github.com/airprompter/airprompter-agent-sdk"
 Source = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-python/packages/agent"
 Protocol = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/protocol"
+Changelog = "https://github.com/airprompter/airprompter-agent-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/airprompter/airprompter-agent-sdk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/airprompter_agent"]

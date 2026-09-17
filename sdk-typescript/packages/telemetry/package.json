@@ -2,6 +2,20 @@
   "name": "@airprompter/agent-telemetry",
   "version": "0.2.9",
   "description": "The content-free telemetry spool and its uploader for AirPrompter agents: minute windows as append-only segments (or in memory on serverless), the host budget, and direct-to-object-store upload under a grant.",
+  "keywords": [
+    "airprompter",
+    "prompts",
+    "llm",
+    "agent",
+    "governance",
+    "telemetry",
+    "spool",
+    "opentelemetry"
+  ],
+  "homepage": "https://github.com/airprompter/airprompter-agent-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/airprompter/airprompter-agent-sdk/issues"
+  },
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",

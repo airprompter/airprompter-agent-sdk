@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a change to an SDK, the CLI, the daemon or the protocol.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and what stands in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: What you would like to see. If it touches the wire protocol, say what a runtime on the previous minor version should do with the new document.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - "TypeScript SDK"
+        - "Python SDK"
+        - "CLI / daemon"
+        - "protocol"
+        - "provider wrappers (OpenAI, Anthropic, AI SDK, LiteLLM, …)"
+        - "deployment (systemd, Docker, Kubernetes, …)"
+        - "docs"
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: Would you be willing to send a pull request?
+      options:
+        - label: "Yes"

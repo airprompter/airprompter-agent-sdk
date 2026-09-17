@@ -84,3 +84,7 @@ BSD-3-Clause. See [LICENSE](LICENSE). "AirPrompter" is a trademark; see [TRADEMA
 ## Security
 
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability and for the threat model this software is built against.
+
+## Contributing and support
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) (set-up, what a change needs, the DCO sign-off) and the [Code of Conduct](CODE_OF_CONDUCT.md). Versions and what changed in each: [CHANGELOG.md](CHANGELOG.md) for the SDKs and CLI, [protocol/CHANGELOG.md](protocol/CHANGELOG.md) for the wire. Where to ask what: [SUPPORT.md](SUPPORT.md).

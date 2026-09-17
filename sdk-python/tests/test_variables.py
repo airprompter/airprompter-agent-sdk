@@ -223,7 +223,7 @@ def test_each_source_has_its_own_timeout_and_the_first_failure_ends_the_fill():
 
     def slow(ctx):
         threads.append(threading.current_thread())
-        time.sleep(0.4)
+        time.sleep(1.0)
         return "late"
 
     def quick(ctx):
@@ -237,19 +237,19 @@ def test_each_source_has_its_own_timeout_and_the_first_failure_ends_the_fill():
     with pytest.raises(VariableSourceError) as error:
         fill_sync(plan, CTX, registry)
     assert (error.value.variable, error.value.reason) == ("b", "timeout"), "b's own bound, though a was named first"
-    assert time.monotonic() - started < 0.3, "the fill ends at b's deadline, not when b eventually answers"
+    assert time.monotonic() - started < 0.6, "the fill ends at b's deadline, not when b eventually answers"
     assert threads and all(t.daemon for t in threads), "a source runs on a daemon thread: a stuck one never holds up exit"
     with pytest.raises(VariableSourceError) as async_error:
         asyncio.run(fill_async(plan, CTX, registry))
     assert (async_error.value.variable, async_error.value.reason) == ("b", "timeout")
 
     # A throw ends the fill at once, whatever is still running before it in plan order.
-    registry.provide("a", VariableSource(resolve=lambda ctx: time.sleep(0.4) or "a", trust="operator", timeout_seconds=1.0))
+    registry.provide("a", VariableSource(resolve=lambda ctx: time.sleep(1.0) or "a", trust="operator", timeout_seconds=2.0))
     registry.provide("b", {"resolve": lambda ctx: (_ for _ in ()).throw(RuntimeError("no")), "trust": "operator"})
     started = time.monotonic()
     with pytest.raises(VariableSourceError) as threw:
         fill_sync(plan, CTX, registry)
-    assert (threw.value.variable, threw.value.reason) == ("b", "threw") and time.monotonic() - started < 0.3
+    assert (threw.value.variable, threw.value.reason) == ("b", "threw") and time.monotonic() - started < 0.6
 
     # A source's OWN TimeoutError is its failure (threw), never the SDK's deadline.
     registry.provide("a", {"resolve": lambda ctx: (_ for _ in ()).throw(TimeoutError("db")), "trust": "operator"})
@@ -270,6 +270,37 @@ def test_each_source_has_its_own_timeout_and_the_first_failure_ends_the_fill():
     with pytest.raises(VariableSourceRequiredError) as required:
         fill_sync(plan, CTX, registry)
     assert required.value.names == ["a"]
+
+    # The deadline wins outright in the async fill too: a coroutine source that swallows its cancellation and answers
+    # late, or is slow to honour it, neither delays the render nor gets its value in.
+    async def swallows(ctx):
+        try:
+            await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            pass
+        return "late-but-here"
+
+    async def slow_to_cancel(ctx):
+        try:
+            await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.5)
+            raise
+
+    for source in (swallows, slow_to_cancel):
+        registry.provide("a", VariableSource(resolve=source, trust="operator", timeout_seconds=0.05))
+        started = time.monotonic()
+        with pytest.raises(VariableSourceError) as late:
+            asyncio.run(fill_async(plan, CTX, registry))
+        assert (late.value.variable, late.value.reason) == ("a", "timeout") and time.monotonic() - started < 0.6, source.__name__
+
+    # A KeyboardInterrupt raised while a coroutine source's frame is on top is the process's, never "the source threw".
+    async def interrupted(ctx):
+        raise KeyboardInterrupt
+
+    registry.provide("a", VariableSource(resolve=interrupted, trust="operator"))
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(fill_async(plan, CTX, registry))
 
 
 # ----------------------------------------------------------------------------- the agent
@@ -491,6 +522,9 @@ def test_managed_fills_before_the_post_and_refuses_an_unfenceable_source_before_
         return "Ops"
 
     agent.variables.provide("team", {"resolve": team_async, "trust": "operator"})
+    with pytest.raises(VariableSourceRequiredError, match="managed runs are synchronous"):
+        agent.run("support.triage", {"ticket": "x"})
+    agent.variables.provide("team", {"resolve": lambda ctx: team_async(ctx), "trust": "operator"})
     with pytest.raises(VariableSourceRequiredError, match="managed runs are synchronous"):
         agent.run("support.triage", {"ticket": "x"})
     agent.close()

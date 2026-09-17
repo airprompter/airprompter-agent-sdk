@@ -72,15 +72,19 @@ own timeout and byte bound (64 KiB by default).
 
 In Python the SDK is synchronous by design, so `render()` *does* run a
 plain-callable source — each on a daemon thread of its own, all at once,
-under its own timeout measured from its start, the first failure ending the
-render — and holds none of the agent's locks while it does; it refuses only
+under its own timeout measured from the moment the render dispatched it,
+the first failure ending the render — and holds none of the agent's locks
+while it does; it refuses only
 a **coroutine-function** source, with the same
 `VariableSourceRequiredError` — use `await ….render_async()`, which awaits
 those and runs plain callables on a daemon thread (never the event loop's
 default executor, which `asyncio.run()` would wait for at exit). A source
 that outlives its timeout keeps its thread until it returns (a thread cannot
 be killed); the render has already failed by name, and the interpreter's
-exit is never held up by it — bound your own I/O inside the source. A source that throws, times
+exit is never held up by it — bound your own I/O inside the source. A
+coroutine source is cancelled at its deadline and the render fails at once,
+whether or not the source honours the cancellation; a value it returns late
+is never used. A source that throws, times
 out, answers more than its bound, or answers nothing for a required
 variable, or answers something other than text, is
 `VariableSourceError { tag, variable, reason }` (`threw` · `timeout` ·

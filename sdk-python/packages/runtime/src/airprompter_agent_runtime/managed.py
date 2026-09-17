@@ -215,6 +215,9 @@ class ManagedRunStream:
         return self._result
 
 
+_MANAGED_SYNC_HINT = "managed runs are synchronous; register a plain callable for it"
+
+
 class ManagedWorkflow:
     def __init__(self, agent: "ManagedAgent", tag: str, subject: Optional[str]):
         self._agent = agent
@@ -340,8 +343,12 @@ class ManagedAgent:
         # run here, and the refusal says so rather than pointing at a render_async() this client does not have.
         awaitable = [name for name in planned if (entry := self.variables.get(name)) is not None and entry.kind == "source" and entry.awaitable]
         if awaitable:
-            raise VariableSourceRequiredError(tag, awaitable, hint="managed runs are synchronous; register a plain callable for it")
-        filled = fill_sync(plan, VariableSourceContext(tag=tag, name="", subject=subject, version_id=None, arm=None), self.variables)
+            raise VariableSourceRequiredError(tag, awaitable, hint=_MANAGED_SYNC_HINT)
+        try:
+            filled = fill_sync(plan, VariableSourceContext(tag=tag, name="", subject=subject, version_id=None, arm=None), self.variables)
+        except VariableSourceRequiredError as error:
+            # A plain callable that handed back a coroutine: the same refusal, with the hint that applies here.
+            raise VariableSourceRequiredError(tag, error.names, hint=_MANAGED_SYNC_HINT) from None
         return {name: str(value) for name, value in filled.values.items() if supplied(filled.values, name)}
 
     def stream(self, tag: str, variables: Mapping[str, str], *, subject: Optional[str] = None, step_id: Optional[str] = None, idempotency_key: Optional[str] = None, max_output_tokens: Optional[int] = None, metadata: Optional[Mapping[str, str]] = None) -> ManagedRunStream:

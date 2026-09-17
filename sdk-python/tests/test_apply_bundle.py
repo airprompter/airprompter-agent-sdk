@@ -11,6 +11,7 @@ import shutil
 import tempfile
 
 import httpx
+from datetime import datetime, timezone
 import pytest
 
 from airprompter_agent.agent import AgentStartError, AirPrompterAgent
@@ -272,3 +273,68 @@ def test_pointer_first_pull_polls_the_cdn_not_the_origin():
     assert bare.status == "ok" and bare.edge.pointer_url is None
     bare_again = pull_bundle(**base, edge=bare.edge, minimum_generation=held)
     assert (bare_again.status, bare_again.via) == ("unchanged", "origin")
+
+def test_pointer_hides_nothing_for_long():
+    plane = FakeControlPlane(SCOPE)
+    plane.promote([plane.slot(tag="support.reply", text="Reply politely.", version_id="ver_1")])
+    fleet_key = generate_x25519_key_pair()
+    clock = {"ms": 1789000000000}
+    now = lambda: datetime.fromtimestamp(clock["ms"] / 1000, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")  # noqa: E731
+    inner = plane.transport()
+    mode = {"origin_fail": False, "pointer": "ok"}
+
+    class Transport(httpx.BaseTransport):
+        def handle_request(self, request):
+            url = str(request.url)
+            if url.endswith("/generation.json") and mode["pointer"] == "outage":
+                raise httpx.ConnectError("cdn unreachable")
+            if url.endswith("/generation.json") and mode["pointer"] == "garbage":
+                return httpx.Response(200, text="<html>not json</html>")
+            if "/payloads/" in url and mode["origin_fail"]:
+                raise httpx.ConnectError("origin blip")
+            return inner.handle_request(request)
+
+    client = SyncClient(base_url="https://api.test", agent_id=SCOPE["agentId"], target=SCOPE["target"], api_key=plane.api_key, transport=Transport())
+    trusted_root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=public_jwk_of(plane.root_key))
+    edge_http = httpx.Client(transport=plane.transport())
+    fetch_root = lambda: edge_http.get("https://edge.test/roots/prod/root.json").json()  # noqa: E731
+    origin_calls = lambda: sum(1 for u in plane.requests if "/manifest" in u)  # noqa: E731
+    base = dict(client=client, scope=SCOPE, trusted_root=trusted_root, fetch_root=fetch_root, now=now, distribution_public_key=fleet_key.public_raw)
+
+    first = pull_bundle(**base)
+    assert first.status == "ok" and first.edge.last_origin_at
+    edge, held = first.edge, first.generation
+
+    # 1. The pointer moves, the origin blips mid-pull: the edge handed in comes back untouched; the next pull sees the move.
+    plane.promote([plane.slot(tag="support.reply", text="Reply warmly.", version_id="ver_2")])
+    mode["origin_fail"] = True
+    blip = pull_bundle(**base, edge=edge, minimum_generation=held)
+    assert blip.status == "unavailable" and blip.edge == edge
+    mode["origin_fail"] = False
+    recovered = pull_bundle(**base, edge=blip.edge, minimum_generation=held)
+    assert recovered.status == "ok"
+    edge, held = recovered.edge, recovered.generation
+
+    # 2. A pinned pointer hides a promotion only until max_pointer_age_ms.
+    plane.pinned_pointer = held
+    plane.promote([plane.slot(tag="support.reply", text="Reply briefly.", version_id="ver_3")])
+    before = origin_calls()
+    for _ in range(5):
+        clock["ms"] += 60_000
+        r = pull_bundle(**base, edge=edge, minimum_generation=held)
+        assert (r.status, r.via) == ("unchanged", "pointer")
+        edge = r.edge
+    assert origin_calls() == before
+    clock["ms"] += 60 * 60_000 + 1
+    bounded = pull_bundle(**base, edge=edge, minimum_generation=held)
+    assert bounded.status == "ok" and bounded.generation == held + 1
+    edge, held = bounded.edge, bounded.generation
+    plane.pinned_pointer = None
+
+    # 3. A CDN outage or a pointer that is not JSON is not an answer: the origin is asked, conditionally.
+    mode["pointer"] = "outage"
+    outage = pull_bundle(**base, edge=edge, minimum_generation=held)
+    assert (outage.status, outage.via) == ("unchanged", "origin")
+    mode["pointer"] = "garbage"
+    garbage = pull_bundle(**base, edge=outage.edge, minimum_generation=held)
+    assert (garbage.status, garbage.via) == ("unchanged", "origin")

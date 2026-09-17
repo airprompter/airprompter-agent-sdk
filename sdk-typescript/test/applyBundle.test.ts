@@ -136,7 +136,7 @@ test("applyBundle under unlock_required stages and waits; unlock() makes it live
 
   const client = new SyncClient({ baseUrl: "https://api.test", agentId: scope.agentId, target: scope.target, apiKey: plane.apiKey, fetch: plane.fetch() });
   const plaintext = await pullBundle({ client, scope, trustedRoot: trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: publicJwkOf(plane.rootKey) }), now: () => new Date().toISOString(), distributionPublicKey: null });
-  assert.deepEqual(plaintext, { status: "refused", reason: "plaintext_not_allowed", edge: { pointerUrl: null, pointerEtag: null, manifestEtag: null } });
+  assert.deepEqual(plaintext, { status: "refused", reason: "plaintext_not_allowed", edge: { pointerUrl: null, pointerEtag: null, manifestEtag: null, lastOriginAt: null } });
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -334,4 +334,85 @@ test("a puller that hands its edge state back polls the CDN pointer, not the ori
   assert.equal(bare.edge.pointerUrl, null);
   const bareAgain = await pullBundle({ ...base, edge: bare.edge, minimumGeneration: held });
   assert.deepEqual([bareAgain.status, (bareAgain as { via?: string }).via], ["unchanged", "origin"]);
+});
+
+test("the pointer can hide nothing for long: an origin failure after a moved pointer keeps the old ETag; a stuck (pinned) pointer is overridden after maxPointerAgeMs; a CDN outage or a malformed pointer falls through to the origin", async () => {
+  const plane = new FakeControlPlane(scope);
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply politely.", versionId: "ver_1" })]);
+  const fleetKey = generateX25519KeyPair();
+  let clock = Date.parse("2026-09-17T10:00:00Z");
+  const now = () => new Date(clock).toISOString();
+  const fetchImpl = plane.fetch();
+  let failOrigin = false;
+  let pointerMode: "ok" | "outage" | "garbage" = "ok";
+  const fetchWith: typeof fetchImpl = async (url, init) => {
+    if (url.endsWith("/generation.json") && pointerMode === "outage") throw new Error("cdn unreachable");
+    if (url.endsWith("/generation.json") && pointerMode === "garbage") return { status: 200, headers: { get: () => null }, text: async () => "<html>not json</html>" } as unknown as Awaited<ReturnType<typeof fetchImpl>>;
+    if (url.includes("/payloads/") && failOrigin) throw new Error("origin blip");
+    return fetchImpl(url, init);
+  };
+  const client = new SyncClient({ baseUrl: "https://api.test", agentId: scope.agentId, target: scope.target, apiKey: plane.apiKey, fetch: fetchWith });
+  const trustedRoot = trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: publicJwkOf(plane.rootKey) });
+  const fetchRoot = async () => JSON.parse(await (await fetchImpl("https://edge.test/roots/prod/root.json", {})).text());
+  const base = { client, scope, trustedRoot, fetchRoot, now, distributionPublicKey: fleetKey.publicRaw };
+  const originCalls = () => plane.requests.filter((u) => u.includes("/manifest")).length;
+
+  const first = await pullBundle(base);
+  assert.equal(first.status, "ok");
+  if (first.status !== "ok") throw new Error("unreachable");
+  let edge = first.edge;
+  let held = first.generation;
+  assert.ok(edge.lastOriginAt, "the origin's answer is stamped");
+
+  // 1. The pointer moves, the origin blips mid-pull: the returned edge is the one handed in — the next pull sees the move again.
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply warmly.", versionId: "ver_2" })]);
+  failOrigin = true;
+  const blip = await pullBundle({ ...base, edge, minimumGeneration: held });
+  assert.equal(blip.status, "unavailable");
+  assert.deepEqual(blip.edge, edge, "nothing advanced past an answer the origin never confirmed");
+  failOrigin = false;
+  const recovered = await pullBundle({ ...base, edge: blip.edge, minimumGeneration: held });
+  assert.equal(recovered.status, "ok", "the promotion is seen on the very next pull, not the one after the next promotion");
+  if (recovered.status !== "ok") throw new Error("unreachable");
+  edge = recovered.edge;
+  held = recovered.generation;
+
+  // 2. A stuck pointer (pinned by a party between the fleet and the edge) hides a promotion only until maxPointerAgeMs.
+  plane.pinnedPointer = { generation: held };
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply briefly.", versionId: "ver_3" })]);
+  const before = originCalls();
+  for (let i = 0; i < 5; i += 1) {
+    clock += 60_000;
+    const r = await pullBundle({ ...base, edge, minimumGeneration: held });
+    assert.deepEqual([r.status, (r as { via?: string }).via], ["unchanged", "pointer"]);
+    edge = r.edge;
+  }
+  assert.equal(originCalls(), before, "within the bound the pinned pointer is believed");
+  clock += 60 * 60_000 + 1;
+  const bounded = await pullBundle({ ...base, edge, minimumGeneration: held });
+  assert.equal(bounded.status, "ok", "past the bound the origin is asked and the hidden promotion lands");
+  if (bounded.status !== "ok") throw new Error("unreachable");
+  assert.equal(bounded.generation, held + 1);
+  edge = bounded.edge;
+  held = bounded.generation;
+  plane.pinnedPointer = null;
+  // A shorter bound is the caller's to set.
+  clock += 10 * 60_000;
+  plane.pinnedPointer = { generation: held };
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply.", versionId: "ver_4" })]);
+  const short = await pullBundle({ ...base, edge, minimumGeneration: held, maxPointerAgeMs: 5 * 60_000 });
+  assert.equal(short.status, "ok");
+  if (short.status !== "ok") throw new Error("unreachable");
+  edge = short.edge;
+  held = short.generation;
+  plane.pinnedPointer = null;
+
+  // 3. A CDN outage, or a pointer that is not JSON, is not an answer: the origin is asked (conditionally: 304 → unchanged via origin).
+  pointerMode = "outage";
+  const outage = await pullBundle({ ...base, edge, minimumGeneration: held });
+  assert.deepEqual([outage.status, (outage as { via?: string }).via], ["unchanged", "origin"]);
+  pointerMode = "garbage";
+  const garbage = await pullBundle({ ...base, edge: outage.edge, minimumGeneration: held });
+  assert.deepEqual([garbage.status, (garbage as { via?: string }).via], ["unchanged", "origin"]);
+  pointerMode = "ok";
 });

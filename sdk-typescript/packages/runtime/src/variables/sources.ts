@@ -35,9 +35,9 @@ export interface VariableSourceContext {
   name: string;
   /** The subject the caller rendered for (sticky A/B assignment), when it gave one. */
   subject: string | undefined;
-  /** The prompt version and the experiment arm the render resolved to. */
-  versionId: string;
-  arm: string;
+  /** The prompt version and the experiment arm the render resolved to; null in managed mode, where the run route resolves them. */
+  versionId: string | null;
+  arm: string | null;
 }
 
 /** A callable source: how the application fills one variable from its own system. */
@@ -79,16 +79,25 @@ export class VariableSourceRequiredError extends Error {
   }
 }
 
-/** A source threw, timed out, answered nothing for a required variable, or answered more than its byte bound. */
+const REASON_TEXT = {
+  threw: "threw",
+  timeout: "timed out",
+  empty: "returned nothing for a required variable",
+  too_large: "returned more than its byte bound",
+  not_text: "returned something other than text",
+  unfenceable: "is end_user trust but the slot declares operator, and a hosted run cannot fence it — declare the variable end_user in AirPrompter",
+} as const;
+
+/** A source threw, timed out, answered nothing for a required variable, answered more than its byte bound or not text — or cannot be fenced where it is going. */
 export class VariableSourceError extends Error {
   readonly code = "variable_source";
   constructor(
     readonly tag: string,
     readonly variable: string,
-    readonly reason: "threw" | "timeout" | "empty" | "too_large",
+    readonly reason: "threw" | "timeout" | "empty" | "too_large" | "not_text" | "unfenceable",
     cause?: unknown,
   ) {
-    super(`render ${tag}: source for ${variable} ${reason === "threw" ? "threw" : reason === "timeout" ? "timed out" : reason === "empty" ? "returned nothing for a required variable" : "returned more than its byte bound"}`, cause === undefined ? undefined : { cause });
+    super(`render ${tag}: source for ${variable} ${REASON_TEXT[reason]}`, cause === undefined ? undefined : { cause });
     this.name = "VariableSourceError";
   }
 }
@@ -124,12 +133,19 @@ export class VariableSourceRegistry {
     return this.entries.delete(name);
   }
 
+  /** The fill's view (the value or the callable itself); an application reads `describe()`. */
   get(name: string): RegisteredSource | undefined {
     return this.entries.get(name);
   }
 
   has(name: string): boolean {
     return this.entries.has(name);
+  }
+
+  /** What is registered under a name, without the value or the callable: fit to print. */
+  describe(name: string): { kind: "literal" | "source"; trust: SlotVariable["trust"] } | undefined {
+    const entry = this.entries.get(name);
+    return entry ? { kind: entry.kind, trust: entry.trust } : undefined;
   }
 
   /** The variable names this application can fill — content-free, fit for a log line or a heartbeat. */

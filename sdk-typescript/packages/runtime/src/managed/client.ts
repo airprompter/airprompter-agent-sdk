@@ -9,13 +9,17 @@
  * honouring `Retry-After`. Every run streams under the hood — the run route
  * sits behind an edge that closes a silent connection at 60 s, and a JSON
  * run is silent until the model finishes — and `run()` assembles the `done`
- * frame for callers who did not ask to stream.
+ * frame for callers who did not ask to stream. Variable sources the
+ * application registered (`start({ variables })`) fill required declared
+ * variables here, before the POST — the hosted route has no way into your
+ * systems; this process does.
  */
 
 import type { SlotInference, SlotVariable } from "@airprompter/agent-core";
 import { createHash } from "node:crypto";
 import { VariableSourceRegistry, type VariableSourceInput } from "../variables/sources.js";
-import { fillAsync, planFill, uncovered, type RenderValues } from "../variables/fill.js";
+import { fillAsync, planFill, stricterSources, supplied, unsourced, type RenderValues } from "../variables/fill.js";
+import { VariableSourceError } from "../variables/sources.js";
 import { errorNamed } from "@airprompter/agent-core";
 
 import { subjectHash as saltedSubjectHash } from "@airprompter/agent-core";
@@ -310,29 +314,33 @@ export class ManagedAgent {
   needs(tag: string, values: RenderValues = {}): string[] {
     const slot = this.catalogue.slots.find((s) => s.tag === tag);
     if (!slot) throw new Error(`no slot ${tag} in the catalogue`);
-    return uncovered({ variables: slot.variables as readonly SlotVariable[], text: null, values, registry: this.variables });
+    return unsourced({ variables: slot.variables as readonly SlotVariable[], values, registry: this.variables });
   }
 
   /**
    * The values a run posts: the call site's, then the application's sources for required declared variables it left
-   * unfilled. Trust cannot be tightened here — the hosted run fences by the slot's declaration, and a source stricter
-   * than it is refused rather than sent raw (`variable_source_trust_stricter` is not a hosted-mode outcome).
+   * unfilled. Trust cannot be tightened here — the hosted run fences by the slot's declaration — so a source stricter
+   * than the declaration is refused BEFORE any lookup (`VariableSourceError`, reason `unfenceable`), never sent raw.
+   * The catalogue types trust as a string; anything but `end_user` counts as the looser declaration, which is the
+   * safe direction. An aborted run is not filled.
    */
-  private async fillForRun(tag: string, values: Record<string, string>, subject: string | undefined): Promise<Record<string, string>> {
+  private async fillForRun(tag: string, values: Record<string, string>, subject: string | undefined, signal: AbortSignal | undefined): Promise<Record<string, string>> {
     const slot = this.catalogue.slots.find((s) => s.tag === tag);
     if (!slot || this.variables.names().length === 0) return values;
-    const plan = planFill({ tag, variables: slot.variables as readonly SlotVariable[], text: null, values, registry: this.variables });
+    const declared = slot.variables as readonly SlotVariable[];
+    const unfenceable = stricterSources(declared, this.variables).filter((name) => !supplied(values, name));
+    if (unfenceable.length > 0) throw new VariableSourceError(tag, unfenceable[0]!, "unfenceable");
+    const plan = planFill({ tag, variables: declared, text: null, values, registry: this.variables });
     if (plan.literal.length === 0 && plan.async.length === 0) return values;
-    const filled = await fillAsync(plan, { tag, subject, versionId: "hosted", arm: "none" }, this.variables);
-    const stricter = filled.filled.filter((entry) => entry.stricter).map((entry) => entry.name);
-    if (stricter.length > 0) throw new Error(`run ${tag}: ${stricter.join(", ")} come from an end_user source but the slot declares operator trust; a hosted run cannot fence them — declare the variable end_user in AirPrompter`);
-    return Object.fromEntries(Object.entries(filled.values).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)]));
+    if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("run aborted");
+    const filled = await fillAsync(plan, { tag, subject, versionId: null, arm: null }, this.variables);
+    return Object.fromEntries(Object.entries(filled.values).filter(([name]) => supplied(filled.values, name)).map(([k, v]) => [k, String(v)]));
   }
 
   /** The run as SSE: iterate the deltas, await `result`. */
   async stream(tag: string, variables: Record<string, string>, options: ManagedRunOptions = {}): Promise<ManagedRunStream> {
     const subjectHash = this.subjectHashFor(options.subject, tag);
-    const filledVariables = await this.fillForRun(tag, variables, options.subject);
+    const filledVariables = await this.fillForRun(tag, variables, options.subject, options.signal);
     const body = JSON.stringify({
       tag,
       variables: filledVariables,

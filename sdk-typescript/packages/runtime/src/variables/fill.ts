@@ -5,8 +5,8 @@
  * the registry of sources. The precedence is fixed and visible: a call-site value always wins (the caller knows
  * more than a source); a source is consulted only for a declared variable the render actually needs — required,
  * or present in the text — and only when the call site did not pass it; what is still missing is the render's
- * problem, and `renderTemplate` says so loudly. Trust comes out stricter than it went in: the effective declaration
- * a render uses is the prompt's, tightened to `end_user` wherever the source that filled it said so.
+ * problem, and `renderTemplate` says so loudly. Trust comes out stricter than it went in: a value a source of
+ * `end_user` trust filled is named in `fenced`, and the resolver renders it fenced whatever the prompt declared.
  *
  * @example
  * ```ts
@@ -15,12 +15,12 @@
  * // plan.async    — names a callable source must fill (renderAsync)
  * // plan.missing  — required names nobody fills: the render will throw MissingVariableError
  * const filled = await fillAsync(plan, { tag, subject, versionId, arm }, registry);
- * renderTemplate({ tag, text, variables: filled.variables, values: filled.values });
+ * resolver.render(resolved, filled.values, { fenced: filled.fenced, text });
  * ```
  */
 
 import { placeholdersOf, type SlotVariable } from "@airprompter/agent-core";
-import { VariableSourceError, VariableSourceRequiredError, isVariableSourceError, type VariableSourceContext, type VariableSourceRegistry } from "./sources.js";
+import { VariableSourceError, VariableSourceRequiredError, isVariableSourceError, type RegisteredSource, type VariableSourceContext, type VariableSourceRegistry } from "./sources.js";
 
 export type RenderValues = Readonly<Record<string, string | number | boolean | null | undefined>>;
 
@@ -40,13 +40,14 @@ export interface FillPlan {
 export interface FilledRender {
   /** The call site's values plus every filled one; a literal or a source never overrides a caller. */
   values: RenderValues;
-  /** The slot's declarations, tightened to `end_user` where the filling source said so. */
-  variables: readonly SlotVariable[];
+  /** Names whose value came from an `end_user` source though the prompt declared `operator`: the resolver fences them. */
+  fenced: ReadonlySet<string>;
   /** Variables a source filled and, for each, whether the source's trust was stricter than the prompt's. */
   filled: Array<{ name: string; from: "literal" | "source"; stricter: boolean }>;
 }
 
-const supplied = (values: RenderValues, name: string): boolean => values[name] !== undefined && values[name] !== null;
+/** A value the call site did pass: `undefined` and `null` are "not passed", everything else is a value. */
+export const supplied = (values: RenderValues, name: string): boolean => values[name] !== undefined && values[name] !== null;
 
 /**
  * Which declared variables a render must fill from a source: required ones, and any the text uses — never one the
@@ -72,39 +73,49 @@ export function planFill(input: { tag: string; variables: readonly SlotVariable[
   return { tag: input.tag, variables: input.variables, values: input.values, literal, async, missing };
 }
 
-/** The effective declarations: the prompt's, with `end_user` wherever the filling source is stricter. */
-function tighten(variables: readonly SlotVariable[], stricterNames: ReadonlySet<string>): readonly SlotVariable[] {
-  if (stricterNames.size === 0) return variables;
-  return variables.map((variable) => (stricterNames.has(variable.name) && variable.trust !== "end_user" ? { ...variable, trust: "end_user" as const } : variable));
+/**
+ * The declared variables whose registered source is stricter than the declaration (`end_user` over `operator`).
+ * Decidable before any lookup — a hosted run, which cannot fence, refuses these at plan time instead of after
+ * calling the customer's system.
+ */
+export function stricterSources(variables: readonly SlotVariable[], registry: VariableSourceRegistry): string[] {
+  return variables.filter((variable) => variable.trust !== "end_user" && registry.get(variable.name)?.trust === "end_user").map((variable) => variable.name);
 }
 
-/** Literals only — the synchronous path. A plan with callable sources refuses here; that is what `renderAsync` is for. */
+/**
+ * Literals only — the synchronous path. A plan with callable sources refuses here; that is what `renderAsync` is
+ * for. The registry is re-read at fill time: a source registered since the plan is refused the same way, so a
+ * revoke-and-provide between the two never turns into a quiet MissingVariableError.
+ */
 export function fillSync(plan: FillPlan, registry: VariableSourceRegistry): FilledRender {
-  if (plan.async.length > 0) throw new VariableSourceRequiredError(plan.tag, plan.async);
   const values: Record<string, RenderValues[string]> = { ...plan.values };
   const filled: FilledRender["filled"] = [];
+  const nowAsync = [...plan.async];
   for (const name of plan.literal) {
     const entry = registry.get(name);
+    if (entry?.kind === "source") nowAsync.push(name);
     if (entry?.kind !== "literal") continue; // revoked between plan and fill: the render decides (missing or optional)
     values[name] = entry.value;
     filled.push({ name, from: "literal", stricter: false });
   }
-  return { values, variables: plan.variables, filled };
+  if (nowAsync.length > 0) throw new VariableSourceRequiredError(plan.tag, nowAsync);
+  return { values, fenced: new Set(), filled };
 }
 
 /** Literals and callable sources — every source runs concurrently, each under its own timeout and byte bound. */
 export async function fillAsync(plan: FillPlan, context: Omit<VariableSourceContext, "name">, registry: VariableSourceRegistry): Promise<FilledRender> {
-  const base = fillSync({ ...plan, async: [] }, registry);
-  const values: Record<string, RenderValues[string]> = { ...base.values };
-  const filled = [...base.filled];
-  const stricter = new Set<string>();
+  const values: Record<string, RenderValues[string]> = { ...plan.values };
+  const filled: FilledRender["filled"] = [];
+  const fenced = new Set<string>();
   const byName = new Map(plan.variables.map((variable) => [variable.name, variable]));
+  // Everything the plan named, re-read now: a literal that became a source is looked up; a source that became a
+  // literal is used as one; anything revoked is left to the render.
   const results = await Promise.all(
-    plan.async.map(async (name) => {
+    [...plan.literal, ...plan.async].map(async (name) => {
       const entry = registry.get(name);
-      if (entry?.kind !== "source") return { name, value: undefined as string | undefined };
-      const value = await resolveOne(plan.tag, name, entry, { ...context, name });
-      return { name, value, trust: entry.trust };
+      if (!entry) return { name, value: undefined as string | undefined, from: "source" as const, trust: "operator" as const };
+      if (entry.kind === "literal") return { name, value: entry.value, from: "literal" as const, trust: entry.trust };
+      return { name, value: await resolveOne(plan.tag, name, entry, { ...context, name }), from: "source" as const, trust: entry.trust };
     }),
   );
   for (const result of results) {
@@ -114,15 +125,18 @@ export async function fillAsync(plan: FillPlan, context: Omit<VariableSourceCont
       continue; // optional and unanswered: the render leaves it empty, as a call site would have
     }
     values[result.name] = result.value;
-    const isStricter = result.trust === "end_user" && variable?.trust !== "end_user";
-    if (isStricter) stricter.add(result.name);
-    filled.push({ name: result.name, from: "source", stricter: isStricter });
+    const stricter = result.trust === "end_user" && variable?.trust !== "end_user";
+    if (stricter) fenced.add(result.name);
+    filled.push({ name: result.name, from: result.from, stricter });
   }
-  return { values, variables: tighten(plan.variables, stricter), filled };
+  return { values, fenced, filled };
 }
 
-/** One lookup: bounded in time and size; a throw, a timeout or an oversize answer is the render's failure, named. */
-async function resolveOne(tag: string, name: string, entry: Extract<ReturnType<VariableSourceRegistry["get"]>, { kind: "source" }>, context: VariableSourceContext): Promise<string | undefined> {
+/**
+ * One lookup: bounded in time and size, text only. A throw, a timeout, an oversize answer or a value that is not a
+ * string is the render's failure, named — `[object Object]` never reaches a prompt.
+ */
+async function resolveOne(tag: string, name: string, entry: Extract<RegisteredSource, { kind: "source" }>, context: VariableSourceContext): Promise<string | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new VariableSourceError(tag, name, "timeout")), entry.timeoutMs);
@@ -130,9 +144,9 @@ async function resolveOne(tag: string, name: string, entry: Extract<ReturnType<V
   try {
     const value = await Promise.race([entry.source.resolve(context), timeout]);
     if (value === undefined || value === null) return undefined;
-    const text = String(value);
-    if (Buffer.byteLength(text, "utf8") > entry.maxBytes) throw new VariableSourceError(tag, name, "too_large");
-    return text;
+    if (typeof value !== "string") throw new VariableSourceError(tag, name, "not_text");
+    if (Buffer.byteLength(value, "utf8") > entry.maxBytes) throw new VariableSourceError(tag, name, "too_large");
+    return value;
   } catch (error) {
     if (isVariableSourceError(error)) throw error;
     throw new VariableSourceError(tag, name, "threw", error);
@@ -142,9 +156,10 @@ async function resolveOne(tag: string, name: string, entry: Extract<ReturnType<V
 }
 
 /**
- * The names a render would still have to fill after the call site's values and the registered sources — what an
- * application checks at start-up so an uncoverable version fails there, not on the first customer request.
+ * The required names a render would still lack after these values and the registered sources — what a call site
+ * checks at start-up so an uncoverable version fails there, not on the first customer request. Only declarations
+ * matter here (a required variable is needed whether or not the text uses it), so no payload is read.
  */
-export function uncovered(input: { variables: readonly SlotVariable[]; text: string | null; values: RenderValues; registry: VariableSourceRegistry }): string[] {
-  return planFill({ tag: "", ...input }).missing;
+export function unsourced(input: { variables: readonly SlotVariable[]; values: RenderValues; registry: VariableSourceRegistry }): string[] {
+  return input.variables.filter((variable) => variable.required && !supplied(input.values, variable.name) && !input.registry.has(variable.name)).map((variable) => variable.name);
 }

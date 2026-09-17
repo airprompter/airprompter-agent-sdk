@@ -6,7 +6,9 @@
  * when nothing verifies); sync runs in the background per mode. `prompt(tag)`
  * renders with trust-aware variables and hands back a content-free `runRef`;
  * `workflow(tag)` yields steps in order; `report()` and `feedback()` feed the
- * spool. Zero network on the render path, ever.
+ * spool. The render path never reaches AirPrompter; the only network it can
+ * touch is the application's own — a variable source it registered
+ * (`renderAsync`, `docs/variables.md`), never on the synchronous `render()`.
  */
 
 import { createHmac, randomBytes } from "node:crypto";
@@ -28,7 +30,7 @@ import { requiredModelsMissing } from "@airprompter/agent-sync";
 import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "@airprompter/agent-sync";
 import { observeCall, type ObserveOptions } from "@airprompter/agent-runtime";
 import { ReleaseResolver, disabledFrom, type Rendered } from "@airprompter/agent-runtime";
-import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, uncovered, type RenderValues, type VariableSourceInput } from "@airprompter/agent-runtime";
+import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, unsourced, type FillPlan, type FilledRender, type RenderValues, type VariableSourceInput } from "@airprompter/agent-runtime";
 import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "@airprompter/agent-runtime";
 import { wrapClient, type WrapHooks } from "@airprompter/agent-runtime";
 import { aiSdkMiddleware, type AiSdkMiddleware, type AiSdkMiddlewareOptions } from "@airprompter/agent-runtime";
@@ -41,7 +43,7 @@ import { SyncClient, type FetchLike } from "@airprompter/agent-core";
 import { DaemonClient, DaemonError, daemonSocketPath } from "@airprompter/agent-sync";
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "@airprompter/agent-sync";
 
-import { PROTOCOL_VERSION, SDK_VERSION, renderTemplate } from "@airprompter/agent-core";
+import { PROTOCOL_VERSION, SDK_VERSION } from "@airprompter/agent-core";
 
 export const SDK_NAME = "agent-sdk-ts";
 /** This package's version and the protocol it speaks (`protocol/version.ts`); the heartbeat names both, store.json records the first (S8). */
@@ -434,6 +436,7 @@ export class AirPrompterAgent {
   private readonly renders = new RenderRegistry();
   /** The application's variable sources (`start({ variables })`, `ap.variables.provide()`). */
   readonly variables: VariableSourceRegistry;
+  /** Slot × variable pairs whose stricter-trust line was logged; bounded by declared names, never cleared. */
   private readonly stricterSaid = new Set<string>();
   readonly spool: SpoolWriter;
   private readonly sink: SpoolSink;
@@ -1520,64 +1523,79 @@ export class AirPrompterAgent {
 
   prompt(tag: string, options: { subject?: string } = {}) {
     // Every path captures the resolver and the resolved slot FIRST: a release that activates while a source is being
-    // awaited must not mix generation N+1's text with generation N's run reference.
-    const register = (rendered: Rendered) => {
+    // awaited must not mix generation N+1's text with generation N's run reference. The payload is decoded once here
+    // and handed to the resolver's render.
+    const prepare = (values: RenderValues) => {
+      const resolver = this.resolver();
+      const resolved = this.resolveSlot(tag, options.subject);
+      const text = resolver.textOf(resolved.slot);
+      const plan = planFill({ tag, variables: resolved.slot.variables, text, values, registry: this.variables });
+      return { resolver, resolved, text, plan };
+    };
+    const finish = (prepared: ReturnType<typeof prepare>, filled: FilledRender): Rendered => {
+      const rendered = this.renderObserved(() => prepared.resolver.render(prepared.resolved, filled.values, { fenced: filled.fenced, text: prepared.text }), { tag, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model });
       this.renders.register(rendered.text, { tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
+      this.sayStricter(tag, prepared.resolved.slot, filled);
       return rendered;
     };
     /** Synchronous: the call site's values and literal sources. A callable source in the way is `VariableSourceRequiredError`. */
     const render = (values: RenderValues = {}): Rendered => {
-      const resolver = this.resolver();
-      const resolved = this.resolveSlot(tag, options.subject);
-      const plan = planFill({ tag, variables: resolved.slot.variables, text: resolver.textOf(resolved.slot), values, registry: this.variables });
-      const filled = fillSync(plan, this.variables);
-      return register(this.renderFilled(resolver, resolved, filled.values, filled.variables, tag));
+      const prepared = prepare(values);
+      return finish(prepared, fillSync(prepared.plan, this.variables));
     };
     /** The same render, with callable sources awaited (each under its own timeout), values fenced by the stricter trust. */
     const renderAsync = async (values: RenderValues = {}): Promise<Rendered> => {
-      const resolver = this.resolver();
-      const resolved = this.resolveSlot(tag, options.subject);
-      const plan = planFill({ tag, variables: resolved.slot.variables, text: resolver.textOf(resolved.slot), values, registry: this.variables });
-      const filled = await this.fillWithSources(plan, { tag, subject: options.subject, versionId: resolved.slot.versionId, arm: resolved.arm }, resolved.slot);
-      return register(this.renderFilled(resolver, resolved, filled.values, filled.variables, tag));
+      const prepared = prepare(values);
+      const filled = await this.fillObserved(prepared.plan, { tag, subject: options.subject, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm }, { tag, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model });
+      return finish(prepared, filled);
     };
     /** The required names a render would still lack after these values and the registered sources — check it at start-up. */
-    const needs = (values: RenderValues = {}): string[] => {
-      const resolver = this.resolver();
-      const resolved = this.resolveSlot(tag, options.subject);
-      return uncovered({ variables: resolved.slot.variables, text: resolver.textOf(resolved.slot), values, registry: this.variables });
-    };
+    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: this.resolveSlot(tag, options.subject).slot.variables, values, registry: this.variables });
     return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, options.subject).slot.variables };
   }
 
-  /** Render with the effective declarations; a `MissingVariableError` is also one content-free error row, so the board sees a version this host cannot render. */
-  private renderFilled(resolver: ReleaseResolver, resolved: { slot: ManifestSlot; arm: string; bucket: number | null }, values: RenderValues, variables: readonly SlotVariable[], tag: string): Rendered {
+  /**
+   * A render, observed: a `MissingVariableError` is also one content-free error row (`render_missing_variable`),
+   * so the board sees a version this host cannot render. The row names the slot, never a step (a step id is not a
+   * spool tag) and never a variable.
+   */
+  private renderObserved<T>(render: () => T, row: { tag: string; versionId: string; arm: string; model: string }): T {
     try {
-      return resolver.render(resolved, values, { variables });
+      return render();
     } catch (error) {
-      if (errorNamed(error, "MissingVariableError")) this.spool.observe({ tag, versionId: resolved.slot.versionId, arm: resolved.arm, model: resolved.slot.model, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
+      if (errorNamed(error, "MissingVariableError")) this.spool.observe({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
       throw error;
     }
   }
 
-  /** Sources run here; the outcome is logged by name only, and a source stricter than the prompt's declaration is said once per slot and name. */
-  private async fillWithSources(plan: ReturnType<typeof planFill>, context: { tag: string; subject: string | undefined; versionId: string; arm: string }, slot: ManifestSlot) {
+  /**
+   * Sources run here. A failure is logged by name and reason only and counted as the same error row as a missing
+   * variable — the window schema has no class for "a source failed" (a protocol 0.3.4 note), and to the board the
+   * outcome is the same: this host could not render the version.
+   */
+  private async fillObserved(plan: FillPlan, context: { tag: string; subject: string | undefined; versionId: string; arm: string }, row: { tag: string; versionId: string; arm: string; model: string }): Promise<FilledRender> {
     try {
-      const filled = await fillAsync(plan, context, this.variables);
-      for (const entry of filled.filled) {
-        if (entry.stricter && !this.stricterSaid.has(`${context.tag}\u0000${entry.name}`)) {
-          this.stricterSaid.add(`${context.tag}\u0000${entry.name}`);
-          this.log({ event: "variable_source_trust_stricter", tag: context.tag, name: entry.name, declared: slot.variables.find((v) => v.name === entry.name)?.trust ?? null });
-        }
-      }
-      return filled;
+      return await fillAsync(plan, context, this.variables);
     } catch (error) {
       if (isVariableSourceError(error)) {
-        const failed = error;
-        this.log({ event: "variable_source_failed", tag: context.tag, name: failed.variable, reason: failed.reason });
-        this.spool.observe({ tag: context.tag, versionId: context.versionId, arm: context.arm, model: slot.model, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
+        this.log({ event: "variable_source_failed", tag: context.tag, name: error.variable, reason: error.reason });
+        this.spool.observe({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
       }
       throw error;
+    }
+  }
+
+  /**
+   * A source stricter than the prompt's declaration is said once per slot and name for the life of the process —
+   * bounded by declared names; a declaration that later loosens again is not said a second time, by design.
+   */
+  private sayStricter(tag: string, slot: ManifestSlot, filled: FilledRender): void {
+    for (const entry of filled.filled) {
+      if (!entry.stricter) continue;
+      const key = `${tag}\u0000${entry.name}`;
+      if (this.stricterSaid.has(key)) continue;
+      this.stricterSaid.add(key);
+      this.log({ event: "variable_source_trust_stricter", tag, name: entry.name, declared: slot.variables.find((v) => v.name === entry.name)?.trust ?? null });
     }
   }
 
@@ -1587,16 +1605,21 @@ export class AirPrompterAgent {
     const workflow = this.resolver().workflow(resolved);
     for (const step of workflow.steps) this.renders.register(step.text, { tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
     /**
-     * A step's text with its variables filled — the workflow's declarations, the same precedence as a prompt, each
-     * step scanned on its own (a source is called for step 3 and not for step 1 when only step 3 uses it).
+     * A step's text with its variables filled — the workflow's declarations, the same precedence and the same
+     * fencing as a prompt (the resolver renders both), each step scanned on its own: a source is called for step 3
+     * and not for step 1 when only step 3 uses it. A source sees the step id as its tag; the error row, when there
+     * is one, names the workflow slot.
      */
+    const resolver = this.resolver();
+    const row = { tag, versionId: resolved.slot.versionId, arm: workflow.arm, model: workflow.model };
     const renderStepAsync = async (stepId: string, values: RenderValues = {}): Promise<string> => {
       const step = workflow.steps.find((entry) => entry.stepId === stepId);
       if (!step) throw new Error(`no step ${stepId} on ${tag}`);
       const plan = planFill({ tag: step.stepId, variables: resolved.slot.variables, text: step.text, values, registry: this.variables });
-      const filled = await this.fillWithSources(plan, { tag: step.stepId, subject: options.subject, versionId: step.versionId, arm: workflow.arm }, resolved.slot);
-      const text = renderTemplate({ tag: step.stepId, text: step.text, variables: filled.variables, values: filled.values, ...(this.options.delimiters ? { delimiters: this.options.delimiters } : {}) });
+      const filled = await this.fillObserved(plan, { tag: step.stepId, subject: options.subject, versionId: step.versionId, arm: workflow.arm }, row);
+      const text = this.renderObserved(() => resolver.renderText({ tag: step.stepId, text: step.text, variables: resolved.slot.variables, values: filled.values, fenced: filled.fenced }), row);
       this.renders.register(text, { tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
+      this.sayStricter(step.stepId, resolved.slot, filled);
       return text;
     };
     return { ...workflow, renderStepAsync };
@@ -1805,23 +1828,17 @@ export class AirPrompterAgent {
 
   /**
    * Per slot and arm of the active release: the required variables neither a literal nor a source fills, so the
-   * call site must. Computed over the slot's own text and every arm override for its tag, since a subject may land
-   * on any arm.
+   * call site must. Declarations only — a required variable is needed whether or not the text uses it — so no
+   * payload is read; `status()` stays cheap for a probe. Every arm override for a tag counts, since a subject may
+   * land on any arm.
    */
   private variablesStatus(): AgentStatus["variables"] {
     const sources = this.variables.names();
     const payload = this.active?.manifest.payload;
     if (!payload) return { sources, unsourced: [] };
-    const resolver = this.resolver();
     const seen = new Map<string, { tag: string; arm: string; names: string[] }>();
     const consider = (slot: ManifestSlot, arm: string) => {
-      let text: string | null = null;
-      try {
-        text = slot.kind === "prompt" ? resolver.textOf(slot) : null;
-      } catch {
-        text = null;
-      }
-      const names = uncovered({ variables: slot.variables, text, values: {}, registry: this.variables });
+      const names = unsourced({ variables: slot.variables, values: {}, registry: this.variables });
       if (names.length > 0) seen.set(`${slot.tag}\u0000${arm}`, { tag: slot.tag, arm, names });
     };
     for (const slot of payload.slots) consider(slot, "none");

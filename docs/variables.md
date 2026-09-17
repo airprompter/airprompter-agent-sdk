@@ -3,11 +3,11 @@
 A prompt's text carries `{{name}}` placeholders; the slot declares each one
 (`name`, `required`, `trust`). Until now every value came from the call
 site, so adding `{{customer_tier}}` to a version meant changing application
-code before that version could be promoted. **Variable sources** (SDKs
-0.2.10+) let the application say once how a value is found in its own
-system; every version that uses the variable is then filled at render time
-with no change where the prompt is rendered — and a version that does not
-use it never causes the lookup.
+code before that version could be promoted. **Variable sources** (TypeScript
+0.2.10; Python 0.2.11) let the application say once how a value is found in
+its own system; every version that uses the variable is then filled at
+render time with no change where the prompt is rendered — and a version
+that does not use it never causes the lookup.
 
 ## Registering a source
 
@@ -28,9 +28,8 @@ ap.variables.provide("region", process.env.REGION!);            // later is fine
 ap.variables.revoke("region");
 ```
 
-```python
-ap = AirPrompterAgent.start(..., variables={"brand": "Acme", "customer_tier": VariableSource(resolve=tier_of, trust="operator")})
-```
+Python: the same shape lands in `airprompter-agent` 0.2.11 (this page is
+updated with it).
 
 The context a source receives — `{ tag, name, subject, versionId, arm }` —
 is content-free: never the prompt text, never other values. A source that
@@ -45,18 +44,25 @@ this order, and stop at the first that answers:
 2. **a registered source** — consulted only for a declared variable that is
    *required or present in the text* and that the call site did not pass;
 3. **nothing** — a required variable is then `MissingVariableError` (the
-   render refuses; that is your bug, not an empty string in a prompt).
+   render refuses; that is your bug, not an empty string in a prompt). An
+   **optional** variable nobody fills renders empty, exactly as it did when
+   the call site left it out — so declare a variable required in AirPrompter
+   when the prompt cannot do without it, and `needs()` will name it.
 
 `render()` is synchronous and uses literals only; if a callable source
 would be needed it throws `VariableSourceRequiredError` naming the
 variables — use `renderAsync()`. Sources run concurrently, each under its
 own timeout and byte bound (64 KiB by default). A source that throws, times
 out, answers more than its bound, or answers nothing for a required
-variable is `VariableSourceError { tag, variable, reason }`. The runtime
-logs `variable_source_failed { tag, name, reason }` — the name, never the
-value or the cause's text — and writes one content-free error row
-(`render_missing_variable`) so the board shows a version this host cannot
-render.
+variable, or answers something other than text, is
+`VariableSourceError { tag, variable, reason }` (`threw` · `timeout` ·
+`too_large` · `empty` · `not_text`). The runtime logs
+`variable_source_failed { tag, name, reason }` — the name, never the value
+or the cause's text — and writes one content-free error row. That row is
+the same `render_missing_variable` class a missing call-site value gets
+(the window schema has no class for "a source failed" yet), so on the
+board a source outage and a missing variable read alike: this host could
+not render the version.
 
 The slot is resolved **before** a source is awaited: a release that
 activates while a lookup is in flight does not mix the new generation's
@@ -88,9 +94,9 @@ ap.status().variables;   // { sources: [...names], unsourced: [{ tag, arm, names
 `needs(values)` takes the values your call site will pass and returns what
 would still be missing; run it at start-up for every slot you render.
 `status().variables.unsourced` is the same answer per slot without knowing
-your call site — every required name no source fills — across the slot's
-text and every experiment arm's override, since a subject may land on any
-arm. Names only, never values.
+your call site — every required name no source fills — for the slot and
+for every experiment arm's override, since a subject may land on any arm.
+Declarations only, no payload read. Names only, never values.
 
 ## Workflows, managed mode, golden sets
 
@@ -101,9 +107,11 @@ arm. Names only, never values.
 - **Managed mode** (`ManagedAgent`, the hosted `/run` route) runs in your process, so `ManagedAgent.start({ variables })`
   fills required declared variables before the run is posted, and `agent.needs(tag, values)` answers the same
   question. The catalogue names declarations, not text, so "used in the text" cannot be known there: required ones are
-  filled, optional ones are not. A hosted run fences by the slot's declaration alone, so an `end_user` source for a
-  variable the slot declares `operator` is refused rather than sent raw — declare the variable `end_user` in
-  AirPrompter. The provider-compatible endpoints have no process of yours in the path: call-site values only.
+  filled, optional ones are not; the context a source sees carries `versionId: null` and `arm: null` (the run route
+  resolves them). A hosted run fences by the slot's declaration alone, so an `end_user` source for a variable the slot
+  declares `operator` is refused before any lookup (`VariableSourceError`, reason `unfenceable`) rather than sent raw —
+  declare the variable `end_user` in AirPrompter, or pass the value from the call site. The provider-compatible
+  endpoints have no process of yours in the path: call-site values only.
 - **Golden sets** run before activation, possibly in the CLI, and must be deterministic: they never consult sources.
   A golden case carries every value it needs.
 - **Fleet runtimes and vendored bundles**: sources are in-process registration and do not care where the release came

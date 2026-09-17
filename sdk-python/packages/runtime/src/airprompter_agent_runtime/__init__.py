@@ -2,7 +2,16 @@
 walked on this host's clock, a retreat honoured), the rendered text with its run reference, the provider wrappers that
 attribute a model call to a render and classify what came back, and the hosted-execution client. Consumes a
 ``LoadedRelease`` from ``airprompter_agent_core`` — the slot store, a daemon or a bundle the customer loaded — and
-never imports the sync or the telemetry package (S10)."""
+never imports the sync or the telemetry package (S10).
+
+Example::
+
+    from airprompter_agent_runtime import ReleaseResolver, Rendered
+
+    resolver = ReleaseResolver(release=reader.current(), run_ref_key=key, agent_id="agt_1", target="prod", instance_id="host-1", now_ms=now_ms)
+    outcome = resolver.resolve("support.reply", subject="user-42")                  # ok with the slot and arm, or a refusal as data
+    rendered: Rendered = resolver.render(outcome.slot, {"customer_name": "Ada"})   # .text, .model, .run_ref
+"""
 
 from .attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from .inference import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of

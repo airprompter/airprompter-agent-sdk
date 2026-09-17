@@ -15,6 +15,18 @@
  * finish-reason shape those versions produce (flat `inputTokens` numbers,
  * or `{ total, noCache, cacheRead }` objects; a finish reason string, or
  * `{ unified }`). Pass `{ version }` to stamp exactly one.
+ *
+ * @example
+ * ```ts
+ * const model = wrapLanguageModel({ model: openai("gpt-5"), middleware: ap.aiSdkMiddleware() }); // the facade supplies the hooks
+ * // Or over the hooks directly, with no facade:
+ * const middleware = aiSdkMiddleware({
+ *   attribute: (params) => currentAttribution() ?? registry.match(requestTexts(params)),
+ *   observe: (target, call, options) => observeCall(target, call, record, options),
+ *   log: (event) => console.log(event),
+ * });
+ * const { text } = await generateText({ model, prompt: [{ role: "system", content: r.text }, { role: "user", content: userMessage }] });
+ * ```
  */
 
 import type { ObserveOptions, ObserveTarget } from "../observe.js";

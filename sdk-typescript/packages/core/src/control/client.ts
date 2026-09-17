@@ -3,6 +3,16 @@
  * the edge pointer (no key), the manifest (ETag / 304), and payloads by
  * content hash (inline or a presigned redirect, which `fetch` follows).
  * Nothing here decides anything; the trust chain runs on what comes back.
+ *
+ * @example
+ * ```ts
+ * const client = new SyncClient({ baseUrl: "https://api.airprompter.com", agentId, target: "prod", apiKey: process.env.AIRPROMPTER_AGENT_KEY! });
+ * const fetched = await client.manifest({ ifNoneMatch: lastEtag }); // a 304 comes back as { status: "not_modified" }
+ * if (fetched.status === "ok") {
+ *   const envelope = verifyManifest({ manifest: fetched.manifest, root, now, scope, storedGeneration, payloads: null });
+ *   // then client.payload(contentHash) for every hash the manifest references, and verifyManifest again with the bytes
+ * }
+ * ```
  */
 
 import type { EdgePointer, Manifest } from "../protocol/types.js";

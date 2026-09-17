@@ -1500,7 +1500,9 @@ class AirPrompterAgent:
         return {"generation": generation}
 
     def rollback(self) -> dict[str, Any]:
-        """Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence. Host-wide when attached to a daemon."""
+        """Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence.
+        Host-wide when attached to a daemon. Raises ``StoreError`` ``release_staged`` while a release is staged (a rollback is
+        never a quiet unlock) and ``no_previous_release`` when this host has held one release only."""
         daemon = self._daemon
         if daemon is not None:
             result = daemon.request("rollback")

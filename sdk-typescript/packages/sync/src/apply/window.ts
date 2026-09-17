@@ -11,6 +11,13 @@
  * time that never happens on a spring-forward night lands where the
  * zone's clock is when that minute would have been. A window whose end
  * precedes its start runs past midnight and belongs to the day it starts on.
+ *
+ * @example
+ * ```ts
+ * const window = parseWindow("22:00-04:00 America/New_York sat,sun"); // opens Saturday and Sunday nights, runs past midnight
+ * const state = windowState(window, Date.now());
+ * if (!state.open) schedule(state.opensAtMs); // the next opening's start, in epoch ms
+ * ```
  */
 
 export type WindowDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
@@ -101,6 +108,7 @@ export function windowState(window: UpdateWindow, nowMs: number): WindowState {
   const wraps = end <= start;
   const today = wallClock(nowMs, window.timezone);
   const openings: Array<{ opensAtMs: number; closesAtMs: number }> = [];
+  // Yesterday's opening can still be open (a window past midnight); eight days ahead reaches the next opening under any `days` filter.
   for (let offset = -1; offset <= 8; offset += 1) {
     const dayMs = zonedToUtc({ year: today.year, month: today.month, day: today.day, hour: 12, minute: 0 }, window.timezone) + offset * 86_400_000;
     const date = wallClock(dayMs, window.timezone);

@@ -3,6 +3,12 @@
  * staged generation, lease, storage protection, spool depth, last upload.
  * Reads only; the store's own verification runs on the active slot so a
  * corrupted host shows as such here before a runtime finds out.
+ *
+ * @example
+ * ```sh
+ * airprompter status --agent agt_… --environment prod
+ * airprompter status --agent agt_… --environment prod --state-dir /var/lib/airprompter --json
+ * ```
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";

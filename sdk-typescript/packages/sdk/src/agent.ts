@@ -9,12 +9,25 @@
  * spool. The render path never reaches AirPrompter; the only network it can
  * touch is the application's own — a variable source it registered
  * (`renderAsync`, `docs/variables.md`), never on the synchronous `render()`.
+ *
+ * @example
+ * ```ts
+ * const ap = await AirPrompterAgent.start({
+ *   organizationId, agentId, target: "prod",
+ *   apiKey: process.env.AIRPROMPTER_AGENT_KEY, // omit to run fully offline from the store or a vendored bundle
+ *   root: { pinned: PINNED_ROOT_JWK }, // AirPrompter's root key for the public service; never your app's target
+ *   sync: { mode: "resident", pollSeconds: 30 },
+ * });
+ * const r = ap.prompt("support.triage", { subject: userId }).render({ team: "Billing", ticket: userMessage });
+ * const reply = await ap.observe(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }));
+ * ap.feedback(r.runRef, { thumbs: "up" });
+ * await ap.stop(); // flushes the spool
+ * ```
  */
 
 import { createHmac, randomBytes } from "node:crypto";
-import { errorNamed, experimentForTag, experimentsOf, protocolAtLeast } from "@airprompter/agent-core";
+import { errorNamed, experimentForTag, experimentsOf, nodeFs, protocolAtLeast } from "@airprompter/agent-core";
 import type { FsPort } from "@airprompter/agent-core";
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "@airprompter/agent-core";
@@ -500,7 +513,7 @@ export class AirPrompterAgent {
       // No daemon on this host: in-process sync from this process's own store, exactly as resident mode.
       options = { ...options, sync: { ...options.sync, mode: "resident" } };
     }
-    const keyProvider = options.keyProvider ?? fileKey(join(SlotStore.path({ stateDir, agentId: options.agentId, target: options.target }), "store.key"));
+    const keyProvider = options.keyProvider ?? fileKey(join(SlotStore.path({ stateDir, agentId: options.agentId, target: options.target }), "store.key"), options.fs ?? nodeFs);
     let store: SlotStore;
     try {
       // S8: store.json records who wrote it — this SDK, or the daemon naming itself through `sdk`.
@@ -603,7 +616,8 @@ export class AirPrompterAgent {
   private async takeVendoredBundle(now: string, verifyOptions: { now: string; root: RootMetadata; countersignRoot: RootMetadata | null; requireCountersign?: boolean }): Promise<void> {
     let contents: ReturnType<typeof openBundle>;
     try {
-      const bundle = typeof this.options.vendoredBundle!.bundle === "string" ? (JSON.parse(readFileSync(this.options.vendoredBundle!.bundle, "utf8")) as Bundle) : this.options.vendoredBundle!.bundle;
+      // A path is read through the application's filesystem port, like everything else the runtime opens.
+      const bundle = typeof this.options.vendoredBundle!.bundle === "string" ? (JSON.parse(new TextDecoder().decode((this.options.fs ?? nodeFs).readFile(this.options.vendoredBundle!.bundle))) as Bundle) : this.options.vendoredBundle!.bundle;
       contents = openBundle(bundle, { agentId: this.options.agentId, target: this.options.target }, this.options.vendoredBundle!.distributionKey ?? this.options.distributionKey);
     } catch (error) {
       this.log({ event: "vendored_bundle_unusable", reason: (error as Error).message });
@@ -1456,7 +1470,11 @@ export class AirPrompterAgent {
     return { generation: this.active.generation };
   }
 
-  /** Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence. Host-wide when attached to a daemon. */
+  /**
+   * Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence.
+   * Host-wide when attached to a daemon. Throws `StoreError` `release_staged` while a release is staged (a rollback
+   * is never a quiet unlock) and `no_previous_release` when this host has held one release only.
+   */
   async rollback(): Promise<{ generation: number; forced: boolean }> {
     if (this.daemon) {
       const result = (await this.daemon.request("rollback")) as { generation: number; forced: boolean };
@@ -1977,7 +1995,7 @@ function defaultStateDir(): string {
   if (process.env.XDG_STATE_HOME) return process.env.XDG_STATE_HOME;
   if (process.platform === "darwin") return join(home, "Library", "Application Support");
   if (process.platform === "win32") return process.env.LOCALAPPDATA ?? join(home, "AppData", "Local");
-  return existsSync(join(home, ".local", "state")) ? join(home, ".local", "state") : join(home, ".local", "state");
+  return join(home, ".local", "state");
 }
 
 /** T34: whether any slot (or arm override) of a manifest carries a golden set. */

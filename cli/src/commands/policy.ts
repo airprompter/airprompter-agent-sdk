@@ -6,6 +6,12 @@
  * operator's act on the host, logged, host-wide through the daemon when
  * one runs. `policy show` prints what is in force and where it came from;
  * `policy set auto|unlock_required` records the operator's choice.
+ *
+ * @example
+ * ```sh
+ * airprompter policy show --agent agt_… --environment prod
+ * airprompter policy set auto --agent agt_… --environment prod --by "CHG-4821"
+ * ```
  */
 
 import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
@@ -75,7 +81,7 @@ export async function policy(argv: string[], ctx: Context): Promise<number> {
     out.field("via", "store");
     out.field("previous", before);
     out.field("applyPolicy", store.state.applyPolicyPin, "apply policy");
-    out.line(`policy set to ${wanted} on this host (was ${before ? `${before.value}, ${before.source}` : "not pinned"}); a resident runtime reads it on its next pass`);
+    out.line(`policy set to ${wanted} on this host (was ${before ? `${before.value}, ${before.source}` : "not pinned"}); a runtime started from now runs under it (a runtime already running in-process does not — use the daemon on a shared host)`);
     out.flush();
     return EXIT.ok;
   }

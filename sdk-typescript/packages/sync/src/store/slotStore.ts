@@ -14,6 +14,15 @@
  * against the stored root document and every payload's hash after decrypt.
  * Any failure marks the slot corrupt and the caller falls back: other slot
  * → vendored bundle → refuse to start. Render never serves unverified bytes.
+ *
+ * @example
+ * ```ts
+ * const store = await SlotStore.open({ stateDir, agentId, target: "prod", keyProvider: fileKey(join(stateDir, "store.key")) });
+ * store.acceptRoot(root); // the root document every later load verifies against
+ * const slot = store.stage({ manifest, payloads }); // "A" or "B": the inactive slot, fsynced
+ * store.activate(); // one rename of store.json flips it
+ * const loaded = store.load(slot, { now: new Date().toISOString() }); // throws StoreError("slot_corrupt") rather than serve unverified bytes
+ * ```
  */
 
 import { randomBytes } from "node:crypto";
@@ -90,7 +99,7 @@ export interface LoadedSlot {
   payloads: Map<string, Buffer>;
 }
 
-export type StoreErrorCode = "kek_unavailable" | "store_corrupt" | "store_newer" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged";
+export type StoreErrorCode = "kek_unavailable" | "store_corrupt" | "store_newer" | "slot_corrupt" | "generation_rollback" | "no_release" | "not_staged" | "release_staged" | "no_previous_release";
 
 export class StoreError extends Error {
   constructor(
@@ -305,10 +314,16 @@ export class SlotStore {
     return slot;
   }
 
-  /** Instant local rollback: the previous release is the other slot. Stamped on evidence by the caller. */
+  /**
+   * Instant local rollback: the previous release is the other slot. Stamped on evidence by the caller. Refused while
+   * the other slot holds a STAGED release — flipping to it would be a silent unlock, not a rollback — and when this
+   * host has only ever held one release.
+   */
   rollbackLocal(): SlotName {
     if (!this.file.active) throw new StoreError("no_release", "nothing is active");
+    if (this.file.staged) throw new StoreError("release_staged", "the other slot holds a staged release, not a previous one: unlock it first (a runtime can also discard it)");
     const previous = otherSlot(this.file.active);
+    if (!this.fs.exists(join(this.dir, "slots", previous, "manifest.json"))) throw new StoreError("no_previous_release", "this host has held one release only; there is nothing to go back to");
     const manifest = this.readManifest(previous);
     const downgrade = manifest.payload.generation < this.file.generation;
     this.write({ ...this.file, active: previous, staged: null, generation: manifest.payload.generation, forcedDowngrade: downgrade, ...(downgrade ? { heldBackBelow: this.file.generation } : {}) });

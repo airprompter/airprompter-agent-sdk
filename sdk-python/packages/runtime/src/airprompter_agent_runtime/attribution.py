@@ -11,6 +11,14 @@ client sees only the call's parameters; three things can name the slot:
 
 Content is read here only to be hashed: the registry keeps hashes and
 dimension names, never a prompt.
+
+Example::
+
+    registry = RenderRegistry()
+    registry.register(rendered.text, Attribution(tag=rendered.tag, version_id=rendered.version_id, arm=rendered.arm, model=rendered.model))
+    registry.match(request_texts(params))   # the render whose text the request carries, or None: never guessed
+    with attribution_scope(Attribution("support.reply", "ver_9", "none", "gpt-5")):
+        client.chat.completions.create(...)   # attributed by scope, whatever text it carries
 """
 
 from __future__ import annotations

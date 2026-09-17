@@ -9,6 +9,14 @@ the same evaluator the runtime already runs inside ``observe()`` decides a
 case. The customer supplies the model call (``invoke``); nothing here talks to
 a provider. Only counts leave the host: ``goldenPass`` on the arm's window,
 one per case, and the apply decision.
+
+Example::
+
+    golden_set = parse_golden_set(payloads[slot["goldenSet"]["contentHash"]], slot["goldenSet"])   # the slot's reference pins setId and case count
+    report = run_golden_set(slot=slot, arm="none", text=prompt_text, golden_set=golden_set,
+                            invoke=lambda call: my_model(call.text, model=call.model))           # the customer's call; returns the output text
+    report.meets_threshold          # pass_bps >= the set's minPassBps
+    golden_reports_meet([report])   # the apply decision over every staged slot
 """
 
 from __future__ import annotations

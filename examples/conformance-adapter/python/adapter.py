@@ -5,7 +5,7 @@ JSON lines on stdin / stdout: ``{"id", "fn", "args"}`` in, ``{"id", "result"}``
 or ``{"id", "error": {"reason", "message"}}`` out. Any language writes one of
 these; this one is the proof that the vectors the harness owns are runnable
 against an SDK the harness never imports. See ``conformance/ADAPTER.md`` for
-the nineteen operations.
+the twenty-one operations. Usage::
 
     node conformance/harness.mjs --adapter-command "python3 examples/conformance-adapter/python/adapter.py"
 

@@ -2,6 +2,8 @@
 // One CommonJS file from src/main.ts and the SDK sources it imports, with
 // the version stamped in. This is the input to the single-executable build
 // and, on its own, `node dist/airprompter.cjs`.
+//
+//   $ node scripts/bundle.mjs                   # from cli/; writes dist/airprompter.cjs
 
 import { build } from "esbuild";
 import { chmodSync, mkdirSync, readFileSync } from "node:fs";

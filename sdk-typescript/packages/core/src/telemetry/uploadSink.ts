@@ -7,6 +7,19 @@
  * bridge (`@airprompter/otel-bridge`: the windows as OTLP metrics to the
  * collector the customer already runs, no AirPrompter grant at all). A sink
  * is data, never a class: `kind` says what it is.
+ *
+ * @example
+ * ```ts
+ * // A customer's own sink: the validated rows to their pipeline; the uploader still sweeps, budgets and deletes on ok.
+ * const sink: UploadSink = {
+ *   kind: "my-pipeline",
+ *   async ship(segment) {
+ *     const response = await pipeline.post(segment.rows);
+ *     return response.ok ? { status: "ok" } : { status: "failed", reason: `http_${response.status}` }; // failed: kept, retried under backoff
+ *   },
+ * };
+ * new SpoolUploader({ dir, instanceId, sink });
+ * ```
  */
 
 import type { SpoolRow } from "./rows.js";

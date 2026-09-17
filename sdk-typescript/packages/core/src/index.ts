@@ -8,6 +8,16 @@
  * package: `agent-sync`, `agent-runtime` and `agent-telemetry` all build on
  * this one and never on each other (S10; `scripts/lint-imports.mjs` pins
  * the direction).
+ *
+ * @example
+ * ```ts
+ * import { BundleRelease, trustedRootFromPinnedKey } from "@airprompter/agent-core";
+ *
+ * const root = trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: PINNED_ROOT_JWK });
+ * const loaded = BundleRelease.load({ bundle, root, scope, now: new Date().toISOString() });
+ * if (!loaded.ok) throw new Error(`bundle refused: ${loaded.reason}`); // the same chain as OTA: signatures, scope, expiry, every payload hash
+ * const release = loaded.release.current(); // what `ReleaseResolver` (agent-runtime) renders and assigns over
+ * ```
  */
 
 export { PROTOCOL_VERSION, SDK_VERSION, protocolAtLeast } from "./protocol/version.js";

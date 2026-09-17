@@ -3,6 +3,8 @@
 // declarations, then CommonJS, each package's `dist/cjs` marked commonjs.
 // A sibling resolves through the workspace link to the sibling's dist, so
 // the order is the whole build.
+//
+//   $ npm run build          # from sdk-typescript/; the release workflow runs the same
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";

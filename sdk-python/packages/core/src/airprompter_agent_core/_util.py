@@ -1,4 +1,12 @@
-"""Small shared helpers: base64url without padding, RFC 3339 instants, ISO formatting the way the protocol writes it."""
+"""Small shared helpers: base64url without padding, RFC 3339 instants, ISO formatting the way the protocol writes it.
+
+Example::
+
+    instant("2026-09-12T14:03:10.123Z")   # 1789221790123 — epoch milliseconds; an offset is honoured
+    iso_ms(1_789_221_790_123)             # "2026-09-12T14:03:10.123Z"
+    b64url_encode(bytes([0, 255]))        # "AP8" — no padding, URL-safe
+    random_id("i-")                       # "i-YwN9yAmSX4YlvxN4": an instance id
+"""
 
 from __future__ import annotations
 

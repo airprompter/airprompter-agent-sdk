@@ -9,6 +9,11 @@
  * (`--password-env`, default AIRPROMPTER_PASSWORD) or, on a terminal, is
  * prompted for without echo. The token is short-lived (an hour); nothing is
  * stored on disk.
+ *
+ * @example
+ * ```sh
+ * eval "$(airprompter login --email you@example.com)"     # password from AIRPROMPTER_PASSWORD or the terminal; exports AIRPROMPTER_SESSION_TOKEN
+ * ```
  */
 
 import { CliError, EXIT, Output, refused, requireOption, usage, type Context } from "../io.js";

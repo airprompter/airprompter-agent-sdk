@@ -15,6 +15,12 @@
  * subject cap: an output longer than SUBJECT_MAX_BYTES fails the check
  * closed instead of being scanned in part. A pattern the rule refuses is
  * refused at declaration and fails closed at evaluation.
+ *
+ * @example
+ * ```js
+ * checksRefusals(checks);                                             // [{ name, reason }] — empty when every declaration is allowed
+ * evaluateChecks(checks, { text: output, outputTokens: usage?.output });   // { passed, failed, results: [{ name, kind, verdict, reason? }] }
+ * ```
  */
 
 export const CHECK_BOUNDS = Object.freeze({

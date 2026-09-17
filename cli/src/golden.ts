@@ -7,6 +7,13 @@
  * <file>`, answers a harness already produced (`{"<tag>/<caseId>": "…"}` or
  * `{"<tag>": {"<caseId>": "…"}}`). Only counts are printed; an output never
  * is, and a failed expectation is named, not quoted.
+ *
+ * @example
+ * ```ts
+ * const invoke = goldenInvokeOf({ run: str(parsed, "run"), outputs: str(parsed, "outputs") });   // a usage error when --golden has neither
+ * const ran = await runGoldenSets({ manifest, payloads, invoke, concurrency: 4, out });
+ * if (!ran.met) return EXIT.refused;   // a set fell below its pass-rate floor; ran.unavailable names the sets whose payload the bundle did not carry
+ * ```
  */
 
 import { spawn } from "node:child_process";

@@ -6,6 +6,16 @@ runtime syncs in-process instead.
 Unix domain sockets only in this phase: on Windows the named pipe the
 daemon listens on is reported absent and the runtime runs in-process (the
 TypeScript SDK attaches there; Python follows one phase behind).
+
+Example::
+
+    socket_path = daemon_socket_path(state_dir=state_dir, agent_id="agt_1", target="prod")
+    client = DaemonClient.connect(socket_path=socket_path, agent_id="agt_1", target="prod", sdk="airprompter-agent-sdk-python/0.2.13")
+    if client is None:
+        sync_in_process()      # no daemon here: the runtime syncs on its own
+    else:
+        loaded = client.slot()   # the active slot, verified by the daemon; the lease rides along
+        client.on_event(lambda event: reload() if event.get("event") == "generation" else None)
 """
 
 from __future__ import annotations

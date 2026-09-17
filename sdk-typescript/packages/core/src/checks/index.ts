@@ -14,6 +14,20 @@
  * is itself quantified — patterns of at most 256 characters, and an output
  * over 64 KiB fails a pattern check closed rather than being scanned in
  * part. A refused pattern is refused at declaration and fails closed here.
+ *
+ * @example
+ * ```ts
+ * const checks: DeclaredCheck[] = [
+ *   { kind: "json_schema", name: "shape", schema: { type: "object", required: ["category"] } },
+ *   { kind: "must_not_match", name: "no_guarantee", pattern: "refund guaranteed", flags: "i" },
+ * ];
+ * checksRefusals(checks); // [] — every declaration is within CHECK_BOUNDS
+ * const text = outputTextOf(completion); // the provider's answer as text; null when the shape is not recognised
+ * if (text !== null) {
+ *   const outcome = evaluateChecks(checks, { text, outputTokens: completion.usage?.completion_tokens ?? null });
+ *   // outcome.passed / outcome.failed are the window's counters; outcome.results names each verdict
+ * }
+ * ```
  */
 
 import type { OutputCheck } from "../protocol/types.js";

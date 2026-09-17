@@ -8,6 +8,17 @@ bridge (``airprompter_agent_telemetry.otel``: the windows as OTLP metrics to
 the collector the customer already runs, no AirPrompter grant at all). A
 sink is data, never a class hierarchy: ``kind`` says what it is. Parity with
 ``sdk-typescript/packages/core/src/telemetry/uploadSink.ts``.
+
+Example::
+
+    class StdoutSink:                     # a customer's own sink: data, not a subclass
+        kind = "stdout"
+
+        def ship(self, segment: UploadSegment) -> UploadOutcome:
+            print(segment.segment, len(segment.rows))
+            return UploadOutcome("ok")    # shipped: the uploader deletes the segment
+
+    isinstance(StdoutSink(), UploadSink)  # True — structural
 """
 
 from __future__ import annotations

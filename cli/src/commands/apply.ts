@@ -4,6 +4,14 @@
  * the inactive slot, then activate under `auto` or leave staged under
  * `unlock_required` (unlock is `airprompter unlock`, T9). `--force`
  * allows a generation below the stored one: a forced downgrade, stamped.
+ *
+ * @example
+ * ```sh
+ * airprompter apply airprompter.bundle.apbundle --org org_… --agent agt_… --environment prod \
+ *   --root ./airprompter-root.jwk.json --distribution-key ~/.config/airprompter/prod.key.json
+ * airprompter apply airprompter.bundle.apbundle --org org_… --agent agt_… --environment prod --root … --distribution-key … \
+ *   --golden --run "./answer.sh"     # golden sets first; a set under its floor stages without activating
+ * ```
  */
 
 import { existsSync, readFileSync } from "node:fs";

@@ -10,6 +10,14 @@ DST is the zone's business: every instant is read back through
 extra hour and a time that never happens on a spring-forward night lands
 where the zone's clock is when that minute would have been. A window whose
 end precedes its start runs past midnight and belongs to the day it starts on.
+
+Example::
+
+    window = parse_window("22:00-04:00 America/New_York sat,sun")   # runs past midnight; opens on the days named
+    state = window_state(window, now_ms)
+    state.open           # True inside an opening
+    state.opens_at_ms    # this opening's start while open, else the next one's — how long an auto-apply waits
+    window.to_wire()     # {"timezone": …, "start": …, "end": …, "days": [...]} for the heartbeat
 """
 
 from __future__ import annotations

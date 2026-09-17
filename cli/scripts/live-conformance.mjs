@@ -4,7 +4,7 @@
 // exercises every route with the protocol's schemas and trust chain. Exit 0
 // when every check passes; the runner's report is printed either way.
 //
-//   node scripts/live-conformance.mjs dist/airprompter-linux-x64
+//   $ node scripts/live-conformance.mjs dist/airprompter-linux-x64
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

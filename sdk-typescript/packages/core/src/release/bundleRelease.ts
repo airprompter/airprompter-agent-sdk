@@ -6,6 +6,14 @@
  * signatures, scope, expiry and every payload hash must verify. There is
  * no anti-rollback here because there is no stored generation; that is the
  * slot store's rule (`agent-sync`).
+ *
+ * @example
+ * ```ts
+ * const root = trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: PINNED_ROOT_JWK });
+ * const loaded = BundleRelease.load({ bundle: JSON.parse(readFileSync("release.apbundle", "utf8")), root, scope, now: new Date().toISOString(), distributionKey });
+ * if (!loaded.ok) throw new Error(`bundle refused: ${loaded.reason}`); // "bundle_wrong_recipient" | "signature_invalid" | "scope_mismatch" | …
+ * const runtime = new ReleaseResolver({ release: loaded.release.current(), runRefKey, agentId, target: "prod", instanceId, nowMs: Date.now });
+ * ```
  */
 
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "../bundle/apbundle.js";

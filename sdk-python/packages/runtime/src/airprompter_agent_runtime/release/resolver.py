@@ -4,7 +4,17 @@ rendered text with its run reference. Pure over a ``LoadedRelease``: the slot st
 customer loaded all look the same from here, and nothing here touches a file, a socket or a clock it was not handed.
 
 The lease, the spool's refusal rows and the daemon's contact are the facade's (``airprompter_agent``): this class
-says *what* would be refused and why; the facade decides what to record."""
+says *what* would be refused and why; the facade decides what to record.
+
+Example::
+
+    resolver = ReleaseResolver(release=reader.current(), run_ref_key=store_key, agent_id="agt_1", target="prod", instance_id="host-1", now_ms=clock.now_ms)
+    outcome = resolver.resolve("support.reply", subject="user-42")   # the arm is sticky per subject; the ramp is read on now_ms
+    if not outcome.ok:
+        record(outcome.reason)                                       # "disabled" | "no_slot" — the facade writes the refusal row
+    rendered = resolver.render(outcome.slot, {"customer_name": "Ada"})   # .text, .model, .run_ref, .inference
+    flow = resolver.workflow(resolver.resolve("onboarding.flow").slot)   # steps in ordinal order, each with its own run_ref
+"""
 
 from __future__ import annotations
 

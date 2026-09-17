@@ -15,6 +15,15 @@
  * and that read is conditional too (`manifestEtag`). Steady state costs a
  * CDN 304 per interval, not an API request; `nextPullDelayMs` stretches the
  * interval while nothing changes.
+ *
+ * @example
+ * ```ts
+ * const client = new SyncClient({ baseUrl, agentId, target: "prod", apiKey: process.env.AIRPROMPTER_AGENT_KEY! });
+ * const trustedRoot = trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: PINNED_ROOT_JWK });
+ * const result = await pullBundle({ client, scope, trustedRoot, fetchRoot, now: () => new Date().toISOString(), distributionPublicKey: fleetPublicRaw, edge, minimumGeneration: table.newest()?.generation ?? 0 });
+ * if (result.status === "ok") await table.insert(result.generation, JSON.stringify(result.bundle), result.edge); // the edge state in the SAME transaction
+ * setTimeout(pull, nextPullDelayMs({ outcome: result.status, unchangedStreak, intervalMs: 60_000 }));
+ * ```
  */
 
 import { createEncryptedBundle, createPlaintextBundle, referencedPayloads, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";

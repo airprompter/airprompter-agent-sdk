@@ -4,6 +4,13 @@ AES-GCM, on ``cryptography``'s primitives alone. The offline bundle
 AES-256-GCM; AES-128-GCM is here only so the implementation can be checked
 against RFC 9180's A.1 test vector, which uses that AEAD with the same KEM
 and KDF.
+
+Example::
+
+    recipient = generate_x25519_key_pair()
+    enc, ciphertext = seal_to(recipient.public_raw, info=b"airprompter-apbundle-v1", aad=b"agt_1|prod", plaintext=b"…")
+    plaintext = open_from(enc=enc, recipient_private_key=recipient.private_key, recipient_public_raw=recipient.public_raw,
+                          info=b"airprompter-apbundle-v1", aad=b"agt_1|prod", ciphertext=ciphertext)   # raises on a wrong key or AAD
 """
 
 from __future__ import annotations

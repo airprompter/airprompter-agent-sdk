@@ -2,6 +2,9 @@
 // (ADAPTER.md). This is the adapter every other one is measured against:
 // `node harness.mjs --adapter adapters/reference.mjs` must pass every
 // section, and an SDK's adapter answers the same calls the same way.
+//
+//   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs
+//   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs --only canonical-json,trust-manifest --json
 
 import { AssignmentError, CanonicalJsonError, assignArm, canonicalJson, effectiveArms, orderedSteps, rampWeightsAt, sha256Prefixed, validateRamp } from "../reference.mjs";
 import { experimentConflict, experimentsOf, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../trust.mjs";

@@ -5,6 +5,13 @@
  * Pure: the spool writer (`@airprompter/agent-telemetry`) and the wrap
  * adapters (`@airprompter/agent-runtime`) both build on these without
  * importing each other.
+ *
+ * @example
+ * ```ts
+ * const observation: Observation = { tag: "support.triage", versionId, arm: "none", model: "gpt-5", status: "ok", latencyMs: 412, tokens: { input: 120, output: 40 }, usageSource: "reported" };
+ * minuteOf(Date.now()); // "2026-09-17T14:03:00Z" — the window a row lands in
+ * latencyBucketIndex(412); // 9: the 512 ms bucket; anything past the last edge lands in it
+ * ```
  */
 
 export const LATENCY_BUCKET_EDGES_MS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 65536] as const;

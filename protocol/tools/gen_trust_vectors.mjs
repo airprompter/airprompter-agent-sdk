@@ -6,7 +6,8 @@
 // are reproducible (signatures still vary per run — ECDSA is randomised —
 // which is why CI verifies a fresh file as well as the checked-in one).
 //
-//   node protocol/tools/gen_trust_vectors.mjs protocol/vectors/manifest-verify.json
+//   $ node protocol/tools/gen_trust_vectors.mjs protocol/vectors/manifest-verify.json
+//   $ node conformance/run.mjs     # the fresh file must still verify
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

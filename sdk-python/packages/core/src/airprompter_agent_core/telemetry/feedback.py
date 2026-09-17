@@ -2,6 +2,13 @@
 normalised into window outcomes. Numbers, booleans and the declared enums
 only; anything else — free text above all — is named in ``rejected`` and
 never reaches the spool. ``protocol/vectors/feedback.json`` pins every rule.
+
+Example::
+
+    normalized = normalize_feedback({"thumbs": "up", "rating": 4, "custom": {"resolved": True}, "note": "free text"})
+    normalized.outcomes   # {"thumbs": True, "rating": 4}
+    normalized.rejected   # {"custom.resolved": "reserved_name", "note": "unknown_signal"}
+    normalized.accepted   # True — at least one signal became an outcome
 """
 
 from __future__ import annotations

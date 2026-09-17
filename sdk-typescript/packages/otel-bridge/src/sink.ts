@@ -21,6 +21,14 @@
  *   `export(request)` — an `@opentelemetry/exporter-metrics-otlp-*` wrapped
  *   in a few lines, or the customer's own — so the protobuf and gRPC paths
  *   need no code here.
+ *
+ * @example
+ * ```ts
+ * const sink = otlpUploadSink({ endpoint: "http://localhost:4318/v1/metrics", headers: { authorization: `Bearer ${token}` }, resource: { "service.name": "support-bot" } });
+ * // Or any exporter: const sink = otlpUploadSink({ exporter: { export: (request) => grpcExporter.send(request) }, resource });
+ * new SpoolUploader({ dir, instanceId, sink }).start();
+ * sink.status(); // { exported, dropped, lastExportAt, lastError }
+ * ```
  */
 
 import type { FetchLike, UploadOutcome, UploadSegment, UploadSink } from "@airprompter/agent-core";

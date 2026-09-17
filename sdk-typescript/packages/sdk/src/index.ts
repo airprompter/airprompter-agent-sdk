@@ -7,6 +7,16 @@
  * sibling directly: the runtime alone renders and assigns over a bundle,
  * the sync package alone pulls and verifies in CI, the telemetry package
  * alone writes the spool from their own instrumentation.
+ *
+ * @example
+ * ```ts
+ * import { AirPrompterAgent } from "@airprompter/agent-sdk";
+ *
+ * const ap = await AirPrompterAgent.start({ organizationId, agentId, target: "prod", apiKey: process.env.AIRPROMPTER_AGENT_KEY, root: { pinned: PINNED_ROOT_JWK } });
+ * const r = ap.prompt("support.triage").render({ team: "Billing", ticket: userMessage }); // never touches the network
+ * const reply = await ap.observe(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }));
+ * ap.feedback(r.runRef, { thumbs: "up" });
+ * ```
  */
 
 export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION, PROTOCOL_VERSION, VENDORED_BUNDLE_EXPIRY_WARNING_DAYS, healthzOf, healthzResponse } from "./agent.js";

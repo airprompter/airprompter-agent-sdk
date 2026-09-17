@@ -94,8 +94,10 @@ Notes:
   no payload is fetched for a manifest that will be refused anyway. A
   runtime may run M9/M10 after fetching (they cannot be checked before) but
   reports them in this vocabulary.
-* A local downgrade is never a manifest check: `airprompter rollback
-  --force` writes `control_plane_refusal: forced_downgrade` on evidence.
+* A local downgrade is never a manifest check: a forced downgrade
+  (`ap.rollback()` below the stored generation, `airprompter apply --force`)
+  is recorded in the store and reported in healthz and the heartbeat;
+  `ap.rollback()` also writes a `refusal: forced_downgrade` row on evidence.
 * `model_unavailable` is the one refusal *after* the chain verified: a slot
   (or an arm override) with `modelRequired: true` names a model the runtime
   did not declare at start. The release stays unactivated, nothing is

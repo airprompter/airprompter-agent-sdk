@@ -5,6 +5,17 @@
  * be moved between slots or targets and swapping the A and B directories on
  * disk cannot roll the store back: decryption fails, the slot is corrupt,
  * and the fallback chain runs.
+ *
+ * @example
+ * ```ts
+ * const aad = payloadAad({ agentId, target: "prod", generation: 7, contentHash: slot.contentHash });
+ * const sealed = encryptPayload(dek, plaintext, aad); // iv(12) ‖ tag(16) ‖ ciphertext, what lands in slots/A/payloads/
+ * try {
+ *   decryptPayload(dek, sealed, aad);
+ * } catch (error) {
+ *   if (isPayloadDecryptError(error)) markSlotCorrupt(); // moved, swapped, or tampered — the same answer for all three
+ * }
+ * ```
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";

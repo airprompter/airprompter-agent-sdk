@@ -19,6 +19,14 @@
  *
  * Nothing here reads a row's content beyond validating its shape: a segment
  * is opaque bytes on the way through, exactly as the daemon treats it.
+ *
+ * @example
+ * ```sh
+ * # on the air-gapped host:
+ * airprompter export-telemetry --org org_… --agent agt_… --environment prod --out 2026-09-12.aptelemetry
+ * # on a host that reaches AirPrompter:
+ * AIRPROMPTER_AGENT_KEY=… airprompter import-telemetry --org org_… --agent agt_… --environment prod --in 2026-09-12.aptelemetry
+ * ```
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";

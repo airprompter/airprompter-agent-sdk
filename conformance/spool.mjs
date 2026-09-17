@@ -2,6 +2,11 @@
 // catalogue normalisation (schemas/feedback-signals.schema.json). Pure: the
 // filesystem rules (0600, fsync + rename, .open recovery) are the SDKs' to
 // test; what is checkable across implementations is here.
+//
+//   latencyBucketIndex(1234);                          // the index into LATENCY_BUCKET_EDGES_MS
+//   segmentName("i-abc123", epochMs, 0);               // "seg-i-abc123-<epochMinute>-0.ndjson"
+//   new SegmentPlanner("i-abc123").append(epochMs, lineBytes);   // { segment, rotated }: a new segment at the minute boundary or SEGMENT_MAX_BYTES
+//   normalizeFeedback(signals);                        // { accepted, outcomes, rejected } per the catalogue
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

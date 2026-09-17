@@ -5,6 +5,8 @@
 // and CommonJS — with nothing else present. A package that reaches for a
 // sibling it does not declare, or ships a file its exports map does not
 // name, fails here and nowhere else.
+//
+//   $ node scripts/install-alone.mjs            # from sdk-typescript/, after npm run build
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

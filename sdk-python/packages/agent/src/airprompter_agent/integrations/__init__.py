@@ -7,6 +7,13 @@ ap.attribute(rendered):`` block. The explicit helpers here (``chat_completion``,
 by the same text match. Each imports its client library lazily — the SDK
 installs and runs without any of them — and none reads anything of a call
 but its usage, finish reason and (for the declared checks) its output text.
+
+Example::
+
+    from airprompter_agent.integrations import chat_completion
+
+    rendered = ap.prompt("support.reply").render(customer_name="Ada")
+    completion = chat_completion(ap, rendered, client, messages=[{"role": "user", "content": ticket}])   # rendered.text is the system message
 """
 
 from .anthropic import messages_create, messages_create_async

@@ -6,6 +6,8 @@
  * resolves to a heading in it (GitHub's slug rule). External links are
  * listed, not fetched. Exit 1 on the first broken one.
  *
+ *   $ node docs/check-links.mjs
+ *
  *   node docs/check-links.mjs
  */
 

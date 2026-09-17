@@ -9,6 +9,16 @@
  * here can carry prompt text, output, or an end-user identifier — the row
  * shape has no field for them. Serverless hosts use the memory sink and
  * flush at invocation end.
+ *
+ * @example
+ * ```ts
+ * const identity = { instanceId, instanceClass: "ephemeral" as const, sdk: "my-service/1.4.0" };
+ * const sink = new MemorySink(identity); // serverless; a resident host uses new DirectorySink(dir, instanceId)
+ * const writer = new SpoolWriter(sink, identity);
+ * writer.observe({ tag: "support.triage", versionId, arm: "none", model: "gpt-5", status: "ok", latencyMs: 412, tokens: { input: 120, output: 40 } }, Date.now());
+ * writer.closeWindows(Date.now()); // invocation end: the minute's windows become rows
+ * const rows = sink.drain(Date.now()); // the rows, then one `dropped` row if the 256 KiB buffer evicted any
+ * ```
  */
 
 import { join } from "node:path";
@@ -83,6 +93,7 @@ export class MemorySink implements SpoolSink {
     const size = Buffer.byteLength(JSON.stringify(row), "utf8") + 1;
     this.rows.push(row);
     this.bytes += size;
+    // The newest row always survives: one row past the budget is kept rather than the buffer emptied.
     while (this.bytes > this.budgetBytes && this.rows.length > 1) {
       const oldest = this.rows.shift()!;
       const lost = Buffer.byteLength(JSON.stringify(oldest), "utf8") + 1;

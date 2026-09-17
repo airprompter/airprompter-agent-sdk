@@ -3,6 +3,14 @@
  * normalised into window outcomes. Numbers, booleans and the declared enums
  * only; anything else — free text above all — is named in `rejected` and
  * never reaches the spool. `protocol/vectors/feedback.json` pins every rule.
+ *
+ * @example
+ * ```ts
+ * const { accepted, outcomes, rejected } = normalizeFeedback({ thumbs: "up", rating: 4, editDistanceRatio: 0.2, note: "great", custom: { upsold: true } });
+ * // outcomes: { thumbs: true, rating: 4, editDistanceRatio: 0.2, upsold: true }
+ * // rejected: { note: "unknown_signal" } — free text never becomes an outcome
+ * if (accepted) writer.outcomes(dimensions, outcomes, Date.now());
+ * ```
  */
 
 export const BOOLEAN_SIGNALS = ["flagged", "accepted", "edited", "regenerated", "copied", "followUp", "escalated", "abandoned", "corrected", "resolved", "reopened", "converted", "refunded", "slaMet"] as const;
@@ -49,6 +57,7 @@ export function normalizeFeedback(signals: Record<string, unknown>): NormalizedF
     } else if ((RUNTIME_SIGNALS as readonly string[]).includes(name)) {
       rejected[name] = "reserved_name";
     } else if (name === "custom") {
+      // Eight custom names per call: outcomes become keys on a window row, and an unbounded set would let content in as names.
       if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).length > 8) {
         rejected[name] = "invalid_value";
         continue;

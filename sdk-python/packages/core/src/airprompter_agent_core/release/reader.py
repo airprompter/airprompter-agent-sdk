@@ -2,7 +2,16 @@
 ``airprompter_agent_sync`` produces a ``LoadedRelease`` from the encrypted slot store or a daemon (its ``LoadedSlot``
 is one); ``airprompter_agent_core`` produces one from a bundle the customer loads (``BundleRelease``);
 ``airprompter_agent_runtime`` renders and assigns over either without knowing which. Structural (a ``Protocol``),
-never a class to ``isinstance``: two copies of a package in one environment must agree on it (S1)."""
+never a class to ``isinstance``: two copies of a package in one environment must agree on it (S1).
+
+Example::
+
+    release = reader.current()   # a store, a daemon or a bundle: the runtime does not know which
+    if release is not None:
+        slot = release.manifest["payload"]["slots"][0]
+        text = release.payloads[slot["contentHash"]].decode("utf-8")
+        resolved = ReleaseSlot(slot, arm="none", bucket=None)   # what the resolver hands to render()
+"""
 
 from __future__ import annotations
 

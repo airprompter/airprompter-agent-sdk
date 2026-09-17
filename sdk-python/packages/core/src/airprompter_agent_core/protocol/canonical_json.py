@@ -5,6 +5,13 @@ value, so nothing here is left to :mod:`json`'s defaults: members sort by
 UTF-16 code units (not code points — astral keys sort *before* U+E000–U+FFFF),
 strings escape exactly what ``JSON.stringify`` escapes, numbers are safe
 integers only, and anything JSON cannot carry is refused rather than dropped.
+
+Example::
+
+    canonical_json({"b": 1, "a": [True, None, "é"]})       # '{"a":[true,null,"é"],"b":1}'
+    sha256_prefixed(canonical_bytes(manifest["payload"]))   # "sha256:…" — the digest a signature covers
+    canonical_json({"n": 1.5})                              # CanonicalJsonError: non_integer_number at $.n
+    canonical_json({"x": UNDEFINED})                        # CanonicalJsonError: undefined_value at $.x — never silently dropped
 """
 
 from __future__ import annotations

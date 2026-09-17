@@ -1,4 +1,14 @@
-/** Option parsing on `node:util` — no dependency, one place for the shared flags. */
+/**
+ * Option parsing on `node:util` — no dependency, one place for the shared flags.
+ *
+ * @example
+ * ```ts
+ * const parsed = parse(argv, { ...SCOPE_OPTIONS, ...ROOT_OPTIONS, ...STORE_OPTIONS, ...COMMON_OPTIONS });
+ * if (flag(parsed, "help")) ctx.stdout(helpFor("verify", "<bundle.apbundle | state-dir> --org … --agent … --environment … --root …", spec));
+ * const scope = scopeOf(parsed);                        // a usage error names the first of --org / --agent / --environment that is missing
+ * const store = await openStore(parsed, ctx, scope);    // --state-dir, or the OS state directory
+ * ```
+ */
 
 import { parseArgs } from "node:util";
 

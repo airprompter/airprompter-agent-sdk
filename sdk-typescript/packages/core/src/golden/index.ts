@@ -10,6 +10,16 @@
  * `observe()` decides a case. The customer supplies the model call
  * (`invoke`); nothing here talks to a provider. Only counts leave the host:
  * `goldenPass` on the arm's window, one per case, and the apply decision.
+ *
+ * @example
+ * ```ts
+ * const set = parseGoldenSet(release.payloads.get(slot.goldenSet!.contentHash)!, slot.goldenSet);
+ * const report = await runGoldenSet({
+ *   slot, arm: "none", text: promptText, set,
+ *   invoke: async ({ text, model }) => (await openai.chat.completions.create({ model, messages: [{ role: "user", content: text }] })).choices[0]!.message.content ?? "",
+ * });
+ * if (!goldenReportsMeet([report])) console.log(`${report.passBps} bps < ${report.minPassBps}: the staged release stays staged`);
+ * ```
  */
 
 import { evaluateChecks, estimateTokens } from "../checks/index.js";

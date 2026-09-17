@@ -11,6 +11,16 @@
  * - `bytesUsed()` and `tree()`: what a customer's CI asserts against.
  *
  * Handles are numbers; a closed or unknown handle throws `EBADF`.
+ *
+ * @example
+ * ```ts
+ * const fs = new MemoryFs();
+ * const sink = new DirectorySink("/spool", "i-writer-a", HOST_SPOOL_BUDGET_BYTES, fs);
+ * sink.append(row, nowMs);
+ * fs.capacityBytes = fs.bytesUsed(); // full from here: the next write throws ENOSPC inside the sink
+ * fs.failNext("fsync", "EIO"); // and the next flush's fsync fails once
+ * sink.append(row2, nowMs + 1000); // never throws: sink.faults.byCode.ENOSPC === 1
+ * ```
  */
 
 import type { FsFailure, FsOpenFlags, FsPort } from "../protocol/ports.js";

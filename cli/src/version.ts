@@ -1,4 +1,12 @@
-/** Stamped by the bundler from package.json and protocol/VERSION; the source defaults are for tests. */
+/**
+ * Stamped by the bundler from package.json and protocol/VERSION; the source defaults are for tests.
+ *
+ * @example
+ * ```ts
+ * ctx.stdout(CLI_VERSION);                                    // the package version in a bundle, "0.0.0-dev" under tsx
+ * const userAgent = `airprompter-cli/${CLI_VERSION}`;         // PROTOCOL_VERSION is what the daemon's `status` reports
+ * ```
+ */
 import { readFileSync } from "node:fs";
 
 declare const __AIRPROMPTER_CLI_VERSION__: string | undefined;

@@ -8,6 +8,15 @@ under ``<store>/spool/telemetry/``, open as
 rotated at the minute boundary or 1 MiB. Nothing here can carry prompt
 text, output, or an end-user identifier — the row shape has no field for
 them. Serverless hosts use the memory sink and flush at invocation end.
+
+Example::
+
+    sink = DirectorySink(spool_dir, "i-hostprocess000")   # <store>/spool/telemetry/
+    writer = SpoolWriter(sink, WriterIdentity("i-hostprocess000", "resident", "acme/1.0"))
+    writer.observe(Observation(tag="support.reply", version_id="ver_9", arm="none", model="gpt-5", status="ok", latency_ms=812,
+                               tokens={"input": 640, "output": 120}, usage_source="reported"), now_ms)
+    writer.close_stale_windows(now_ms)   # on the sweep: a minute that has turned is written; the current one stays open
+    writer.close_windows(now_ms)         # at shutdown: every window, then the open segment is fsynced and renamed
 """
 
 from __future__ import annotations

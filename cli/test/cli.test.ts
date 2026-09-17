@@ -224,6 +224,13 @@ test("diff names what changes, apply moves the store forward, pull --check repor
   assert.equal(h.json().generation, 1);
   assert.equal(h.json().stagedSlot, "B");
   h.reset();
+  // A rollback while a release waits for its unlock would be a silent unlock: refused, and the staged slot stays.
+  assert.equal(await run(["rollback", "--agent", scope.agentId, "--environment", scope.target, "--state-dir", stateDir, "--json"], h.ctx), EXIT.refused);
+  assert.equal(h.json().reason, "release_staged");
+  h.reset();
+  assert.equal(await run(["status", "--agent", scope.agentId, "--environment", scope.target, "--state-dir", stateDir, "--json"], h.ctx), EXIT.ok);
+  assert.deepEqual([h.json().generation, h.json().stagedSlot], [1, "B"]);
+  h.reset();
   const ap = await AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) } });
   assert.equal(ap.status().applyState, "awaiting_unlock");
   assert.equal(ap.status().stagedGeneration, 2);
@@ -331,6 +338,27 @@ test("refusals: a tampered payload, a foreign signing key, another target, plain
   assert.equal(await run(["status", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.ok);
   assert.equal(dev.json().forcedDowngrade, true);
   assert.equal(dev.json().generation, 1);
+  dev.reset();
+  // `airprompter rollback`: the other slot (generation 2) comes back — forward this time, so not a forced downgrade;
+  // a second rollback steps below the stored generation and says so.
+  assert.equal(await run(["rollback", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.ok);
+  assert.deepEqual({ generation: dev.json().generation, previousGeneration: dev.json().previousGeneration, forced: dev.json().forced, outcome: dev.json().outcome, via: dev.json().via }, { generation: 2, previousGeneration: 1, forced: false, outcome: "rolled_back", via: "store" });
+  dev.reset();
+  assert.equal(await run(["rollback", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.ok);
+  assert.deepEqual({ generation: dev.json().generation, forced: dev.json().forced }, { generation: 1, forced: true });
+  dev.reset();
+  assert.equal(await run(["status", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "dev-state"), "--json"], dev.ctx), EXIT.ok);
+  assert.equal(dev.json().generation, 1);
+  dev.reset();
+  // A store that never applied anything, and one that held one release only, have nothing to go back to — by name.
+  assert.equal(await run(["rollback", "--agent", "agt_never", "--environment", "dev", "--state-dir", join(work, "empty-state"), "--json"], dev.ctx), EXIT.refused);
+  assert.equal(dev.json().reason, "no_release");
+  dev.reset();
+  assert.equal(await run(["apply", plain, ...devArgs, "--root", devRootDoc, "--state-dir", join(work, "one-state"), "--json"], dev.ctx), EXIT.ok);
+  dev.reset();
+  assert.equal(await run(["rollback", "--agent", scope.agentId, "--environment", "dev", "--state-dir", join(work, "one-state"), "--json"], dev.ctx), EXIT.refused);
+  assert.equal(dev.json().reason, "no_previous_release");
+  dev.reset();
   void stateDir;
   rmSync(work, { recursive: true, force: true });
 });

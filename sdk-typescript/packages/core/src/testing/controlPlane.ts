@@ -3,6 +3,15 @@
  * key, sealed manifests per generation, payloads by hash, an edge pointer —
  * served through a `fetch` the SDK takes as an option. Signs exactly as the
  * hosted service does (canonical payload bytes, ES256, P1363).
+ *
+ * @example
+ * ```ts
+ * const plane = new FakeControlPlane({ organizationId: "org_1", agentId: "agt_1", target: "prod" });
+ * const manifest = plane.promote([plane.slot({ tag: "a", text: "Hello {{name}}", variables: [{ name: "name", required: true, trust: "operator" }] })]);
+ * const store = await SlotStore.open({ stateDir, ...plane.scope, keyProvider: fileKey(join(stateDir, "store.key")) });
+ * store.acceptRoot(plane.root);
+ * store.stage({ manifest, payloads: plane.payloads }); // "A": the bytes the fake served, now encrypted at rest
+ * ```
  */
 
 import { generateKeyPairSync } from "node:crypto";

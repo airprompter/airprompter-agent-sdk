@@ -2,6 +2,12 @@
 trace to attach feedback later. ``agent·target·slot·versionId·arm·generation·bucket``,
 HMAC-signed with a per-store key so a forged ref cannot file signals
 against a version that was never run here. Carries no subject and no text.
+
+Example::
+
+    facts = RunRefFacts(agent_id="agt_1", target="prod", tag="support.reply", version_id="ver_9", arm="none", generation=12, bucket=None)
+    run_ref = mint_run_ref(facts, key)   # the per-store key; keep the token beside your own trace
+    parse_run_ref(run_ref, key)          # the facts back, or None for a forged or foreign token
 """
 
 from __future__ import annotations

@@ -13,6 +13,12 @@
  * count. The command prints the tree before and after, the eviction, the
  * `dropped` row, the bound and the verdict; exit 0 when the invariant holds.
  * Nothing here touches the host's real spool.
+ *
+ * @example
+ * ```sh
+ * airprompter telemetry verify --budget 104857600 --sink-absent
+ * airprompter telemetry verify --budget 104857600 --sink-absent --writers 4 --quarantine-cap 10485760 --json
+ * ```
  */
 
 import { join } from "node:path";

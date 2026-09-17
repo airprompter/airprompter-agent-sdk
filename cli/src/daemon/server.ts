@@ -5,6 +5,14 @@
  * 0600 local socket, forwards unlock / rollback / sync / policy, pushes
  * `generation`, `lease` and `policy` events, and answers `GET /healthz`
  * for probes.
+ *
+ * @example
+ * ```ts
+ * const server = new DaemonServer(agent, { socketPath, version: CLI_VERSION, protocol: PROTOCOL_VERSION, agentId: scope.agentId, target: scope.target, logger: log, uploader });
+ * await server.listen();   // refuses when another daemon answers on the socket; a stale socket file is removed
+ * // … until SIGINT / SIGTERM
+ * await server.close();
+ * ```
  */
 
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
@@ -13,6 +21,7 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { healthzOf, type AirPrompterAgent } from "../../../sdk-typescript/packages/sdk/src/agent.js";
 import { HOST_SPOOL_BUDGET_BYTES } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
 import { DAEMON_MAX_LINE_BYTES } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
+import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
 import type { SpoolUploader, UploaderStatus } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
 
 export interface DaemonStatus {
@@ -187,7 +196,8 @@ export class DaemonServer {
     try {
       this.send(socket, { id, ok: true, ...(await this.dispatch(request.op, request)) });
     } catch (error) {
-      this.send(socket, { id, ok: false, error: (error as Error).message });
+      // A store's refusal keeps its code on the wire (`release_staged`, `no_previous_release`, …) so the CLI can name it.
+      this.send(socket, { id, ok: false, error: (error as Error).message, ...(isStoreError(error) ? { reason: error.code } : {}) });
     }
   }
 

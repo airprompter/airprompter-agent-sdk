@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Generate protocol/vectors/ramp.json — the signed ramp plan's walk (S9), from an
 independent implementation: the assignment hash from hashlib, the walk from the
-rule in assignment-hash.md › The ramp plan. Usage: gen_ramp_vectors.py <out>.
+rule in assignment-hash.md › The ramp plan.
+
+Usage::
+
+    $ python3 protocol/tools/gen_ramp_vectors.py protocol/vectors/ramp.json
 """
 import base64
 import hashlib

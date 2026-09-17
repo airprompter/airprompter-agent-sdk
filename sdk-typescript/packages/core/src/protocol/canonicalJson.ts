@@ -1,4 +1,15 @@
-/** Canonical JSON per `protocol/canonical-json.md`: the bytes under every digest and signature. */
+/**
+ * Canonical JSON per `protocol/canonical-json.md`: the bytes under every digest and signature. Keys sorted, no
+ * whitespace, integers only (a float, `NaN`, `undefined`, a class instance or a cycle is refused with a
+ * `CanonicalJsonError` naming the path), so two SDKs hash the same document to the same bytes.
+ *
+ * @example
+ * ```ts
+ * const bytes = canonicalBytes(manifest.payload); // what the signature covers
+ * const digest = sha256Prefixed(bytes); // "sha256:<hex>"
+ * canonicalJson({ b: 1, a: [true, null] }); // '{"a":[true,null],"b":1}'
+ * ```
+ */
 
 import { createHash } from "node:crypto";
 

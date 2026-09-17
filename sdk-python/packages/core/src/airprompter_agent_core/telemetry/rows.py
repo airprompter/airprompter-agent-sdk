@@ -1,7 +1,15 @@
 """The telemetry row schemas (``protocol/spool-format.md``, D52/D66): what a spool segment carries, and nothing
 else. There is no field for prompt text, output, or an end-user identifier — the shape is the privacy rule. Pure: the
 spool writer (``airprompter_agent_telemetry``) and the wrappers (``airprompter_agent_runtime``) both build on these
-without importing each other (S10)."""
+without importing each other (S10).
+
+Example::
+
+    observation = Observation(tag="support.reply", version_id="ver_9", arm="none", model="gpt-5", status="ok", latency_ms=812.5,
+                              tokens={"input": 640, "output": 120}, usage_source="reported")
+    latency_bucket_index(812.5)    # 10: the 512–1024 ms bucket
+    minute_of(1_789_221_790_123)   # "2026-09-12T14:03:00Z" — the window a row lands in
+"""
 
 from __future__ import annotations
 

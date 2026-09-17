@@ -3,6 +3,14 @@
  * canonical bytes, root-metadata acceptance R1–R5 and manifest verification
  * M1–M12. Pure over its inputs; `now` is always passed in. This is what
  * decides whether bytes go live, so it never reads the network or the disk.
+ *
+ * @example
+ * ```ts
+ * const root = trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: PINNED_ROOT_JWK });
+ * const rootVerdict = verifyRootMetadata({ candidate: fetchedRoot, trusted: root, now }); // R1–R5; a newer root replaces the pinned one
+ * const verdict = verifyManifest({ manifest, root: rootVerdict.ok ? fetchedRoot : root, now, scope, storedGeneration: 3, payloads });
+ * if (!verdict.ok) refuse(verdict.reason); // "signature_invalid" | "scope_mismatch" | "generation_rollback" | "payload_hash_mismatch" | …
+ * ```
  */
 
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
@@ -29,6 +37,7 @@ export function signBytes(bytes: Uint8Array, privateJwk: P256PrivateJwk): string
 }
 
 export function verifyBytes(bytes: Uint8Array, signature: string, publicJwk: P256PublicJwk): boolean {
+  // P1363 r‖s is 64 bytes, exactly 86 base64url characters unpadded; any other length is not an ES256 signature and never reaches the verifier.
   if (!/^[A-Za-z0-9_-]{86}$/.test(signature)) return false;
   try {
     const key = createPublicKey({ key: publicJwk as unknown as import("node:crypto").JsonWebKey, format: "jwk" });

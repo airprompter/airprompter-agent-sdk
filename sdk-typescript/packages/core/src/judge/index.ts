@@ -7,6 +7,14 @@
  * resolved task criteria that passed, in [0, 1], and lands as `judgeScore` on
  * the run's arm window through `ap.feedback()`. The output, the rubric text
  * and the judge's reasoning never reach the spool.
+ *
+ * @example
+ * ```ts
+ * const rubric = JUDGE_RUBRICS.helpfulness; // or { name: "prompt", criteria: rubricFromPrompt(promptText) } for the prompt's own
+ * const reply = await askModel(judgePrompt(rubric, output)); // the customer's model; one JSON line back
+ * const result = parseJudgeReply(reply, rubric); // { score, taskPass, taskFail, taskUnclear, protectionFail, flagged }
+ * ap.feedback(runRef, judgeSignalsOf(result)); // judgeScore when the task rubric resolved; flagged always
+ * ```
  */
 
 export interface JudgeRubric {
@@ -86,6 +94,7 @@ export function judgePrompt(rubric: JudgeRubric, output: string): string {
     list,
     "",
     "<answer>",
+    // An output carrying its own </answer> would close the fence early and address the judge as instructions.
     output.replace(/<\/answer>/giu, "<\\/answer>"),
     "</answer>",
     "",

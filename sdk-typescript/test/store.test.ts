@@ -62,8 +62,13 @@ test("a second release stages into B and activates; generation below the stored 
   store.acceptRoot(plane.root);
   store.stage({ manifest: first, payloads: plane.payloads });
   store.activate();
+  // One release only: there is nothing to go back to, and the store says so by name.
+  assert.throws(() => store.rollbackLocal(), (e: unknown) => e instanceof StoreError && e.code === "no_previous_release");
   const second = plane.promote([plane.slot({ tag: "a", text: "two" })]);
   assert.equal(store.stage({ manifest: second, payloads: plane.payloads }), "B");
+  // Staged, not yet active: a rollback would be a silent unlock, so it is refused; the staged slot is untouched.
+  assert.throws(() => store.rollbackLocal(), (e: unknown) => e instanceof StoreError && e.code === "release_staged");
+  assert.deepEqual([store.state.active, store.state.staged, store.state.generation], ["A", "B", 1]);
   assert.equal(store.activate(), "B");
   assert.equal(store.state.generation, 2);
   assert.throws(() => store.stage({ manifest: first, payloads: plane.payloads }), (e: unknown) => e instanceof StoreError && e.code === "generation_rollback");
@@ -165,4 +170,16 @@ test("KEK rotation re-wraps the DEK: payloads stay readable, nothing is re-encry
   // The old file key no longer opens it.
   await assert.rejects(openStore(stateDir), (e: unknown) => e instanceof StoreError && e.code === "kek_unavailable");
   rmSync(stateDir, { recursive: true, force: true });
+});
+
+test("the file key provider goes through the filesystem port, so a store on a memory filesystem keeps its key there too", async () => {
+  const { MemoryFs } = await import("../packages/core/src/testing/memoryFs.js");
+  const { fileKey } = await import("../packages/sync/src/store/keyProvider.js");
+  const fs = new MemoryFs();
+  const provider = fileKey("/keys/store.key", fs);
+  const wrapped = await provider.wrap(new Uint8Array(32).fill(7));
+  assert.deepEqual([...(await provider.unwrap(wrapped))], [...new Uint8Array(32).fill(7)]);
+  assert.equal(fs.exists("/keys/store.key"), true, "the KEK file is on the port's filesystem");
+  assert.equal(fs.readFile("/keys/store.key").length, 32);
+  assert.equal(existsSync("/keys/store.key"), false, "and nowhere on the real disk");
 });

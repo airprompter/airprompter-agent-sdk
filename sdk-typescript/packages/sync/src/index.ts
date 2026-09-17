@@ -5,6 +5,15 @@
  * or the daemon loads is a `LoadedRelease` (`@airprompter/agent-core`) for
  * `@airprompter/agent-runtime` to serve; this package never imports the
  * runtime or the telemetry package (S10).
+ *
+ * @example
+ * ```ts
+ * import { SlotStore, fileKey, syncOnce } from "@airprompter/agent-sync";
+ *
+ * const store = await SlotStore.open({ stateDir, agentId, target: "prod", keyProvider: fileKey(join(stateDir, "store.key")) });
+ * const pass = await syncOnce({ store, client, now, scope, trustedRoot, active: null, etag: null, applyPolicy: () => "activated" });
+ * // pass.outcome: "activated" | "staged" | "unchanged" | "refused" | "unavailable" | … — never a throw past here
+ * ```
  */
 
 export { SlotStore, StoreError, isStoreError, STORE_FORMAT_VERSION, STORE_FORMATS_READ } from "./store/slotStore.js";

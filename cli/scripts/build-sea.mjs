@@ -4,7 +4,7 @@
 // (the release workflow replaces that with Developer ID + notarization);
 // Windows gets its Authenticode signature in the workflow too.
 //
-//   node scripts/build-sea.mjs --out ../dist/airprompter-darwin-arm64
+//   $ node scripts/build-sea.mjs --out ../dist/airprompter-darwin-arm64
 
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";

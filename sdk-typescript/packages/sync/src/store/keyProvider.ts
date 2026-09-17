@@ -7,11 +7,21 @@
  * `fileKey()` ships here: a 0600 file beside the store. `kms()`, `vault()`
  * and `osKeystore()` are optional packages; `custom()` wraps anything that
  * can wrap and unwrap 32 bytes.
+ *
+ * @example
+ * ```ts
+ * const provider = customKeyProvider({
+ *   storageProtection: "kms", // what the heartbeat reports; "custom" when unnamed
+ *   wrap: async (dek) => (await kms.encrypt({ KeyId, Plaintext: dek })).CiphertextBlob!,
+ *   unwrap: async (wrapped) => (await kms.decrypt({ CiphertextBlob: wrapped })).Plaintext!,
+ * });
+ * const store = await SlotStore.open({ stateDir, agentId, target: "prod", keyProvider: provider }); // fileKey(path) is the fallback
+ * ```
  */
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { nodeFs, type FsPort } from "@airprompter/agent-core";
 
 export type StorageProtection = "os_keystore" | "kms" | "vault" | "custom" | "file_key";
 
@@ -45,14 +55,15 @@ export async function unwrapWithRawKey(kek: Uint8Array, wrapped: Uint8Array): Pr
  * other users, backups and snapshots — not against a co-tenant process
  * running as the same user. Reported, never silent.
  */
-export function fileKey(path: string): KeyProvider {
+export function fileKey(path: string, fs: FsPort = nodeFs): KeyProvider {
+  // Through the same port as the store: an application that runs the store on a memory or custom filesystem keeps
+  // the key there too, instead of finding a 0600 file on the real disk it never asked for.
   const load = (): Uint8Array => {
-    if (!existsSync(path)) {
-      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-      writeFileSync(path, randomBytes(32), { mode: 0o600 });
-      chmodSync(path, 0o600);
+    if (!fs.exists(path)) {
+      fs.mkdirp(dirname(path), 0o700);
+      fs.writeFile(path, randomBytes(32), 0o600);
     }
-    const kek = readFileSync(path);
+    const kek = fs.readFile(path);
     if (kek.length !== 32) throw new Error(`${path} is not a 32-byte key file`);
     return kek;
   };

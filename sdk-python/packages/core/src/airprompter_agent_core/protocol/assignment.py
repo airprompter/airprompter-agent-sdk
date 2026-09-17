@@ -1,4 +1,13 @@
-"""Sticky assignment (``protocol/assignment-hash.md``): SHA-256(salt ‖ subject), first 8 bytes big-endian mod 10000, cumulative weights."""
+"""Sticky assignment (``protocol/assignment-hash.md``): SHA-256(salt ‖ subject), first 8 bytes big-endian mod 10000, cumulative weights.
+
+Example::
+
+    arms = [{"arm": "a", "weightBps": 9000}, {"arm": "b", "weightBps": 1000}]   # weights sum to 10000
+    assignment = assign_arm(salt=experiment["salt"], subject="user-42", arms=arms)
+    assignment.arm["arm"], assignment.bucket   # ("a", 3729) — the same subject lands here on every host
+    effective_arms(arms=arms, ramp=experiment.get("ramp"), disabled_arms=["b"], now_ms=now_ms)   # b's share goes to the control
+    ordered_steps("onboarding.flow", slot["steps"])   # the steps sorted by ordinal (ids onboarding.flow#1, #2, …), or StepError
+"""
 
 from __future__ import annotations
 

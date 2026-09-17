@@ -16,6 +16,13 @@
  * end-user identifier — the rows have no field for them, and the attribute
  * keys are a closed set the conformance runner pins.
  * `protocol/vectors/otel-mapping.json` is the vector every bridge must match.
+ *
+ * @example
+ * ```ts
+ * const request = spoolRowsToOtlp(segment.rows, { resource: { "service.name": "support-bot" } });
+ * // request.resourceMetrics[0].scopeMetrics[0].metrics: one entry per metric the rows carry, delta temporality
+ * await fetch("http://localhost:4318/v1/metrics", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
+ * ```
  */
 
 import { LATENCY_BUCKET_EDGES_MS, SDK_VERSION, type SpoolRow, type WindowRow } from "@airprompter/agent-core";

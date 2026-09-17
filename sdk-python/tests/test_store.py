@@ -66,8 +66,17 @@ def test_second_release_and_anti_rollback(tmp_path):
     store.accept_root(plane.root)
     store.stage(manifest=first, payloads=plane.payloads)
     store.activate()
+    # One release only: there is nothing to go back to, and the store says so by name.
+    with pytest.raises(StoreError) as none:
+        store.rollback_local()
+    assert none.value.code == "no_previous_release"
     second = plane.promote([plane.slot(tag="a", text="two")])
     assert store.stage(manifest=second, payloads=plane.payloads) == "B"
+    # Staged, not yet active: a rollback would be a silent unlock, so it is refused; the staged slot is untouched.
+    with pytest.raises(StoreError) as staged:
+        store.rollback_local()
+    assert staged.value.code == "release_staged"
+    assert (store.state["active"], store.state["staged"], store.state["generation"]) == ("A", "B", 1)
     assert store.activate() == "B"
     assert store.state["generation"] == 2
     with pytest.raises(StoreError) as refused:

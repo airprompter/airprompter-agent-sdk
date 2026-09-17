@@ -1,7 +1,15 @@
 /**
- * Wire types for protocol 0.2 — hand-written to match `protocol/schemas/*`.
+ * Wire types for the protocol (0.2 through 0.3.x) — hand-written to match `protocol/schemas/*`.
  * The conformance vectors, not these types, are what proves agreement; keep
  * them narrow and let the schema tests catch drift.
+ *
+ * @example
+ * ```ts
+ * const slot: ManifestSlot | undefined = manifest.payload.slots.find((entry) => entry.tag === "support.triage");
+ * const experiment: Experiment | null = experimentForTag(manifest.payload, "support.triage"); // null: the slot renders with arm "none"
+ * const fenced = slot?.variables.filter((variable: SlotVariable) => variable.trust === "end_user"); // rendered inside delimiters
+ * if (bundle.encryption.scheme === "none") bundle.encryption.contents.manifest; // the union narrows on `scheme`
+ * ```
  */
 
 export type Target = "dev" | "staging" | "prod";

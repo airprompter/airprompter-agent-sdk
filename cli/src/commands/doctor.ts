@@ -1,6 +1,6 @@
 /**
  * `airprompter doctor` (S14): every reason a host is not serving the release
- * it should, with the remedy next to it. Nine checks, each `ok`, `warn`,
+ * it should, with the remedy next to it. Twelve checks, each `ok`, `warn`,
  * `fail` or `skip`, never a throw: the source (the API answers this key for
  * this agent and target; the edge pointer when named), the root, the store
  * (present, opens, active slot re-verifies as a runtime would), the lease,
@@ -8,6 +8,12 @@
  * daemon (reachable and its healthz), the policy pin. Reads only — nothing
  * here creates a store, writes a file or sends a heartbeat. Exit 0 when no
  * check fails (warnings are printed, not fatal); `refused` (1) otherwise.
+ *
+ * @example
+ * ```sh
+ * AIRPROMPTER_AGENT_KEY=… airprompter doctor --org org_… --agent agt_… --environment prod --root ./airprompter-root.jwk.json
+ * airprompter doctor --org org_… --agent agt_… --environment prod --json     # no key set: the source check is skipped, the host checks still run
+ * ```
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";

@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-sdk",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry.",
   "keywords": [
     "airprompter",
@@ -58,10 +58,10 @@
     "provenance": true
   },
   "dependencies": {
-    "@airprompter/agent-core": "0.2.12",
-    "@airprompter/agent-sync": "0.2.12",
-    "@airprompter/agent-runtime": "0.2.12",
-    "@airprompter/agent-telemetry": "0.2.12"
+    "@airprompter/agent-core": "0.2.13",
+    "@airprompter/agent-sync": "0.2.13",
+    "@airprompter/agent-runtime": "0.2.13",
+    "@airprompter/agent-telemetry": "0.2.13"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.40",

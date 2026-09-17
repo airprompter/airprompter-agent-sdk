@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airprompter-agent-telemetry"
-version = "0.2.12"
+version = "0.2.13"
 description = "The content-free telemetry spool and its uploader for AirPrompter agents: minute windows as append-only segments (or in memory on serverless), the host budget, and direct-to-object-store upload under a grant."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -23,7 +23,7 @@ classifiers = [
   "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-  "airprompter-agent-core==0.2.12",
+  "airprompter-agent-core==0.2.13",
   "httpx>=0.27",
 ]
 

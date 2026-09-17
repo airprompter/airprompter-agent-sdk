@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-runtime",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Serve a verified AirPrompter agent release: slot resolution under the ramp and any retreat, rendered text with run references, provider wrappers, and the hosted-execution client. Renders and assigns over a bundle the customer loads with no store, daemon or network.",
   "keywords": [
     "airprompter",
@@ -52,7 +52,7 @@
     "provenance": true
   },
   "dependencies": {
-    "@airprompter/agent-core": "0.2.12"
+    "@airprompter/agent-core": "0.2.13"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.40",

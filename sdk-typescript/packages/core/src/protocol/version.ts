@@ -12,7 +12,7 @@
  */
 export const PROTOCOL_VERSION = "0.3.4";
 /** This package's own version, as the heartbeat and store.json (S8: the writer) record it. */
-export const SDK_VERSION = "0.2.13";
+export const SDK_VERSION = "0.2.14";
 
 /**
  * Whether a protocol version string is at least another (`major.minor.patch`, numerically). The manifest a control

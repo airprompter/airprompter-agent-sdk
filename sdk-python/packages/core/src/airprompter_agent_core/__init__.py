@@ -76,7 +76,7 @@ def protocol_at_least(version: str, floor: str) -> bool:
     if not isinstance(version, str) or not isinstance(floor, str) or not _re.fullmatch(r"\d+\.\d+\.\d+", version) or not _re.fullmatch(r"\d+\.\d+\.\d+", floor):
         return False
     return [int(part) for part in version.split(".")] >= [int(part) for part in floor.split(".")]
-SDK_VERSION = "0.2.13"
+SDK_VERSION = "0.2.14"
 
 __all__ = [
     "APBUNDLE_INFO",

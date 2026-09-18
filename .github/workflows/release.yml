@@ -227,6 +227,9 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: cli
+      # S12: the dev test runs conformance/live.mjs, which needs the runner's own deps (as CI installs them).
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: conformance
       - run: npm test
         working-directory: cli
       - name: Tag matches package.json

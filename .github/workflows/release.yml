@@ -65,7 +65,7 @@ jobs:
             --certificate-identity-regexp '^https://github.com/airprompter/airprompter-agent-sdk/' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             protocol.spdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: protocol-sbom-signed
           path: |

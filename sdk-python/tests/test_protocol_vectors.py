@@ -28,6 +28,7 @@ from airprompter_agent_core.protocol import (
     trusted_root_from_pinned_key,
     verify_manifest,
     verify_root_metadata,
+    verify_seal,
 )
 
 VECTORS = os.path.join(os.path.dirname(__file__), "..", "..", "protocol", "vectors")
@@ -138,6 +139,21 @@ def test_examples_digest_reproduces():
     with open(os.path.join(VECTORS, "..", "examples", "manifest.json"), encoding="utf-8") as f:
         manifest = json.load(f)
     assert release_digest(manifest["payload"]["slots"]) == manifest["payload"]["releaseDigest"]
+
+
+def test_seal_vectors():
+    """The customer-store seal (pins.md): every case's sealId/sealedPins/pins/texts must recompute the JS-generated
+    observedDigest, intact, and changedTags."""
+    file = vector("seal.json")
+    assert len(file["cases"]) >= 5, "the generator promises 5 seal cases"
+    checked = 0
+    for c in file["cases"]:
+        verdict = verify_seal(seal_id=c["sealId"], sealed_pins=c["sealedPins"], pins=c["pins"], texts=c["texts"])
+        assert verdict.observed_digest == c["expected"]["observedDigest"], c["name"]
+        assert verdict.intact == c["expected"]["intact"], c["name"]
+        assert verdict.changed_tags == c["expected"]["changedTags"], c["name"]
+        checked += 1
+    assert checked >= 5, "every seal vector must be asserted"
 
 
 def test_variable_default_and_source_are_digest_bound_only_when_present():

@@ -83,6 +83,11 @@ class FakeControlPlane:
         #: The issuer's and the bucket's clock (grant expiry, policy expiry); a test drives it beside the runtime's.
         self.now: Callable[[], float] = lambda: float(now_ms())
         self._grant_seq = 0
+        #: 0.3.5: every release digest this target has ever sealed, and the newest envelope sealed for it — what
+        #: `?release=` answers from ("the newest envelope this target ever sealed for that release digest").
+        self.sealed: dict[str, dict[str, Any]] = {}
+        #: 0.3.5: content hashes this fake answers 404 for — a mirror/pin test forcing `payload_missing`.
+        self.withhold_payloads: set[str] = set()
 
     def _issue_grant(self, instance_id: str, now: float) -> dict[str, Any]:
         self._grant_seq += 1
@@ -194,6 +199,13 @@ class FakeControlPlane:
         data = json.dumps(manifest).encode("utf-8")
         self._current = {"manifest": manifest, "bytes": data, "etag": sha256_prefixed(data)}
         self.edge_etag += 1
+        # 0.3.5 (pins.md): "the newest envelope this target ever sealed for that release digest" — every promotion
+        # of the same digest (a re-promotion, a local rollback re-promoted forward) overwrites the entry, keeping
+        # the newest by generation, never appending a history a pinned reader would have to walk.
+        digest = payload["releaseDigest"]
+        existing = self.sealed.get(digest)
+        if existing is None or existing["manifest"]["payload"]["generation"] < payload["generation"]:
+            self.sealed[digest] = self._current
         return manifest
 
     @property
@@ -255,7 +267,7 @@ class FakeControlPlane:
                 for key in ("protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"):
                     if key not in body:
                         return httpx.Response(400, json={"error": f"heartbeat: missing {key}"})
-                allowed = {"protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"}
+                allowed = {"protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "pinnedReleaseDigest", "seal", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"}
                 for key in body:
                     if key not in allowed:
                         return httpx.Response(400, json={"error": f"heartbeat: unknown {key}"})
@@ -276,15 +288,41 @@ class FakeControlPlane:
                     return httpx.Response(403, json={"error": "x", "details": {"code": "agent_mismatch"}})
                 if manifest_match.group(2) != self.scope["target"]:
                     return httpx.Response(403, json={"error": "x", "details": {"code": "target_mismatch"}})
-                if not self._current:
-                    return httpx.Response(404, json={"error": "Not found"})
                 # The answer names the edge pointer, as the service does (a deployment without an edge omits the header).
                 pointer_header = {"x-agent-edge-pointer-url": self.edge_pointer_url} if self.edge_pointer_url else {}
+                query = dict(request.url.params)
+                release = query.get("release")
+                wait = query.get("wait")
+                if release is not None:
+                    # 0.3.5 (pins.md, openapi.yaml): not combinable with `wait`; the grammar is a full digest or
+                    # >=12 hex characters of one, an optional `sha256:` prefix, matched case-insensitively.
+                    if wait is not None:
+                        return httpx.Response(400, json={"error": "wait and release cannot be combined", "details": {"code": "wait_with_release"}})
+                    if not re.match(r"^(sha256:)?[0-9a-fA-F]{12,64}$", release):
+                        return httpx.Response(400, json={"error": "release does not match the seal grammar", "details": {"code": "seal_invalid"}})
+                    hex_part = (release[7:] if release.startswith("sha256:") else release).lower()
+                    if len(hex_part) == 64:
+                        entry = self.sealed.get(f"sha256:{hex_part}")
+                        sealed = [entry] if entry else []
+                    else:
+                        sealed = [entry for digest, entry in self.sealed.items() if digest[7:].startswith(hex_part)]
+                    if not sealed:
+                        return httpx.Response(404, json={"error": "this target has never sealed that release", "details": {"code": "release_unknown"}})
+                    if len(sealed) > 1:
+                        return httpx.Response(409, json={"error": "the short form matches more than one release sealed on this target", "matches": [e["manifest"]["payload"]["releaseDigest"][7:19] for e in sealed]})
+                    entry = sealed[0]
+                    if request.headers.get("if-none-match") == entry["etag"]:
+                        return httpx.Response(304, headers={"etag": entry["etag"], **pointer_header})
+                    return httpx.Response(200, content=entry["bytes"], headers={"etag": entry["etag"], "x-agent-generation": str(entry["manifest"]["payload"]["generation"]), "content-type": "application/json", **pointer_header})
+                if not self._current:
+                    return httpx.Response(404, json={"error": "Not found"})
                 if request.headers.get("if-none-match") == self._current["etag"]:
                     return httpx.Response(304, headers={"etag": self._current["etag"], **pointer_header})
                 return httpx.Response(200, content=self._current["bytes"], headers={"etag": self._current["etag"], "x-agent-generation": str(self._current["manifest"]["payload"]["generation"]), "content-type": "application/json", **pointer_header})
             payload_match = re.match(r"^/v1/agents/([^/]+)/payloads/(sha256:[0-9a-f]{64})$", path)
             if payload_match:
+                if payload_match.group(2) in self.withhold_payloads:
+                    return httpx.Response(404, json={"error": "Not found"})
                 data = self.payloads.get(payload_match.group(2))
                 return httpx.Response(200, content=data) if data is not None else httpx.Response(404, json={"error": "Not found"})
             return httpx.Response(404, json={"error": "Not found"})

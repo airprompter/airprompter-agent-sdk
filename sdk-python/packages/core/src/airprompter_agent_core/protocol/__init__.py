@@ -11,6 +11,7 @@ Example::
 
 from .assignment import ASSIGNMENT_MODULUS, RAMP_MAX_STEPS, RAMP_MIN_STEP_MS, Assignment, AssignmentError, StepError, arm_for_bucket, assign_arm, bucket_from_hash, effective_arms, ordered_steps, ramp_weights_at, subject_hash, validate_arms, validate_ramp
 from .canonical_json import UNDEFINED, CanonicalJsonError, canonical_bytes, canonical_json, sha256_prefixed
+from .seal import SealVerdict, seal_id_of, verify_seal
 from .trust import (
     SUPPORTED_PROTOCOL_MAJORS,
     Verdict,
@@ -56,6 +57,9 @@ __all__ = [
     "referenced_payloads",
     "release_digest",
     "release_digest_input",
+    "SealVerdict",
+    "seal_id_of",
+    "verify_seal",
     "sign_bytes",
     "trusted_root_from_pinned_key",
     "verify_bytes",

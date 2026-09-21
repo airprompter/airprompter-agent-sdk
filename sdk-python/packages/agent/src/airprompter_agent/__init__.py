@@ -22,6 +22,7 @@ from .agent import (
     AirPrompterAgent,
     ApplyOptions,
     GoldenOptions,
+    MirrorHandle,
     PromptHandle,
     ReleaseChange,
     Rendered,
@@ -37,6 +38,7 @@ from .agent import (
     healthz_of,
     healthz_response,
 )
+from .mirror import Mirror, MirrorCopy, MirrorPort, SealReport, copy_from_release, seal_for_heartbeat, seal_of
 from airprompter_agent_sync.apply.window import UpdateWindow, WindowState, is_known_time_zone, parse_window, validate_window, window_state
 from airprompter_agent_core.golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, GoldenCaseResult, GoldenInvocation, GoldenReport, GoldenSetError, golden_reports_meet, parse_golden_set, pass_bps_of, run_golden_set
 from airprompter_agent_core.judge import JUDGE_RUBRICS, PROTECTION_CRITERIA, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
@@ -178,6 +180,14 @@ __all__ = [
     "LATENCY_BUCKET_EDGES_MS",
     "LoadedRelease",
     "LoadedSlot",
+    "Mirror",
+    "MirrorCopy",
+    "MirrorHandle",
+    "MirrorPort",
+    "SealReport",
+    "copy_from_release",
+    "seal_for_heartbeat",
+    "seal_of",
     "MANAGED_REFUSAL_CODES",
     "MANAGED_SDK_USER_AGENT",
     "ManagedAgent",

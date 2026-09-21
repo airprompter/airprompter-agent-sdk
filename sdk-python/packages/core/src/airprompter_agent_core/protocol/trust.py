@@ -30,8 +30,9 @@ from .assignment import AssignmentError, validate_ramp
 from .canonical_json import canonical_bytes, canonical_json, sha256_prefixed
 
 SUPPORTED_PROTOCOL_MAJORS = frozenset({0})
-#: S4: the directive kinds a runtime honours. `disable` acts without a local act; `request_unlock` only asks.
-DIRECTIVE_KINDS = frozenset({"request_unlock", "disable"})
+#: S4: the directive kinds a runtime honours. `disable` acts without a local act; `request_unlock` and `request_resync`
+#: (0.3.5, reserved — pins.md) only ask.
+DIRECTIVE_KINDS = frozenset({"request_unlock", "request_resync", "disable"})
 _SIGNATURE = re.compile(r"^[A-Za-z0-9_-]{86}$")
 
 

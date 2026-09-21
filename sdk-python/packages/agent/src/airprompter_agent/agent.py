@@ -26,6 +26,7 @@ cancels the timers, waits for a pass in flight, and closes the spool.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import hmac
 import json
@@ -58,14 +59,17 @@ from airprompter_agent_sync.sync.loop import required_models_missing
 from airprompter_agent_telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant, post_segment
 from airprompter_agent_core.control.client import SyncClient
 from airprompter_agent_sync.sync.daemon import DaemonClient, daemon_socket_path
-from airprompter_agent_sync.sync.loop import jittered_delay_ms, sync_once
+from airprompter_agent_sync.sync.loop import PinRequest, jittered_delay_ms, sync_once
+from airprompter_agent_sync.sync.pin import PinFile, clear_pin_file, merge_live_control, read_pin_file, write_pin_file
 from airprompter_agent_core.checks import evaluate_checks, output_text_of
 from airprompter_agent_core.golden import GoldenInvoke, GoldenReport, golden_reports_meet, manifest_has_golden, parse_golden_set, run_golden_set
 from airprompter_agent_core.judge import JUDGE_RUBRICS, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
 from airprompter_agent_runtime.observe import PendingObservation, ObserveTarget, observe_call, observe_call_async
-from airprompter_agent_core.release.reader import ReleaseSlot
+from airprompter_agent_core.protocol.seal import seal_id_of
+from airprompter_agent_core.release.reader import LoadedRelease, ReleaseSlot
 from airprompter_agent_runtime.release.resolver import ReleaseResolver, Rendered, Workflow, WorkflowStep, copy_inference, disabled_from
 from airprompter_agent_runtime.variables import FilledRender, FillPlan, VariableSourceContext, VariableSourceInput, VariableSourceRegistry, fill_async, fill_sync, is_variable_source_error, plan_fill, unsourced
+from .mirror import Mirror, MirrorPort, SealReport, copy_from_release, seal_for_heartbeat
 
 from airprompter_agent_core import SDK_VERSION  # one constant, pinned to pyproject by tests/test_package_split.py
 
@@ -194,6 +198,8 @@ class AgentStatus:
     #: "unsourced": [{"tag", "arm", "names"}]}``: per slot and arm, the required variables neither a literal nor a
     #: source fills, so the call site must. Declarations only; no payload is read.
     variables: dict[str, Any] = field(default_factory=lambda: {"sources": [], "unsourced": []})
+    #: 0.3.5: the seal id this instance is pinned to (pins.md), or ``None`` when following the pointer.
+    pinned_release: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -377,6 +383,34 @@ class WorkflowHandle(Workflow):
         return await self._render_step_async(step_id, {**(values or {}), **kwargs})
 
 
+@dataclass(frozen=True)
+class _SyntheticRelease:
+    """0.3.5: a ``LoadedRelease`` built from the customer's mirror copy (``_content_source`` / ``_release_for_resolver``)
+    — never written to a store, never signature-verified on its own (the mirror's ``verify_seal`` is the check),
+    only handed to ``ReleaseResolver`` so rendering reads the mirror the same way it reads the store."""
+
+    manifest: Mapping[str, Any]
+    generation: int
+    payloads: Mapping[str, bytes]
+
+
+class MirrorHandle:
+    """The handle ``ap.mirror(port)`` returns: ``refresh()`` re-runs the reconcile rule now, ``resync(approved_by=)``
+    re-materialises deliberately, ``report()`` reads the last computed seal report."""
+
+    def __init__(self, agent: "AirPrompterAgent"):
+        self._agent = agent
+
+    def refresh(self) -> None:
+        self._agent._reconcile_mirror()
+
+    def resync(self, *, approved_by: str) -> SealReport:
+        return self._agent._resync_mirror(approved_by)
+
+    def report(self) -> Optional[SealReport]:
+        return self._agent._mirror_report
+
+
 class AirPrompterAgent:
     def __init__(self, options: dict[str, Any], store: Optional[SlotStore], trusted_root: Mapping[str, Any], own_instance_id: str, spool_dir: str, run_ref_seed: Optional[str] = None):
         self._o = options
@@ -459,6 +493,29 @@ class AirPrompterAgent:
         self._client: Optional[SyncClient] = None
         if options.get("api_key") and self._sync_options.mode not in ("offline", "daemon"):
             self._client = SyncClient(base_url=options.get("base_url") or "https://api.airprompter.com", agent_id=options["agent_id"], target=options["target"], api_key=options["api_key"], transport=options.get("transport"), user_agent=_USER_AGENT)
+        # 0.3.5 (pins.md): the pin sidecar, the live manifest adopted alongside a pinned release, and the customer's mirror.
+        self._pin: Optional[PinFile] = None
+        self._live_manifest: Optional[Mapping[str, Any]] = None
+        self._live_etag: Optional[str] = None
+        #: `unpin()` sets this once: the NEXT unpinned activation forces past the store's generation, re-basing it
+        #: to the pointer's (pins.md: unpinning resumes following the pointer and never treats the pointer's own
+        #: generation as a rollback).
+        self._rebase_on_next_activation = False
+        self._mirror_instance: Optional[Mirror] = None
+        self._mirror_report: Optional[SealReport] = None
+        self._mirror_unreadable_streak = 0
+        self._mirror_broken_logged = False
+        #: The release the mirror's cached copy was last written FOR (this SDK's own materialise/resync) — the
+        #: reference a re-check is against, so a copy broken since generation N is reported against N's seal, not a
+        #: release that activated after.
+        self._mirror_materialised_for: Optional[LoadedRelease] = None
+        self._reconciling_mirror = threading.Lock()
+        #: The `source` `_resolver()` last built its `ReleaseResolver` from — `_finish()` stamps it onto
+        #: `Rendered.resolution_source` right after capturing the resolver, so the two never drift.
+        self._last_resolver_source = "store"
+        #: `(releaseDigest, requestedAt)` pairs of `request_resync` directives already handed to
+        #: `on_resync_requested` — deduped so a directive that keeps riding the manifest is not re-announced every tick.
+        self._resync_requests_seen: set[str] = set()
 
     # ------------------------------------------------------------------ start
 
@@ -490,12 +547,18 @@ class AirPrompterAgent:
         random: Optional[Callable[[], float]] = None,
         logger: Optional[Callable[[dict[str, Any]], None]] = None,
         variables: Optional[Mapping[str, VariableSourceInput]] = None,
+        release: Optional[str] = None,
     ) -> "AirPrompterAgent":
         """``root`` is ``{"pinned": <P-256 public JWK>}`` for this environment, or a full root document (from the bundle or a previous accept).
         ``api_key`` absent means offline: serve the store or the vendored bundle, never call home.
         ``variables`` is how this application fills prompt variables from its own system: a literal per name, or a
         source (``{"resolve": callable, "trust": "operator"|"end_user", ...}``) consulted for a declared variable the
-        version's text uses and the call site did not pass. ``ap.variables.provide()`` adds more after start."""
+        version's text uses and the call site did not pass. ``ap.variables.provide()`` adds more after start.
+        ``release`` (0.3.5, pins.md): pin to a seal — the runtime fetches, verifies and renders exactly that sealed
+        release for this target and keeps obeying the environment's live Freeze, lease and unlock/re-sync requests.
+        A seal id (12 hex) or a release digest. Persisted in ``pin.json`` beside the store, so a restart on the
+        same host resumes the pin; ``ap.unpin()`` clears it. Ignored (with ``pin_unsupported_with_daemon`` logged
+        once) when attached to a daemon: a daemon-attached runtime does not yet support pin or mirror this row."""
         sync_options = _coerce(SyncOptions, sync)
         options: dict[str, Any] = {
             "organization_id": organization_id,
@@ -523,6 +586,7 @@ class AirPrompterAgent:
             "variables": variables,
         }
         resolved_state_dir = state_dir or default_state_dir()
+        options["state_dir"] = resolved_state_dir
         # The root is scoped to the HOSTED environment (the public service is "prod"), never to this app's target.
         pinned_root = trusted_root_from_pinned_key(purpose="platform", environment=root.get("hosted_environment", "prod"), pinned_root=root["pinned"]) if "pinned" in root else root
         if sync_options.mode == "daemon":
@@ -535,6 +599,9 @@ class AirPrompterAgent:
                 agent._daemon_socket = socket_path
                 agent._attach_daemon(client)
                 agent._schedule_spool_close()
+                # Do-not-touch (this row): the daemon protocol is out of scope, so an attached SDK ignores pin/mirror entirely.
+                if release:
+                    agent._log({"event": "pin_unsupported_with_daemon"})
                 return agent
             if logger:
                 logger({"sdk": SDK_NAME, "agentId": agent_id, "target": target, "event": "daemon_absent", "socketPath": socket_path})
@@ -555,6 +622,16 @@ class AirPrompterAgent:
         # S6: the instance id is the PROCESS's, never the store's — N workers on one host are N instances in the fleet view, and
         # their same-minute windows keep distinct keys at ingest (the store's own id stays store.json's identity).
         agent = cls(options, store, trusted, cls.new_instance_id(), os.path.join(store.dir, "spool", "telemetry"), store.instance_id)
+        # 0.3.5 (pins.md): a named `release` writes the pin (a fresh pin always wins over a stale one from a
+        # previous start); otherwise a pin left by an earlier process on this host resumes.
+        if release:
+            agent._pin = PinFile(version=1, release=release, pinned_at=agent._now_iso(), by="sdk")
+            write_pin_file(None, resolved_state_dir, agent_id, target, agent._pin)
+        else:
+            resumed = read_pin_file(None, resolved_state_dir, agent_id, target)
+            if resumed:
+                agent._pin = resumed
+                agent._log({"event": "pin_resumed", "release": resumed.release})
         agent._boot()
         return agent
 
@@ -1034,6 +1111,31 @@ class AirPrompterAgent:
         now = self._now_ms()
         return [d for d in directives if d.get("kind") == "request_unlock" and instant(d["expiresAt"]) > now]
 
+    def _open_resync_requests(self, payload: Optional[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        """0.3.5: unexpired ``request_resync`` directives from the latest verified manifest — surfaced to the
+        mirror's ``on_resync_requested``, never acted on by the runtime itself."""
+        standing = self._standing_directives
+        if standing and (payload is None or standing[0] >= payload["generation"]):
+            directives = standing[1]
+        else:
+            directives = list(payload.get("directives", [])) if payload else []
+        now = self._now_ms()
+        return [d for d in directives if d.get("kind") == "request_resync" and instant(d["expiresAt"]) > now]
+
+    def _notify_resync_requests(self, payload: Mapping[str, Any]) -> None:
+        """0.3.5: hand every ``request_resync`` directive not already seen to the mirror's ``on_resync_requested``
+        hook, deduped by ``(releaseDigest, requestedAt)`` so a directive that keeps riding the manifest is
+        announced once."""
+        mirror = self._mirror_instance
+        if mirror is None:
+            return
+        for directive in self._open_resync_requests(payload):
+            key = f"{directive['releaseDigest']} {directive['requestedAt']}"
+            if key in self._resync_requests_seen:
+                continue
+            self._resync_requests_seen.add(key)
+            mirror.notify_resync_requested({"sealId": seal_id_of(directive["releaseDigest"]), "directive": directive})
+
     # ------------------------------------------------------------------ sync
 
     def sync_now(self) -> None:
@@ -1059,6 +1161,19 @@ class AirPrompterAgent:
                 self._unavailable_models = list(models)
                 self.spool.refusal(at=self._now_iso(), reason="model_unavailable", generation=generation, tag=None, at_ms=self._now_ms())
 
+            def on_directives(payload: Mapping[str, Any]) -> None:
+                self._take_apply_policy(payload)
+                # 0.3.5: while pinned, directives come from the LIVE manifest (adopted below), never the pinned
+                # envelope's own — `_sync_pinned` never calls this callback for the pinned fetch itself.
+                if not self._pin:
+                    self._take_directives(payload)
+
+            pin_kwargs: dict[str, Any] = {}
+            if self._pin:
+                pin_kwargs = {"pin": PinRequest(release=self._pin.release), "live_etag": self._live_etag, "rebase": False}
+            elif self._rebase_on_next_activation:
+                pin_kwargs = {"rebase": True}
+
             result = sync_once(
                 store=self._store,
                 client=self._client,
@@ -1075,9 +1190,10 @@ class AirPrompterAgent:
                 countersign_root=self._o.get("countersign_root"),
                 apply_policy=self._apply_policy,
                 on_refusal=on_refusal,
-                on_directives=self._take_verified,
+                on_directives=on_directives,
                 catalog=self._declared_models(),
                 on_model_unavailable=on_model_unavailable,
+                **pin_kwargs,
             )
             with self._lock:
                 self._etag = result.etag
@@ -1086,12 +1202,19 @@ class AirPrompterAgent:
                 self._last_sync_ms = self._now_ms()
                 self._last_sync_outcome = result.outcome
                 # S3: contact is a signed manifest or the origin's authenticated answer — never the pointer's silence.
-                contact = result.outcome in ("unchanged", "activated", "activated_externally", "staged", "nothing_promoted", "held_back")
+                contact = result.outcome in ("unchanged", "pinned_unchanged", "activated", "activated_externally", "staged", "nothing_promoted", "held_back")
                 if contact:
                     self._last_contact_ms = self._now_ms()
                 if result.outcome not in ("pointer_unchanged", "unavailable"):
                     self._pointer_behind = False
                 self._consecutive_sync_failures = 0 if (contact or result.outcome == "pointer_unchanged") else self._consecutive_sync_failures + 1
+                # 0.3.5: this pass's stage/activate went through unforced past the store's own generation once — the
+                # re-base is spent only when it was actually consumed: `activated`, `staged` or `unchanged`. A
+                # `refused` pass never got as far as staging, so the re-base a caller just asked for (right after
+                # `unpin()`) must still apply to the pointer's next release; leaving it set here means a refused
+                # pass never silently swallows the pending re-base.
+                if self._rebase_on_next_activation and result.outcome in ("activated", "staged", "unchanged"):
+                    self._rebase_on_next_activation = False
                 activated = result.outcome == "activated" and result.active is not None
                 if activated:
                     self._active = result.active
@@ -1099,11 +1222,24 @@ class AirPrompterAgent:
                     self._staged_manifest = None
                     self._last_refusal = None
                     self._unavailable_models = []
+                    if self._pin:
+                        self._log({"event": "pin_activated", "generation": result.generation if result.generation is not None else result.active.generation, "sealId": seal_id_of(result.active.manifest["payload"]["releaseDigest"])})
+                if self._pin and result.outcome == "refused":
+                    self._log({"event": "pin_refused", "code": result.reason, **({"matches": result.detail.split(",")} if result.detail else {})})
+                if self._pin and result.live_control:
+                    self._live_manifest = result.live_control.manifest
+                    self._live_etag = result.live_control.etag
+                    self._take_directives(result.live_control.manifest["payload"])
+                    self._log({"event": "live_control_adopted", "generation": result.live_control.manifest["payload"]["generation"]})
             if activated:
                 self._emit_change()
             if result.outcome == "staged":
                 self._log({"event": "release_staged", "generation": result.generation})
                 self._emit_change()
+            # 0.3.5 (pins.md): "the seal recomputed each tick" — a registered mirror reconciles at the end of every
+            # pass, not only when this one happened to activate or stage.
+            if self._mirror_instance:
+                self._reconcile_mirror()
 
     def _declared_models(self) -> Optional[list[str]]:
         """T15: the models this application declared it can call; None when it declared nothing (then no release is refused over a model)."""
@@ -1186,6 +1322,7 @@ class AirPrompterAgent:
         requests = self._open_unlock_requests(payload)
         if requests:
             self._log({"event": "unlock_requested", "generation": payload["generation"], "requests": [{"releaseDigest": r.get("releaseDigest"), "expiresAt": r.get("expiresAt"), "requestedBy": r.get("requestedBy")} for r in requests]})
+        self._notify_resync_requests(payload)
 
     def _ramp_statuses(self, manifest: Optional[Mapping[str, Any]]) -> list[dict[str, Any]]:
         """S9/S16: every experiment's plan as this host walks it — per slot, each on its own clock and retreat."""
@@ -1221,13 +1358,55 @@ class AirPrompterAgent:
             return disabled_from(standing[1]).as_dict() if standing else {"agent": False, "slots": [], "arms": []}
         return self._resolver().disabled().as_dict()
 
-    def _resolver(self) -> ReleaseResolver:
-        """S10: the runtime over the active release — resolution, the ramp walk and rendering live in ``airprompter_agent_runtime``."""
-        release = self._active
-        if release is None:
+    def _control_payload(self) -> Optional[Mapping[str, Any]]:
+        """0.3.5 (pins.md): what governs directives, lease and countersign right now — the LIVE manifest's payload
+        while pinned and a live manifest has been adopted (``merge_live_control``: content stays the pinned
+        envelope's, everything else is live's), else the active release's own payload. Every existing read of
+        directives, lease or countersign on the active manifest goes through this one accessor."""
+        if self._pin and self._live_manifest and self._active:
+            return merge_live_control(self._active.manifest, self._live_manifest)["payload"]
+        return self._active.manifest["payload"] if self._active else None
+
+    def _content_source(self) -> dict[str, Any]:
+        """0.3.5: what a render (or a workflow step, or a golden run) reads slots and text from — the mirror's
+        cached copy once one is registered and readable, else the active release. ONE accessor so every site that
+        used to read ``self._active.manifest["payload"]["slots"]`` / ``self._active.payloads[...]`` reads through
+        here instead: a later render source is one more branch here, not a search-and-replace."""
+        active = self._active
+        mirror = self._mirror_instance
+        if mirror is not None and mirror.copy is not None:
+            copy = mirror.copy
+            return {"slots": copy.pins, "text_for": mirror.text_for, "source": "customer_store"}
+        return {"slots": active.manifest["payload"]["slots"] if active else [], "text_for": (lambda h: active.payloads.get(h)) if active else (lambda h: None), "source": self._source}
+
+    def _release_for_resolver(self) -> tuple[LoadedRelease, str]:
+        """The release ``_content_source()`` currently reads from, built once per call so a mirror's cache changing
+        mid-await never moves what an in-flight render sees (the same invariant ``_prepare()`` keeps for the
+        resolved slot)."""
+        active = self._active
+        if active is None:
             if self._staged_manifest is not None:
                 raise AgentStartError("no_verified_release", f"no active release: generation {self._staged_manifest['payload']['generation']} is staged under unlock_required and waiting for an unlock")
             raise AgentStartError("no_verified_release", "no active release")
+        content = self._content_source()
+        if content["source"] != "customer_store":
+            return active, content["source"]
+        payloads: dict[str, bytes] = {}
+        for slot in content["slots"]:
+            text = content["text_for"](slot["contentHash"])
+            if text is not None:
+                payloads[slot["contentHash"]] = text
+            for step in slot.get("steps") or []:
+                step_text = content["text_for"](step["contentHash"])
+                if step_text is not None:
+                    payloads[step["contentHash"]] = step_text
+        release = _SyntheticRelease(manifest={**active.manifest, "payload": {**active.manifest["payload"], "slots": content["slots"]}}, generation=active.generation, payloads=payloads)
+        return release, "customer_store"
+
+    def _resolver(self) -> ReleaseResolver:
+        """S10: the runtime over the active release — resolution, the ramp walk and rendering live in ``airprompter_agent_runtime``."""
+        release, source = self._release_for_resolver()
+        self._last_resolver_source = source
         cached = self._resolver_for
         if cached is not None and cached[0] is release and cached[1] is self._standing_directives:
             return cached[2]
@@ -1303,6 +1482,16 @@ class AirPrompterAgent:
             body["activeReleaseDigest"] = active_digest
         if staged_digest:
             body["stagedReleaseDigest"] = staged_digest
+        # 0.3.5 (pins.md): `pinnedReleaseDigest` and `seal` are content-free and sent only once the release this
+        # instance serves was sealed at protocol >= 0.3.5 — the same gate `catalog.variables` uses at 0.3.4, since
+        # an older service refuses the whole heartbeat over an unknown key.
+        if self._pin and self._active and protocol_at_least(str(self._active.manifest["payload"].get("protocol", "0.0.0")), "0.3.5"):
+            body["pinnedReleaseDigest"] = self._active.manifest["payload"]["releaseDigest"]
+        # F4: protocol/schemas/heartbeat.schema.json caps seal.changedTags at 64 — an oversize array would 400 the
+        # WHOLE heartbeat, not just this field. `seal_for_heartbeat` slices only the wire body; `self._mirror_report`
+        # keeps the full list.
+        if self._mirror_report and self._active and protocol_at_least(str(self._active.manifest["payload"].get("protocol", "0.0.0")), "0.3.5"):
+            body["seal"] = seal_for_heartbeat(self._mirror_report).to_wire()
         if status.apply_state == "refused" and status.last_refusal and _REFUSAL_WORD.match(status.last_refusal):
             body["refusal"] = status.last_refusal
             if status.last_refusal == "model_unavailable" and self._unavailable_models:
@@ -1534,7 +1723,8 @@ class AirPrompterAgent:
     def _lease_expires_at(self) -> Optional[str]:
         if self._active is None:
             return None
-        payload = self._active.manifest["payload"]
+        # 0.3.5: `leaseSeconds` is control, not content — live while pinned (`_control_payload()`).
+        payload = self._control_payload() or self._active.manifest["payload"]
         # S3: attached to a daemon, the daemon's contact with the origin is the lease; a local socket answer is not contact.
         if self._source == "daemon" or self._daemon is not None:
             return self._daemon_lease_expires_at
@@ -1548,7 +1738,8 @@ class AirPrompterAgent:
         """The lease: the facade's rule (it knows the daemon and the origin); the runtime knows nothing of contact."""
         active = self._active
         assert active is not None
-        payload = active.manifest["payload"]
+        # 0.3.5: `onLeaseExpiry` is control, not content — live while pinned (`_control_payload()`).
+        payload = self._control_payload() or active.manifest["payload"]
         expires_at = self._lease_expires_at()
         if expires_at and instant(expires_at) <= self._now_ms():
             # §6.4: degrade keeps serving and reports it; halt stops rendering. Either way the spool carries one row.
@@ -1593,6 +1784,10 @@ class AirPrompterAgent:
         resolved: ReleaseSlot
         text: str
         plan: FillPlan
+        #: 0.3.5: the `_content_source()` this `resolver` was built over — captured in the same tick as `_resolver()`,
+        #: right after it, so an await between `_prepare()` and `_finish()` never changes what generation's text a
+        #: render mixes with what source it reports.
+        source: str = "store"
 
         @property
         def row(self) -> dict[str, Any]:
@@ -1601,14 +1796,16 @@ class AirPrompterAgent:
     def _prepare(self, tag: str, subject: Optional[str], values: Mapping[str, Any]) -> "AirPrompterAgent._Prepared":
         with self._lock:
             resolver = self._resolver()
+            source = self._last_resolver_source
             slot, arm, bucket = self._resolve_slot(tag, subject)
             resolved = ReleaseSlot(slot, arm, bucket)
             text = resolver.text_of(slot)
             plan = plan_fill(tag=tag, variables=slot.get("variables", []), text=text, values=values, registry=self.variables)
-            return AirPrompterAgent._Prepared(resolver, resolved, text, plan)
+            return AirPrompterAgent._Prepared(resolver, resolved, text, plan, source)
 
     def _finish(self, prepared: "AirPrompterAgent._Prepared", filled: FilledRender) -> Rendered:
         rendered = self._render_observed(lambda: prepared.resolver.render(prepared.resolved, filled.values, fenced=filled.fenced, text=prepared.text), prepared.row)
+        rendered = dataclasses.replace(rendered, resolution_source=prepared.source)
         # The registry keeps its own copy of the block: the one handed out is the caller's to edit.
         self._renders.register(rendered.text, Attribution(rendered.tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference)))
         self._say_stricter(rendered.tag, prepared.resolved.slot, filled)
@@ -1950,6 +2147,9 @@ class AirPrompterAgent:
     def status(self) -> AgentStatus:
         state = self._store.state if self._store else None
         manifest = self._active.manifest["payload"] if self._active else None
+        # 0.3.5: onLeaseExpiry is control, not content — live while pinned (`_control_payload()`); ramps/experiments
+        # below stay the pinned content's own (`manifest`, unchanged).
+        control_manifest = self._control_payload() or manifest
         lease_expires_at = self._lease_expires_at()
         depth_of = getattr(self._sink, "depth", None)
         depth = depth_of() if callable(depth_of) else {"segments": 0, "bytes": 0}
@@ -1976,7 +2176,7 @@ class AirPrompterAgent:
             signing_key_id=self._active.signing_key_id if self._active else None,
             lease_expires_at=lease_expires_at,
             lease_expired=instant(lease_expires_at) <= self._now_ms() if lease_expires_at else False,
-            on_lease_expiry=manifest.get("onLeaseExpiry") if manifest else None,
+            on_lease_expiry=control_manifest.get("onLeaseExpiry") if control_manifest else None,
             last_contact_at=None if self._last_contact_ms is None else iso_ms(self._last_contact_ms),
             forced_downgrade=bool(state and state.get("forcedDowngrade") is True),
             disabled=self._disabled_now(),
@@ -2001,7 +2201,123 @@ class AirPrompterAgent:
             ramp=self._ramp_status(manifest),
             ramps=self._ramp_statuses(manifest),
             variables=self._variables_status(),
+            # The seal id of what is ACTUALLY pinned and active (the release the runtime holds), not a re-derivation
+            # of whatever short or ambiguous form `start(release=...)` was given.
+            pinned_release=seal_id_of(self._active.manifest["payload"]["releaseDigest"]) if self._pin and self._active else None,
         )
+
+    # ------------------------------------------------------------------ pins and the mirror (0.3.5, pins.md)
+
+    def release_info(self) -> Optional[dict[str, Any]]:
+        """0.3.5: what this instance is pinned to, or ``None`` before any release has activated (whether pinned or
+        not)."""
+        if self._active is None:
+            return None
+        return {"seal_id": seal_id_of(self._active.manifest["payload"]["releaseDigest"]), "release_digest": self._active.manifest["payload"]["releaseDigest"], "generation": self._active.generation, "pinned": self._pin is not None}
+
+    def unpin(self) -> None:
+        """0.3.5: clear the pin — the next unpinned sync pass re-bases to the pointer's current generation (never a
+        false ``generation_rollback`` merely because the pin outran it, pins.md) and resumes following it. A no-op
+        (still logs ``pin_cleared``) when nothing was pinned."""
+        if self._store is not None:
+            clear_pin_file(None, self._o.get("state_dir") or default_state_dir(), self._o["agent_id"], self._o["target"])
+        self._pin = None
+        self._live_manifest = None
+        self._live_etag = None
+        self._rebase_on_next_activation = True
+        self._log({"event": "pin_cleared"})
+
+    def mirror(self, port: MirrorPort) -> "MirrorHandle":
+        """0.3.5 (pins.md): register the customer's own copy of the active release. Reads it once now (materialising
+        this SDK's own copy if the application's store is empty), then reconciles at the end of every sync pass."""
+        self._mirror_instance = Mirror(port)
+        self._mirror_materialised_for = None
+        self._mirror_broken_logged = False
+        self._reconcile_mirror()
+        return MirrorHandle(self)
+
+    def seal(self) -> Optional[SealReport]:
+        """The last computed seal report, recomputed now against the current mirror copy — ``None`` when no mirror
+        is registered, nothing is active, or the copy has never been read."""
+        if self._mirror_instance is None or self._active is None:
+            return self._mirror_report
+        reference = self._mirror_materialised_for or self._active
+        self._mirror_report = self._mirror_instance.compute_report(reference, self._now_iso())
+        return self._mirror_report
+
+    def _reconcile_mirror(self) -> None:
+        """0.3.5: read the application's mirror store and cache it. On a ``None`` copy (never written, or reset) it
+        materialises this SDK's own — the ONE case where this method writes. On an existing copy, intact for the
+        release it was last written for, with a NEWER release now active, it replaces it (``mirror_updated``): the
+        SDK only ever overwrites its OWN untouched write, never a copy that broke. A broken copy is left exactly as
+        it is — drift is reported, never repaired behind the application's back (pins.md)."""
+        with self._reconciling_mirror:
+            mirror = self._mirror_instance
+            if mirror is None or self._active is None:
+                return
+            try:
+                mirror.refresh()
+                self._mirror_unreadable_streak = 0
+            except Exception as error:  # noqa: BLE001 — the application's own store failure, never a seal break
+                self._mirror_unreadable_streak += 1
+                if self._mirror_unreadable_streak == 1:
+                    self._log({"event": "mirror_unreadable", "reason": str(error)})
+                return  # The cache stays whatever it was — a good copy is never lost to a transient read failure.
+            now = self._now_iso()
+            if mirror.copy is None:
+                mirror.materialise(self._active)
+                self._mirror_materialised_for = self._active
+                self._log({"event": "mirror_materialised", "sealId": seal_id_of(self._active.manifest["payload"]["releaseDigest"])})
+                self._mirror_report = mirror.compute_report(self._active, now)
+                return
+            # F6 (Mirror.copy_is_self_consistent): `_mirror_materialised_for` is in-memory and does not survive a
+            # restart — a copy this SDK genuinely wrote for a release that has since been superseded is, right
+            # after a restart, indistinguishable from any other stale copy by that field alone. Use the seal the
+            # copy already carries instead: a fresh process (`_mirror_materialised_for is None`) whose cached copy
+            # already names a DIFFERENT seal than what is active now, and whose copy is still self-consistent
+            # (nobody edited it since it was written), is exactly the "safe to replace" case below, just
+            # discovered a different way.
+            active_seal_id = seal_id_of(self._active.manifest["payload"]["releaseDigest"])
+            if self._mirror_materialised_for is None and mirror.copy.seal_id != active_seal_id and mirror.copy_is_self_consistent():
+                mirror.materialise(self._active)
+                self._mirror_materialised_for = self._active
+                self._log({"event": "mirror_updated", "sealId": active_seal_id})
+                self._mirror_report = mirror.compute_report(self._active, now)
+                return
+            reference = self._mirror_materialised_for or self._active
+            report = mirror.compute_report(reference, now)
+            self._mirror_report = report
+            if report is None:
+                return
+            if not report.intact:
+                if not self._mirror_broken_logged:
+                    self._mirror_broken_logged = True
+                    self._log({"event": "seal_broken", "sealId": report.seal_id, "changedTags": report.changed_tags or []})
+                return  # Never overwrite a broken copy.
+            if self._mirror_broken_logged:
+                self._mirror_broken_logged = False
+                self._log({"event": "seal_intact", "sealId": report.seal_id})
+            if reference is not self._active:
+                # Intact for the previous release, and a new one has since activated: the SDK's own write is safe to replace.
+                mirror.materialise(self._active)
+                self._mirror_materialised_for = self._active
+                self._log({"event": "mirror_updated", "sealId": active_seal_id})
+                self._mirror_report = mirror.compute_report(self._active, now)
+
+    def _resync_mirror(self, approved_by: str) -> SealReport:
+        """``ap.mirror(port).resync(approved_by=...)``: re-materialise deliberately and report the healed state.
+        ``approved_by`` is logged, never the copy's content."""
+        mirror = self._mirror_instance
+        if mirror is None or self._active is None:
+            raise AgentStartError("no_verified_release", "resync(): no mirror registered (call ap.mirror(port) first), or no active release")
+        report = mirror.resync(self._active, self._now_iso())
+        self._mirror_materialised_for = self._active
+        self._mirror_report = report
+        if self._mirror_broken_logged:
+            self._mirror_broken_logged = False
+            self._log({"event": "seal_intact", "sealId": report.seal_id})
+        self._log({"event": "mirror_resynced", "approvedBy": approved_by})
+        return report
 
     @property
     def generation(self) -> int:

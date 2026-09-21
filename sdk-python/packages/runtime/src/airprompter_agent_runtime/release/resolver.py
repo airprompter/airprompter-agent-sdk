@@ -47,6 +47,9 @@ class Rendered:
     tag: str
     #: 0.3.1: how the model is called for this slot, as the version declared it — the wrappers apply it.
     inference: Optional[Mapping[str, Any]] = None
+    #: 0.3.5 (pins.md): which release this text was rendered from — ``store`` (the slot store, the default), ``vendored_bundle``,
+    #: ``daemon``, or ``customer_store`` (the customer's own mirror of a pinned release). The agent stamps it.
+    resolution_source: str = "store"
 
 
 @dataclass(frozen=True)

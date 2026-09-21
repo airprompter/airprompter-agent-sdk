@@ -29,9 +29,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional
 
 from airprompter_agent_core import SDK_VERSION
-from airprompter_agent_core._util import b64url_decode, b64url_encode, fsync_dir, iso_ms, now_ms, random_id
+from airprompter_agent_core._util import b64url_decode, b64url_encode, iso_ms, now_ms, random_id
 from airprompter_agent_core.protocol.canonical_json import sha256_prefixed
 from airprompter_agent_core.protocol.trust import Verdict, referenced_payloads, verify_manifest
+from .atomic import write_file_atomically, write_file_synced
 from .key_provider import KeyProvider
 from .payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
 
@@ -62,22 +63,12 @@ def _other_slot(slot: SlotName) -> SlotName:
 
 
 def _write_file_synced(path: str, data: bytes, mode: int = 0o600) -> None:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    try:
-        os.write(fd, data)
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    write_file_synced(path, data, mode)
 
 
 def _replace_file_atomically(path: str, data: bytes, before_rename: Optional[Callable[[str], None]] = None) -> None:
     """Write to a temp file, fsync, rename: the file is either the old one or the new one, never half."""
-    temp = f"{path}.{os.urandom(4).hex()}.tmp"
-    _write_file_synced(temp, data)
-    if before_rename:
-        before_rename(path)
-    os.replace(temp, path)
-    fsync_dir(os.path.dirname(path))
+    write_file_atomically(path, data, before_rename)
 
 
 @dataclass

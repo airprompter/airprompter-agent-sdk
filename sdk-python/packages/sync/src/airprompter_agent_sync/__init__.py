@@ -16,7 +16,8 @@ from .store.key_provider import KeyProvider, custom_key_provider, file_key, kms,
 from .store.payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
 from .store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
 from .sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
-from .sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
+from .sync.loop import LiveControl, PinRequest, SyncPassOutput, jittered_delay_ms, sync_once
+from .sync.pin import PinFile, clear_pin_file, merge_live_control, read_pin_file, write_pin_file
 from .sync.pull_bundle import DEFAULT_MAX_POINTER_AGE_MS, PullBundleResult, PullEdgeState, next_pull_delay_ms, pull_bundle
 
 __all__ = [
@@ -27,9 +28,16 @@ __all__ = [
     "KeyProvider",
     "LoadedSlot",
     "PayloadDecryptError",
+    "PinFile",
+    "clear_pin_file",
+    "merge_live_control",
+    "read_pin_file",
+    "write_pin_file",
     "SlotStore",
     "StoreError",
     "StoreHooks",
+    "LiveControl",
+    "PinRequest",
     "SyncPassOutput",
     "UpdateWindow",
     "WindowState",

@@ -46,6 +46,9 @@ from .protocol import (
     referenced_payloads,
     release_digest,
     release_digest_input,
+    SealVerdict,
+    seal_id_of,
+    verify_seal,
     sha256_prefixed,
     sign_bytes,
     subject_hash,
@@ -64,7 +67,7 @@ from .telemetry.feedback import NormalizedFeedback, normalize_feedback
 from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
-PROTOCOL_VERSION = "0.3.4"
+PROTOCOL_VERSION = "0.3.5"
 
 
 def protocol_at_least(version: str, floor: str) -> bool:
@@ -121,6 +124,7 @@ __all__ = [
     "SDK_VERSION",
     "SUPPORTED_PROTOCOL_MAJORS",
     "SYSTEM_CLOCK",
+    "SealVerdict",
     "SpoolRow",
     "StepError",
     "SyncClient",
@@ -180,6 +184,8 @@ __all__ = [
     "render_template",
     "rubric_from_prompt",
     "run_golden_set",
+    "seal_id_of",
+    "verify_seal",
     "sha256_prefixed",
     "sign_bytes",
     "sink_status",

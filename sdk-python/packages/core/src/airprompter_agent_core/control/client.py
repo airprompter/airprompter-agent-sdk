@@ -21,10 +21,13 @@ from urllib.parse import quote
 
 import httpx
 
+#: 0.3.5: the five refusal codes a ``?release=`` read can answer (pins.md); a runtime asking without ``release`` never sees this variant.
+SEAL_REFUSAL_CODES = frozenset({"seal_invalid", "release_unknown", "release_ambiguous", "release_not_promoted_here", "wait_with_release"})
+
 
 @dataclass
 class ManifestFetch:
-    status: str  # "ok" | "not_modified" | "not_found" | "unauthorized" | "forbidden" | "error"
+    status: str  # "ok" | "not_modified" | "not_found" | "unauthorized" | "forbidden" | "refused_seal" | "error"
     manifest: Optional[dict[str, Any]] = None
     etag: Optional[str] = None
     generation: Optional[int] = None
@@ -32,6 +35,8 @@ class ManifestFetch:
     http_status: Optional[int] = None
     #: The edge pointer this target's answers name (``x-agent-edge-pointer-url``); None on a deployment without an edge.
     edge_pointer_url: Optional[str] = None
+    #: ``status == "refused_seal"`` and ``code == "release_ambiguous"`` only: the seal ids a short prefix matched.
+    matches: Optional[list[str]] = None
 
 
 @dataclass
@@ -84,15 +89,42 @@ class SyncClient:
             return EdgePointerFetch("unavailable")
         return EdgePointerFetch("ok", pointer=json.loads(response.text), etag=response.headers.get("etag"))
 
-    def manifest(self, *, if_none_match: Optional[str] = None, wait: Optional[int] = None) -> ManifestFetch:
+    def manifest(self, *, if_none_match: Optional[str] = None, wait: Optional[int] = None, release: Optional[str] = None) -> ManifestFetch:
+        # pins.md: `?release=` never long-polls — the release it names does not move by definition — and the platform
+        # refuses the combination too (`wait_with_release`); refusing it here saves the round trip.
+        if wait and release:
+            raise ValueError("manifest: release cannot be combined with wait")
         url = f"{self._base_url}/v1/agents/{quote(self._agent_id, safe='')}/targets/{self._target}/manifest"
-        params = {"wait": str(wait)} if wait else None
+        params: dict[str, str] = {}
+        if wait:
+            params["wait"] = str(wait)
+        if release:
+            params["release"] = release
         headers = self._headers(**({"if-none-match": if_none_match} if if_none_match else {}))
-        response = self._client.get(url, headers=headers, params=params)
+        response = self._client.get(url, headers=headers, params=params or None)
         status = response.status_code
         edge_pointer_url = response.headers.get("x-agent-edge-pointer-url")
         if status == 304:
             return ManifestFetch("not_modified", edge_pointer_url=edge_pointer_url)
+        # 0.3.5: a pinned read's 400/404/409 may be one of the five seal refusals (pins.md) — read the body before
+        # falling back to the unpinned mapping below, so an unrelated 400/404/409 is never silently swallowed as a
+        # seal refusal.
+        if release and status in (400, 404, 409):
+            if status == 409:
+                # The 409 body is shaped `{ error, matches }` (openapi.yaml), not the common `{ error, details }`
+                # refusal — `matches` lives at the top, so it is read here rather than through `_refusal_code`.
+                matches: Optional[list[str]] = None
+                try:
+                    parsed = json.loads(response.text)
+                    raw_matches = parsed.get("matches")
+                    if isinstance(raw_matches, list):
+                        matches = [m for m in raw_matches if isinstance(m, str)]
+                except (ValueError, AttributeError):
+                    matches = None
+                return ManifestFetch("refused_seal", code="release_ambiguous", matches=matches)
+            code = _refusal_code(response.text)
+            if code in SEAL_REFUSAL_CODES:
+                return ManifestFetch("refused_seal", code=code)
         if status == 404:
             return ManifestFetch("not_found")
         if status == 401:

@@ -23,6 +23,7 @@ from typing import Any, Callable
 from airprompter_agent_core.checks import checks_refusals, evaluate_checks, pattern_refusal, project_checks
 from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, ordered_steps, ramp_weights_at, validate_ramp
 from airprompter_agent_core.protocol.canonical_json import canonical_json, sha256_prefixed
+from airprompter_agent_core.protocol.seal import verify_seal
 from airprompter_agent_core.protocol.trust import experiment_conflict, experiment_for_tag, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
 from airprompter_agent_core.telemetry.rows import epoch_minute, latency_bucket_index, minute_of
@@ -101,6 +102,11 @@ def op_verify_root_metadata(a: dict) -> dict:
 def op_verify_manifest(a: dict) -> dict:
     payloads = {p["contentHash"]: base64.urlsafe_b64decode(p["bytes"] + "=" * (-len(p["bytes"]) % 4)) for p in a["payloads"]} if a.get("payloads") is not None else None
     return _verdict(verify_manifest(manifest=a["manifest"], root=a["root"], now=a["now"], scope=a["scope"], stored_generation=a["storedGeneration"], payloads=payloads, countersign_root=a.get("countersignRoot"), require_countersign=bool(a.get("requireCountersign"))))
+
+
+def op_verify_seal(a: dict) -> dict:
+    v = verify_seal(seal_id=a["sealId"], sealed_pins=a["sealedPins"], pins=a["pins"], texts=a["texts"])
+    return {"observedDigest": v.observed_digest, "intact": v.intact, "changedTags": v.changed_tags}
 
 
 def op_latency_bucket_index(a: dict) -> dict:
@@ -184,6 +190,7 @@ OPS: dict[str, Callable[[dict], dict]] = {
     "checksRefusals": op_checks_refusals,
     "projectChecks": op_project_checks,
     "spoolRowsToOtlp": op_spool_rows_to_otlp,
+    "verifySeal": op_verify_seal,
 }
 
 

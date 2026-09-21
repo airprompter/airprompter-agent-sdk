@@ -111,6 +111,8 @@ export async function pull(argv: string[], ctx: Context): Promise<number> {
   if (fetched.status === "forbidden") throw refused(`the Agent key is not allowed here (${fetched.code ?? "forbidden"})`, { reason: fetched.code ?? "forbidden" });
   if (fetched.status === "error") throw refused(`manifest fetch failed with HTTP ${fetched.httpStatus}`, { reason: `http_${fetched.httpStatus}` });
   if (fetched.status === "not_modified") throw refused("unexpected 304 without an ETag", { reason: "protocol" });
+  // Never actually reached: pull never sends `release`, so the platform never answers `refused_seal` here (0.3.5, pins.md). Handled for exhaustiveness.
+  if (fetched.status === "refused_seal") throw refused(`the named release was refused (${fetched.code})`, { reason: fetched.code });
   const manifest = fetched.manifest;
 
   if (flag(parsed, "check")) {

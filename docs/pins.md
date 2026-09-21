@@ -129,6 +129,17 @@ handle = ap.mirror(FileMirrorPort())
 report = handle.resync(approved_by="ops@example.com")
 ```
 
+### From the command line
+
+Two verbs help when you are at a host rather than in your code:
+
+- `airprompter mirror status` prints what this host is pinned to (if
+  anything) and the seal of the release it currently holds — the value to
+  compare against your mirror's own seal.
+- `airprompter seal verify --copy <file>` checks a saved copy of your
+  mirror against that release offline, printing which named entries differ
+  and exiting non-zero when they do. Nothing is written.
+
 ## What drift looks like
 
 Every routine pass, the runtime rehashes what your mirror holds and

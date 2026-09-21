@@ -11,6 +11,11 @@ airprompter apply    Stage a bundle into the store and activate it per the envir
 airprompter status   Active and staged generation, lease, storage protection, spool depth, last upload
 airprompter unlock   Make the staged release live on this host (the operator's unlock; --generation N to name it)
 airprompter rollback The previous release on this host live again, now and offline (the other slot; a step below the stored generation is a forced downgrade, reported)
+airprompter pin <seal>   Pin this host's next SDK start to a named seal (a seal id or a release digest) — content pinned, control live; takes effect on the next start
+airprompter unpin    Remove the pin so the next SDK start resumes following the pointer, re-based without a false rollback refusal
+airprompter mirror status   The pin file (if any) and this host's active seal id, for comparing against the heartbeat's seal member
+airprompter mirror resync --approve <who>   Always refused: re-sync runs inside the application, ap.mirror(port).resync({ approvedBy }) — the CLI never rewrites a customer store
+airprompter seal verify --copy <file>   Recompute a customer-store MirrorCopy's seal against this host's active release, offline
 airprompter policy   Show or set the apply policy this host holds (an update may tighten it; only this loosens it)
 airprompter doctor   Every reason this host is not serving the release it should, with the remedy (source, root, store, lease, key protection, spool, daemon, policy pin)
 airprompter diff     What a bundle would change against the active release on this host, or against another bundle (--against)

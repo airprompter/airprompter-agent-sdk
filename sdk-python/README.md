@@ -101,6 +101,12 @@ coroutine functions need `await ….render_async()`. `ap.prompt(tag).needs()`
 and `ap.status().variables` name what no source fills. See
 [docs/variables.md](../docs/variables.md).
 
+`AirPrompterAgent.start(release=...)` pins a runtime to one named seal
+instead of the pointer, while it keeps obeying the environment's live
+directives, lease and countersign requirement; `ap.mirror(port)`
+registers the customer's own copy of a release and reports whether it
+still matches. See [docs/pins.md](../docs/pins.md).
+
 Async applications use `await ap.observe_async(r, lambda: client.messages.create(...))`
 (and `chat_completion_async` / `messages_create_async`). Everything else
 is synchronous and thread-safe; resident mode runs its sync, heartbeat and

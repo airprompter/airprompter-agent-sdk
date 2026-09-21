@@ -20,14 +20,18 @@ import { doctor } from "./commands/doctor.js";
 import { importPrompts } from "./commands/importPrompts.js";
 import { login } from "./commands/login.js";
 import { keygen } from "./commands/keygen.js";
+import { mirror } from "./commands/mirror.js";
+import { pin } from "./commands/pin.js";
 import { policy } from "./commands/policy.js";
 import { pull } from "./commands/pull.js";
+import { seal } from "./commands/seal.js";
 import { status } from "./commands/status.js";
 import { exportTelemetry, importTelemetry } from "./commands/telemetry.js";
 import { telemetryValidate } from "./commands/telemetryValidate.js";
 import { telemetryVerify } from "./commands/telemetryVerify.js";
 import { rollback } from "./commands/rollback.js";
 import { unlock } from "./commands/unlock.js";
+import { unpin } from "./commands/unpin.js";
 import { verify } from "./commands/verify.js";
 import { CliError, EXIT, type Context, isCliError } from "./io.js";
 import { CLI_VERSION } from "./version.js";
@@ -40,6 +44,10 @@ const COMMANDS: Record<string, { run: (argv: string[], ctx: Context) => Promise<
   doctor: { run: doctor, summary: "Every reason this host is not serving the release it should, with the remedy: source, root, store, lease, key protection, spool vs budget, daemon, policy pin" },
   unlock: { run: unlock, summary: "Make the staged release live on this host (the operator's unlock; --generation N to name it)" },
   rollback: { run: rollback, summary: "Make the previous release on this host live again, now and offline (the other slot); a step below the stored generation is a forced downgrade, reported" },
+  pin: { run: pin, summary: "Pin this host's next SDK start to a named seal (a seal id or a release digest) — content pinned, control live; a running SDK reads pin.json only at start" },
+  unpin: { run: unpin, summary: "Remove the pin so the next SDK start resumes following the pointer, re-based without a false rollback refusal" },
+  mirror: { run: mirror, summary: "mirror status: the pin file and this host's active seal; mirror resync --approve <who>: always refused — resync runs inside the application, ap.mirror(port).resync({ approvedBy })" },
+  seal: { run: seal, summary: "seal verify --copy <file>: recompute a customer-store MirrorCopy's seal against this host's active release, offline" },
   policy: { run: policy, summary: "Show or set the apply policy this host holds (an update may tighten it; only this loosens it)" },
   diff: { run: diff, summary: "What a bundle would change against the active release on this host" },
   keygen: { run: keygen, summary: "Generate a distribution or countersign keypair" },

@@ -27,7 +27,7 @@ export { VariableSourceRegistry, VariableSourceError, VariableSourceRequiredErro
 export type { VariableSource, VariableSourceInput, VariableSourceContext, RegisteredSource } from "./variables/sources.js";
 export { planFill, fillSync, fillAsync, unsourced, stricterSources, supplied } from "./variables/fill.js";
 export type { FillPlan, FilledRender, RenderValues } from "./variables/fill.js";
-export type { Rendered, Disabled, ResolverInput, ResolveOutcome } from "./release/resolver.js";
+export type { Rendered, Disabled, ResolverInput, ResolveOutcome, ReleaseSource } from "./release/resolver.js";
 export { applyInference, temperatureOf, topPOf, INFERENCE_KEYS } from "./wrap/inference.js";
 export type { AppliedInference, ApplyInferenceOptions, InferenceUnsupportedReason } from "./wrap/inference.js";
 

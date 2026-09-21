@@ -31,3 +31,6 @@ export type { DaemonHello, DaemonSlotResponse, DaemonGenerationEvent, DaemonAppl
 
 export { parseWindow, validateWindow, isKnownTimeZone, windowState } from "./apply/window.js";
 export type { UpdateWindow, WindowDay, WindowState } from "./apply/window.js";
+
+export { readPinFile, writePinFile, clearPinFile, mergeLiveControl } from "./sync/pin.js";
+export type { PinFile } from "./sync/pin.js";

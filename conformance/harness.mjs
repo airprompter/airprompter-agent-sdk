@@ -32,7 +32,7 @@ export function vectorsDir(override) {
   throw new Error("no protocol/vectors directory: pass --vectors <dir>");
 }
 
-export const OPERATIONS = ["canonicalJson", "orderedSteps", "assignArm", "experimentForTag", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
+export const OPERATIONS = ["canonicalJson", "orderedSteps", "assignArm", "experimentForTag", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp", "verifySeal"];
 
 /** Which operations each section needs; a section runs only when its adapter has them all. */
 export const SECTIONS = {
@@ -50,6 +50,9 @@ export const SECTIONS = {
   feedback: ["normalizeFeedback"],
   checks: ["evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks"],
   otel: ["spoolRowsToOtlp"],
+  // 0.3.5 (pins.md): the customer-store seal recomputation — a text tamper, a settings-only drift, a workflow
+  // step tamper, a missing slot, and the intact case (vectors/seal.json).
+  seal: ["verifySeal"],
 };
 
 // ---------------------------------------------------------------------------
@@ -304,6 +307,16 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
     otel: async () => {
       const otel = readJson("otel-mapping.json");
       for (const c of otel.cases) await expectOk(`otel: ${c.name}`, "spoolRowsToOtlp", { rows: c.rows, resource: c.resource, sdkVersion: "0.1.0" }, (r) => (sameJson(r.request, c.expected) ? true : "the request differs from the vector"));
+    },
+    seal: async () => {
+      const sv = readJson("seal.json");
+      for (const c of sv.cases) {
+        await expectOk(c.name, "verifySeal", { sealId: c.sealId, sealedPins: c.sealedPins, pins: c.pins, texts: c.texts }, (r) =>
+          r.observedDigest === c.expected.observedDigest && r.intact === c.expected.intact && sameJson([...r.changedTags].sort(), [...c.expected.changedTags].sort())
+            ? true
+            : `got ${short(r)}, expected ${short(c.expected)}`,
+        );
+      }
     },
   };
 

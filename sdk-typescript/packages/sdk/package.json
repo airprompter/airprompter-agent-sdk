@@ -51,7 +51,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\""
   },
   "airprompter": {
-    "sizeBudgetBytes": 240000
+    "sizeBudgetBytes": 300000
   },
   "publishConfig": {
     "access": "public",

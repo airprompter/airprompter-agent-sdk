@@ -10,7 +10,9 @@
  * protocolAtLeast("0.3.10", "0.3.9"); // true — numeric per part, never a string compare
  * ```
  */
-export const PROTOCOL_VERSION = "0.3.4";
+// 0.3.5: pins.md — `?release=` pinned reads and the heartbeat's `pinnedReleaseDigest` / `seal` members are gated with
+// `protocolAtLeast(manifest.payload.protocol, "0.3.5")`, the same way `catalog.variables` is gated at 0.3.4 above.
+export const PROTOCOL_VERSION = "0.3.5";
 /** This package's own version, as the heartbeat and store.json (S8: the writer) record it. */
 export const SDK_VERSION = "0.2.14";
 

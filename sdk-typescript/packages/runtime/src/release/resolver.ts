@@ -24,6 +24,14 @@
 
 import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";
 
+/**
+ * Where the content a render (or a workflow step) came from — the facade's own store, its vendored fallback, the
+ * host daemon, or (0.3.5, pins.md) the customer's own mirror once one is registered and its cached copy is
+ * readable. Defined here (not in `@airprompter/agent-sdk`) because `Rendered.resolutionSource` carries it and this
+ * package must not import the facade (S10, the layer rule); the facade's own `ReleaseSource` re-exports this type.
+ */
+export type ReleaseSource = "store" | "vendored_bundle" | "daemon" | "customer_store";
+
 export interface Rendered {
   text: string;
   model: string;
@@ -34,6 +42,8 @@ export interface Rendered {
   generation: number;
   runRef: string;
   tag: string;
+  /** 0.3.5: where this render's text and settings came from — the facade sets it; a resolver built directly (without the facade) never sets it. */
+  resolutionSource?: ReleaseSource;
 }
 
 export interface Disabled {

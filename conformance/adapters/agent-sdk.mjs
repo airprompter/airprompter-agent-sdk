@@ -76,6 +76,7 @@ export const ops = {
   checksRefusals: ({ checks }) => ({ refusals: core.checksRefusals(checks) }),
   projectChecks: ({ checks }) => ({ projected: core.projectChecks(checks) }),
   spoolRowsToOtlp: ({ rows, resource, sdkVersion }) => ({ request: bridge.spoolRowsToOtlp(rows, { resource, ...(sdkVersion ? { sdkVersion } : {}) }) }),
+  verifySeal: ({ sealId, sealedPins, pins, texts }) => core.verifySeal({ sealId, sealedPins, pins, texts }),
 };
 
 export default ops;

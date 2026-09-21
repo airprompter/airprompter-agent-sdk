@@ -42,7 +42,7 @@ import { fileKey, type KeyProvider, type StorageProtection } from "@airprompter/
 import { requiredModelsMissing } from "@airprompter/agent-sync";
 import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "@airprompter/agent-sync";
 import { observeCall, type ObserveOptions } from "@airprompter/agent-runtime";
-import { ReleaseResolver, disabledFrom, type Rendered } from "@airprompter/agent-runtime";
+import { ReleaseResolver, disabledFrom, type Rendered, type ReleaseSource } from "@airprompter/agent-runtime";
 import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, unsourced, type FillPlan, type FilledRender, type RenderValues, type VariableSourceInput } from "@airprompter/agent-runtime";
 import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "@airprompter/agent-runtime";
 import { wrapClient, type WrapHooks } from "@airprompter/agent-runtime";
@@ -55,6 +55,9 @@ import { parseWindow, windowState, type UpdateWindow } from "@airprompter/agent-
 import { SyncClient, type FetchLike } from "@airprompter/agent-core";
 import { DaemonClient, DaemonError, daemonSocketPath } from "@airprompter/agent-sync";
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "@airprompter/agent-sync";
+import { readPinFile, writePinFile, clearPinFile, mergeLiveControl, type PinFile } from "@airprompter/agent-sync";
+import { sealIdOf, type LoadedRelease } from "@airprompter/agent-core";
+import { Mirror, copyFromRelease, type MirrorPort, type SealReport } from "./mirror.js";
 
 import { PROTOCOL_VERSION, SDK_VERSION } from "@airprompter/agent-core";
 
@@ -66,8 +69,8 @@ export const VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30;
 
 export type SyncMode = "resident" | "on_invoke" | "daemon" | "offline";
 
-/** Where the release comes from: this process's own store, a vendored bundle, or the host daemon over its socket. */
-export type ReleaseSource = "store" | "vendored_bundle" | "daemon";
+/** Where the release comes from: this process's own store, a vendored bundle, the host daemon over its socket, or (0.3.5) the customer's own mirror. Re-exported from `@airprompter/agent-runtime`, which defines it (S10: it rides `Rendered.resolutionSource`, and the runtime package must not import this facade). */
+export type { ReleaseSource };
 
 export interface StartOptions {
   organizationId: string;
@@ -88,6 +91,14 @@ export interface StartOptions {
   /** The customer's countersign root, when the target requires countersign. */
   countersignRoot?: RootMetadata;
   requireCountersign?: boolean;
+  /**
+   * 0.3.5 (pins.md): pin to a seal — the runtime fetches, verifies and renders exactly that sealed release for
+   * this target and keeps obeying the environment's live Freeze, lease and unlock/re-sync requests. A seal id (12
+   * hex) or a release digest. Persisted in `pin.json` beside the store, so a restart on the same host resumes the
+   * pin; `ap.unpin()` clears it. Ignored (with `pin_unsupported_with_daemon` logged once) when attached to a
+   * daemon: a daemon-attached runtime does not yet support pin or mirror this row.
+   */
+  release?: string;
   sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string; daemonSocketPath?: string };
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */
   vendoredBundle?: { bundle: Bundle | string; distributionKey?: DistributionKey };
@@ -254,6 +265,8 @@ export interface AgentStatus {
   lastSyncOutcome: string | null;
   consecutiveSyncFailures: number;
   nextSyncAt: string | null;
+  /** 0.3.5: the seal id this instance is pinned to (pins.md), or `null` when following the pointer. */
+  pinnedRelease: string | null;
 }
 
 export interface ReleaseChange {
@@ -416,7 +429,7 @@ export class AirPrompterAgent {
    * held back, or ignored as the generation already held. A Freeze reaches a fleet that never unlocks.
    */
   private standingDirectives: { generation: number; directives: Directive[] } | null = null;
-  private resolverFor: { release: LoadedSlot; standing: { generation: number; directives: Directive[] } | null; resolver: ReleaseResolver } | null = null;
+  private resolverFor: { release: LoadedRelease; standing: { generation: number; directives: Directive[] } | null; resolver: ReleaseResolver } | null = null;
   /** S4: what the latest verified manifest asked for, and the generation whose advisory mismatch was already logged. */
   private manifestApplyPolicy: { generation: number; value: ApplyPolicy } | null = null;
   private applyPolicyAdvisoryLogged = 0;
@@ -454,6 +467,23 @@ export class AirPrompterAgent {
   readonly spool: SpoolWriter;
   private readonly sink: SpoolSink;
   private readonly client: SyncClient | null;
+  // 0.3.5 (pins.md): the pin sidecar, the live manifest adopted alongside a pinned release, and the customer's mirror.
+  private pin: PinFile | null = null;
+  private liveManifest: Manifest | null = null;
+  private liveEtag: string | null = null;
+  /** `unpin()` sets this once: the NEXT unpinned activation forces past the store's generation, re-basing it to the pointer's (pins.md: unpinning resumes following the pointer and never treats the pointer's own generation as a rollback). */
+  private rebaseOnNextActivation = false;
+  private mirrorInstance: Mirror | null = null;
+  private mirrorReport: SealReport | null = null;
+  private mirrorUnreadableStreak = 0;
+  private mirrorBrokenLogged = false;
+  /** The release the mirror's cached copy was last written FOR (this SDK's own materialise/resync) — the reference a re-check is against, so a copy broken since generation N is reported against N's seal, not a release that activated after. */
+  private mirrorMaterialisedFor: LoadedRelease | null = null;
+  private reconcilingMirror: Promise<void> | null = null;
+  /** The `source` `resolver()` last built its `ReleaseResolver` from — `prepare()` stamps it onto `Rendered.resolutionSource` right after capturing the resolver, so the two never drift. */
+  private lastResolverSource: ReleaseSource = "store";
+  /** `<sealId, requestedAt>` pairs of `request_resync` directives already handed to `onResyncRequested` — deduped so a directive that keeps riding the manifest is not re-announced every tick. */
+  private readonly resyncRequestsSeen = new Set<string>();
 
   private constructor(
     private readonly options: StartOptions,
@@ -507,6 +537,8 @@ export class AirPrompterAgent {
         agent.daemonSocket = socketPath;
         await agent.attachDaemon(client);
         agent.startSpoolTimer();
+        // Do-not-touch (this row): the daemon protocol is out of scope, so an attached SDK ignores pin/mirror entirely.
+        if (options.release) agent.log({ event: "pin_unsupported_with_daemon" });
         return agent;
       }
       options.logger?.({ sdk: SDK_NAME, agentId: options.agentId, target: options.target, event: "daemon_absent", socketPath });
@@ -529,6 +561,19 @@ export class AirPrompterAgent {
     // S6: the instance id is the PROCESS's, never the store's — N workers on one host are N instances in the fleet view, and
     // their same-minute windows keep distinct keys at ingest (the store's own id stays store.json's identity).
     const agent = new AirPrompterAgent(options, store, trusted, AirPrompterAgent.newInstanceId(), join(store.dir, "spool", "telemetry"), store.instanceId);
+    // 0.3.5 (pins.md): a named `release` writes the pin (a fresh pin always wins over a stale one from a previous
+    // start); otherwise a pin left by an earlier process on this host resumes.
+    const fs = options.fs ?? nodeFs;
+    if (options.release) {
+      agent.pin = { version: 1, release: options.release, pinnedAt: agent.nowIso(), by: "sdk" };
+      writePinFile(fs, stateDir, options.agentId, options.target, agent.pin);
+    } else {
+      const resumed = readPinFile(fs, stateDir, options.agentId, options.target);
+      if (resumed) {
+        agent.pin = resumed;
+        agent.log({ event: "pin_resumed", release: resumed.release });
+      }
+    }
     await agent.boot();
     return agent;
   }
@@ -905,6 +950,10 @@ export class AirPrompterAgent {
   private emitChange(): void {
     const change: ReleaseChange = { generation: this.generation, stagedGeneration: this.status().stagedGeneration };
     for (const listener of this.changeListeners) listener(change);
+    // 0.3.5: a registered mirror reconciles after every change this method reports (sync, unlock, rollback, applyBundle,
+    // a daemon event) — materialising a missing copy, replacing its own untouched write for a new release, or leaving a
+    // broken one exactly as it is. `reconcileMirror` is a no-op with no mirror registered.
+    if (this.mirrorInstance) void this.reconcileMirror();
   }
 
   /** The active, verified release this process serves (manifest + payload bytes), or null. */
@@ -1027,6 +1076,70 @@ export class AirPrompterAgent {
     return directives.flatMap((d) => (d.kind === "request_unlock" && instant(d.expiresAt) > now ? [d] : []));
   }
 
+  /** 0.3.5: unexpired `request_resync` directives from the latest verified manifest — surfaced to the mirror's `onResyncRequested`, never acted on by the runtime itself. */
+  private openResyncRequests(payload: Manifest["payload"] | null): Array<Extract<Directive, { kind: "request_resync" }>> {
+    const directives = this.standingDirectives && (!payload || this.standingDirectives.generation >= payload.generation) ? this.standingDirectives.directives : (payload?.directives ?? []);
+    const now = this.nowMs();
+    return directives.flatMap((d) => (d.kind === "request_resync" && instant(d.expiresAt) > now ? [d] : []));
+  }
+
+  /** 0.3.5: hand every `request_resync` directive not already seen to the mirror's `onResyncRequested` hook, deduped by `(releaseDigest, requestedAt)` so a directive that keeps riding the manifest is announced once. */
+  private notifyResyncRequests(payload: Manifest["payload"]): void {
+    if (!this.mirrorInstance) return;
+    for (const directive of this.openResyncRequests(payload)) {
+      const key = `${directive.releaseDigest} ${directive.requestedAt}`;
+      if (this.resyncRequestsSeen.has(key)) continue;
+      this.resyncRequestsSeen.add(key);
+      this.mirrorInstance.notifyResyncRequested({ sealId: sealIdOf(directive.releaseDigest), directive });
+    }
+  }
+
+  /**
+   * 0.3.5 (pins.md): what governs directives, lease and countersign right now — the LIVE manifest's payload while
+   * pinned and a live manifest has been adopted (`mergeLiveControl`: content stays the pinned envelope's,
+   * everything else is live's), else the active release's own payload. Every existing read of directives, lease
+   * or countersign on the active manifest goes through this one accessor.
+   */
+  private controlPayload(): Manifest["payload"] | null {
+    if (this.pin && this.liveManifest && this.active) return mergeLiveControl(this.active.manifest, this.liveManifest).payload;
+    return this.active?.manifest.payload ?? null;
+  }
+
+  /**
+   * 0.3.5: what a render (or a workflow step, or a golden run) reads slots and text from — the mirror's cached
+   * copy once one is registered and readable, else the active release. ONE accessor so every site that used to
+   * read `this.active.manifest.payload.slots` / `this.active.payloads.get(...)` reads through here instead: a
+   * later render source (row 2b's daemon-served mirror, say) is one more branch here, not a search-and-replace.
+   */
+  private contentSource(): { slots: ManifestSlot[]; textFor: (contentHash: string) => Buffer | undefined; source: ReleaseSource } {
+    const active = this.active;
+    const mirror = this.mirrorInstance;
+    if (mirror?.copy) {
+      const copy = mirror.copy;
+      return { slots: copy.pins, textFor: (hash) => mirror.textFor(hash) ?? undefined, source: "customer_store" };
+    }
+    return { slots: active?.manifest.payload.slots ?? [], textFor: (hash) => active?.payloads.get(hash), source: this.source };
+  }
+
+  /** The release `contentSource()` currently reads from, built once per call so a mirror's cache changing mid-await never moves what an in-flight render sees (the same invariant `prepare()` keeps for the resolved slot). */
+  private releaseForResolver(): { release: LoadedRelease; source: ReleaseSource } {
+    const active = this.active;
+    if (!active) throw new AgentStartError("no_verified_release", this.stagedManifest ? `no active release: generation ${this.stagedManifest.payload.generation} is staged under unlock_required and waiting for an unlock` : "no active release");
+    const content = this.contentSource();
+    if (content.source !== "customer_store") return { release: active, source: content.source };
+    const payloads = new Map<string, Uint8Array>();
+    for (const slot of content.slots) {
+      const text = content.textFor(slot.contentHash);
+      if (text) payloads.set(slot.contentHash, text);
+      for (const step of slot.steps ?? []) {
+        const stepText = content.textFor(step.contentHash);
+        if (stepText) payloads.set(step.contentHash, stepText);
+      }
+    }
+    const release: LoadedRelease = { manifest: { ...active.manifest, payload: { ...active.manifest.payload, slots: content.slots } }, generation: active.generation, payloads };
+    return { release, source: "customer_store" };
+  }
+
   /** One sync pass now (resident timers call this; on_invoke hosts call it from `invoke`). Never throws. */
   async syncNow(): Promise<void> {
     if (this.daemon) {
@@ -1068,9 +1181,12 @@ export class AirPrompterAgent {
           this.log({ event: "sync_refused", reason, generation });
         },
         onDirectives: (payload) => {
+          // 0.3.5: while pinned, directives come from the LIVE manifest (adopted below), never the pinned
+          // envelope's own — `syncPinned` never calls this callback for the pinned fetch itself.
           this.takeApplyPolicy(payload);
-          this.takeDirectives(payload);
+          if (!this.pin) this.takeDirectives(payload);
         },
+        ...(this.pin ? { pin: { release: this.pin.release }, liveEtag: this.liveEtag, rebase: false } : this.rebaseOnNextActivation ? { rebase: true } : {}),
       });
       this.etag = result.etag;
       this.edgeEtag = result.edgeEtag;
@@ -1079,23 +1195,39 @@ export class AirPrompterAgent {
       this.lastSyncOutcome = result.outcome;
       this.lastSyncDetail = { reason: result.reason ?? null, detail: result.detail ?? null };
       // S3: contact is a signed manifest or the origin's authenticated answer — never the pointer's silence.
-      const contact = result.outcome === "unchanged" || result.outcome === "activated" || result.outcome === "activated_externally" || result.outcome === "staged" || result.outcome === "nothing_promoted" || result.outcome === "held_back";
+      const contact = result.outcome === "unchanged" || result.outcome === "pinned_unchanged" || result.outcome === "activated" || result.outcome === "activated_externally" || result.outcome === "staged" || result.outcome === "nothing_promoted" || result.outcome === "held_back";
       if (contact) this.markContact();
       // The pass went to the origin (any outcome but the pointer's silence): the pointer is trusted again from here.
       if (result.outcome !== "pointer_unchanged" && result.outcome !== "unavailable") this.pointerBehind = false;
       this.consecutiveSyncFailures = contact || result.outcome === "pointer_unchanged" ? 0 : this.consecutiveSyncFailures + 1;
+      // 0.3.5: this pass's stage/activate went through unforced past the store's own generation once — the re-base is spent.
+      if (this.rebaseOnNextActivation && (result.outcome === "activated" || result.outcome === "staged" || result.outcome === "refused" || result.outcome === "unchanged")) this.rebaseOnNextActivation = false;
       if (result.outcome === "activated" && result.active) {
         this.active = result.active;
         this.source = "store";
         this.stagedManifest = null;
         this.lastRefusal = null;
         this.unavailableModels = [];
+        if (this.pin) this.log({ event: "pin_activated", generation: result.generation ?? result.active.generation, sealId: sealIdOf(result.active.manifest.payload.releaseDigest) });
         this.emitChange();
       }
       if (result.outcome === "staged") {
         this.log({ event: "release_staged", generation: result.generation });
         this.emitChange();
       }
+      if (this.pin && result.outcome === "refused") {
+        this.log({ event: "pin_refused", code: result.reason, ...(result.detail ? { matches: result.detail.split(",") } : {}) });
+      }
+      if (this.pin && result.liveControl) {
+        this.liveManifest = result.liveControl.manifest;
+        this.liveEtag = result.liveControl.etag;
+        this.takeDirectives(result.liveControl.manifest.payload);
+        this.log({ event: "live_control_adopted", generation: result.liveControl.manifest.payload.generation });
+      }
+      // 0.3.5 (pins.md): "the seal recomputed each tick" — a registered mirror reconciles at the end of every
+      // pass, not only when this one happened to activate or stage (`emitChange()` covers those; this covers
+      // every other outcome too, so a drift introduced between activations is still caught on the next tick).
+      if (this.mirrorInstance) await this.reconcileMirror();
     })();
     // Cleared only by the pass that set it: an `applyBundle` chained behind this sync replaces the guard with its own
     // promise, and this sync's end must not drop it while the apply is still over the store.
@@ -1173,6 +1305,7 @@ export class AirPrompterAgent {
     if (before.agent !== after.agent || before.slots.join(",") !== after.slots.join(",") || before.arms.join(",") !== after.arms.join(",")) this.log({ event: after.agent || after.slots.length || after.arms.length ? "disabled_by_directive" : "disable_lifted", generation: payload.generation, ...after });
     const requests = this.openUnlockRequests(payload);
     if (requests.length) this.log({ event: "unlock_requested", generation: payload.generation, requests: requests.map((r) => ({ releaseDigest: r.releaseDigest, expiresAt: r.expiresAt, requestedBy: r.requestedBy })) });
+    this.notifyResyncRequests(payload);
   }
 
   /** What is disabled right now: the standing directives when they are as new as the active manifest, else the active manifest's own. */
@@ -1183,10 +1316,15 @@ export class AirPrompterAgent {
     return { agent: detail.agent, slots: detail.slots, arms: [...detail.arms, ...Object.values(detail.armsByExperiment).flat()] };
   }
 
-  /** S10: the runtime over the active release — resolution, the ramp walk and rendering live in `@airprompter/agent-runtime`. */
+  /**
+   * S10: the runtime over the active release — resolution, the ramp walk and rendering live in
+   * `@airprompter/agent-runtime`. 0.3.5: the release it resolves over is `releaseForResolver()`'s — the mirror's
+   * cached copy when one is registered and readable, else the active release — so every existing caller (resolve,
+   * render, workflow, golden) reads the mirror without its own plumbing.
+   */
   private resolver(): ReleaseResolver {
-    const release = this.active;
-    if (!release) throw new AgentStartError("no_verified_release", this.stagedManifest ? `no active release: generation ${this.stagedManifest.payload.generation} is staged under unlock_required and waiting for an unlock` : "no active release");
+    const { release, source } = this.releaseForResolver();
+    this.lastResolverSource = source;
     if (this.resolverFor?.release === release && this.resolverFor.standing === this.standingDirectives) return this.resolverFor.resolver;
     const resolver = new ReleaseResolver({
       release,
@@ -1283,6 +1421,11 @@ export class AirPrompterAgent {
       disabled: { agent: status.disabled.agent, slots: status.disabled.slots, ...(status.disabled.arms.length ? { arms: status.disabled.arms } : {}) },
       // S4: what this host runs under, so the fleet view can say "pinned on the host" when the console's setting is advisory here.
       applyPolicy: { effective: status.applyPolicy.effective, source: status.applyPolicy.source },
+      // 0.3.5 (pins.md): `pinnedReleaseDigest` and `seal` are content-free and sent only once the release this
+      // instance serves was sealed at protocol ≥ 0.3.5 — the same gate `catalog.variables` uses at 0.3.4, since an
+      // older service refuses the whole heartbeat over an unknown key.
+      ...(this.pin && this.active && protocolAtLeast(this.active.manifest.payload.protocol, "0.3.5") ? { pinnedReleaseDigest: this.active.manifest.payload.releaseDigest } : {}),
+      ...(this.mirrorReport && this.active && protocolAtLeast(this.active.manifest.payload.protocol, "0.3.5") ? { seal: this.mirrorReport } : {}),
     };
   }
 
@@ -1500,7 +1643,8 @@ export class AirPrompterAgent {
   }
 
   private leaseExpiresAt(): string | null {
-    const manifest = this.active?.manifest.payload;
+    // 0.3.5: while pinned with a live manifest adopted, the lease is the LIVE manifest's — content pinned, control live.
+    const manifest = this.controlPayload();
     if (!manifest) return null;
     // S3: attached to a daemon, the daemon's contact with the origin is the lease; a local socket answer is not contact.
     if (this.source === "daemon" || this.daemon) return this.daemonLeaseExpiresAt;
@@ -1512,7 +1656,9 @@ export class AirPrompterAgent {
   /** The lease: the facade's rule (it knows the daemon and the origin); the runtime knows nothing of contact. */
   private guardLease(tag: string): void {
     const active = this.active!;
-    const payload = active.manifest.payload;
+    // 0.3.5: onLeaseExpiry comes from `controlPayload()` too (live while pinned); falls back to the active
+    // manifest's own only in the impossible case `controlPayload()` returns null with `active` set.
+    const payload = this.controlPayload() ?? active.manifest.payload;
     const expiresAt = this.leaseExpiresAt();
     if (expiresAt && instant(expiresAt) <= this.nowMs()) {
       // §6.4: degrade keeps serving and reports it; halt stops rendering. Either way the spool carries one row.
@@ -1550,16 +1696,19 @@ export class AirPrompterAgent {
     // and handed to the resolver's render.
     const prepare = (values: RenderValues) => {
       const resolver = this.resolver();
+      // Captured in the same tick as `resolver()`, right after it: an await between here and `finish()` must never
+      // change what generation's text a render mixes with what source it reports.
+      const source = this.lastResolverSource;
       const resolved = this.resolveSlot(tag, options.subject);
       const text = resolver.textOf(resolved.slot);
       const plan = planFill({ tag, variables: resolved.slot.variables, text, values, registry: this.variables });
-      return { resolver, resolved, text, plan };
+      return { resolver, resolved, text, plan, source };
     };
     const finish = (prepared: ReturnType<typeof prepare>, filled: FilledRender): Rendered => {
       const rendered = this.renderObserved(() => prepared.resolver.render(prepared.resolved, filled.values, { fenced: filled.fenced, text: prepared.text }), { tag, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model });
       this.renders.register(rendered.text, { tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
       this.sayStricter(tag, prepared.resolved.slot, filled);
-      return rendered;
+      return { ...rendered, resolutionSource: prepared.source };
     };
     /** Synchronous: the call site's values and literal sources. A callable source in the way is `VariableSourceRequiredError`. */
     const render = (values: RenderValues = {}): Rendered => {
@@ -1872,6 +2021,8 @@ export class AirPrompterAgent {
   status(): AgentStatus {
     const state = this.store?.state ?? null;
     const manifest = this.active?.manifest.payload;
+    // 0.3.5: onLeaseExpiry is control, not content — live while pinned (`controlPayload()`); ramps/experiments below stay the pinned content's own.
+    const control = this.controlPayload();
     const leaseExpiresAt = this.leaseExpiresAt();
     const depth = this.sink.depth?.() ?? { segments: 0, bytes: 0 };
     // S9/S16: every experiment's plan as this host walks it — per slot, each on its own clock and retreat.
@@ -1896,7 +2047,7 @@ export class AirPrompterAgent {
       signingKeyId: this.active?.signingKeyId ?? null,
       leaseExpiresAt,
       leaseExpired: leaseExpiresAt ? instant(leaseExpiresAt) <= this.nowMs() : false,
-      onLeaseExpiry: manifest?.onLeaseExpiry ?? null,
+      onLeaseExpiry: control?.onLeaseExpiry ?? null,
       lastContactAt: this.lastContactMs === null ? null : new Date(this.lastContactMs).toISOString(),
       forcedDowngrade: state?.forcedDowngrade === true,
       disabled: this.disabledNow(),
@@ -1921,7 +2072,134 @@ export class AirPrompterAgent {
       lastSyncOutcome: this.lastSyncOutcome,
       consecutiveSyncFailures: this.consecutiveSyncFailures,
       nextSyncAt: this.nextSyncMs === null || !this.timer ? null : new Date(this.nextSyncMs).toISOString(),
+      // The seal id of what is ACTUALLY pinned and active (the release the runtime holds), not a re-derivation of
+      // whatever short or ambiguous form `start({ release })` was given.
+      pinnedRelease: this.pin && this.active ? sealIdOf(this.active.manifest.payload.releaseDigest) : null,
     };
+  }
+
+  /**
+   * 0.3.5: what this instance is pinned to, or `null` before any release has activated (whether pinned or not).
+   * Named `releaseInfo()`, not `release()` — the plan's proposed name collides with the existing public getter
+   * `get release(): LoadedSlot | null` a few lines below (unrelated to pins; the raw active release). See
+   * "Deviations from the plan".
+   */
+  releaseInfo(): { sealId: string; releaseDigest: string; generation: number; pinned: boolean } | null {
+    if (!this.active) return null;
+    return { sealId: sealIdOf(this.active.manifest.payload.releaseDigest), releaseDigest: this.active.manifest.payload.releaseDigest, generation: this.active.generation, pinned: this.pin !== null };
+  }
+
+  /**
+   * 0.3.5: clear the pin — the next unpinned sync pass re-bases to the pointer's current generation (never a false
+   * `generation_rollback` merely because the pin outran it, pins.md) and resumes following it. A no-op (still
+   * logs `pin_cleared`) when nothing was pinned.
+   */
+  async unpin(): Promise<void> {
+    if (this.store) clearPinFile(this.options.fs ?? nodeFs, this.options.stateDir ?? defaultStateDir(), this.options.agentId, this.options.target);
+    this.pin = null;
+    this.liveManifest = null;
+    this.liveEtag = null;
+    this.rebaseOnNextActivation = true;
+    this.log({ event: "pin_cleared" });
+  }
+
+  /**
+   * 0.3.5 (pins.md): register the customer's own copy of the active release. Reads it once now (materialising a
+   * missing copy, or reporting a break already there) and after every later activation — never on a timer. The
+   * returned `refresh`/`resync`/`report` are for the application's own use (a webhook, an admin action); the agent
+   * calls the same rules automatically the rest of the time.
+   */
+  mirror(port: MirrorPort): { refresh(): Promise<void>; resync(input: { approvedBy: string }): Promise<SealReport>; report(): SealReport | null } {
+    this.mirrorInstance = new Mirror(port);
+    this.mirrorMaterialisedFor = null;
+    this.mirrorBrokenLogged = false;
+    void this.reconcileMirror();
+    return {
+      refresh: () => this.reconcileMirror(),
+      resync: (input) => this.resyncMirror(input.approvedBy),
+      report: () => this.mirrorReport,
+    };
+  }
+
+  /** The last computed seal report, recomputed now against the current mirror copy — `null` when no mirror is registered, nothing is active, or the copy has never been read. */
+  seal(): SealReport | null {
+    if (!this.mirrorInstance || !this.active) return this.mirrorReport;
+    const reference = this.mirrorMaterialisedFor ?? this.active;
+    this.mirrorReport = this.mirrorInstance.computeReport(reference, this.nowIso());
+    return this.mirrorReport;
+  }
+
+  /**
+   * 0.3.5: read the application's mirror store and cache it. On a `null` copy (never written, or reset) it
+   * materialises this SDK's own — the ONE case where this method writes. On an existing copy, intact for the
+   * release it was last written for, with a NEWER release now active, it replaces it (`mirror_updated`): the SDK
+   * only ever overwrites its OWN untouched write, never a copy that broke. A broken copy is left exactly as it is
+   * — drift is reported, never repaired behind the application's back (pins.md).
+   */
+  private async reconcileMirror(): Promise<void> {
+    if (this.reconcilingMirror) return this.reconcilingMirror;
+    const run = (async () => {
+      const mirror = this.mirrorInstance;
+      if (!mirror || !this.active) return;
+      try {
+        await mirror.refresh();
+        this.mirrorUnreadableStreak = 0;
+      } catch (error) {
+        this.mirrorUnreadableStreak += 1;
+        if (this.mirrorUnreadableStreak === 1) this.log({ event: "mirror_unreadable", reason: (error as Error).message });
+        return; // The cache stays whatever it was (Mirror.refresh assigns only on success) — a good copy is never lost to a transient read failure.
+      }
+      const now = this.nowIso();
+      if (!mirror.copy) {
+        await mirror.materialise(this.active);
+        this.mirrorMaterialisedFor = this.active;
+        this.log({ event: "mirror_materialised", sealId: sealIdOf(this.active.manifest.payload.releaseDigest) });
+        this.mirrorReport = mirror.computeReport(this.active, now);
+        return;
+      }
+      const reference = this.mirrorMaterialisedFor ?? this.active;
+      const report = mirror.computeReport(reference, now);
+      this.mirrorReport = report;
+      if (!report) return;
+      if (!report.intact) {
+        if (!this.mirrorBrokenLogged) {
+          this.mirrorBrokenLogged = true;
+          this.log({ event: "seal_broken", sealId: report.sealId, changedTags: report.changedTags ?? [] });
+        }
+        return; // Never overwrite a broken copy.
+      }
+      if (this.mirrorBrokenLogged) {
+        this.mirrorBrokenLogged = false;
+        this.log({ event: "seal_intact", sealId: report.sealId });
+      }
+      if (reference !== this.active) {
+        // Intact for the previous release, and a new one has since activated: the SDK's own write is safe to replace.
+        await mirror.materialise(this.active);
+        this.mirrorMaterialisedFor = this.active;
+        this.log({ event: "mirror_updated", sealId: sealIdOf(this.active.manifest.payload.releaseDigest) });
+        this.mirrorReport = mirror.computeReport(this.active, now);
+      }
+    })();
+    const guarded: Promise<void> = run.finally(() => {
+      if (this.reconcilingMirror === guarded) this.reconcilingMirror = null;
+    });
+    this.reconcilingMirror = guarded;
+    return guarded;
+  }
+
+  /** `ap.mirror(port).resync({ approvedBy })`: re-materialise deliberately and report the healed state. `approvedBy` is logged, never the copy's content. */
+  private async resyncMirror(approvedBy: string): Promise<SealReport> {
+    const mirror = this.mirrorInstance;
+    if (!mirror || !this.active) throw new Error("resync(): no mirror registered (call ap.mirror(port) first), or no active release");
+    const report = await mirror.resync(this.active, this.nowIso());
+    this.mirrorMaterialisedFor = this.active;
+    this.mirrorReport = report;
+    if (this.mirrorBrokenLogged) {
+      this.mirrorBrokenLogged = false;
+      this.log({ event: "seal_intact", sealId: report.sealId });
+    }
+    this.log({ event: "mirror_resynced", approvedBy });
+    return report;
   }
 
   get generation(): number {

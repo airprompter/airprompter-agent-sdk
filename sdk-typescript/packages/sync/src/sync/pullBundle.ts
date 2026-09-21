@@ -155,6 +155,9 @@ export async function pullBundle(input: PullBundleInput): Promise<PullBundleResu
     if (fetched.status === "unauthorized") return { status: "unavailable", reason: "unauthorized", edge: given };
     if (fetched.status === "forbidden") return { status: "unavailable", reason: "forbidden", ...(fetched.code ? { detail: fetched.code } : {}), edge: given };
     if (fetched.status === "error") return { status: "unavailable", reason: `http_${fetched.httpStatus}`, edge: given };
+    // Never actually reached: this call never sends `release`, so the platform never answers `refused_seal`. Handled
+    // for exhaustiveness only — TypeScript does not know that from the call site.
+    if (fetched.status === "refused_seal") return { status: "unavailable", reason: "network", detail: `unexpected refused_seal: ${fetched.code}`, edge: given };
     // The origin answered: the pointer it names, the ETag it moved to, and the moment — the pointer's trust starts here.
     if (fetched.edgePointerUrl) edge.pointerUrl = fetched.edgePointerUrl;
     if (pointerEtag !== undefined) edge.pointerEtag = pointerEtag;

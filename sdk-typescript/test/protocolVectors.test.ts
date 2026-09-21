@@ -9,6 +9,7 @@ import { assignArm, AssignmentError, orderedSteps, StepError } from "../packages
 import { canonicalJson, CanonicalJsonError, sha256Prefixed } from "../packages/core/src/protocol/canonicalJson.js";
 import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../packages/core/src/protocol/trust.js";
 import { checksRefusals, evaluateChecks, patternRefusal, projectChecks, type DeclaredCheck } from "../packages/core/src/checks/index.js";
+import { verifySeal } from "../packages/core/src/protocol/seal.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));
 
@@ -90,6 +91,19 @@ test("checks.json: evaluations, patterns, declarations and the projection", () =
   for (const v of file.declarations) assert.deepEqual(checksRefusals(v.checks), v.refusals, v.name);
   assert.deepEqual(projectChecks(file.projection.checks), file.projection.expected);
   assert.ok(file.evaluations.length >= 20);
+});
+
+// 0.3.5: the customer-store seal recomputation (pins.md) agrees with the independently generated vectors — a text
+// tamper, a settings-only drift, a workflow step tamper, and a missing slot, plus the intact case.
+test("seal.json", () => {
+  const file = vector("seal.json") as { cases: Array<{ name: string; sealId: string; sealedPins: unknown; pins: unknown; texts: Record<string, string>; expected: { observedDigest: string; intact: boolean; changedTags: string[] } }> };
+  assert.ok(file.cases.length === 5, `seal.json: expected 5 cases, got ${file.cases.length}`);
+  for (const c of file.cases) {
+    const result = verifySeal({ sealId: c.sealId, sealedPins: c.sealedPins as never, pins: c.pins as never, texts: c.texts });
+    assert.equal(result.observedDigest, c.expected.observedDigest, `${c.name}: observedDigest`);
+    assert.equal(result.intact, c.expected.intact, `${c.name}: intact`);
+    assert.deepEqual(result.changedTags, c.expected.changedTags, `${c.name}: changedTags`);
+  }
 });
 
 test("0.3.4: a variable's default and source are in the release digest only when present; a null is unset", () => {

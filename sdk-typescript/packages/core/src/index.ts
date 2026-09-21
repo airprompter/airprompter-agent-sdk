@@ -31,6 +31,8 @@ export { canonicalJson, canonicalBytes, sha256Prefixed, CanonicalJsonError } fro
 export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, validateRamp, rampWeightsAt, effectiveArms, isAssignmentError, orderedSteps, AssignmentError, StepError, ASSIGNMENT_MODULUS, RAMP_MIN_STEP_MS, RAMP_MAX_STEPS } from "./protocol/assignment.js";
 export { keyThumbprint, publicJwkOf, signBytes, verifyBytes, trustedRootFromPinnedKey, verifyRootMetadata, verifyManifest, referencedPayloads, releaseDigest, releaseDigestInput, instant } from "./protocol/trust.js";
 export type { Verdict, VerifyManifestInput } from "./protocol/trust.js";
+export { verifySeal, sealIdOf } from "./protocol/seal.js";
+export type { VerifySealInput, VerifySealResult } from "./protocol/seal.js";
 
 export { renderTemplate, placeholdersOf, defaultOf, xmlDelimiters, MissingVariableError, UnknownVariableError } from "./render/template.js";
 export type { Delimiters, RenderInput } from "./render/template.js";
@@ -49,7 +51,7 @@ export type { ReleaseReader, ReleaseSlot, LoadedRelease } from "./release/reader
 export type { BundleReleaseInput, BundleReleaseRefusal } from "./release/bundleRelease.js";
 
 export { SyncClient } from "./control/client.js";
-export type { ControlPlaneRefusal, FetchLike, ManifestFetch, SyncClientOptions } from "./control/client.js";
+export type { ControlPlaneRefusal, FetchLike, ManifestFetch, SealRefusalCode, SyncClientOptions } from "./control/client.js";
 
 export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "./telemetry/rows.js";
 export type { Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "./telemetry/rows.js";

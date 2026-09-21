@@ -230,8 +230,16 @@ export class FakeControlPlane {
     const bytes = Buffer.from(JSON.stringify(manifest), "utf8");
     this.current = { manifest, bytes, etag: sha256Prefixed(bytes) };
     this.edgeEtag += 1;
+    // 0.3.5 (pins.md): "the newest envelope this target ever sealed for that release digest" — every promotion of
+    // the same digest (a re-promotion, a local rollback re-promoted forward) overwrites the entry, keeping the
+    // newest by generation, never appending a history a pinned reader would have to walk.
+    const existing = this.sealed.get(payload.releaseDigest);
+    if (!existing || existing.manifest.payload.generation < payload.generation) this.sealed.set(payload.releaseDigest, this.current);
     return manifest;
   }
+
+  /** 0.3.5: every release digest this target has ever sealed, and the newest envelope sealed for it — what `?release=` answers from. */
+  private readonly sealed = new Map<string, { manifest: Manifest; bytes: Buffer; etag: string }>();
 
   get manifest(): Manifest | null {
     return this.current?.manifest ?? null;
@@ -296,7 +304,7 @@ export class FakeControlPlane {
           if (!(key in body)) return respond(400, JSON.stringify({ error: `heartbeat: missing ${key}` }));
         }
         for (const key of Object.keys(body)) {
-          if (!["protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
+          if (!["protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "pinnedReleaseDigest", "seal", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
         }
         this.heartbeats.push(body);
         const answer: Record<string, unknown> = { pollSeconds: 30, uploadIntervalSeconds: this.uploadIntervalSeconds, heartbeatIntervalSeconds: this.heartbeatIntervalSeconds, expiresAt: new Date(Date.now() + this.heartbeatIntervalSeconds * 3000).toISOString() };
@@ -312,9 +320,25 @@ export class FakeControlPlane {
       if (manifestMatch) {
         if (manifestMatch[1] !== this.scope.agentId) return respond(403, JSON.stringify({ error: "x", details: { code: "agent_mismatch" } }));
         if (manifestMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "x", details: { code: "target_mismatch" } }));
-        if (!this.current) return respond(404, JSON.stringify({ error: "Not found" }));
         // The answer names the edge pointer, as the service does (a deployment without an edge omits the header).
         const pointerHeader = this.edgePointerUrl ? { "x-agent-edge-pointer-url": this.edgePointerUrl } : {};
+        const release = parsed.searchParams.get("release");
+        const wait = parsed.searchParams.get("wait");
+        if (release !== null) {
+          // 0.3.5 (pins.md, openapi.yaml): not combinable with `wait`; the grammar is a full digest or >=12 hex
+          // characters of one, an optional `sha256:` prefix, matched case-insensitively.
+          if (wait !== null) return respond(400, JSON.stringify({ error: "wait and release cannot be combined", details: { code: "wait_with_release" } }));
+          const grammar = /^(sha256:)?[0-9a-fA-F]{12,64}$/;
+          if (!grammar.test(release)) return respond(400, JSON.stringify({ error: "release does not match the seal grammar", details: { code: "seal_invalid" } }));
+          const hex = (release.startsWith("sha256:") ? release.slice(7) : release).toLowerCase();
+          const sealed = hex.length === 64 ? (this.sealed.get(`sha256:${hex}`) ? [this.sealed.get(`sha256:${hex}`)!] : []) : [...this.sealed.entries()].filter(([digest]) => digest.slice(7).startsWith(hex)).map(([, entry]) => entry);
+          if (sealed.length === 0) return respond(404, JSON.stringify({ error: "this target has never sealed that release", details: { code: "release_unknown" } }));
+          if (sealed.length > 1) return respond(409, JSON.stringify({ error: "the short form matches more than one release sealed on this target", matches: sealed.map((entry) => entry.manifest.payload.releaseDigest.slice(7, 19)) }));
+          const entry = sealed[0]!;
+          if (init?.headers?.["if-none-match"] === entry.etag) return respond(304, "", { etag: entry.etag, ...pointerHeader });
+          return respond(200, entry.bytes, { etag: entry.etag, "x-agent-generation": String(entry.manifest.payload.generation), "content-type": "application/json", ...pointerHeader });
+        }
+        if (!this.current) return respond(404, JSON.stringify({ error: "Not found" }));
         if (init?.headers?.["if-none-match"] === this.current.etag) return respond(304, "", { etag: this.current.etag, ...pointerHeader });
         return respond(200, this.current.bytes, { etag: this.current.etag, "x-agent-generation": String(this.current.manifest.payload.generation), "content-type": "application/json", ...pointerHeader });
       }

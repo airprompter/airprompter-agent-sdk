@@ -6,7 +6,7 @@
 //   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs
 //   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs --only canonical-json,trust-manifest --json
 
-import { AssignmentError, CanonicalJsonError, assignArm, canonicalJson, effectiveArms, orderedSteps, rampWeightsAt, sha256Prefixed, validateRamp } from "../reference.mjs";
+import { AssignmentError, CanonicalJsonError, assignArm, canonicalJson, effectiveArms, orderedSteps, rampWeightsAt, sha256Prefixed, validateRamp, verifySeal } from "../reference.mjs";
 import { experimentConflict, experimentsOf, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../trust.mjs";
 import { SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "../spool.mjs";
 import { checksRefusals, evaluateChecks, patternRefusal, projectChecks } from "../checks.mjs";
@@ -112,6 +112,9 @@ export const ops = {
   },
   spoolRowsToOtlp({ rows, resource, sdkVersion }) {
     return { request: spoolRowsToOtlp(rows, { resource, ...(sdkVersion ? { sdkVersion } : {}) }) };
+  },
+  verifySeal({ sealId, sealedPins, pins, texts }) {
+    return verifySeal({ sealId, sealedPins, pins, texts });
   },
 };
 

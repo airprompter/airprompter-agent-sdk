@@ -113,14 +113,17 @@ export interface Experiment {
 
 export type Directive =
   | { kind: "request_unlock"; releaseDigest: Sha256; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }
+  // 0.3.5, reserved (pins.md): asks a runtime to re-materialise the customer's mirror through its own re-sync hook; never granted automatically.
+  | { kind: "request_resync"; releaseDigest: Sha256; requestedBy: string; requestedAt: string; expiresAt: string; note?: string }
   | { kind: "disable"; scope: "agent" | "slot" | "arm"; tag?: string; arm?: string; experimentId?: string; issuedAt: string; reason?: string };
 
 /**
  * S4: the set of directive kinds a runtime honours is closed. `disable` is the one kind that acts without a
- * local act (a reduction: it only ever stops serving); `request_unlock` is a request the runtime surfaces and
- * never grants. A manifest carrying any other kind is refused whole (`directive_unknown`) — never partly obeyed.
+ * local act (a reduction: it only ever stops serving); `request_unlock` and `request_resync` are requests the
+ * runtime surfaces and never grants. A manifest carrying any other kind is refused whole (`directive_unknown`) —
+ * never partly obeyed.
  */
-export const DIRECTIVE_KINDS: ReadonlySet<string> = new Set<Directive["kind"]>(["request_unlock", "disable"]);
+export const DIRECTIVE_KINDS: ReadonlySet<string> = new Set<Directive["kind"]>(["request_unlock", "request_resync", "disable"]);
 
 /** S4: the apply policy a host holds, as store.json records it. */
 export type ApplyPolicy = "auto" | "unlock_required";

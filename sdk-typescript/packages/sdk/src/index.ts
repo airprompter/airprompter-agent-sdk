@@ -22,6 +22,9 @@
 export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION, PROTOCOL_VERSION, VENDORED_BUNDLE_EXPIRY_WARNING_DAYS, healthzOf, healthzResponse } from "./agent.js";
 export type { AgentStatus, Healthz, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange, SpoolReport, HeartbeatSdkName, BundleOutcome } from "./agent.js";
 
+export { Mirror, copyFromRelease, sealOf } from "./mirror.js";
+export type { MirrorCopy, MirrorPort, SealReport } from "./mirror.js";
+
 export * from "@airprompter/agent-core";
 export * from "@airprompter/agent-sync";
 export * from "@airprompter/agent-runtime";

@@ -77,6 +77,7 @@ bytes travel base64url. `→` is the arguments object, `←` the result object;
 | checks | `checksRefusals` | `{ checks }` | `{ refusals: [{ name, reason }] }` |
 | checks | `projectChecks` | `{ checks }` | `{ projected: [check…] }` |
 | otel | `spoolRowsToOtlp` | `{ rows, resource, sdkVersion }` | `{ request }` — one OTLP/HTTP JSON `ExportMetricsServiceRequest` |
+| seal | `verifySeal` | `{ sealId, sealedPins, pins, texts }` — `sealedPins`/`pins` are `ManifestSlot[]` (the pins as sealed, and the customer's own copy), `texts` is `contentHash → base64url text` | `{ observedDigest, intact, changedTags: [tag…] }` — pins.md's customer-store seal recomputation (0.3.5); no adapter has ever refused this op |
 
 Results are compared key-order-insensitively; a refusal is compared by
 `reason` alone. A canonical-JSON refusal the vectors express only in

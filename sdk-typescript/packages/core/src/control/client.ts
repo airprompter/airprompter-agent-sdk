@@ -12,6 +12,9 @@
  *   const envelope = verifyManifest({ manifest: fetched.manifest, root, now, scope, storedGeneration, payloads: null });
  *   // then client.payload(contentHash) for every hash the manifest references, and verifyManifest again with the bytes
  * }
+ * // 0.3.5: `release` pins the read to one seal instead of the pointer (pins.md) — never combined with `wait`.
+ * const pinned = await client.manifest({ release: sealIdOf(pinnedDigest) });
+ * if (pinned.status === "refused_seal") report(pinned.code); // "seal_invalid" | "release_unknown" | "release_ambiguous" | "release_not_promoted_here" | "wait_with_release"
  * ```
  */
 
@@ -33,12 +36,17 @@ export interface SyncClientOptions {
   userAgent?: string;
 }
 
+/** 0.3.5: the five refusal codes a `?release=` read can answer (pins.md); a runtime asking without `release` never sees this variant. */
+export type SealRefusalCode = "seal_invalid" | "release_unknown" | "release_ambiguous" | "release_not_promoted_here" | "wait_with_release";
+const SEAL_REFUSAL_CODES: ReadonlySet<SealRefusalCode> = new Set(["seal_invalid", "release_unknown", "release_ambiguous", "release_not_promoted_here", "wait_with_release"]);
+
 export type ManifestFetch =
   | { status: "ok"; manifest: Manifest; etag: string | null; generation: number | null; edgePointerUrl: string | null }
   | { status: "not_modified"; edgePointerUrl: string | null }
   | { status: "not_found" }
   | { status: "unauthorized" }
   | { status: "forbidden"; code: string | null }
+  | { status: "refused_seal"; code: SealRefusalCode; matches?: string[] }
   | { status: "error"; httpStatus: number };
 
 /**
@@ -86,14 +94,39 @@ export class SyncClient {
     return { status: "ok", pointer: JSON.parse(await response.text()) as EdgePointer, etag: response.headers.get("etag") };
   }
 
-  async manifest(input: { ifNoneMatch?: string | null; wait?: number }): Promise<ManifestFetch> {
+  async manifest(input: { ifNoneMatch?: string | null; wait?: number; release?: string }): Promise<ManifestFetch> {
+    // pins.md: `?release=` never long-polls — the release it names does not move by definition — and the platform
+    // refuses the combination too (`wait_with_release`); refusing it here saves the round trip.
+    if (input.wait && input.release) throw new Error("manifest: release cannot be combined with wait");
     const url = new URL(`${this.options.baseUrl}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/manifest`);
     if (input.wait) url.searchParams.set("wait", String(input.wait));
+    if (input.release) url.searchParams.set("release", input.release);
     const response = await this.fetchImpl(url.toString(), { headers: this.headers(input.ifNoneMatch ? { "if-none-match": input.ifNoneMatch } : {}) });
     // The answer names the edge pointer for this target (`x-agent-edge-pointer-url`): the few hundred bytes an idle
     // puller polls at the CDN instead of here. Null on a deployment without an edge.
     const edgePointerUrl = response.headers.get("x-agent-edge-pointer-url");
     if (response.status === 304) return { status: "not_modified", edgePointerUrl };
+    // 0.3.5: a pinned read's 400/404/409 may be one of the five seal refusals (pins.md) — read the body before
+    // falling back to the unpinned mapping below, so an unrelated 400/404/409 (there is none today, but the shape
+    // stays honest) is never silently swallowed as a seal refusal.
+    if (input.release && (response.status === 400 || response.status === 404 || response.status === 409)) {
+      if (response.status === 409) {
+        // The 409 body is shaped `{ error, matches }` (openapi.yaml), not the common `{ error, details }` refusal —
+        // `matches` lives at the top, so it is read here rather than through `readControlPlaneRefusal`.
+        let matches: string[] | undefined;
+        try {
+          const parsed = JSON.parse(await response.text()) as { matches?: unknown };
+          if (Array.isArray(parsed.matches)) matches = parsed.matches.filter((m): m is string => typeof m === "string");
+        } catch {
+          matches = undefined;
+        }
+        return { status: "refused_seal", code: "release_ambiguous", ...(matches ? { matches } : {}) };
+      }
+      const refusal = await readControlPlaneRefusal(response);
+      if (refusal.code && (SEAL_REFUSAL_CODES as ReadonlySet<string>).has(refusal.code)) {
+        return { status: "refused_seal", code: refusal.code as SealRefusalCode };
+      }
+    }
     if (response.status === 404) return { status: "not_found" };
     if (response.status === 401) return { status: "unauthorized" };
     if (response.status === 403) return { status: "forbidden", code: (await readControlPlaneRefusal(response)).code };

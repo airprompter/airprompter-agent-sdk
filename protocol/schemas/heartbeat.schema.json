@@ -123,6 +123,13 @@
         "stagedReleaseDigest": {
           "$ref": "manifest.schema.json#/$defs/sha256"
         },
+        "pinnedReleaseDigest": {
+          "description": "0.3.5: the seal this instance is pinned to (pins.md) — the release it renders regardless of the pointer. Absent when following the pointer. Sent only once the release it serves was sealed at protocol ≥ 0.3.5 (`protocolAtLeast`), as `catalog.variables` is: a strict older service refuses the whole heartbeat over an unknown key.",
+          "$ref": "manifest.schema.json#/$defs/sha256"
+        },
+        "seal": {
+          "$ref": "#/$defs/seal"
+        },
         "applyState": {
           "description": "What the runtime did with the latest manifest it verified. The fleet view is built from this, not from what the control plane hoped.",
           "type": "string",
@@ -346,6 +353,44 @@
             "backoffUntil": {
               "$ref": "manifest.schema.json#/$defs/timestamp"
             }
+          }
+        }
+      }
+    },
+    "seal": {
+      "description": "0.3.5: what the customer's store holds against the seal it was written from (pins.md). observedDigest is the release digest recomputed from the customer's copy; intact ⇔ every text hashes to its pin and observedDigest equals the seal. Content-free: changedTags names slots and steps, never text. brokenAt is the instance's own first observation; the service stamps its own on first receipt.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sealId",
+        "observedDigest",
+        "intact",
+        "checkedAt"
+      ],
+      "properties": {
+        "sealId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{12}$"
+        },
+        "observedDigest": {
+          "$ref": "manifest.schema.json#/$defs/sha256"
+        },
+        "intact": {
+          "type": "boolean"
+        },
+        "checkedAt": {
+          "$ref": "manifest.schema.json#/$defs/timestamp"
+        },
+        "brokenAt": {
+          "$ref": "manifest.schema.json#/$defs/timestamp"
+        },
+        "changedTags": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:#[1-9][0-9]{0,2})?$"
           }
         }
       }

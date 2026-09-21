@@ -26,6 +26,7 @@ import {
   effectiveArms,
   rampWeightsAt,
   validateRamp,
+  verifySeal,
 } from "./reference.mjs";
 import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./trust.mjs";
 import { LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "./spool.mjs";
@@ -241,6 +242,21 @@ for (const vector of ws.vectors) {
     else fail(vector.name, error.message);
   }
 }
+
+section("vectors: seal");
+const seal = readJson(join(protocolDir, "vectors", "seal.json"));
+for (const c of seal.cases) {
+  const result = verifySeal({ sealId: c.sealId, sealedPins: c.sealedPins, pins: c.pins, texts: c.texts });
+  const changedMatch = [...result.changedTags].sort().join() === [...c.expected.changedTags].sort().join();
+  if (result.observedDigest === c.expected.observedDigest && result.intact === c.expected.intact && changedMatch) ok(c.name);
+  else fail(c.name, `got ${JSON.stringify(result)}, expected ${JSON.stringify(c.expected)}`);
+}
+// Ties the seal to the manifest rule: the "intact" case's releaseDigest is exactly releaseDigest(pins) — the same
+// function a manifest's own releaseDigest is checked against ("manifest rules the schema cannot express" above).
+const sealIntact = seal.cases.find((c) => c.name === "intact");
+const rebuiltDigest = releaseDigest(sealIntact.pins);
+if (rebuiltDigest === sealIntact.releaseDigest) ok("intact: releaseDigest reproduces from pins (ties to the manifest rule)");
+else fail("intact: releaseDigest reproduces from pins", `computed ${rebuiltDigest}, vector says ${sealIntact.releaseDigest}`);
 
 section("vectors: assignment");
 const as = readJson(join(protocolDir, "vectors", "assignment.json"));

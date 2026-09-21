@@ -22,6 +22,7 @@ service, and by any self-hosted registry that implements it.
 | `spool-format.md` | The local telemetry spool: file layout, row types, what may never be in it, how third-party instrumentation writes to it |
 | `store-format.md` | `store.json`, the host's record: the N/N-1 rule between the daemon (writer) and the SDK (reader), format 2's fields, `store_newer` (S8) |
 | `golden-sets.md` | Golden sets run before activation (5-D): the reference on the slot, the payload, the run, `goldenPass`, the apply decision, and the customer-side judge |
+| `pins.md` | Pins and seals (0.3.5): the seal grammar and `?release=` pinned read, content pinned/control live, how a customer-held copy of a release proves itself intact, and `request_resync` |
 | `examples/` | One valid document per schema, and `refused/` documents each schema must reject |
 | `vectors/` | Conformance vectors every SDK must pass |
 | `tools/` | The independent Python generators behind `vectors/assignment.json` and `examples/` — CI regenerates and diffs |

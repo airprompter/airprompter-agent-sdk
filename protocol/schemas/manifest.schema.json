@@ -247,7 +247,7 @@
       }
     },
     "directive": {
-      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act — a reduction, it only ever stops serving (scope agent / slot) or hands an arm's share back to the control (scope arm, S9: the retreat from a ramp); `request_unlock` is a request the runtime surfaces and never grants. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
+      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act — a reduction, it only ever stops serving (scope agent / slot) or hands an arm's share back to the control (scope arm, S9: the retreat from a ramp); `request_unlock` and `request_resync` are requests the runtime surfaces and never grants on its own. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
       "oneOf": [
         {
           "type": "object",
@@ -255,6 +255,20 @@
           "required": ["kind", "releaseDigest", "requestedBy", "requestedAt", "expiresAt"],
           "properties": {
             "kind": { "const": "request_unlock" },
+            "releaseDigest": { "$ref": "#/$defs/sha256" },
+            "requestedBy": { "$ref": "#/$defs/identifier" },
+            "requestedAt": { "$ref": "#/$defs/timestamp" },
+            "expiresAt": { "$ref": "#/$defs/timestamp" },
+            "note": { "type": "string", "maxLength": 500 }
+          }
+        },
+        {
+          "description": "0.3.5, reserved: asks the runtime to re-materialise the customer's store from the sealed release through the application's re-sync hook (pins.md); the runtime never overwrites the copy by itself. A runtime that does not know the kind refuses the whole manifest (`directive_unknown`), so the control plane emits it only to an environment whose live instances all report protocol ≥ 0.3.5 — not yet emitted.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "releaseDigest", "requestedBy", "requestedAt", "expiresAt"],
+          "properties": {
+            "kind": { "const": "request_resync" },
             "releaseDigest": { "$ref": "#/$defs/sha256" },
             "requestedBy": { "$ref": "#/$defs/identifier" },
             "requestedAt": { "$ref": "#/$defs/timestamp" },

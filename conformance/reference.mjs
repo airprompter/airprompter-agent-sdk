@@ -79,6 +79,20 @@ export function inferenceDigestInput(inference) {
   return Object.fromEntries(INFERENCE_DIGEST_KEYS.filter((k) => inference[k] !== undefined && inference[k] !== null).map((k) => [k, inference[k]]));
 }
 
+/** A workflow step's own digest projection (0.3.2): reused by verifySeal for a per-step comparison. */
+export function stepDigestInput(s) {
+  return {
+    stepId: s.stepId,
+    ordinal: s.ordinal,
+    promptArtifactId: s.promptArtifactId,
+    promptVersionId: s.promptVersionId,
+    contentHash: s.contentHash,
+    byteLength: s.byteLength,
+    // 0.3.2: a step's own settings, projected as a slot's are.
+    ...(s.inference ? { inference: inferenceDigestInput(s.inference) } : {}),
+  };
+}
+
 export function releaseDigestInput(slots) {
   return [...slots]
     .sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
@@ -98,20 +112,7 @@ export function releaseDigestInput(slots) {
       ...(slot.inference ? { inference: inferenceDigestInput(slot.inference) } : {}),
       // 0.3.4: `default` and `source` ride the digest only when the pin carries them, so a slot without them keeps its digest.
       variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust, ...(v.default !== undefined && v.default !== null ? { default: v.default } : {}), ...(v.source !== undefined && v.source !== null ? { source: v.source } : {}) })),
-      ...(slot.steps
-        ? {
-            steps: slot.steps.map((s) => ({
-              stepId: s.stepId,
-              ordinal: s.ordinal,
-              promptArtifactId: s.promptArtifactId,
-              promptVersionId: s.promptVersionId,
-              contentHash: s.contentHash,
-              byteLength: s.byteLength,
-              // 0.3.2: a step's own settings, projected as a slot's are.
-              ...(s.inference ? { inference: inferenceDigestInput(s.inference) } : {}),
-            })),
-          }
-        : {}),
+      ...(slot.steps ? { steps: slot.steps.map(stepDigestInput) } : {}),
     }));
 }
 
@@ -186,6 +187,94 @@ export function orderedSteps(slotTag, steps) {
     if (step.stepId !== `${slotTag}#${step.ordinal}`) throw new AssignmentError("step_tag_mismatch");
   });
   return sorted;
+}
+
+// ---------------------------------------------------------------------------
+// 0.3.5: the customer-store seal (pins.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Recompute a customer-held copy's seal against the release's pins AS
+ * SEALED (`sealedPins`), the customer's own copy of those pins (`pins`),
+ * and the texts the customer's store actually holds (`texts`, keyed by a
+ * pin's or step's declared `contentHash`). A missing or mismatching text
+ * marks that tag (or `<tag>#<ordinal>` step id) changed and its rehashed
+ * content hash is substituted before recomputing the digest. Per-tag
+ * attribution does not stop there: every prompt pin's and workflow step's
+ * full digest projection is diffed between the sealed copy and the
+ * (rehashed) observed copy — canonical-json.md's projection, exactly as
+ * `releaseDigestInput` builds it — so a settings-only drift (a changed
+ * `inference` block, a dropped variable, a slot present on only one side)
+ * is named by its tag too, not just a text tamper. `changedTags` is the
+ * sorted, deduped union of every source above; it never carries text.
+ *
+ *   verifySeal({ sealId: "a3a20ff4f7fb", sealedPins, pins, texts });
+ *   // → { observedDigest: "sha256:…", intact: true, changedTags: [] }
+ */
+export function verifySeal({ sealId, sealedPins, pins, texts }) {
+  const changed = new Set();
+  const rehash = (contentHash, tag) => {
+    const encoded = texts[contentHash];
+    if (encoded === undefined) {
+      changed.add(tag);
+      return contentHash;
+    }
+    const bytes = Buffer.from(encoded, "base64url");
+    const rehashed = sha256Prefixed(bytes);
+    if (rehashed !== contentHash) {
+      changed.add(tag);
+      return rehashed;
+    }
+    return contentHash;
+  };
+  // (a) text missing or rehashes differently.
+  const observedPins = pins.map((pin) => {
+    const contentHash = rehash(pin.contentHash, pin.tag);
+    const steps = pin.steps ? pin.steps.map((step) => ({ ...step, contentHash: rehash(step.contentHash, step.stepId) })) : undefined;
+    return { ...pin, contentHash, ...(steps ? { steps } : {}) };
+  });
+  const observedDigest = releaseDigest(observedPins);
+
+  const pinProjection = (pin) => canonicalJson(releaseDigestInput([pin])[0]);
+  const withoutSteps = (pin) => ({ ...pin, steps: undefined });
+
+  const sealedByTag = new Map(sealedPins.map((p) => [p.tag, p]));
+  const observedByTag = new Map(observedPins.map((p) => [p.tag, p]));
+  const allTags = new Set([...sealedByTag.keys(), ...observedByTag.keys()]);
+  for (const tag of allTags) {
+    const sealedPin = sealedByTag.get(tag);
+    const observedPin = observedByTag.get(tag);
+    // (d) a tag present on only one side.
+    if (!sealedPin || !observedPin) {
+      changed.add(tag);
+      continue;
+    }
+    const isWorkflow = Array.isArray(sealedPin.steps) || Array.isArray(observedPin.steps);
+    if (!isWorkflow) {
+      // (b) a prompt pin: compare its full digest projection.
+      if (pinProjection(sealedPin) !== pinProjection(observedPin)) changed.add(tag);
+      continue;
+    }
+    // (c) a workflow pin: compare with steps removed, then each step by stepId.
+    if (pinProjection(withoutSteps(sealedPin)) !== pinProjection(withoutSteps(observedPin))) changed.add(tag);
+    const sealedSteps = new Map((sealedPin.steps ?? []).map((s) => [s.stepId, s]));
+    const observedSteps = new Map((observedPin.steps ?? []).map((s) => [s.stepId, s]));
+    const allStepIds = new Set([...sealedSteps.keys(), ...observedSteps.keys()]);
+    for (const stepId of allStepIds) {
+      const sealedStep = sealedSteps.get(stepId);
+      const observedStep = observedSteps.get(stepId);
+      if (!sealedStep || !observedStep) {
+        changed.add(stepId);
+        continue;
+      }
+      if (canonicalJson(stepDigestInput(sealedStep)) !== canonicalJson(stepDigestInput(observedStep))) changed.add(stepId);
+    }
+  }
+
+  const changedTags = [...changed].sort();
+  const shortIdMatches = observedDigest.slice(7, 19) === sealId;
+  const intact = changedTags.length === 0 && observedDigest === releaseDigest(sealedPins) && shortIdMatches;
+  return { observedDigest, intact, changedTags };
 }
 
 // ---------------------------------------------------------------------------

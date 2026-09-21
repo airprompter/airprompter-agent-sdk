@@ -4,7 +4,7 @@
   "document": {
     "format": "apbundle",
     "version": 1,
-    "protocol": "0.3.4",
+    "protocol": "0.3.5",
     "encryption": {
       "scheme": "none"
     }

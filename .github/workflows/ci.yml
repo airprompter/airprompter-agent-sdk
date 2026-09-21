@@ -51,6 +51,8 @@ jobs:
           python3 protocol/tools/gen_spool_vectors.py /tmp/spool >/dev/null
           diff -u protocol/vectors/spool.json /tmp/spool/spool.json
           diff -u protocol/vectors/feedback.json /tmp/spool/feedback.json
+          python3 protocol/tools/gen_seal_vectors.py /tmp/seal.json
+          diff -u protocol/vectors/seal.json /tmp/seal.json
       - name: Trust-chain vectors verify with fresh signatures too
         # ECDSA signatures are randomised, so this file is not byte-diffed;
         # a fresh generation must still verify, which proves the chain logic
@@ -69,6 +71,7 @@ jobs:
           test "$(node -p "require('./protocol/vectors/manifest-verify.json').protocol")" = "$v"
           test "$(node -p "require('./protocol/vectors/spool.json').protocol")" = "$v"
           test "$(node -p "require('./protocol/vectors/feedback.json').protocol")" = "$v"
+          test "$(node -p "require('./protocol/vectors/seal.json').protocol")" = "$v"
           grep -q "^  version: $v$" protocol/openapi.yaml
       - name: Every protocol change carries a CHANGELOG entry
         if: github.event_name == 'pull_request'

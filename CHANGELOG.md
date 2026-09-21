@@ -10,6 +10,8 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+- Protocol 0.3.5 (no SDK release yet): an application can ask for a specific sealed update of an agent by its Seal ID instead of the latest, and a runtime can report whether the copy in the customer's own store still matches the seal it was written from, naming what changed without ever sending prompt text. The SDKs learn to pin, mirror and report in their next release; see [protocol/CHANGELOG.md](protocol/CHANGELOG.md) and [protocol/pins.md](protocol/pins.md).
+
 ## 0.2.14 — 2026-09-17 (protocol 0.3.4)
 
 ### Added

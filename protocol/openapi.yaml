@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AirPrompter Agent routes (customer-v1)
-  version: 0.3.4
+  version: 0.3.5
   summary: The routes an agent runtime calls. Pull only; the control plane never opens a connection to you.
   description: |
     Every route is called by the customer's runtime over outbound HTTPS with an
@@ -63,6 +63,12 @@ paths:
         (0.3.3; the heartbeat carries the same `edgePointerUrl`), so a puller
         that never heartbeats learns it from its first pull. A deployment
         without an edge omits the header.
+
+        `?release=<seal>` (0.3.5, `pins.md`) asks for the latest envelope
+        sealed for that release on this target instead of the pointer's — the
+        byte-for-byte answer a pin names, ETag and `304` included, not a
+        different shape. Not combinable with `wait`: a pinned read never
+        long-polls, since the release it names never moves.
       parameters:
         - $ref: "#/components/parameters/agentId"
         - $ref: "#/components/parameters/target"
@@ -77,9 +83,19 @@ paths:
             type: integer
             minimum: 1
             maximum: 25
+        - name: release
+          in: query
+          description: |
+            0.3.5: pin the read to one release instead of the pointer — a
+            release digest (`sha256:` + 64 hex) or its short form (≥ 12 hex
+            characters of one, an optional `sha256:` prefix, case-insensitive).
+            Not combinable with `wait` (`400 wait_with_release`).
+          schema:
+            type: string
+            pattern: "^(sha256:)?[0-9a-fA-F]{12,64}$"
       responses:
         "200":
-          description: The current manifest
+          description: The current manifest, or (with `?release=`) the latest envelope sealed for that release on this target
           headers:
             ETag:
               description: sha256 of the stored envelope, `sha256:<hex>`.
@@ -90,6 +106,7 @@ paths:
                 type: string
                 const: no-store
             x-agent-generation:
+              description: The generation of the envelope answered. For a pinned answer (`?release=`), the pinned envelope's generation, not the pointer's.
               schema:
                 type: integer
                 minimum: 1
@@ -109,6 +126,7 @@ paths:
               schema:
                 $ref: "schemas/manifest.schema.json#/$defs/sha256"
             x-agent-generation:
+              description: The generation of the envelope answered. For a pinned answer (`?release=`), the pinned envelope's generation, not the pointer's.
               schema:
                 type: integer
                 minimum: 1
@@ -116,13 +134,36 @@ paths:
               schema:
                 type: string
                 format: uri
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404":
-          description: No release has been promoted to this target yet, or the key's binding does not cover it (indistinguishable by design)
+        "400":
+          description: "`seal_invalid`: `release` does not match the seal grammar. `wait_with_release`: `wait` and `release` were both sent"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "No release has been promoted to this target yet, or the key's binding does not cover it (indistinguishable by design); with `?release=`, also `release_unknown` (this target has never sealed that release) or `release_not_promoted_here` (sealed, but never promoted to this target)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: "`release_ambiguous`: the short form in `?release=` matches more than one release sealed on this target — the body's `matches` names each full short form; retry with more hex characters or the full digest"
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error, matches]
+                properties:
+                  error:
+                    type: string
+                  matches:
+                    type: array
+                    minItems: 2
+                    maxItems: 8
+                    items:
+                      type: string
+                      pattern: "^[0-9a-f]{12}$"
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /v1/agents/{agentId}/payloads/{contentHash}:

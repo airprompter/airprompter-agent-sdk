@@ -249,11 +249,21 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
  * verifies and stages it (forcing past the store's own generation counter only when the pinned envelope is
  * older — "pinned envelopes may be older"), then — after a successful activation, or when the edge pointer moved
  * since the last pass — reads the LIVE manifest (verified for signature/scope only, never staged) so the caller
- * can adopt its directives, lease and countersign requirement as `liveControl`.
+ * can adopt its directives, lease and countersign requirement as `liveControl`. When `input.edgePointerUrl` is
+ * absent there is no pointer whose silence can ever report "moved", so every pinned pass treats itself as moved
+ * and re-reads the live manifest — otherwise a pinned runtime with no pointer configured would go deaf to live
+ * control (a `disable`/Freeze directive, a lease change, a countersign requirement) forever after its first
+ * activation. The live read still sends `If-None-Match: input.liveEtag`, so this costs one 304 per quiet tick —
+ * the same price the unpinned path already pays with no pointer.
  */
 async function syncPinned(input: SyncPassInput, pin: { release: string }, now: string, trustedRoot: RootMetadata, edgeEtagIn: string | null): Promise<SyncPassOutput> {
   let edgeEtag = edgeEtagIn;
-  let pointerMoved = false;
+  // No pointer configured: there is nothing whose silence could ever flip this to true, so every pinned pass
+  // must re-read the live manifest itself (step 3 below) — otherwise a pinned runtime with no
+  // `input.edgePointerUrl` would never again see live control (directives/lease/countersign) after its first
+  // activation. The live read already sends `If-None-Match: input.liveEtag`, so a quiet environment still costs
+  // only one 304 per tick — the same price the unpinned path pays without a pointer.
+  let pointerMoved = !input.edgePointerUrl;
   if (input.edgePointerUrl) {
     const edge = await input.client.edgePointer(input.edgePointerUrl, edgeEtag);
     // The pointer's silence (`not_modified`) never decides pinned content and is not itself "moved" — only a new

@@ -132,6 +132,42 @@ test("live control reaches a pinned runtime: a live disable directive refuses re
   }
 });
 
+test("F1: a pinned runtime with NO edgePointerUrl still re-reads live control on every pass — a live disable directive reaches it, live_control_adopted is logged with the new generation, and the pinned content still names A", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const [ta, ra] = slots(plane, "A");
+  const manifestA = plane.promote([ta!, ra!]);
+  const sealA = sealIdOf(manifestA.payload.releaseDigest);
+  const events: Array<Record<string, unknown>> = [];
+  // No edgePointerUrl — a rootUrl-only pinned runtime (the shape F1 targets): `pointerMoved` inside `syncPinned`
+  // is set purely from the edge pointer today, so this config never had anything to flip it to true after the
+  // first activation.
+  const ap = await start(plane, stateDir, {
+    release: sealA,
+    sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/prod/root.json" },
+    logger: (e) => events.push(e),
+  });
+  try {
+    assert.equal(ap.prompt("support.triage").render({ ticket: "t1" }).text, "Triage A t1.", "renders A's text at start");
+
+    // A live promotion carrying a `disable` directive — no pointer to notice it moved, but the fix means this
+    // pinned pass reads the live manifest anyway.
+    const [tb, rb] = slots(plane, "B");
+    const manifestB = plane.promote([tb!, rb!], { directives: [{ kind: "disable", scope: "agent", issuedAt: new Date().toISOString() }] });
+    await ap.syncNow();
+
+    assert.throws(() => ap.prompt("support.triage").render({ ticket: "t2" }), RenderRefusedError, "disabled by the live directive even with no edge pointer configured");
+    assert.equal(ap.releaseInfo()?.sealId, sealA, "the pinned content still names A");
+    assert.ok(
+      events.some((e) => e.event === "live_control_adopted" && e.generation === manifestB.payload.generation),
+      `expected live_control_adopted at generation ${manifestB.payload.generation}, got ${JSON.stringify(events.map((e) => ({ event: e.event, generation: e.generation })))}`,
+    );
+  } finally {
+    await ap.stop();
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("pin refusals: an invalid grammar is seal_invalid; an unknown but well-formed digest is release_unknown", async () => {
   const stateDir1 = tempDir();
   const plane1 = new FakeControlPlane(scope);
@@ -201,6 +237,62 @@ test("unpin re-bases: pinned to A while the store's own counter was already at C
     assert.equal(ap3.releaseInfo()?.pinned, false);
     assert.equal(ap3.status().lastRefusal, null, "no generation_rollback on the first unpinned pass");
     assert.equal(readPinFile(nodeFs, stateDir, scope.agentId, scope.target), null, "pin.json is gone");
+  } finally {
+    await ap3.stop();
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("F3: unpin re-bases past a refused pass — a payload_missing refusal on the first post-unpin pointer pass leaves the re-base pending, so the very next syncNow() still activates the pointer's release, with no false generation_rollback logged along the way", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const [ta, ra] = slots(plane, "A");
+  const manifestA = plane.promote([ta!, ra!]);
+  const sealA = sealIdOf(manifestA.payload.releaseDigest);
+  const [tb, rb] = slots(plane, "B");
+  plane.promote([tb!, rb!]);
+  const [tc, rc] = slots(plane, "C");
+  const manifestC = plane.promote([tc!, rc!]);
+
+  // Same rebase setup as the sibling test above: sync unpinned all the way to C (the store's counter becomes C's),
+  // then restart pinned to A (older) so the first pinned sync forces past it.
+  const ap1 = await start(plane, stateDir);
+  await ap1.syncNow();
+  assert.equal(ap1.status().generation, manifestC.payload.generation);
+  await ap1.stop();
+
+  const ap2 = await start(plane, stateDir, { release: sealA });
+  await ap2.syncNow();
+  assert.equal(ap2.status().forcedDowngrade, true);
+  await ap2.stop();
+
+  const events: Array<Record<string, unknown>> = [];
+  const ap3 = await start(plane, stateDir, { logger: (e) => events.push(e) });
+  await ap3.syncNow();
+  await ap3.unpin();
+  try {
+    // The first post-unpin pass must fetch C's payload fresh — `ap3`'s in-memory active release is still A, so
+    // C's bytes are not held and `syncOnce` goes to the network for them. Withhold it: this pass refuses
+    // `payload_missing`, BEFORE the fix, that refusal wrongly cleared `rebaseOnNextActivation`.
+    plane.withholdPayloads.add(tc!.contentHash);
+    await ap3.syncNow();
+    assert.equal(ap3.status().generation, manifestA.payload.generation, "still A: the refused pass never activated anything");
+    assert.ok(
+      events.some((e) => e.event === "sync_refused" && e.reason === "payload_missing"),
+      `expected a payload_missing sync_refused, got ${JSON.stringify(events.map((e) => ({ event: e.event, reason: e.reason })))}`,
+    );
+
+    // Restore the payload and retry — the re-base must still be pending, so this pass activates C exactly as the
+    // sibling test's single, uninterrupted pass does.
+    plane.withholdPayloads.delete(tc!.contentHash);
+    await ap3.syncNow();
+    assert.equal(ap3.prompt("support.triage").render({ ticket: "t" }).text, "Triage C t.", "the second pass activates the pointer's release (C)");
+    assert.equal(ap3.status().generation, manifestC.payload.generation);
+    assert.equal(
+      events.some((e) => e.event === "sync_refused" && e.reason === "generation_rollback"),
+      false,
+      `expected no generation_rollback anywhere, got ${JSON.stringify(events.map((e) => ({ event: e.event, reason: e.reason })))}`,
+    );
   } finally {
     await ap3.stop();
     rmSync(stateDir, { recursive: true, force: true });

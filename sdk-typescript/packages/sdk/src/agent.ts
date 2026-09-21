@@ -57,7 +57,7 @@ import { DaemonClient, DaemonError, daemonSocketPath } from "@airprompter/agent-
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "@airprompter/agent-sync";
 import { readPinFile, writePinFile, clearPinFile, mergeLiveControl, type PinFile } from "@airprompter/agent-sync";
 import { sealIdOf, type LoadedRelease } from "@airprompter/agent-core";
-import { Mirror, copyFromRelease, type MirrorPort, type SealReport } from "./mirror.js";
+import { Mirror, copyFromRelease, sealForHeartbeat, type MirrorPort, type SealReport } from "./mirror.js";
 
 import { PROTOCOL_VERSION, SDK_VERSION } from "@airprompter/agent-core";
 
@@ -1200,8 +1200,12 @@ export class AirPrompterAgent {
       // The pass went to the origin (any outcome but the pointer's silence): the pointer is trusted again from here.
       if (result.outcome !== "pointer_unchanged" && result.outcome !== "unavailable") this.pointerBehind = false;
       this.consecutiveSyncFailures = contact || result.outcome === "pointer_unchanged" ? 0 : this.consecutiveSyncFailures + 1;
-      // 0.3.5: this pass's stage/activate went through unforced past the store's own generation once — the re-base is spent.
-      if (this.rebaseOnNextActivation && (result.outcome === "activated" || result.outcome === "staged" || result.outcome === "refused" || result.outcome === "unchanged")) this.rebaseOnNextActivation = false;
+      // 0.3.5: this pass's stage/activate went through unforced past the store's own generation once — the re-base is
+      // spent only when it was actually consumed: `activated`, `staged` or `unchanged`. A `refused` pass never got
+      // as far as staging (a rejected manifest, a missing payload, an unavailable model, …), so the re-base a
+      // caller just asked for (right after `unpin()`) must still apply to the pointer's next release; leaving it
+      // set here means a refused pass never silently swallows the pending re-base.
+      if (this.rebaseOnNextActivation && (result.outcome === "activated" || result.outcome === "staged" || result.outcome === "unchanged")) this.rebaseOnNextActivation = false;
       if (result.outcome === "activated" && result.active) {
         this.active = result.active;
         this.source = "store";
@@ -1425,7 +1429,10 @@ export class AirPrompterAgent {
       // instance serves was sealed at protocol ≥ 0.3.5 — the same gate `catalog.variables` uses at 0.3.4, since an
       // older service refuses the whole heartbeat over an unknown key.
       ...(this.pin && this.active && protocolAtLeast(this.active.manifest.payload.protocol, "0.3.5") ? { pinnedReleaseDigest: this.active.manifest.payload.releaseDigest } : {}),
-      ...(this.mirrorReport && this.active && protocolAtLeast(this.active.manifest.payload.protocol, "0.3.5") ? { seal: this.mirrorReport } : {}),
+      // F4: protocol/schemas/heartbeat.schema.json caps seal.changedTags at 64 — an oversize array would 400 the
+      // WHOLE heartbeat, not just this field. `sealForHeartbeat` slices only the wire body; `this.mirrorReport`
+      // (and the `seal_broken` log line above, which reads it directly) keeps the full list.
+      ...(this.mirrorReport && this.active && protocolAtLeast(this.active.manifest.payload.protocol, "0.3.5") ? { seal: sealForHeartbeat(this.mirrorReport) } : {}),
     };
   }
 
@@ -2154,6 +2161,23 @@ export class AirPrompterAgent {
         await mirror.materialise(this.active);
         this.mirrorMaterialisedFor = this.active;
         this.log({ event: "mirror_materialised", sealId: sealIdOf(this.active.manifest.payload.releaseDigest) });
+        this.mirrorReport = mirror.computeReport(this.active, now);
+        return;
+      }
+      // F6 (Mirror.copyIsSelfConsistent): `mirrorMaterialisedFor` is in-memory and does not survive a restart —
+      // a copy this SDK genuinely wrote for a release that has since been superseded is, right after a restart,
+      // indistinguishable from any other stale copy by that field alone. Use the seal the copy already carries
+      // instead: a fresh process (`mirrorMaterialisedFor === null`) whose cached copy already names a DIFFERENT
+      // seal than what is active now, and whose copy is still self-consistent (nobody edited it since it was
+      // written — its texts still hash to its own pins, and its pins' digest still matches its own sealId), is
+      // exactly the "safe to replace" case below, just discovered a different way. A copy that fails that check
+      // falls straight through to the existing broken-report path — reported against the active release, never
+      // rewritten. When the copy's sealId already equals the active seal id, this block does nothing and the
+      // path below (report computed against `this.active`) is unchanged from before.
+      if (this.mirrorMaterialisedFor === null && mirror.copy.sealId !== sealIdOf(this.active.manifest.payload.releaseDigest) && mirror.copyIsSelfConsistent()) {
+        await mirror.materialise(this.active);
+        this.mirrorMaterialisedFor = this.active;
+        this.log({ event: "mirror_updated", sealId: sealIdOf(this.active.manifest.payload.releaseDigest) });
         this.mirrorReport = mirror.computeReport(this.active, now);
         return;
       }

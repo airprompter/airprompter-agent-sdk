@@ -12,7 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import type { MirrorCopy, MirrorPort } from "../packages/sdk/src/mirror.js";
+import { sealForHeartbeat, type MirrorCopy, type MirrorPort, type SealReport } from "../packages/sdk/src/mirror.js";
 import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
 import { sealIdOf } from "../packages/core/src/protocol/seal.js";
 import { FakeControlPlane } from "../packages/core/src/testing/index.js";
@@ -276,4 +276,110 @@ test("a request_resync directive notifies the mirror's onResyncRequested once �
     await ap.stop();
     rmSync(stateDir, { recursive: true, force: true });
   }
+});
+
+test("F6 (positive): after a restart, a copy this SDK wrote for release A — now stale against B — is replaced on the seal it already carries, with no false seal_broken", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const [ta, ra] = slots(plane, "A");
+  const manifestA = plane.promote([ta!, ra!]);
+  const port = new InMemoryMirrorPort(); // the customer's own store — the SAME object survives the "restart" below, standing in for its backing database.
+
+  const ap1 = await start(plane, stateDir);
+  try {
+    const handle1 = ap1.mirror(port);
+    await handle1.refresh();
+    assert.equal(port.writes, 1, "materialised for A");
+    assert.equal(port.stored?.sealId, sealIdOf(manifestA.payload.releaseDigest));
+  } finally {
+    await ap1.stop();
+  }
+
+  // Promote B on the plane — this happens while nothing is running, the way a real deploy would.
+  const [tb, rb] = slots(plane, "B");
+  const manifestB = plane.promote([tb!, rb!]);
+
+  // "Restart": a FRESH AirPrompterAgent (mirrorMaterialisedFor starts null again), same store dir, same port object.
+  const events: Array<Record<string, unknown>> = [];
+  const ap2 = await start(plane, stateDir, { logger: (e) => events.push(e) });
+  try {
+    await ap2.syncNow();
+    assert.equal(ap2.status().generation, manifestB.payload.generation, "active is now B");
+
+    const handle2 = ap2.mirror(port);
+    await handle2.refresh();
+
+    assert.equal(port.stored?.sealId, sealIdOf(manifestB.payload.releaseDigest), "the port's copy was replaced for B");
+    assert.ok(events.some((e) => e.event === "mirror_updated" && e.sealId === sealIdOf(manifestB.payload.releaseDigest)), `expected mirror_updated for B, got ${JSON.stringify(events.map((e) => e.event))}`);
+    assert.equal(events.some((e) => e.event === "seal_broken"), false, "no false seal_broken across the restart");
+    assert.equal(ap2.seal()?.intact, true);
+  } finally {
+    await ap2.stop();
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("F6 (negative): after a restart, a copy edited between the two runs is left exactly as it is — seal_broken fires, the port is never rewritten", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const [ta, ra] = slots(plane, "A");
+  const manifestA = plane.promote([ta!, ra!]);
+  const port = new InMemoryMirrorPort();
+
+  const ap1 = await start(plane, stateDir);
+  try {
+    const handle1 = ap1.mirror(port);
+    await handle1.refresh();
+    assert.equal(port.writes, 1);
+  } finally {
+    await ap1.stop();
+  }
+
+  // Tamper the port's own copy while nothing is running — same one-byte edit the earlier tampered-text test uses.
+  const triagePin = port.stored!.pins.find((p) => p.tag === "support.triage")!;
+  const original = Buffer.from(port.stored!.texts[triagePin.contentHash]!, "base64url").toString("utf8");
+  port.stored!.texts[triagePin.contentHash] = Buffer.from(original.replace("A", "X")).toString("base64url");
+  const editedSealId = port.stored!.sealId;
+  const editedText = port.stored!.texts[triagePin.contentHash];
+
+  const [tb, rb] = slots(plane, "B");
+  const manifestB = plane.promote([tb!, rb!]);
+
+  const events: Array<Record<string, unknown>> = [];
+  const ap2 = await start(plane, stateDir, { logger: (e) => events.push(e) });
+  try {
+    await ap2.syncNow();
+    assert.equal(ap2.status().generation, manifestB.payload.generation, "active is now B");
+
+    const handle2 = ap2.mirror(port);
+    await handle2.refresh();
+
+    assert.ok(events.some((e) => e.event === "seal_broken"), `expected seal_broken, got ${JSON.stringify(events.map((e) => e.event))}`);
+    assert.equal(events.some((e) => e.event === "mirror_updated"), false, "never treated as safe to replace");
+    assert.equal(port.stored?.sealId, editedSealId, "the port's copy is untouched — still A's sealId");
+    assert.equal(port.stored?.texts[triagePin.contentHash], editedText, "the edited text is untouched");
+    assert.equal(ap2.seal()?.intact, false);
+    void manifestA;
+  } finally {
+    await ap2.stop();
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("F4: sealForHeartbeat slices changedTags to 64 (the heartbeat schema's cap) without touching the full report", () => {
+  const changedTags = Array.from({ length: 65 }, (_, i) => `tag.${String(i).padStart(3, "0")}`);
+  const report: SealReport = { sealId: "seal_1", observedDigest: "sha256:abc", intact: false, checkedAt: new Date().toISOString(), brokenAt: new Date().toISOString(), changedTags };
+
+  const sliced = sealForHeartbeat(report);
+  assert.equal(sliced.changedTags?.length, 64, "sliced to the schema's maxItems");
+  assert.deepEqual(sliced.changedTags, changedTags.slice(0, 64), "deterministic cut — already sorted, so the first 64 survive");
+  assert.equal(report.changedTags?.length, 65, "the original report (what seal_broken logs) is untouched");
+
+  // The "absent, never empty" rule: a report with no changedTags stays that way through the helper.
+  const clean: SealReport = { sealId: "seal_2", observedDigest: "sha256:def", intact: true, checkedAt: new Date().toISOString() };
+  assert.equal(sealForHeartbeat(clean).changedTags, undefined, "absent stays absent, never becomes an empty array");
+
+  // Exactly at the cap: untouched.
+  const exact: SealReport = { ...report, changedTags: changedTags.slice(0, 64) };
+  assert.equal(sealForHeartbeat(exact).changedTags?.length, 64);
 });

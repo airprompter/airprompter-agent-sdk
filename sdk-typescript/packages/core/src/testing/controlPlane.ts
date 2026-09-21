@@ -75,6 +75,8 @@ export class FakeControlPlane {
   generation = 0;
   edgeEtag = 0;
   requireCountersign = false;
+  /** F3 test hook: hashes in here 404 on `/payloads/:hash` even though `this.payloads` still has the bytes — simulates the plane withholding one payload for a single pass (`payload_missing`) without ever mutating the manifest itself. */
+  readonly withholdPayloads = new Set<string>();
 
   /**
    * Fresh keys by default (a test). `airprompter dev` (S12) hands in the keys it persisted, so the root a customer
@@ -344,6 +346,7 @@ export class FakeControlPlane {
       }
       const payloadMatch = /^\/v1\/agents\/([^/]+)\/payloads\/(sha256:[0-9a-f]{64})$/.exec(parsed.pathname);
       if (payloadMatch) {
+        if (this.withholdPayloads.has(payloadMatch[2]!)) return respond(404, JSON.stringify({ error: "Not found" }));
         const bytes = this.payloads.get(payloadMatch[2]!);
         return bytes ? respond(200, bytes) : respond(404, JSON.stringify({ error: "Not found" }));
       }

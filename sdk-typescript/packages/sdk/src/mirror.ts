@@ -65,6 +65,12 @@ export function copyFromRelease(release: LoadedRelease): MirrorCopy {
   return { sealId: sealIdOf(release.manifest.payload.releaseDigest), pins, texts };
 }
 
+/** protocol/schemas/heartbeat.schema.json caps `seal.changedTags` at 64 items — a strict schema, so one oversize array refuses the WHOLE heartbeat, not just that field. `changedTags` is already sorted, so the cut is deterministic; the log event (`seal_broken`) is never touched by this — only the wire body is capped. The "absent, never empty" rule is unaffected: a report with no `changedTags` still has none here. */
+export function sealForHeartbeat(report: SealReport): SealReport {
+  if (!report.changedTags || report.changedTags.length <= 64) return report;
+  return { ...report, changedTags: report.changedTags.slice(0, 64) };
+}
+
 /**
  * Recompute the seal of `copy` against `release`'s own pins (pins.md). `previous` carries `brokenAt` forward while
  * the same release is still broken — a re-check never moves the instance's own first-observation timestamp — and
@@ -131,6 +137,19 @@ export class Mirror {
     const report = sealOf(release, this.cachedCopy, now, this.lastReport);
     this.lastReport = report;
     return report;
+  }
+
+  /**
+   * The restart rule's one home (F6): whether the cached copy is internally consistent — its texts still hash to
+   * its own pins, and its pins' digest still matches the sealId it carries — with no reference to whatever
+   * release is active right now. `mirrorMaterialisedFor` (the in-process "this SDK wrote it" memory) does not
+   * survive a restart, so after one, a copy this SDK genuinely wrote for release N is indistinguishable from any
+   * other copy by that fact alone; but a copy nobody has tampered with since IT was written verifies against
+   * ITSELF regardless of which release is active. `false` when nothing is cached yet.
+   */
+  copyIsSelfConsistent(): boolean {
+    if (!this.cachedCopy) return false;
+    return verifySeal({ sealId: this.cachedCopy.sealId, sealedPins: this.cachedCopy.pins, pins: this.cachedCopy.pins, texts: this.cachedCopy.texts }).intact;
   }
 
   /** A pin from the cached copy — the render source when a mirror is registered and readable. `null` before any copy is cached. */

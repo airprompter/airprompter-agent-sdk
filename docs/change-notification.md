@@ -122,8 +122,9 @@ nudge" button.
 
 - `pullBundle` already takes `skipPointer`. The puller job wires the
   channel: an SQS long-poll loop (or an HTTP handler) that calls the pull.
-  The demo puller (`~/customer-app-test/src/fleet/puller.mjs`) shows the
-  poll loop; the nudge is a second trigger into the same `pass()`.
+  The puller's own poll loop (`pullToDatastore` with `nextPullDelayMs`,
+  [datastore.md](datastore.md)) stays; the nudge is a second trigger into
+  the same pass.
 - `airprompterd` gains `--nudge-sqs <queue-url>` (and later a webhook
   listener) so a daemon-run host reacts too.
 

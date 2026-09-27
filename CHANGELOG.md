@@ -10,6 +10,8 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.2.15 — 2026-09-27 (protocol 0.3.4)
+
 ### Added
 - Your datastore carries the release (T40, TypeScript and Python): the puller writes every sealed release into a datastore the application already runs, and every runtime hydrates from it — the release, its dial-up percentages and ramp, the fleet's rollback, the region. Two layers, so any backend can join: `KvStore` (four operations — `get` with an opaque version, a conditional `put` (`ifAbsent` / `ifVersion`), `list` by prefix, `delete`; no transactions) and `kvReleaseDatastore(kv)` / `kv_release_datastore(kv)`, the SDK's `ReleaseDatastore` over any `KvStore` in one shared format (`protocol/datastore-format.md`), so a Python puller and a TypeScript runtime share one bucket. `MemoryKvStore`, `fsKvStore` / `FileKvStore` and `MemoryReleaseDatastore` ship in `agent-sync`. `docs/datastore.md`.
 - Three optional adapters, one per language, bundling no client library: `@airprompter/datastore-s3` / `airprompter-datastore-s3` (S3's `If-None-Match` / `If-Match`; MinIO and R2 too), `@airprompter/datastore-postgres` / `airprompter-datastore-postgres` (one table; `INSERT … ON CONFLICT`, versioned `UPDATE`s; `pg`, Neon, psycopg 3, psycopg2), `@airprompter/datastore-redis` / `airprompter-datastore-redis` (atomic Lua writes, a sorted-set index, one cluster hash tag; `redis`, `ioredis`, redis-py). The TypeScript and Python adapter for a backend use the same table, keys or objects.

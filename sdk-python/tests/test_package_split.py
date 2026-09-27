@@ -138,6 +138,12 @@ def test_five_distributions_one_version_exact_pinned_siblings():
     from airprompter_agent.agent import SDK_VERSION as agent_version
 
     assert {core_version, agent_version} == versions, "SDK_VERSION is the lockstep version"
+    # BSD-3-Clause travels with every redistribution: each distribution carries the licence text (hatchling packs LICENSE*).
+    with open(os.path.join(SDK_PY, "..", "LICENSE"), encoding="utf-8") as f:
+        licence = f.read()
+    for name in [*PACKAGES, "datastore-s3", "datastore-postgres", "datastore-redis"]:
+        with open(os.path.join(SDK_PY, "packages", name, "LICENSE"), encoding="utf-8") as f:
+            assert f.read() == licence, f"packages/{name}/LICENSE is the repository's LICENSE"
     # T40: the datastore adapters ride the same version, pin sync alone, and never require a database client.
     for name in ("datastore-s3", "datastore-postgres", "datastore-redis"):
         with open(os.path.join(SDK_PY, "packages", name, "pyproject.toml"), encoding="utf-8") as f:

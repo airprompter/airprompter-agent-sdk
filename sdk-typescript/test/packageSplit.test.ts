@@ -200,6 +200,9 @@ test("S10: the five packages carry one version, exact-pinned siblings, the locks
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), name === "datastore-s3" ? ["@aws-sdk/client-s3"] : [], `${name}: the client library is the application's`);
     assert.ok(sizes[name]!.bytes > 0 && sizes[name]!.bytes <= sizes[name]!.budget, `${name}: ${sizes[name]!.bytes} bytes against its ${sizes[name]!.budget}-byte budget`);
   }
+  // BSD-3-Clause travels with every redistribution: each package carries the licence text npm always packs.
+  const licence = readFileSync(join(root, "..", "LICENSE"), "utf8");
+  for (const name of [...PACKAGES, "datastore-s3", "datastore-postgres", "datastore-redis"]) assert.equal(readFileSync(join(root, "packages", name, "LICENSE"), "utf8"), licence, `packages/${name}/LICENSE is the repository's LICENSE`);
   // Every source the CLI bundles from must reach the sidecar image's build stage: a package added here and not there
   // builds everywhere but the Dockerfile (S13 found it in CI).
   const dockerfile = readFileSync(join(root, "..", "deploy", "docker", "Dockerfile"), "utf8");

@@ -1,7 +1,7 @@
 {
   "name": "@airprompter/datastore-s3",
-  "version": "0.2.14",
-  "description": "The AirPrompter release datastore over an S3 bucket: a KvStore with S3's own conditional writes (If-None-Match, If-Match), for kvReleaseDatastore \u2014 the puller writes sealed releases, every runtime hydrates from them.",
+  "version": "0.2.15",
+  "description": "The AirPrompter release datastore over an S3 bucket: a KvStore with S3's own conditional writes (If-None-Match, If-Match), for kvReleaseDatastore — the puller writes sealed releases, every runtime hydrates from them.",
   "keywords": [
     "airprompter",
     "prompts",
@@ -47,7 +47,7 @@
     "sizeBudgetBytes": 30000
   },
   "dependencies": {
-    "@airprompter/agent-sync": "0.2.14"
+    "@airprompter/agent-sync": "0.2.15"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": ">=3.700.0"

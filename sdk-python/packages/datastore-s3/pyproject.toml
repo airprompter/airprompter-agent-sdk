@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airprompter-datastore-s3"
-version = "0.2.14"
+version = "0.2.15"
 description = "The AirPrompter release datastore over an S3 bucket: a KvStore with S3's own conditional writes (IfNoneMatch, IfMatch), for kv_release_datastore — the puller writes sealed releases, every runtime hydrates from them."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 # The client library is the application's: the adapter imports none, and the extras below only name a known-good one.
 dependencies = [
-  "airprompter-agent-sync==0.2.14",
+  "airprompter-agent-sync==0.2.15",
 ]
 
 [project.optional-dependencies]

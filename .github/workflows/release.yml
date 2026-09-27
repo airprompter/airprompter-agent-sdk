@@ -13,7 +13,15 @@
 #                          on npmjs.com must be configured for every
 #                          @airprompter/agent-* package,
 #                          @airprompter/otel-bridge and every
-#                          @airprompter/datastore-* package).
+#                          @airprompter/datastore-* package). npm registers a
+#                          trusted publisher only on a package that already
+#                          exists: a NEW package's first version is published
+#                          once by hand (`npm publish --access public` from
+#                          the tagged commit, after `npm run build`), then
+#                          its trusted publisher is added, then the tag is
+#                          pushed — this job skips any version already on
+#                          the registry, so the hand-published one is left
+#                          as it is.
 #   sdk-python/vX.Y.Z      PyPI trusted publishing of the eight distributions
 #                          (airprompter-agent-core, -sync, -runtime,
 #                          -telemetry, airprompter-agent, and
@@ -112,7 +120,7 @@ jobs:
           generate_release_notes: true
 
   npm:
-    name: Publish @airprompter/agent-* (five packages, one tag)
+    name: Publish @airprompter/* (nine packages, one tag)
     if: startsWith(github.ref, 'refs/tags/sdk-typescript/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -150,16 +158,22 @@ jobs:
           output-file: agent-sdk.spdx.json
       - name: Publish with provenance, in dependency order
         # core first: a sibling's exact pin must resolve on the registry before the sibling is published.
+        # A version already on the registry is skipped, so a run that failed part-way can be re-run: without it the
+        # re-run dies on the first package it already published, and the rest of the version can never go out.
         run: |
-          for name in core sync runtime telemetry sdk; do
-            npm publish --provenance --access public --workspace "@airprompter/agent-$name"
-          done
+          publish() {
+            v=$(node -p "require('./packages/$2/package.json').version")
+            if npm view "$1@$v" version >/dev/null 2>&1; then
+              echo "$1@$v is already on the registry; skipped"
+            else
+              npm publish --provenance --access public --workspace "$1"
+            fi
+          }
+          for name in core sync runtime telemetry sdk; do publish "@airprompter/agent-$name" "$name"; done
           # S13: the bridge is optional and pins core; it goes out after core, whatever its position.
-          npm publish --provenance --access public --workspace "@airprompter/otel-bridge"
+          publish "@airprompter/otel-bridge" otel-bridge
           # T40: the datastore adapters are optional and pin sync; they go out after it.
-          for adapter in s3 postgres redis; do
-            npm publish --provenance --access public --workspace "@airprompter/datastore-$adapter"
-          done
+          for adapter in s3 postgres redis; do publish "@airprompter/datastore-$adapter" "datastore-$adapter"; done
         working-directory: sdk-typescript
       - uses: softprops/action-gh-release@v2
         with:
@@ -203,6 +217,8 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: sdk-python/dist
+          # A distribution already on PyPI is skipped, so a run that failed part-way can be re-run.
+          skip-existing: true
       - uses: softprops/action-gh-release@v2
         with:
           files: airprompter-agent.spdx.json

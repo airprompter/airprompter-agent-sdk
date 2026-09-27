@@ -9,15 +9,44 @@ Example::
 
     store = SlotStore.open(state_dir="/var/lib/acme", agent_id="agt_1", target="prod", key_provider=file_key("/var/lib/acme/store.key"))
     loaded = store.load(store.state["active"], now=now_iso)   # the active slot, verified on every open, or StoreError
+    pull_to_datastore(datastore=releases, region="eu-west-1", client=client, scope=scope, trusted_root=root, now=now, distribution_public_key=fleet_public_raw)
 """
 
 from .apply.window import UpdateWindow, WindowState, is_known_time_zone, parse_window, validate_window, window_state
 from .store.key_provider import KeyProvider, custom_key_provider, file_key, kms, os_keystore, unwrap_with_raw_key, vault, wrap_with_raw_key
+from .store.datastore_records import (
+    DATASTORE_FORMAT,
+    DatastoreKeys,
+    DatastoreRecordError,
+    datastore_keys,
+    decode_datastore_record,
+    encode_datastore_record,
+    encode_key_segment,
+    generation_of_release_key,
+)
+from .store.kv_store import FileKvStore, KvEntry, KvStore, KvStoreReport, MemoryKvStore, check_kv_store
+from .store.release_datastore import (
+    DatastoreRollbackResult,
+    HydrationPlan,
+    KvReleaseDatastore,
+    MemoryReleaseDatastore,
+    ReleaseControl,
+    ReleaseDatastore,
+    ReleaseKey,
+    StoredReleaseRow,
+    clear_datastore_rollback,
+    kv_release_datastore,
+    prune_datastore,
+    resolve_hydration,
+    rollback_datastore,
+    rollout_of,
+)
 from .store.payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
 from .store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
 from .sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
 from .sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
 from .sync.pull_bundle import DEFAULT_MAX_POINTER_AGE_MS, PullBundleResult, PullEdgeState, next_pull_delay_ms, pull_bundle
+from .sync.pull_to_datastore import PullToDatastoreResult, pull_to_datastore
 
 __all__ = [
     "DAEMON_MAX_LINE_BYTES",
@@ -55,4 +84,34 @@ __all__ = [
     "vault",
     "window_state",
     "wrap_with_raw_key",
+    "DatastoreRollbackResult",
+    "HydrationPlan",
+    "MemoryReleaseDatastore",
+    "PullToDatastoreResult",
+    "ReleaseControl",
+    "ReleaseDatastore",
+    "ReleaseKey",
+    "StoredReleaseRow",
+    "clear_datastore_rollback",
+    "pull_to_datastore",
+    "resolve_hydration",
+    "rollback_datastore",
+    "rollout_of",
+    "DATASTORE_FORMAT",
+    "DatastoreKeys",
+    "DatastoreRecordError",
+    "FileKvStore",
+    "KvEntry",
+    "KvReleaseDatastore",
+    "KvStore",
+    "KvStoreReport",
+    "MemoryKvStore",
+    "check_kv_store",
+    "datastore_keys",
+    "decode_datastore_record",
+    "encode_datastore_record",
+    "encode_key_segment",
+    "generation_of_release_key",
+    "kv_release_datastore",
+    "prune_datastore",
 ]

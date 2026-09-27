@@ -48,7 +48,7 @@ test("S10: the direction is core → clients → sdk → binary; the edge set is
   const clean = lint(["--json"]);
   assert.equal(clean.status, 0, clean.stderr);
   const { edges } = JSON.parse(clean.stdout.slice(0, clean.stdout.lastIndexOf("}") + 1)) as { edges: string[] };
-  assert.deepEqual(edges, ["cli→core", "cli→otel-bridge", "cli→runtime", "cli→sdk", "cli→sync", "cli→telemetry", "otel-bridge→core", "runtime→core", "sdk→core", "sdk→runtime", "sdk→sync", "sdk→telemetry", "sync→core", "telemetry→core"], "the clients never import each other; core imports nothing of ours; the bridge is a client of core alone");
+  assert.deepEqual(edges, ["cli→core", "cli→otel-bridge", "cli→runtime", "cli→sdk", "cli→sync", "cli→telemetry", "datastore-postgres→sync", "datastore-redis→sync", "datastore-s3→sync", "otel-bridge→core", "runtime→core", "sdk→core", "sdk→runtime", "sdk→sync", "sdk→telemetry", "sync→core", "telemetry→core"], "the clients never import each other; core imports nothing of ours; the bridge is a client of core alone; the datastore adapters of sync alone");
   const probe = join(root, "packages", "telemetry", "src", "_lintProbe.ts");
   writeFileSync(probe, 'import { SlotStore } from "@airprompter/agent-sync";\nexport const probe = typeof SlotStore;\n');
   try {
@@ -191,6 +191,18 @@ test("S10: the five packages carry one version, exact-pinned siblings, the locks
     assert.ok(sizes[name]!.bytes > 0, `${name} built`);
     assert.ok(sizes[name]!.bytes <= sizes[name]!.budget, `${name}: ${sizes[name]!.bytes} bytes over its ${sizes[name]!.budget}-byte budget`);
   }
+  // T40: the datastore adapters ride the same version, pin sync alone, and never pull a database client in.
+  for (const name of ["datastore-s3", "datastore-postgres", "datastore-redis"]) {
+    const manifest = JSON.parse(readFileSync(join(root, "packages", name, "package.json"), "utf8")) as { name: string; version: string; dependencies?: Record<string, string>; peerDependencies?: Record<string, string>; airprompter: { sizeBudgetBytes: number } };
+    assert.equal(manifest.name, `@airprompter/${name}`);
+    assert.equal(manifest.version, version, `${name} is on the lockstep version`);
+    assert.deepEqual(manifest.dependencies, { "@airprompter/agent-sync": version }, `${name} depends on sync alone, exact-pinned`);
+    assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), name === "datastore-s3" ? ["@aws-sdk/client-s3"] : [], `${name}: the client library is the application's`);
+    assert.ok(sizes[name]!.bytes > 0 && sizes[name]!.bytes <= sizes[name]!.budget, `${name}: ${sizes[name]!.bytes} bytes against its ${sizes[name]!.budget}-byte budget`);
+  }
+  // BSD-3-Clause travels with every redistribution: each package carries the licence text npm always packs.
+  const licence = readFileSync(join(root, "..", "LICENSE"), "utf8");
+  for (const name of [...PACKAGES, "datastore-s3", "datastore-postgres", "datastore-redis"]) assert.equal(readFileSync(join(root, "packages", name, "LICENSE"), "utf8"), licence, `packages/${name}/LICENSE is the repository's LICENSE`);
   // Every source the CLI bundles from must reach the sidecar image's build stage: a package added here and not there
   // builds everywhere but the Dockerfile (S13 found it in CI).
   const dockerfile = readFileSync(join(root, "..", "deploy", "docker", "Dockerfile"), "utf8");

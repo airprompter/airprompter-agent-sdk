@@ -12,7 +12,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-export const BUILD_ORDER = ["core", "sync", "runtime", "telemetry", "otel-bridge", "sdk"];
+export const BUILD_ORDER = ["core", "sync", "runtime", "telemetry", "otel-bridge", "datastore-s3", "datastore-postgres", "datastore-redis", "sdk"];
+const published = (name) => (name === "otel-bridge" || name.startsWith("datastore-") ? `@airprompter/${name}` : `@airprompter/agent-${name}`);
 const tsc = join(root, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
 
 for (const name of BUILD_ORDER) {
@@ -22,5 +23,5 @@ for (const name of BUILD_ORDER) {
   execFileSync(tsc, ["-p", "tsconfig.cjs.json"], { cwd: dir, stdio: "inherit", shell: process.platform === "win32" });
   mkdirSync(join(dir, "dist", "cjs"), { recursive: true });
   writeFileSync(join(dir, "dist", "cjs", "package.json"), JSON.stringify({ type: "commonjs" }));
-  console.log(`built ${name === "otel-bridge" ? "@airprompter/otel-bridge" : `@airprompter/agent-${name}`}`);
+  console.log(`built ${published(name)}`);
 }

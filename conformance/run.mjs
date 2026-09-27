@@ -31,6 +31,7 @@ import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./
 import { LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "./spool.mjs";
 import { checksRefusals, evaluateChecks, patternRefusal, projectChecks } from "./checks.mjs";
 import { spoolRowsToOtlp } from "./otel.mjs";
+import { datastoreKeys, decodeRecord, encodeRecord } from "./datastore.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const protocolDir = join(here, "..", "protocol");
@@ -511,6 +512,41 @@ section("examples/spool-writer: the reference writers without the SDK (D66) pass
   const py = spawnSync("python3", [join(here, "..", "examples", "spool-writer", "python", "check_vectors.py"), join(protocolDir, "vectors", "spool.json")], { encoding: "utf8" });
   if (py.status === 0) ok(`spool_writer.py: ${py.stdout.trim()}`);
   else fail("spool_writer.py", (py.stderr || py.stdout || `exit ${py.status}`).trim().split("\n").slice(-3).join(" | "));
+}
+
+// ---------------------------------------------------------------------------
+section("datastore layout and records (datastore-format.md)");
+{
+  const ds = readJson(join(protocolDir, "vectors", "datastore.json"));
+  const recordValidate = validatorFor("datastore-record");
+  for (const c of ds.keys) {
+    const k = datastoreKeys(c.prefix, c.key);
+    const got = { releasesPrefix: k.releasesPrefix, release: k.release(c.generation), latest: k.latest, edge: k.edge, control: k.control };
+    if (JSON.stringify(got) === JSON.stringify(c.expect)) ok(`keys: ${c.name}`);
+    else fail(`keys: ${c.name}`, JSON.stringify(got));
+  }
+  for (const c of ds.records) {
+    const text = encodeRecord(c.fields);
+    if (text !== c.text) fail(`record: ${c.name} encodes canonically`, text);
+    else if (!recordValidate(JSON.parse(text))) fail(`record: ${c.name} validates`, ajv.errorsText(recordValidate.errors));
+    else {
+      try {
+        decodeRecord(text, c.fields.kind, c.fields.kind === "release" ? c.fields.generation : undefined);
+        ok(`record: ${c.name}`);
+      } catch (error) {
+        fail(`record: ${c.name} decodes`, error.message);
+      }
+    }
+  }
+  for (const c of ds.refused) {
+    try {
+      decodeRecord(c.text, c.kind, c.keyGeneration);
+      fail(`refused: ${c.name}`, "decoded");
+    } catch (error) {
+      if (error.code === c.code) ok(`refused: ${c.name} (${c.code})`);
+      else fail(`refused: ${c.name}`, `${error.code}: ${error.message}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

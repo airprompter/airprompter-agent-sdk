@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const PACKAGES = ["core", "sync", "runtime", "telemetry", "otel-bridge", "sdk"];
+const PACKAGES = ["core", "sync", "runtime", "telemetry", "otel-bridge", "datastore-s3", "datastore-postgres", "datastore-redis", "sdk"];
 
 function jsBytes(dir) {
   let total = 0;

@@ -10,6 +10,23 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.2.15 — 2026-09-27 (protocol 0.3.4)
+
+### Added
+- Your datastore carries the release (T40, TypeScript and Python): the puller writes every sealed release into a datastore the application already runs, and every runtime hydrates from it — the release, its dial-up percentages and ramp, the fleet's rollback, the region. Two layers, so any backend can join: `KvStore` (four operations — `get` with an opaque version, a conditional `put` (`ifAbsent` / `ifVersion`), `list` by prefix, `delete`; no transactions) and `kvReleaseDatastore(kv)` / `kv_release_datastore(kv)`, the SDK's `ReleaseDatastore` over any `KvStore` in one shared format (`protocol/datastore-format.md`), so a Python puller and a TypeScript runtime share one bucket. `MemoryKvStore`, `fsKvStore` / `FileKvStore` and `MemoryReleaseDatastore` ship in `agent-sync`. `docs/datastore.md`.
+- Three optional adapters, one per language, bundling no client library: `@airprompter/datastore-s3` / `airprompter-datastore-s3` (S3's `If-None-Match` / `If-Match`; MinIO and R2 too), `@airprompter/datastore-postgres` / `airprompter-datastore-postgres` (one table; `INSERT … ON CONFLICT`, versioned `UPDATE`s; `pg`, Neon, psycopg 3, psycopg2), `@airprompter/datastore-redis` / `airprompter-datastore-redis` (atomic Lua writes, a sorted-set index, one cluster hash tag; `redis`, `ioredis`, redis-py). The TypeScript and Python adapter for a backend use the same table, keys or objects.
+- `checkKvStore` / `check_kv_store`: the contract an adapter proves against a live backend — conditional writes, exact prefixes (no `%`, `_`, `*`, `?` or `[` is a wildcard), large and non-ASCII values, and racing writers (exactly one of N wins). CI runs it for all three adapters in both languages against live Postgres, Redis and an S3 endpoint, plus a cross-language test: releases and a rollback the TypeScript adapter wrote hydrate a Python runtime through the Python adapter, for every backend.
+- `pullToDatastore` / `pull_to_datastore`: the puller around the datastore — the edge state and newest generation read from it, the sealed release written back with a content-free `rollout` summary, then the edge state (never before its release). `AirPrompterAgent.start({ datastore: { store, region, pollSeconds } })` hydrates from it after the host's own store and before the vendored bundle; `ap.hydrate()` re-reads it; `status().datastore` reports it. Every record is verified through the same chain as OTA; a record from a newer format is refused, never served.
+- Fleet rollback held in the datastore: `rollbackDatastore` / `rollback_datastore` names an older release and the generation it steps down from; every runtime that hydrates next steps down (verified, stamped as a forced downgrade) and holds the newer generations back until a later promotion or `clearDatastoreRollback` ends it. Written only if the rollback is still what was read — a racing operator gets `conflict`. An older release with no rollback in the datastore is still refused.
+- Regions: every release and rollback is keyed by region; a region with releases of its own serves them, one without reads the global ones; a regional rollback binds that region, a global one every region without its own.
+- `pruneDatastore` / `prune_datastore` keeps the newest N releases and the one a rollback names. `SlotStore.holdBack` / `releaseHold` (`hold_back` / `release_hold`) set and clear the store's existing `heldBackBelow` for the datastore's rollback; no store-format change.
+
+### Changed
+- Publish size budgets: `@airprompter/agent-sync` 220 KB (was 160) — the KV layer, the record codec and the adapter check; `@airprompter/agent-sdk` 260 KB (was 240) — the datastore hydration.
+
+### Fixed
+- The Node filesystem port's `listRecursive` returned directories as well as files; it returns files only, as the port documents and as `MemoryFs` and the Python port always did (`SlotStore.listSlotFiles` no longer lists `payloads`).
+
 ## 0.2.14 — 2026-09-17 (protocol 0.3.4)
 
 ### Added

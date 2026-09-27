@@ -1,0 +1,56 @@
+{
+  "name": "@airprompter/datastore-redis",
+  "version": "0.2.15",
+  "description": "The AirPrompter release datastore over Redis or Valkey: a KvStore with atomic Lua conditional writes and a sorted-set index, for kvReleaseDatastore. Bring your own client (redis, ioredis).",
+  "keywords": [
+    "airprompter",
+    "prompts",
+    "llm",
+    "agent",
+    "datastore",
+    "redis",
+    "valkey"
+  ],
+  "homepage": "https://github.com/airprompter/airprompter-agent-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/airprompter/airprompter-agent-sdk/issues"
+  },
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/airprompter/airprompter-agent-sdk",
+    "directory": "sdk-typescript/packages/datastore-redis"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\""
+  },
+  "airprompter": {
+    "sizeBudgetBytes": 30000
+  },
+  "dependencies": {
+    "@airprompter/agent-sync": "0.2.15"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

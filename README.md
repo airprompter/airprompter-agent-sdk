@@ -22,8 +22,8 @@ content, or make bytes live on a locked runtime.
 | Path | What it is |
 |---|---|
 | [`protocol/`](protocol/) | The wire contract: JSON Schemas for manifests, bundles, key-sets, directives and telemetry windows; the **spool format** any instrumentation can write; the assignment-hash specification; conformance vectors; OpenAPI for the customer routes. Versioned independently of the SDKs. |
-| [`sdk-typescript/`](sdk-typescript/) | Five packages for Node 20+, one version, released in lockstep: `@airprompter/agent-core` (the protocol, pure), `-sync` (pull, the encrypted A/B slot store, the apply policy, the daemon client), `-runtime` (render and assign over a release you hold, the provider wrappers, hosted mode), `-telemetry` (the spool and its uploader), and `@airprompter/agent-sdk` (the facade, `AirPrompterAgent`). Install what you use. |
-| [`sdk-python/`](sdk-python/) | The same five for Python 3.10+: `airprompter-agent-core`, `-sync`, `-runtime`, `-telemetry` and `airprompter-agent`. Same protocol, same conformance vectors; wrappers for the `openai`, `anthropic` and LiteLLM clients. |
+| [`sdk-typescript/`](sdk-typescript/) | Five packages for Node 20+, one version, released in lockstep: `@airprompter/agent-core` (the protocol, pure), `-sync` (pull, the encrypted A/B slot store, the apply policy, the daemon client), `-runtime` (render and assign over a release you hold, the provider wrappers, hosted mode), `-telemetry` (the spool and its uploader), and `@airprompter/agent-sdk` (the facade, `AirPrompterAgent`). Optional beside them: `@airprompter/otel-bridge`, and `@airprompter/datastore-s3`, `-postgres`, `-redis` — your own datastore carrying releases to your runtimes ([docs/datastore.md](docs/datastore.md)). Install what you use. |
+| [`sdk-python/`](sdk-python/) | The same five for Python 3.10+: `airprompter-agent-core`, `-sync`, `-runtime`, `-telemetry` and `airprompter-agent`, plus the optional `airprompter-datastore-s3`, `-postgres` and `-redis` (the same tables, keys and objects as the TypeScript adapters). Same protocol, same conformance vectors; wrappers for the `openai`, `anthropic` and LiteLLM clients. |
 | [`protocol/compatible-endpoints.md`](protocol/compatible-endpoints.md) | Hosted mode without any SDK of ours: the OpenAI and Anthropic SDKs pointed at `…/v1/agents/{agentId}/{openai\|anthropic}` with `model: "slot:<tag>"` — the mapping, what is refused, the answer shapes. |
 | [`cli/`](cli/) | `airprompter` — `pull`, `verify`, `apply`, `status`, `diff`, `unlock`, `rollback`, `keygen`, `export-telemetry`, `import-telemetry`, `login` + `import` (your prompts become reviewable versions), `dev` (a directory served as a registry: live sync while you edit, and the conformance target), and `airprompter daemon` (`airprompterd`). Shipped as signed single-file executables for macOS, Linux and Windows. |
 | [`conformance/`](conformance/) | Runner that executes `protocol/vectors` against every SDK, and `live.mjs` — the same schemas and trust chain over HTTP against a running registry (`airprompter dev`, Hangar, or the hosted service). The hosted service runs the same vectors. |
@@ -58,14 +58,17 @@ platforms in CI (release tag pending signing identities). The packages:
 <!-- compat-table:start -->
 | Package | Version | Protocol | Vectors and examples exercised | Conformance |
 |---|---|---|---|---|
-| `@airprompter/agent-core` | 0.2.14 | 0.3.4 | `canonical-json.json`, `manifest-verify.json`, `assignment.json`, `ramp.json`, `workflow-steps.json`, `checks.json` | green |
-| `@airprompter/agent-sync` | 0.2.14 | 0.3.4 | `examples/store.v1.json`, `examples/store.v2.json`, `examples/refused/*` | green |
-| `@airprompter/agent-runtime` | 0.2.14 | 0.3.4 | `ramp.json (walked by `ReleaseResolver` over a bundle release)` | green |
-| `@airprompter/agent-telemetry` | 0.2.14 | 0.3.4 | `spool.json`, `feedback.json` | green |
-| `@airprompter/otel-bridge` | 0.2.14 | 0.3.4 | `otel-mapping.json` | green |
-| `@airprompter/agent-sdk` | 0.2.14 | 0.3.4 | `examples/heartbeat.*.json`, `examples/edge-pointer.json` | green |
+| `@airprompter/agent-core` | 0.2.15 | 0.3.4 | `canonical-json.json`, `manifest-verify.json`, `assignment.json`, `ramp.json`, `workflow-steps.json`, `checks.json` | green |
+| `@airprompter/agent-sync` | 0.2.15 | 0.3.4 | `examples/store.v1.json`, `examples/store.v2.json`, `examples/refused/*`, `datastore.json` | green |
+| `@airprompter/agent-runtime` | 0.2.15 | 0.3.4 | `ramp.json (walked by `ReleaseResolver` over a bundle release)` | green |
+| `@airprompter/agent-telemetry` | 0.2.15 | 0.3.4 | `spool.json`, `feedback.json` | green |
+| `@airprompter/otel-bridge` | 0.2.15 | 0.3.4 | `otel-mapping.json` | green |
+| `@airprompter/datastore-s3` | 0.2.15 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
+| `@airprompter/datastore-postgres` | 0.2.15 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
+| `@airprompter/datastore-redis` | 0.2.15 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
+| `@airprompter/agent-sdk` | 0.2.15 | 0.3.4 | `examples/heartbeat.*.json`, `examples/edge-pointer.json` | green |
 
-Generated by `sdk-typescript/scripts/compat-table.mjs` from the conformance run on protocol `0.3.4` (Node 24). One version across the six packages; `@airprompter/agent-sdk` exact-pins its siblings; `@airprompter/otel-bridge` is optional and pins core.
+Generated by `sdk-typescript/scripts/compat-table.mjs` from the conformance run on protocol `0.3.4` (Node 22). One version across the nine packages; `@airprompter/agent-sdk` exact-pins its siblings; `@airprompter/otel-bridge` is optional and pins core; the three `@airprompter/datastore-*` adapters are optional and pin sync (their live-backend suites run in the adapters CI job; here they run where a backend is configured).
 <!-- compat-table:end -->
 
 ## Supply chain

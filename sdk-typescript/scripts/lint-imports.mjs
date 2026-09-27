@@ -21,7 +21,8 @@ import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "..");
-const LAYER = { core: 0, sync: 1, runtime: 1, telemetry: 1, "otel-bridge": 1, sdk: 2 };
+// The datastore adapters (T40) sit beside the facade: they implement the sync package's KvStore and nothing imports them.
+const LAYER = { core: 0, sync: 1, runtime: 1, telemetry: 1, "otel-bridge": 1, "datastore-s3": 2, "datastore-postgres": 2, "datastore-redis": 2, sdk: 2 };
 const PACKAGES = Object.keys(LAYER);
 
 function walk(dir, out = []) {
@@ -51,11 +52,13 @@ function targetOf(spec, fromFile) {
   const barrel = /^@airprompter\/agent-([a-z]+)(\/testing)?$/.exec(spec);
   if (barrel) return { pkg: barrel[1], via: "barrel" };
   if (spec === "@airprompter/otel-bridge") return { pkg: "otel-bridge", via: "barrel" };
+  const adapter = /^@airprompter\/(datastore-[a-z0-9]+)$/.exec(spec);
+  if (adapter) return { pkg: adapter[1], via: "barrel" };
   if (spec.startsWith("@airprompter/")) return { pkg: null, via: "unknown-barrel" };
   if (spec.startsWith(".")) {
     const abs = resolve(fromFile, "..", spec);
     const rel = relative(root, abs).split(sep).join("/");
-    const m = /^packages\/([a-z-]+)\/src\//.exec(rel);
+    const m = /^packages\/([a-z0-9-]+)\/src\//.exec(rel);
     if (m) return { pkg: m[1], via: "relative" };
     return { pkg: null, via: "outside" };
   }

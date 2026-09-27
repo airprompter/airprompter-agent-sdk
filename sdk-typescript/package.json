@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-sdk-workspace",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "private": true,
   "description": "Workspace for the AirPrompter agent SDK packages (core, sync, runtime, telemetry, sdk) — one version, released in lockstep.",
   "license": "BSD-3-Clause",
@@ -22,7 +22,12 @@
     "version:lockstep": "node scripts/version-lockstep.mjs"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1141.0",
     "@types/node": "^22.16.5",
+    "@types/pg": "^8.23.1",
+    "ioredis": "^5.11.1",
+    "pg": "^8.23.0",
+    "redis": "^4.7.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.3"
   }

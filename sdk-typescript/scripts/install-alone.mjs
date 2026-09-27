@@ -25,6 +25,9 @@ const FLOWS = {
   runtime: { with: ["core", "runtime"], esm: 'import { ReleaseResolver, wrapClient, ManagedAgent } from "@airprompter/agent-runtime"; if (![ReleaseResolver, wrapClient, ManagedAgent].every((f) => typeof f === "function")) throw new Error("runtime surface");', cjs: 'const r = require("@airprompter/agent-runtime"); if (typeof r.ReleaseResolver !== "function") throw new Error("runtime cjs");' },
   telemetry: { with: ["core", "telemetry"], esm: 'import { SpoolWriter, DirectorySink, SpoolUploader } from "@airprompter/agent-telemetry"; if (![SpoolWriter, DirectorySink, SpoolUploader].every((f) => typeof f === "function")) throw new Error("telemetry surface");', cjs: 'const t = require("@airprompter/agent-telemetry"); if (typeof t.SpoolWriter !== "function") throw new Error("telemetry cjs");' },
   "otel-bridge": { with: ["core", "otel-bridge"], esm: 'import { otlpUploadSink, spoolRowsToOtlp } from "@airprompter/otel-bridge"; if (![otlpUploadSink, spoolRowsToOtlp].every((f) => typeof f === "function")) throw new Error("otel-bridge surface");', cjs: 'const o = require("@airprompter/otel-bridge"); if (typeof o.otlpUploadSink !== "function") throw new Error("otel-bridge cjs");' },
+  "datastore-s3": { with: ["core", "sync", "datastore-s3"], esm: 'import { s3KvStore } from "@airprompter/datastore-s3"; if (typeof s3KvStore !== "function") throw new Error("datastore-s3 surface");', cjs: 'const d = require("@airprompter/datastore-s3"); if (typeof d.s3KvStore !== "function") throw new Error("datastore-s3 cjs");' },
+  "datastore-postgres": { with: ["core", "sync", "datastore-postgres"], esm: 'import { postgresKvStore, postgresKvSchema } from "@airprompter/datastore-postgres"; if (![postgresKvStore, postgresKvSchema].every((f) => typeof f === "function")) throw new Error("datastore-postgres surface");', cjs: 'const d = require("@airprompter/datastore-postgres"); if (typeof d.postgresKvStore !== "function") throw new Error("datastore-postgres cjs");' },
+  "datastore-redis": { with: ["core", "sync", "datastore-redis"], esm: 'import { redisKvStore, fromNodeRedis, fromIoRedis } from "@airprompter/datastore-redis"; if (![redisKvStore, fromNodeRedis, fromIoRedis].every((f) => typeof f === "function")) throw new Error("datastore-redis surface");', cjs: 'const d = require("@airprompter/datastore-redis"); if (typeof d.redisKvStore !== "function") throw new Error("datastore-redis cjs");' },
   sdk: { with: ["core", "sync", "runtime", "telemetry", "sdk"], esm: 'import { AirPrompterAgent, SlotStore, ReleaseResolver, SpoolWriter, verifyManifest } from "@airprompter/agent-sdk"; import { FakeControlPlane } from "@airprompter/agent-sdk/testing"; if (![AirPrompterAgent, SlotStore, ReleaseResolver, SpoolWriter, verifyManifest, FakeControlPlane].every((f) => typeof f === "function")) throw new Error("sdk surface");', cjs: 'const a = require("@airprompter/agent-sdk"); if (typeof a.AirPrompterAgent !== "function") throw new Error("sdk cjs");' },
 };
 
@@ -45,7 +48,7 @@ try {
     writeFileSync(join(project, "cjs.cjs"), flow.cjs);
     execFileSync("node", ["esm.mjs"], { cwd: project, stdio: "inherit" });
     execFileSync("node", ["cjs.cjs"], { cwd: project, stdio: "inherit" });
-    console.log(`install-alone: ${name === "otel-bridge" ? "@airprompter/otel-bridge" : `@airprompter/agent-${name}`} with [${flow.with.join(", ")}] — ESM and CJS import clean`);
+    console.log(`install-alone: ${name === "otel-bridge" || name.startsWith("datastore-") ? `@airprompter/${name}` : `@airprompter/agent-${name}`} with [${flow.with.join(", ")}] — ESM and CJS import clean`);
   }
 } finally {
   rmSync(work, { recursive: true, force: true });

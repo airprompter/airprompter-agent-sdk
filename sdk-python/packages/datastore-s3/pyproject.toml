@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "airprompter-datastore-s3"
+version = "0.2.15"
+description = "The AirPrompter release datastore over an S3 bucket: a KvStore with S3's own conditional writes (IfNoneMatch, IfMatch), for kv_release_datastore — the puller writes sealed releases, every runtime hydrates from them."
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.10"
+authors = [{ name = "AirPrompter" }]
+keywords = ["airprompter", "prompts", "llm", "agent", "datastore", "s3", "aws"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries",
+]
+# The client library is the application's: the adapter imports none, and the extras below only name a known-good one.
+dependencies = [
+  "airprompter-agent-sync==0.2.15",
+]
+
+[project.optional-dependencies]
+boto3 = ["boto3>=1.35.70"]
+
+[project.urls]
+Homepage = "https://github.com/airprompter/airprompter-agent-sdk"
+Source = "https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-python/packages/datastore-s3"
+Protocol = "https://github.com/airprompter/airprompter-agent-sdk/blob/main/protocol/datastore-format.md"
+Changelog = "https://github.com/airprompter/airprompter-agent-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/airprompter/airprompter-agent-sdk/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/airprompter_datastore_s3"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/airprompter_datastore_s3", "README.md"]

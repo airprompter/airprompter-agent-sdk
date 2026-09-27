@@ -240,6 +240,23 @@ class SlotStore:
         self._write(next_file)
         return previous
 
+    def hold_back(self, generation: int) -> None:
+        """T40: hold generations at or below ``generation`` back — a fleet rollback read from the customer's datastore,
+        which steps down through ``stage(force=True)`` + ``activate()`` and then records what it stepped down from,
+        exactly as ``rollback_local`` does. Never lowers a hold already in force."""
+        held = self._file.get("heldBackBelow")
+        if held is not None and held >= generation:
+            return
+        self._write({**self._file, "heldBackBelow": generation})
+
+    def release_hold(self) -> None:
+        """T40: end a hold (the datastore's rollback was cleared): the held-back generations may be applied again."""
+        if self._file.get("heldBackBelow") is None:
+            return
+        next_file = dict(self._file)
+        del next_file["heldBackBelow"]
+        self._write(next_file)
+
     def discard_staged(self) -> None:
         """Discard a staged slot (a crashed apply, or a refused unlock)."""
         slot = self._file.get("staged")

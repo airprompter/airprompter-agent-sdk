@@ -48,6 +48,8 @@ jobs:
           diff -u protocol/vectors/assignment.json /tmp/assignment.json
           python3 protocol/tools/gen_examples.py /tmp/examples >/dev/null
           diff -ru protocol/examples /tmp/examples
+          node protocol/tools/gen_datastore_vectors.mjs /tmp/datastore.json >/dev/null
+          diff -u protocol/vectors/datastore.json /tmp/datastore.json
           python3 protocol/tools/gen_spool_vectors.py /tmp/spool >/dev/null
           diff -u protocol/vectors/spool.json /tmp/spool/spool.json
           diff -u protocol/vectors/feedback.json /tmp/spool/feedback.json
@@ -181,6 +183,61 @@ jobs:
         run: node harness.mjs --adapter-command "python ../examples/conformance-adapter/python/adapter.py"
         working-directory: conformance
 
+  datastore-adapters:
+    # T40: the three adapters against live backends — Postgres and Redis as
+    # service containers, S3 through moto's server (which enforces If-None-Match
+    # and If-Match) — in both languages, plus the cross-language test: rows the
+    # TypeScript adapter wrote hydrate a Python runtime through the Python one.
+    # The package jobs above skip these suites; here a skip is a failure.
+    name: Datastore adapters (live Postgres, Redis, S3)
+    needs: packages
+    if: needs.packages.outputs.typescript == 'true' && needs.packages.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      AIRPROMPTER_TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      AIRPROMPTER_TEST_REDIS_URL: redis://localhost:6379
+      AIRPROMPTER_TEST_S3_ENDPOINT: http://127.0.0.1:5000
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: sdk-typescript
+      - run: python tools/install_dev.py "psycopg[binary]>=3.1" "psycopg2-binary>=2.9" "redis>=5" "boto3>=1.35.70" "moto[server]==5.2.3"
+        working-directory: sdk-python
+      - name: Start the S3 endpoint (moto)
+        run: |
+          nohup moto_server -H 127.0.0.1 -p 5000 >/tmp/moto.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:5000/ >/dev/null && exit 0; sleep 1; done
+          cat /tmp/moto.log; exit 1
+      - name: TypeScript adapters against the live backends (none skipped)
+        run: node --import tsx --test test/datastoreAdapters.test.ts 2>&1 | tee /tmp/ts-adapters.log && grep -q "^# skipped 0$" /tmp/ts-adapters.log && grep -q "^# fail 0$" /tmp/ts-adapters.log
+        working-directory: sdk-typescript
+      - name: Python adapters and the cross-language datastore test against the live backends (none skipped)
+        run: python -m pytest tests/test_datastore_adapters.py tests/test_interop.py -rs 2>&1 | tee /tmp/py-adapters.log && ! grep -q SKIPPED /tmp/py-adapters.log
+        working-directory: sdk-python
+
   cli:
     name: CLI (${{ matrix.artifact }})
     needs: packages
@@ -266,7 +323,8 @@ jobs:
           sudo install -d /etc/airprompter && sudo install -m 0600 deploy/systemd/airprompterd.env.example /etc/airprompter/airprompterd.env
           systemd-analyze verify deploy/systemd/airprompterd.service
       - name: WinSW service definition is well-formed XML
-        run: sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null && xmllint --noout deploy/windows/airprompterd.xml
+        # Refresh the index first: the runner image's cached one names package builds the mirror has since dropped (404).
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null && xmllint --noout deploy/windows/airprompterd.xml
       - name: launchd plist is well-formed (plutil runs on macOS; here the XML must at least parse)
         run: xmllint --noout deploy/launchd/com.airprompter.airprompterd.plist
       - name: Kubernetes DaemonSet

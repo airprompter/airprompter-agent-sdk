@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / "packages"
-PACKAGES = ["core", "sync", "runtime", "telemetry", "agent"]
-NAMES = {"core": "airprompter-agent-core", "sync": "airprompter-agent-sync", "runtime": "airprompter-agent-runtime", "telemetry": "airprompter-agent-telemetry", "agent": "airprompter-agent"}
+PACKAGES = ["core", "sync", "runtime", "telemetry", "agent", "datastore-s3", "datastore-postgres", "datastore-redis"]
+NAMES = {"core": "airprompter-agent-core", "sync": "airprompter-agent-sync", "runtime": "airprompter-agent-runtime", "telemetry": "airprompter-agent-telemetry", "agent": "airprompter-agent", "datastore-s3": "airprompter-datastore-s3", "datastore-postgres": "airprompter-datastore-postgres", "datastore-redis": "airprompter-datastore-redis"}
 VERSION_LINE = re.compile(r'^version = "([^"]+)"$', re.M)
 PIN = re.compile(r'"(airprompter-agent(?:-[a-z]+)?)(\[[a-z,]+\])?==([^"]+)"')
 

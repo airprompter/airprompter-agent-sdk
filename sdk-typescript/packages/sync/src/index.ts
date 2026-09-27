@@ -29,7 +29,11 @@ export { pullBundle, nextPullDelayMs, DEFAULT_MAX_POINTER_AGE_MS } from "./sync/
 export type { PullBundleInput, PullBundleResult, PullEdgeState } from "./sync/pullBundle.js";
 export { pullToDatastore } from "./sync/pullToDatastore.js";
 export type { PullToDatastoreInput, PullToDatastoreResult } from "./sync/pullToDatastore.js";
-export { MemoryReleaseDatastore, resolveHydration, rollbackDatastore, clearDatastoreRollback, rolloutOf, globalKeyOf } from "./store/releaseDatastore.js";
+export { MemoryReleaseDatastore, KvReleaseDatastore, kvReleaseDatastore, resolveHydration, rollbackDatastore, clearDatastoreRollback, pruneDatastore, rolloutOf, globalKeyOf } from "./store/releaseDatastore.js";
+export { MemoryKvStore, fsKvStore, checkKvStore } from "./store/kvStore.js";
+export type { KvStore, KvEntry, KvPutCondition, KvStoreReport } from "./store/kvStore.js";
+export { DATASTORE_FORMAT, DatastoreRecordError, isDatastoreRecordError, datastoreKeys, encodeKeySegment, encodeDatastoreRecord, decodeDatastoreRecord, generationOfReleaseKey } from "./store/datastoreRecords.js";
+export type { DatastoreKeys, DatastoreRecord, DatastoreRecordErrorCode } from "./store/datastoreRecords.js";
 export type { ReleaseDatastore, ReleaseKey, StoredReleaseRow, ReleaseControl, ReleaseRollout, RolloutExperiment, HydrationPlan, DatastoreRollbackResult } from "./store/releaseDatastore.js";
 export type { SyncPassInput, SyncPassOutput, SyncPassResult, ApplyPolicyDecision } from "./sync/loop.js";
 export { DaemonClient, DaemonError, isDaemonError, daemonSocketPath, DAEMON_MAX_LINE_BYTES, UNIX_SOCKET_PATH_MAX } from "./sync/daemon.js";

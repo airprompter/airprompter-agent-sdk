@@ -5,16 +5,20 @@
 #   protocol/vX.Y.Z        protocol tag — CI conformance only (ci.yml); the
 #                          protocol is consumed by pinning the tag, not by a
 #                          package.
-#   sdk-typescript/vX.Y.Z  npm publish of the six packages (core, sync,
-#                          runtime, telemetry, otel-bridge, sdk) from one
-#                          tag, in dependency order, each with provenance
-#                          (OIDC; no npm token in the repository — trusted
-#                          publishing on npmjs.com must be configured for
-#                          every @airprompter/agent-* package and
-#                          @airprompter/otel-bridge).
-#   sdk-python/vX.Y.Z      PyPI trusted publishing of the five distributions
+#   sdk-typescript/vX.Y.Z  npm publish of the nine packages (core, sync,
+#                          runtime, telemetry, otel-bridge, the three
+#                          datastore adapters, sdk) from one tag, in
+#                          dependency order, each with provenance (OIDC; no
+#                          npm token in the repository — trusted publishing
+#                          on npmjs.com must be configured for every
+#                          @airprompter/agent-* package,
+#                          @airprompter/otel-bridge and every
+#                          @airprompter/datastore-* package).
+#   sdk-python/vX.Y.Z      PyPI trusted publishing of the eight distributions
 #                          (airprompter-agent-core, -sync, -runtime,
-#                          -telemetry, airprompter-agent) from one tag.
+#                          -telemetry, airprompter-agent, and
+#                          airprompter-datastore-s3, -postgres, -redis) from
+#                          one tag; each needs a trusted publisher on PyPI.
 #   cli/vX.Y.Z             single-file executables for linux/macos/windows,
 #                          cosign keyless signatures, SBOM, GitHub release.
 #   conformance/vX.Y.Z     npm publish of @airprompter/protocol-conformance
@@ -152,6 +156,10 @@ jobs:
           done
           # S13: the bridge is optional and pins core; it goes out after core, whatever its position.
           npm publish --provenance --access public --workspace "@airprompter/otel-bridge"
+          # T40: the datastore adapters are optional and pin sync; they go out after it.
+          for adapter in s3 postgres redis; do
+            npm publish --provenance --access public --workspace "@airprompter/datastore-$adapter"
+          done
         working-directory: sdk-typescript
       - uses: softprops/action-gh-release@v2
         with:
@@ -159,7 +167,7 @@ jobs:
           generate_release_notes: true
 
   pypi:
-    name: Publish airprompter-agent-* (five distributions, one tag)
+    name: Publish airprompter-agent-* and airprompter-datastore-* (eight distributions, one tag)
     if: startsWith(github.ref, 'refs/tags/sdk-python/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -173,7 +181,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install build
-      - name: Build every distribution into one dist/ (core, sync, runtime, telemetry, agent)
+      - name: Build every distribution into one dist/ (core, sync, runtime, telemetry, agent, the three datastore adapters)
         run: python tools/build_all.py
         working-directory: sdk-python
       - name: Tag matches every pyproject version (one version, lockstep)

@@ -14,15 +14,29 @@ Example::
 
 from .apply.window import UpdateWindow, WindowState, is_known_time_zone, parse_window, validate_window, window_state
 from .store.key_provider import KeyProvider, custom_key_provider, file_key, kms, os_keystore, unwrap_with_raw_key, vault, wrap_with_raw_key
+from .store.datastore_records import (
+    DATASTORE_FORMAT,
+    DatastoreKeys,
+    DatastoreRecordError,
+    datastore_keys,
+    decode_datastore_record,
+    encode_datastore_record,
+    encode_key_segment,
+    generation_of_release_key,
+)
+from .store.kv_store import FileKvStore, KvEntry, KvStore, KvStoreReport, MemoryKvStore, check_kv_store
 from .store.release_datastore import (
     DatastoreRollbackResult,
     HydrationPlan,
+    KvReleaseDatastore,
     MemoryReleaseDatastore,
     ReleaseControl,
     ReleaseDatastore,
     ReleaseKey,
     StoredReleaseRow,
     clear_datastore_rollback,
+    kv_release_datastore,
+    prune_datastore,
     resolve_hydration,
     rollback_datastore,
     rollout_of,
@@ -83,4 +97,21 @@ __all__ = [
     "resolve_hydration",
     "rollback_datastore",
     "rollout_of",
+    "DATASTORE_FORMAT",
+    "DatastoreKeys",
+    "DatastoreRecordError",
+    "FileKvStore",
+    "KvEntry",
+    "KvReleaseDatastore",
+    "KvStore",
+    "KvStoreReport",
+    "MemoryKvStore",
+    "check_kv_store",
+    "datastore_keys",
+    "decode_datastore_record",
+    "encode_datastore_record",
+    "encode_key_segment",
+    "generation_of_release_key",
+    "kv_release_datastore",
+    "prune_datastore",
 ]

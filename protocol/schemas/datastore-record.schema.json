@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/0.3/datastore-record.schema.json",
+  "title": "AirPrompter datastore record (format 1)",
+  "description": "One value in the customer's datastore (datastore-format.md): a sealed release, the pointer to the newest one, the puller's edge state, or the fleet's rollback. Canonical JSON in UTF-8; every record names its format and its kind. A reader refuses a format above its own and a record that does not match its kind.",
+  "$defs": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "generation": { "type": "integer", "minimum": 1 },
+    "nullableString": { "type": ["string", "null"] },
+    "rolloutExperiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["experimentId", "tag", "arms", "ramp"],
+      "properties": {
+        "experimentId": { "type": "string", "minLength": 1 },
+        "tag": { "$ref": "#/$defs/nullableString" },
+        "arms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["arm", "weightBps"],
+            "properties": { "arm": { "type": "string", "minLength": 1 }, "weightBps": { "type": "integer", "minimum": 0, "maximum": 10000 } }
+          }
+        },
+        "ramp": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["notBefore", "weightBps"],
+            "properties": { "notBefore": { "$ref": "#/$defs/timestamp" }, "weightBps": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 10000 } } }
+          }
+        }
+      }
+    },
+    "rollout": {
+      "description": "A content-free copy of what the signed manifest says about rollout — for the customer's queries, never read when serving.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applyPolicy", "experiments", "disabled"],
+      "properties": {
+        "applyPolicy": { "type": "string", "enum": ["auto", "unlock_required"] },
+        "experiments": { "type": "array", "items": { "$ref": "#/$defs/rolloutExperiment" } },
+        "disabled": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent", "slots", "arms"],
+          "properties": {
+            "agent": { "type": "boolean" },
+            "slots": { "type": "array", "items": { "type": "string" } },
+            "arms": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["arm", "experimentId"],
+                "properties": { "arm": { "type": "string" }, "experimentId": { "$ref": "#/$defs/nullableString" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "kind", "generation", "releaseDigest", "createdAt", "notAfter", "bundle", "rollout"],
+      "properties": {
+        "format": { "const": 1 },
+        "kind": { "const": "release" },
+        "generation": { "$ref": "#/$defs/generation" },
+        "releaseDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "notAfter": { "$ref": "#/$defs/timestamp" },
+        "bundle": { "description": "The .apbundle document (bundle.schema.json).", "type": "object" },
+        "rollout": { "$ref": "#/$defs/rollout" }
+      }
+    },
+    "latest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "kind", "generation"],
+      "properties": { "format": { "const": 1 }, "kind": { "const": "latest" }, "generation": { "$ref": "#/$defs/generation" } }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "kind", "pointerUrl", "pointerEtag", "manifestEtag", "lastOriginAt"],
+      "properties": {
+        "format": { "const": 1 },
+        "kind": { "const": "edge" },
+        "pointerUrl": { "$ref": "#/$defs/nullableString" },
+        "pointerEtag": { "$ref": "#/$defs/nullableString" },
+        "manifestEtag": { "$ref": "#/$defs/nullableString" },
+        "lastOriginAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "kind", "generation", "heldBackBelow", "setAt"],
+      "properties": {
+        "format": { "const": 1 },
+        "kind": { "const": "control" },
+        "generation": { "$ref": "#/$defs/generation" },
+        "heldBackBelow": { "$ref": "#/$defs/generation" },
+        "setAt": { "$ref": "#/$defs/timestamp" },
+        "reason": { "type": "string", "maxLength": 512 },
+        "setBy": { "type": "string", "maxLength": 256 }
+      }
+    }
+  },
+  "oneOf": [{ "$ref": "#/$defs/release" }, { "$ref": "#/$defs/latest" }, { "$ref": "#/$defs/edge" }, { "$ref": "#/$defs/control" }]
+}

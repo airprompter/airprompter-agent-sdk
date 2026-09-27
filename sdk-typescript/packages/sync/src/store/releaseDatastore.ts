@@ -27,19 +27,15 @@
  *     rows (`region: null`). A rollback set for a region binds that region
  *     only; one set globally binds every region without one of its own.
  *
+ * Most applications never implement `ReleaseDatastore` themselves: `kvReleaseDatastore(kv)` implements it over a
+ * `KvStore` (four operations; `@airprompter/datastore-s3`, `-postgres` and `-redis` ship three) in the shared format
+ * of `protocol/datastore-format.md`, so a Python puller and a TypeScript runtime read each other's rows. Implement
+ * the interface directly only for a schema of your own (real columns to query the rollout by).
+ *
  * @example
  * ```ts
- * // A Postgres DAO: one row per (org, agent, target, region, generation); one control row per key.
- * const datastore: ReleaseDatastore = {
- *   latest: async (key) => rowOf(await sql`SELECT * FROM ap_releases WHERE ${keyWhere(key)} ORDER BY generation DESC LIMIT 1`),
- *   get: async (key, generation) => rowOf(await sql`SELECT * FROM ap_releases WHERE ${keyWhere(key)} AND generation = ${generation}`),
- *   generations: async (key) => (await sql`SELECT generation FROM ap_releases WHERE ${keyWhere(key)} ORDER BY generation DESC`).map((r) => r.generation),
- *   put: (key, row, edge) => sql.begin(async (tx) => { await insertRow(tx, key, row); await upsertEdge(tx, key, edge); }), // ONE transaction
- *   edge: async (key) => edgeOf(await sql`SELECT edge FROM ap_release_edges WHERE ${keyWhere(key)}`),
- *   putEdge: (key, edge) => upsertEdge(sql, key, edge),
- *   control: async (key) => controlOf(await sql`SELECT control FROM ap_release_controls WHERE ${keyWhere(key)}`),
- *   setControl: (key, control) => (control ? upsertControl(sql, key, control) : deleteControl(sql, key)),
- * };
+ * import { postgresKvStore } from "@airprompter/datastore-postgres";
+ * const datastore = kvReleaseDatastore(postgresKvStore({ pool })); // or MemoryReleaseDatastore in tests
  * await pullToDatastore({ datastore, region: "eu-west-1", client, scope, trustedRoot, fetchRoot, now, distributionPublicKey });
  * const ap = await AirPrompterAgent.start({ ...scope, root, distributionKey, datastore: { store: datastore, region: "eu-west-1" } });
  * ```
@@ -48,6 +44,8 @@
 import { experimentsOf } from "@airprompter/agent-core";
 import type { ApplyPolicy, Manifest, Target } from "@airprompter/agent-core";
 import type { PullEdgeState } from "../sync/pullBundle.js";
+import { datastoreKeys, decodeDatastoreRecord, encodeDatastoreRecord, generationOfReleaseKey, type DatastoreRecord } from "./datastoreRecords.js";
+import { MemoryKvStore, type KvStore } from "./kvStore.js";
 
 /** Where a row lives: the signed scope, and the region the customer deploys to (`null`: every region without its own). */
 export interface ReleaseKey {
@@ -97,10 +95,10 @@ export interface ReleaseControl {
 }
 
 /**
- * The DAO the application implements over its own datastore. Every method may throw (the datastore is down): the
- * puller reports it, a runtime keeps serving what it holds. `put` writes the row AND the puller's edge state in one
- * transaction — an edge saved without its row makes the next origin read a 304 and the row is never written. A row
- * is immutable once written: `put` of a generation already held for the key is a no-op.
+ * What the puller writes and every runtime reads. Every method may throw (the datastore is down): the puller reports
+ * it, a runtime keeps serving what it holds. No method needs a transaction: the puller writes the row
+ * (`putRelease`), then the edge state (`putEdge`) — an edge is never saved before its row, so an ETag can never hide a
+ * row that was not written. A row is immutable once written.
  */
 export interface ReleaseDatastore {
   /** The newest row for exactly this key (no region fallback here — `resolveHydration` does that). */
@@ -108,14 +106,20 @@ export interface ReleaseDatastore {
   get(key: ReleaseKey, generation: number): Promise<StoredReleaseRow | null>;
   /** Every generation held for exactly this key, newest first. */
   generations(key: ReleaseKey): Promise<number[]>;
-  put(key: ReleaseKey, row: StoredReleaseRow, edge: PullEdgeState): Promise<void>;
+  /** Write a row; a generation already held is left as it is. The newest generation only ever moves forward. */
+  putRelease(key: ReleaseKey, row: StoredReleaseRow): Promise<void>;
   /** The puller's memory between pulls; null before the first. */
   edge(key: ReleaseKey): Promise<PullEdgeState | null>;
-  /** The edge state alone, for a pull that wrote no row (`unchanged`, `nothing_promoted`): it moved no ETag past a row. */
+  /** Written after the row it describes; never moves back past a later `lastOriginAt` another puller wrote. */
   putEdge(key: ReleaseKey, edge: PullEdgeState): Promise<void>;
   control(key: ReleaseKey): Promise<ReleaseControl | null>;
-  /** `null` clears the rollback for exactly this key. */
-  setControl(key: ReleaseKey, control: ReleaseControl | null): Promise<void>;
+  /**
+   * `null` clears the rollback for exactly this key. With `expected` (what the caller read, `null` for none) the write
+   * happens only if the control is still that — `false` when another operator changed it first.
+   */
+  setControl(key: ReleaseKey, control: ReleaseControl | null, expected?: ReleaseControl | null): Promise<boolean>;
+  /** Optional: delete all but the newest `keep` rows, never the one a rollback names. Returns how many went. */
+  prune?(key: ReleaseKey, keep: number): Promise<number>;
 }
 
 /** The rollout summary of a manifest — what the signed payload says, copied as data. */
@@ -186,7 +190,7 @@ export async function resolveHydration(datastore: ReleaseDatastore, key: Release
   return { row: target, newest: newestRow.generation, control, rowsFrom };
 }
 
-export type DatastoreRollbackResult = { ok: true; control: ReleaseControl } | { ok: false; reason: "no_release" | "no_previous_release" | "generation_missing" | "not_a_rollback" };
+export type DatastoreRollbackResult = { ok: true; control: ReleaseControl } | { ok: false; reason: "no_release" | "no_previous_release" | "generation_missing" | "not_a_rollback" | "conflict" };
 
 /**
  * Roll the fleet in `key.region` (or every region, with `region: null`) back to an older row. Without `toGeneration`
@@ -196,6 +200,8 @@ export type DatastoreRollbackResult = { ok: true; control: ReleaseControl } | { 
  */
 export async function rollbackDatastore(input: { datastore: ReleaseDatastore; key: ReleaseKey; toGeneration?: number; reason?: string; setBy?: string; now?: () => string }): Promise<DatastoreRollbackResult> {
   const { datastore, key } = input;
+  // Read first: the write below goes through only if nobody changed this key's rollback in between.
+  const before = await datastore.control(key);
   const plan = await resolveHydration(datastore, key);
   if (!plan.row) return { ok: false, reason: "no_release" };
   const rowsKey = plan.rowsFrom === "global" ? globalKeyOf(key) : key;
@@ -212,7 +218,7 @@ export async function rollbackDatastore(input: { datastore: ReleaseDatastore; ke
     ...(input.reason ? { reason: input.reason } : {}),
     ...(input.setBy ? { setBy: input.setBy } : {}),
   };
-  await datastore.setControl(key, control);
+  if (!(await datastore.setControl(key, control, before))) return { ok: false, reason: "conflict" };
   return { ok: true, control };
 }
 
@@ -221,56 +227,162 @@ export async function clearDatastoreRollback(input: { datastore: ReleaseDatastor
   await input.datastore.setControl(input.key, null);
 }
 
-const keyString = (key: ReleaseKey): string => JSON.stringify([key.organizationId, key.agentId, key.target, key.region]);
+/** Delete all but the newest `keep` rows for exactly this key (never the one a rollback names). */
+export async function pruneDatastore(input: { datastore: ReleaseDatastore; key: ReleaseKey; keep: number }): Promise<number> {
+  if (!Number.isInteger(input.keep) || input.keep < 1) throw new Error("keep must be a positive integer");
+  if (!input.datastore.prune) throw new Error("this datastore does not prune");
+  return input.datastore.prune(input.key, input.keep);
+}
+
+const MAX_CAS_ATTEMPTS = 8;
+
+type ReleaseRecord = Extract<DatastoreRecord, { kind: "release" }>;
+
+const rowOf = (record: ReleaseRecord): StoredReleaseRow => ({
+  generation: record.generation,
+  releaseDigest: record.releaseDigest,
+  bundle: JSON.stringify(record.bundle),
+  createdAt: record.createdAt,
+  notAfter: record.notAfter,
+  rollout: record.rollout as unknown as ReleaseRollout,
+});
+
+const controlOf = (record: Extract<DatastoreRecord, { kind: "control" }>): ReleaseControl => ({
+  generation: record.generation,
+  heldBackBelow: record.heldBackBelow,
+  setAt: record.setAt,
+  ...(record.reason !== undefined ? { reason: record.reason } : {}),
+  ...(record.setBy !== undefined ? { setBy: record.setBy } : {}),
+});
+
+const sameControl = (a: ReleaseControl | null, b: ReleaseControl | null): boolean =>
+  a === null || b === null ? a === b : encodeDatastoreRecord({ kind: "control", ...a }) === encodeDatastoreRecord({ kind: "control", ...b });
 
 /**
- * A `ReleaseDatastore` in memory: tests, a dev loop, and the reference for what a real DAO must do (immutable rows,
- * the row and its edge together, copies in and out).
+ * `ReleaseDatastore` over any `KvStore`, in the shared format (`protocol/datastore-format.md`): what one SDK writes,
+ * every other reads. Writes are ordered, never transactional: the release (`ifAbsent`), then `latest.json` moved
+ * forward only (compare-and-set), then the edge state (compare-and-set, never back past a later `lastOriginAt`).
  */
-export class MemoryReleaseDatastore implements ReleaseDatastore {
-  private readonly rows = new Map<string, Map<number, StoredReleaseRow>>();
-  private readonly edges = new Map<string, PullEdgeState>();
-  private readonly controls = new Map<string, ReleaseControl>();
+export class KvReleaseDatastore implements ReleaseDatastore {
+  constructor(
+    readonly kv: KvStore,
+    readonly prefix: string = "airprompter/",
+  ) {}
+
+  private keys(key: ReleaseKey) {
+    return datastoreKeys(this.prefix, key);
+  }
 
   async latest(key: ReleaseKey): Promise<StoredReleaseRow | null> {
-    const rows = this.rows.get(keyString(key));
-    if (!rows || rows.size === 0) return null;
-    return structuredClone(rows.get(Math.max(...rows.keys()))!);
+    const keys = this.keys(key);
+    const pointer = await this.kv.get(keys.latest);
+    if (pointer) {
+      const { generation } = decodeDatastoreRecord(pointer.value, "latest");
+      const row = await this.get(key, generation);
+      // A newer release written after the pointer was read is found on the next read; one the pointer names but
+      // nobody holds any more (pruned by hand) falls through to the listing.
+      if (row) return row;
+    }
+    // No pointer (a crash between the release and its pointer, or a store written by hand): the highest release.
+    const newest = (await this.generations(key))[0];
+    return newest === undefined ? null : this.get(key, newest);
   }
 
   async get(key: ReleaseKey, generation: number): Promise<StoredReleaseRow | null> {
-    const row = this.rows.get(keyString(key))?.get(generation);
-    return row ? structuredClone(row) : null;
+    const entry = await this.kv.get(this.keys(key).release(generation));
+    return entry ? rowOf(decodeDatastoreRecord(entry.value, "release", generation)) : null;
   }
 
   async generations(key: ReleaseKey): Promise<number[]> {
-    return [...(this.rows.get(keyString(key))?.keys() ?? [])].sort((a, b) => b - a);
+    const keys = this.keys(key);
+    const generations = (await this.kv.list(keys.releasesPrefix)).map((name) => generationOfReleaseKey(keys.releasesPrefix, name)).filter((generation): generation is number => generation !== null);
+    return [...new Set(generations)].sort((a, b) => b - a);
   }
 
-  async put(key: ReleaseKey, row: StoredReleaseRow, edge: PullEdgeState): Promise<void> {
-    const id = keyString(key);
-    const rows = this.rows.get(id) ?? new Map<number, StoredReleaseRow>();
-    if (!rows.has(row.generation)) rows.set(row.generation, structuredClone(row));
-    this.rows.set(id, rows);
-    this.edges.set(id, { ...edge });
+  async putRelease(key: ReleaseKey, row: StoredReleaseRow): Promise<void> {
+    const keys = this.keys(key);
+    const text = encodeDatastoreRecord({ kind: "release", generation: row.generation, releaseDigest: row.releaseDigest, createdAt: row.createdAt, notAfter: row.notAfter, bundle: JSON.parse(row.bundle) as Record<string, unknown>, rollout: row.rollout as unknown as Record<string, unknown> });
+    await this.kv.put(keys.release(row.generation), text, { ifAbsent: true }); // false: already held — immutable
+    await this.advanceLatest(keys.latest, row.generation);
+  }
+
+  private async advanceLatest(latestKey: string, generation: number): Promise<void> {
+    const text = encodeDatastoreRecord({ kind: "latest", generation });
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.kv.get(latestKey);
+      if (current && decodeDatastoreRecord(current.value, "latest").generation >= generation) return;
+      if (await this.kv.put(latestKey, text, current ? { ifVersion: current.version } : { ifAbsent: true })) return;
+    }
+    throw new Error(`latest.json kept moving under ${MAX_CAS_ATTEMPTS} attempts to advance it to ${generation}`);
   }
 
   async edge(key: ReleaseKey): Promise<PullEdgeState | null> {
-    const edge = this.edges.get(keyString(key));
-    return edge ? { ...edge } : null;
+    const entry = await this.kv.get(this.keys(key).edge);
+    if (!entry) return null;
+    const { kind: _kind, ...edge } = decodeDatastoreRecord(entry.value, "edge");
+    return edge;
   }
 
   async putEdge(key: ReleaseKey, edge: PullEdgeState): Promise<void> {
-    this.edges.set(keyString(key), { ...edge });
+    const edgeKey = this.keys(key).edge;
+    const text = encodeDatastoreRecord({ kind: "edge", pointerUrl: edge.pointerUrl, pointerEtag: edge.pointerEtag, manifestEtag: edge.manifestEtag, lastOriginAt: edge.lastOriginAt });
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.kv.get(edgeKey);
+      if (current) {
+        const held = decodeDatastoreRecord(current.value, "edge");
+        // Another puller already recorded a later answer from the origin: this state is older, not newer.
+        if ((held.lastOriginAt ?? "") > (edge.lastOriginAt ?? "")) return;
+        if (current.value === text) return;
+      }
+      if (await this.kv.put(edgeKey, text, current ? { ifVersion: current.version } : { ifAbsent: true })) return;
+    }
+    throw new Error(`edge.json kept moving under ${MAX_CAS_ATTEMPTS} attempts`);
   }
 
   async control(key: ReleaseKey): Promise<ReleaseControl | null> {
-    const control = this.controls.get(keyString(key));
-    return control ? { ...control } : null;
+    const entry = await this.kv.get(this.keys(key).control);
+    return entry ? controlOf(decodeDatastoreRecord(entry.value, "control")) : null;
   }
 
-  async setControl(key: ReleaseKey, control: ReleaseControl | null): Promise<void> {
-    if (control) this.controls.set(keyString(key), { ...control });
-    else this.controls.delete(keyString(key));
+  async setControl(key: ReleaseKey, control: ReleaseControl | null, expected?: ReleaseControl | null): Promise<boolean> {
+    const controlKey = this.keys(key).control;
+    const current = await this.kv.get(controlKey);
+    const held = current ? controlOf(decodeDatastoreRecord(current.value, "control")) : null;
+    if (expected !== undefined && !sameControl(held, expected)) return false;
+    if (control === null) {
+      if (current) await this.kv.delete(controlKey);
+      return true;
+    }
+    const text = encodeDatastoreRecord({ kind: "control", ...control });
+    return this.kv.put(controlKey, text, current ? { ifVersion: current.version } : { ifAbsent: true });
+  }
+
+  async prune(key: ReleaseKey, keep: number): Promise<number> {
+    const keys = this.keys(key);
+    const generations = await this.generations(key);
+    const control = await this.control(key);
+    const pointer = await this.kv.get(keys.latest);
+    const protectedGenerations = new Set<number>(generations.slice(0, keep));
+    if (control) protectedGenerations.add(control.generation);
+    if (pointer) protectedGenerations.add(decodeDatastoreRecord(pointer.value, "latest").generation);
+    let removed = 0;
+    for (const generation of generations) {
+      if (protectedGenerations.has(generation)) continue;
+      await this.kv.delete(keys.release(generation));
+      removed += 1;
+    }
+    return removed;
+  }
+}
+
+/** `ReleaseDatastore` over a `KvStore` in the shared format; `prefix` is the deployment's own (`airprompter/` by default). */
+export function kvReleaseDatastore(kv: KvStore, options: { prefix?: string } = {}): KvReleaseDatastore {
+  return new KvReleaseDatastore(kv, options.prefix ?? "airprompter/");
+}
+
+/** A `ReleaseDatastore` in memory — the shared format over a `MemoryKvStore`: tests and dev loops. */
+export class MemoryReleaseDatastore extends KvReleaseDatastore {
+  constructor(prefix = "airprompter/") {
+    super(new MemoryKvStore(), prefix);
   }
 }

@@ -39,6 +39,7 @@
     "spool.mjs",
     "checks.mjs",
     "otel.mjs",
+    "datastore.mjs",
     "adapters/reference.mjs",
     "protocol/",
     "ADAPTER.md",

@@ -21,8 +21,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / "packages"
-DIST = {"core": "airprompter_agent_core", "sync": "airprompter_agent_sync", "runtime": "airprompter_agent_runtime", "telemetry": "airprompter_agent_telemetry", "agent": "airprompter_agent"}
-LAYER = {"core": 0, "sync": 1, "runtime": 1, "telemetry": 1, "agent": 2}
+DIST = {"core": "airprompter_agent_core", "sync": "airprompter_agent_sync", "runtime": "airprompter_agent_runtime", "telemetry": "airprompter_agent_telemetry", "agent": "airprompter_agent", "datastore-s3": "airprompter_datastore_s3", "datastore-postgres": "airprompter_datastore_postgres", "datastore-redis": "airprompter_datastore_redis"}
+# The datastore adapters (T40) sit beside the facade: they implement sync's KvStore and nothing imports them.
+LAYER = {"core": 0, "sync": 1, "runtime": 1, "telemetry": 1, "agent": 2, "datastore-s3": 2, "datastore-postgres": 2, "datastore-redis": 2}
 BY_MODULE = {v: k for k, v in DIST.items()}
 
 

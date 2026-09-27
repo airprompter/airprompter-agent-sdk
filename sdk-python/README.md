@@ -150,8 +150,10 @@ update-window timers on daemon threads.
    `next_pull_delay_ms` stretches the interval while nothing changes;
    `skip_pointer=True` is the "check now" a nudge or an operator uses
    ([docs/change-notification.md](../docs/change-notification.md)).
-   Or hand the SDK your datastore and skip the glue: implement the
-   eight-method `ReleaseDatastore` DAO over your table, run
+   Or hand the SDK your datastore and skip the glue:
+   `kv_release_datastore(kv)` over an S3 bucket, a Postgres table or a Redis
+   (`airprompter-datastore-s3`, `-postgres`, `-redis`; any other backend is
+   a four-method `KvStore` that `check_kv_store` proves), run
    `pull_to_datastore(datastore=, region=, …)` in the puller, and start
    each runtime with `datastore={"store": …, "region": …, "poll_seconds": …}`
    — it hydrates from the datastore at start and on `ap.hydrate()`, the

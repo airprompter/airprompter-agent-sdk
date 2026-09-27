@@ -21,6 +21,7 @@ service, and by any self-hosted registry that implements it.
 | `assignment-hash.md` | Sticky assignment: `SHA-256(salt ‖ subject)`, first 8 bytes big-endian mod 10000, cumulative arm weights |
 | `spool-format.md` | The local telemetry spool: file layout, row types, what may never be in it, how third-party instrumentation writes to it |
 | `store-format.md` | `store.json`, the host's record: the N/N-1 rule between the daemon (writer) and the SDK (reader), format 2's fields, `store_newer` (S8) |
+| `datastore-format.md` | Releases in the customer's own datastore: the key layout (`v1/…/{global\|region.X}/…`), the four record kinds as canonical JSON (format 1), write ordering instead of transactions, what a reader refuses |
 | `golden-sets.md` | Golden sets run before activation (5-D): the reference on the slot, the payload, the run, `goldenPass`, the apply decision, and the customer-side judge |
 | `examples/` | One valid document per schema, and `refused/` documents each schema must reject |
 | `vectors/` | Conformance vectors every SDK must pass |

@@ -1,8 +1,8 @@
 /**
  * The puller with the customer's datastore around it (T40): `pullBundle`
  * reading its memory (the edge state, the newest generation held) from the
- * datastore and writing what it sealed back through it — the row and the
- * edge state in one `put`, never the edge before the row. The Agent key
+ * datastore and writing what it sealed back through it — the row first, then
+ * the edge state, never the edge before the row. The Agent key
  * lives here and nowhere else; every runtime hydrates from the rows.
  *
  * A regional puller (`region: "eu-west-1"`) keeps its own rows and its own
@@ -54,7 +54,9 @@ export async function pullToDatastore(input: PullToDatastoreInput): Promise<Pull
         notAfter: result.notAfter,
         rollout: rolloutOf(result.manifest),
       };
-      await datastore.put(key, row, result.edge);
+      // The row, then its edge state — in that order, never together: an edge saved before its row could hide it.
+      await datastore.putRelease(key, row);
+      await datastore.putEdge(key, result.edge);
       return { ...result, key, stored: true };
     }
     // Nothing written: the edge moves only when the origin confirmed nothing moved (the pointer's ETag, the contact).

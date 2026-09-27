@@ -13,13 +13,21 @@
 
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 
+import { join, relative } from "node:path";
 import type { ClockPort, FsPort } from "../protocol/ports.js";
 
 export const nodeFs: FsPort = {
   mkdirp: (path, mode = 0o700) => void mkdirSync(path, { recursive: true, mode }),
   exists: (path) => existsSync(path),
   list: (dir) => (existsSync(dir) ? readdirSync(dir) : []),
-  listRecursive: (dir) => (existsSync(dir) ? readdirSync(dir, { recursive: true }).map(String).sort() : []),
+  // Files only, as the port says (and as MemoryFs and the Python port list them): a directory is not an entry.
+  listRecursive: (dir) =>
+    existsSync(dir)
+      ? readdirSync(dir, { recursive: true, withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => relative(dir, join(entry.parentPath ?? (entry as unknown as { path: string }).path, entry.name)))
+          .sort()
+      : [],
   stat: (path) => {
     const s = statSync(path);
     return { size: s.size, mtimeMs: s.mtimeMs };

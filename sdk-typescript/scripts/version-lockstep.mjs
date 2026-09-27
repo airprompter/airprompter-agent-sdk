@@ -9,7 +9,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
-const PACKAGES = ["core", "sync", "runtime", "telemetry", "otel-bridge", "sdk"];
+const PACKAGES = ["core", "sync", "runtime", "telemetry", "otel-bridge", "datastore-s3", "datastore-postgres", "datastore-redis", "sdk"];
 const args = process.argv.slice(2);
 const set = args.includes("--set") ? args[args.indexOf("--set") + 1] : null;
 const expect = args.includes("--expect") ? args[args.indexOf("--expect") + 1] : null;

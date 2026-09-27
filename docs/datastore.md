@@ -1,54 +1,78 @@
 # Your datastore carries the release
 
-The fleet pattern without glue code: hand the SDK a **`ReleaseDatastore`** —
-a small DAO over a datastore you already run (a Postgres table, a DynamoDB
-item, a Redis hash, a config service) — and the puller writes every sealed
-release through it while every runtime **hydrates** from it: the release,
-its dial-up percentages and ramp, the fleet's rollback, and the region.
-The SDK opens no connection of its own; the DAO is yours.
+The fleet pattern without glue code: hand the SDK a datastore you already
+run — an S3 bucket, a Postgres table, a Redis, a directory — and the puller
+writes every sealed release into it while every runtime **hydrates** from
+it: the release, its dial-up percentages and ramp, the fleet's rollback, and
+the region. The SDK opens no connection of its own; the client is yours.
 
 ```
-AirPrompter ──pull (Agent key)──▶ pullToDatastore ──put(row + edge)──▶ your datastore
-                                                                          │
-                          runtimes (no Agent key) ◀──hydrate (verify)─────┘
+AirPrompter ──pull (Agent key)──▶ pullToDatastore ──release, then edge──▶ your datastore
+                                                                            │
+                           runtimes (no Agent key) ◀──hydrate (verify)──────┘
 ```
 
-## What a row holds
+## Pick a backend
+
+Two layers, so any datastore can join:
+
+1. **`KvStore`** — four operations every backend already has: `get` (a value
+   and an opaque version), a **conditional** `put` (`ifAbsent`, or
+   `ifVersion` — the version last read), `list` by prefix, `delete`. No
+   transactions.
+2. **`kvReleaseDatastore(kv)`** (`kv_release_datastore`) — the SDK's
+   `ReleaseDatastore` over any `KvStore`, in one shared format
+   ([`protocol/datastore-format.md`](../protocol/datastore-format.md)): the
+   same keys and the same canonical records from every SDK and every
+   adapter, so a Python puller and a TypeScript runtime share one bucket.
+
+| Backend | TypeScript | Python | Conditional writes |
+|---|---|---|---|
+| S3 (and MinIO, R2) | `@airprompter/datastore-s3` → `s3KvStore({ client, bucket })` | `airprompter-datastore-s3` → `s3_kv_store(client=, bucket=)` | `If-None-Match: *`, `If-Match: <ETag>` |
+| PostgreSQL 11+ | `@airprompter/datastore-postgres` → `postgresKvStore({ client })` | `airprompter-datastore-postgres` → `postgres_kv_store(connection=)` | `INSERT … ON CONFLICT DO NOTHING`, `UPDATE … WHERE version = $n` |
+| Redis 6.2+ / Valkey | `@airprompter/datastore-redis` → `redisKvStore({ command })` | `airprompter-datastore-redis` → `redis_kv_store(client=)` | one Lua `EVAL` per write |
+| A directory | `fsKvStore(dir)` (in `agent-sync`) | `FileKvStore(dir)` | single writer per directory |
+| Tests | `MemoryKvStore`, `MemoryReleaseDatastore` | the same names | — |
+
+The adapters bundle no client library: pass the `S3Client`, `pg.Pool`,
+`redis` / `ioredis` client (TypeScript) or boto3, psycopg / psycopg2, redis-py
+client (Python) you already configure.
+
+**Another backend** (DynamoDB, GCS, etcd, Consul, MySQL…) is a `KvStore` of a
+few dozen lines. Prove it with the suite this repository runs against every
+adapter: `await checkKvStore(kv)` / `check_kv_store(kv)` → `{ ok, failures }`.
+It checks conditional writes, exact prefix listing (no `%`, `_`, `*`, `?` or
+`[` is a wildcard), non-ASCII and large values, and — what a hand-rolled
+adapter gets wrong — racing writers: of N concurrent `ifAbsent` puts, or N
+puts on one version, exactly one wins.
+
+Implement `ReleaseDatastore` directly only for a schema of your own (real
+columns to query the rollout by); rows written that way are yours alone.
+
+## What a release holds
 
 | Field | What it is |
 |---|---|
-| `generation` | the signed generation; one row per generation per key, immutable once written |
+| `generation` | the signed generation; one record per generation per key, immutable once written |
 | `releaseDigest` | the release's digest, for your own queries |
-| `bundle` | the `.apbundle` as JSON text — **ciphertext** to the fleet's distribution key off the dev target, signed end to end |
+| `bundle` | the `.apbundle` — **ciphertext** to the fleet's distribution key off the dev target, signed end to end |
 | `createdAt`, `notAfter` | when it was sealed; how long it stays usable as a fallback |
 | `rollout` | a content-free copy of what the signed manifest says: each experiment's arms and base weights (the dial-up percentages), its ramp steps, the apply policy and the `disable` directives — for your dashboards; **never read when serving** |
 
 The datastore is a carrier, never a root of trust: a runtime verifies every
-row (root, signatures, scope, every payload's hash) before a byte is served.
-The ramp keeps walking on each host's clock exactly as the signed manifest
-says, so a row written once still dials up on schedule.
+release (root, signatures, scope, every payload's hash) before a byte is
+served. The ramp keeps walking on each host's clock exactly as the signed
+manifest says, so a release written once still dials up on schedule.
 
-Beside the rows the DAO keeps the puller's **edge state** (the pointer URL
-and ETags, [change-notification.md](change-notification.md)) — written in
-the **same transaction** as the row, never before it — and one **control**
-per key: the rollback in force.
+Beside the releases the datastore keeps a `latest.json` pointer (moved
+forward only), the puller's **edge state** (the pointer URL and ETags,
+[change-notification.md](change-notification.md)) — written **after** the
+release it describes, never before, so it can never hide a release that was
+not written — and one **control** per key: the rollback in force. A record
+from a newer format is refused (`datastore_record_newer`), never served.
 
-## The DAO
-
-TypeScript (`@airprompter/agent-sync`, async) and Python
-(`airprompter_agent_sync`, sync) take the same eight methods:
-
-| Method | Does |
-|---|---|
-| `latest(key)` | the newest row for exactly this key |
-| `get(key, generation)` | one row |
-| `generations(key)` | every generation held, newest first |
-| `put(key, row, edge)` | the row **and** the edge state, one transaction; a generation already held is a no-op |
-| `edge(key)` / `putEdge(key, edge)` (`put_edge`) | the puller's memory; `putEdge` alone only for a pull that wrote no row |
-| `control(key)` / `setControl(key, control \| null)` (`set_control`) | the rollback in force; `null` clears it |
-
-`key` is `{ organizationId, agentId, target, region }`. `MemoryReleaseDatastore`
-is the reference implementation (and what the tests use).
+`pruneDatastore({ datastore, key, keep })` (`prune_datastore`) deletes all
+but the newest `keep` releases, never the one a rollback names.
 
 ## The puller
 
@@ -64,8 +88,8 @@ result = pull_to_datastore(datastore=releases, region="eu-west-1", client=client
 
 It reads the edge state and the newest generation from the datastore, pulls
 (`pullBundle` / `pull_bundle`: an older answer from the control plane is
-`generation_rollback`, never a quiet row), and writes the row with its
-edge. A datastore that cannot be read or written is `datastore_unavailable`
+`generation_rollback`, never a quiet row), and writes the release, then its
+edge state. A datastore that cannot be read or written is `datastore_unavailable`
 with `stage: "read" | "write"`; nothing is half-written.
 
 ## The runtime
@@ -106,6 +130,15 @@ downgrade (`forcedDowngrade`, a `forced_downgrade` spool row, `healthz`
 degraded) — and holds the newer generations back. It ends when you clear
 it, or when a generation **above** `heldBackBelow` is promoted: the fleet
 moves past it on its own, as a host-local `rollback()` does.
+
+Two operators at once cannot overwrite each other: the rollback is written
+only if the control is still what was read, and the loser gets
+`{ ok: false, reason: "conflict" }` — read again and decide.
+
+Who can write the control can move the fleet down to any older release the
+datastore holds (still signed, still verified, stamped as a forced
+downgrade). Give runtimes read-only access to the datastore; only the puller
+and your operators need to write.
 
 With a datastore configured the datastore is the fleet's word on rollback:
 a host-local `ap.rollback()` holds until the next hydrate, which releases

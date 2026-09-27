@@ -15,13 +15,14 @@ REGION: every row and control is keyed by ``(organizationId, agentId, target, re
 serves them; one with none reads the global rows (``region=None``). A rollback set for a region binds that region
 only; one set globally binds every region without one of its own. The same rules as ``releaseDatastore.ts``.
 
+Most applications never implement ``ReleaseDatastore`` themselves: ``kv_release_datastore(kv)`` implements it over a
+``KvStore`` (four operations; ``airprompter-datastore-s3``, ``-postgres`` and ``-redis`` ship three) in the shared
+format of ``protocol/datastore-format.md``, so a Python puller and a TypeScript runtime read each other's rows.
+
 Example::
 
-    class PostgresReleases:                       # implements ReleaseDatastore over your own connection
-        def latest(self, key): ...                # SELECT … ORDER BY generation DESC LIMIT 1
-        def put(self, key, row, edge): ...        # the row AND the edge state in ONE transaction
-        ...
-
+    from airprompter_datastore_postgres import postgres_kv_store
+    releases = kv_release_datastore(postgres_kv_store(connection=psycopg.connect(url, autocommit=True)))
     pull_to_datastore(datastore=releases, region="eu-west-1", client=client, scope=scope, trusted_root=root,
                       fetch_root=fetch_root, now=now_iso, distribution_public_key=fleet_public_raw)
     ap = AirPrompterAgent.start(..., distribution_key=fleet_key, datastore={"store": releases, "region": "eu-west-1"})
@@ -29,7 +30,6 @@ Example::
 
 from __future__ import annotations
 
-import copy
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,6 +38,8 @@ from typing import Any, Mapping, Optional, Protocol
 from airprompter_agent_core.protocol.trust import experiments_of
 
 from ..sync.pull_bundle import PullEdgeState
+from .datastore_records import datastore_keys, decode_datastore_record, encode_datastore_record, generation_of_release_key
+from .kv_store import KvStore, MemoryKvStore
 
 
 @dataclass(frozen=True)
@@ -77,19 +79,25 @@ class ReleaseControl:
     set_by: Optional[str] = None
 
 
+#: ``set_control``'s "no expectation": write whatever the control is now.
+UNSET: Any = object()
+
+
 class ReleaseDatastore(Protocol):
-    """The DAO the application implements. Every method may raise (the datastore is down): the puller reports it, a
-    runtime keeps serving what it holds. ``put`` writes the row AND the puller's edge state in one transaction; a row
-    is immutable once written (``put`` of a generation already held for the key is a no-op)."""
+    """What the puller writes and every runtime reads. Every method may raise (the datastore is down): the puller
+    reports it, a runtime keeps serving what it holds. No method needs a transaction: the puller writes the row
+    (``put_release``), then the edge state (``put_edge``) — never the edge before its row. A row is immutable once
+    written. ``set_control`` with ``expected`` (what the caller read, ``None`` for none) writes only if the control is
+    still that and answers ``False`` when another operator changed it first. ``prune(key, keep)`` is optional."""
 
     def latest(self, key: ReleaseKey) -> Optional[StoredReleaseRow]: ...
     def get(self, key: ReleaseKey, generation: int) -> Optional[StoredReleaseRow]: ...
     def generations(self, key: ReleaseKey) -> list[int]: ...
-    def put(self, key: ReleaseKey, row: StoredReleaseRow, edge: PullEdgeState) -> None: ...
+    def put_release(self, key: ReleaseKey, row: StoredReleaseRow) -> None: ...
     def edge(self, key: ReleaseKey) -> Optional[PullEdgeState]: ...
     def put_edge(self, key: ReleaseKey, edge: PullEdgeState) -> None: ...
     def control(self, key: ReleaseKey) -> Optional[ReleaseControl]: ...
-    def set_control(self, key: ReleaseKey, control: Optional[ReleaseControl]) -> None: ...
+    def set_control(self, key: ReleaseKey, control: Optional[ReleaseControl], expected: Any = UNSET) -> bool: ...
 
 
 def rollout_of(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -158,7 +166,7 @@ def resolve_hydration(datastore: ReleaseDatastore, key: ReleaseKey) -> Hydration
 class DatastoreRollbackResult:
     ok: bool
     control: Optional[ReleaseControl] = None
-    reason: Optional[str] = None  # "no_release" | "no_previous_release" | "generation_missing" | "not_a_rollback"
+    reason: Optional[str] = None  # "no_release" | "no_previous_release" | "generation_missing" | "not_a_rollback" | "conflict"
 
 
 def _now_iso() -> str:
@@ -168,7 +176,8 @@ def _now_iso() -> str:
 def rollback_datastore(*, datastore: ReleaseDatastore, key: ReleaseKey, to_generation: Optional[int] = None, reason: Optional[str] = None, set_by: Optional[str] = None, now: Optional[str] = None) -> DatastoreRollbackResult:
     """Roll the fleet in ``key.region`` (or every region, with ``region=None``) back to an older row — one step down
     from what serves without ``to_generation``. Held until a generation above today's newest is promoted, or
-    ``clear_datastore_rollback`` ends it."""
+    ``clear_datastore_rollback`` ends it. ``conflict`` when another operator changed this key's rollback meanwhile."""
+    before = datastore.control(key)
     plan = resolve_hydration(datastore, key)
     if plan.row is None:
         return DatastoreRollbackResult(ok=False, reason="no_release")
@@ -183,7 +192,8 @@ def rollback_datastore(*, datastore: ReleaseDatastore, key: ReleaseKey, to_gener
     if target >= plan.newest:
         return DatastoreRollbackResult(ok=False, reason="not_a_rollback")
     control = ReleaseControl(generation=target, held_back_below=plan.newest, set_at=now or _now_iso(), reason=reason, set_by=set_by)
-    datastore.set_control(key, control)
+    if not datastore.set_control(key, control, before):
+        return DatastoreRollbackResult(ok=False, reason="conflict")
     return DatastoreRollbackResult(ok=True, control=control)
 
 
@@ -192,47 +202,144 @@ def clear_datastore_rollback(*, datastore: ReleaseDatastore, key: ReleaseKey) ->
     datastore.set_control(key, None)
 
 
-def _key_string(key: ReleaseKey) -> str:
-    return json.dumps([key.organization_id, key.agent_id, key.target, key.region])
+def prune_datastore(*, datastore: ReleaseDatastore, key: ReleaseKey, keep: int) -> int:
+    """Delete all but the newest ``keep`` rows for exactly this key (never the one a rollback names)."""
+    if not isinstance(keep, int) or keep < 1:
+        raise ValueError("keep must be a positive integer")
+    prune = getattr(datastore, "prune", None)
+    if prune is None:
+        raise ValueError("this datastore does not prune")
+    return int(prune(key, keep))
 
 
-class MemoryReleaseDatastore:
-    """A ``ReleaseDatastore`` in memory: tests, a dev loop, and the reference for what a real DAO must do."""
+_MAX_CAS_ATTEMPTS = 8
 
-    def __init__(self) -> None:
-        self._rows: dict[str, dict[int, StoredReleaseRow]] = {}
-        self._edges: dict[str, PullEdgeState] = {}
-        self._controls: dict[str, ReleaseControl] = {}
+
+def _row_of(record: Mapping[str, Any]) -> StoredReleaseRow:
+    return StoredReleaseRow(generation=record["generation"], release_digest=record["releaseDigest"], bundle=json.dumps(record["bundle"]), created_at=record["createdAt"], not_after=record["notAfter"], rollout=record["rollout"])
+
+
+def _control_of(record: Mapping[str, Any]) -> ReleaseControl:
+    return ReleaseControl(generation=record["generation"], held_back_below=record["heldBackBelow"], set_at=record["setAt"], reason=record.get("reason"), set_by=record.get("setBy"))
+
+
+def _control_fields(control: ReleaseControl) -> dict[str, Any]:
+    return {"kind": "control", "generation": control.generation, "heldBackBelow": control.held_back_below, "setAt": control.set_at, "reason": control.reason, "setBy": control.set_by}
+
+
+def _same_control(a: Optional[ReleaseControl], b: Optional[ReleaseControl]) -> bool:
+    if a is None or b is None:
+        return a is b
+    return encode_datastore_record(_control_fields(a)) == encode_datastore_record(_control_fields(b))
+
+
+class KvReleaseDatastore:
+    """``ReleaseDatastore`` over any ``KvStore``, in the shared format (``protocol/datastore-format.md``): what one SDK
+    writes, every other reads. Writes are ordered, never transactional: the release (``if_absent``), then
+    ``latest.json`` moved forward only, then the edge state, never back past a later ``lastOriginAt``."""
+
+    def __init__(self, kv: KvStore, prefix: str = "airprompter/") -> None:
+        self.kv = kv
+        self.prefix = prefix
+
+    def _keys(self, key: ReleaseKey):
+        return datastore_keys(self.prefix, key)
 
     def latest(self, key: ReleaseKey) -> Optional[StoredReleaseRow]:
-        rows = self._rows.get(_key_string(key))
-        return copy.deepcopy(rows[max(rows)]) if rows else None
+        pointer = self.kv.get(self._keys(key).latest)
+        if pointer is not None:
+            row = self.get(key, decode_datastore_record(pointer.value, "latest")["generation"])
+            if row is not None:
+                return row
+        # No pointer (a crash between the release and its pointer, or rows written by hand): the highest release.
+        generations = self.generations(key)
+        return self.get(key, generations[0]) if generations else None
 
     def get(self, key: ReleaseKey, generation: int) -> Optional[StoredReleaseRow]:
-        row = self._rows.get(_key_string(key), {}).get(generation)
-        return copy.deepcopy(row) if row else None
+        entry = self.kv.get(self._keys(key).release(generation))
+        return _row_of(decode_datastore_record(entry.value, "release", generation)) if entry is not None else None
 
     def generations(self, key: ReleaseKey) -> list[int]:
-        return sorted(self._rows.get(_key_string(key), {}), reverse=True)
+        keys = self._keys(key)
+        found = {generation_of_release_key(keys.releases_prefix, name) for name in self.kv.list(keys.releases_prefix)}
+        return sorted((g for g in found if g is not None), reverse=True)
 
-    def put(self, key: ReleaseKey, row: StoredReleaseRow, edge: PullEdgeState) -> None:
-        rows = self._rows.setdefault(_key_string(key), {})
-        rows.setdefault(row.generation, copy.deepcopy(row))
-        self._edges[_key_string(key)] = copy.copy(edge)
+    def put_release(self, key: ReleaseKey, row: StoredReleaseRow) -> None:
+        keys = self._keys(key)
+        text = encode_datastore_record({"kind": "release", "generation": row.generation, "releaseDigest": row.release_digest, "createdAt": row.created_at, "notAfter": row.not_after, "bundle": json.loads(row.bundle), "rollout": row.rollout})
+        self.kv.put(keys.release(row.generation), text, if_absent=True)  # False: already held — immutable
+        latest_text = encode_datastore_record({"kind": "latest", "generation": row.generation})
+        for _ in range(_MAX_CAS_ATTEMPTS):
+            current = self.kv.get(keys.latest)
+            if current is not None and decode_datastore_record(current.value, "latest")["generation"] >= row.generation:
+                return
+            if self.kv.put(keys.latest, latest_text, **({"if_version": current.version} if current is not None else {"if_absent": True})):
+                return
+        raise RuntimeError(f"latest.json kept moving under {_MAX_CAS_ATTEMPTS} attempts to advance it to {row.generation}")
 
     def edge(self, key: ReleaseKey) -> Optional[PullEdgeState]:
-        edge = self._edges.get(_key_string(key))
-        return copy.copy(edge) if edge else None
+        entry = self.kv.get(self._keys(key).edge)
+        if entry is None:
+            return None
+        record = decode_datastore_record(entry.value, "edge")
+        return PullEdgeState(record["pointerUrl"], record["pointerEtag"], record["manifestEtag"], record["lastOriginAt"])
 
     def put_edge(self, key: ReleaseKey, edge: PullEdgeState) -> None:
-        self._edges[_key_string(key)] = copy.copy(edge)
+        edge_key = self._keys(key).edge
+        text = encode_datastore_record({"kind": "edge", "pointerUrl": edge.pointer_url, "pointerEtag": edge.pointer_etag, "manifestEtag": edge.manifest_etag, "lastOriginAt": edge.last_origin_at})
+        for _ in range(_MAX_CAS_ATTEMPTS):
+            current = self.kv.get(edge_key)
+            if current is not None:
+                held = decode_datastore_record(current.value, "edge")
+                # Another puller already recorded a later answer from the origin: this state is older, not newer.
+                if (held["lastOriginAt"] or "") > (edge.last_origin_at or "") or current.value == text:
+                    return
+            if self.kv.put(edge_key, text, **({"if_version": current.version} if current is not None else {"if_absent": True})):
+                return
+        raise RuntimeError(f"edge.json kept moving under {_MAX_CAS_ATTEMPTS} attempts")
 
     def control(self, key: ReleaseKey) -> Optional[ReleaseControl]:
-        control = self._controls.get(_key_string(key))
-        return copy.copy(control) if control else None
+        entry = self.kv.get(self._keys(key).control)
+        return _control_of(decode_datastore_record(entry.value, "control")) if entry is not None else None
 
-    def set_control(self, key: ReleaseKey, control: Optional[ReleaseControl]) -> None:
+    def set_control(self, key: ReleaseKey, control: Optional[ReleaseControl], expected: Any = UNSET) -> bool:
+        control_key = self._keys(key).control
+        current = self.kv.get(control_key)
+        held = _control_of(decode_datastore_record(current.value, "control")) if current is not None else None
+        if expected is not UNSET and not _same_control(held, expected):
+            return False
         if control is None:
-            self._controls.pop(_key_string(key), None)
-        else:
-            self._controls[_key_string(key)] = copy.copy(control)
+            if current is not None:
+                self.kv.delete(control_key)
+            return True
+        text = encode_datastore_record(_control_fields(control))
+        return self.kv.put(control_key, text, **({"if_version": current.version} if current is not None else {"if_absent": True}))
+
+    def prune(self, key: ReleaseKey, keep: int) -> int:
+        keys = self._keys(key)
+        generations = self.generations(key)
+        protected = set(generations[:keep])
+        control = self.control(key)
+        if control is not None:
+            protected.add(control.generation)
+        pointer = self.kv.get(keys.latest)
+        if pointer is not None:
+            protected.add(decode_datastore_record(pointer.value, "latest")["generation"])
+        removed = 0
+        for generation in generations:
+            if generation not in protected:
+                self.kv.delete(keys.release(generation))
+                removed += 1
+        return removed
+
+
+def kv_release_datastore(kv: KvStore, *, prefix: str = "airprompter/") -> KvReleaseDatastore:
+    """``ReleaseDatastore`` over a ``KvStore`` in the shared format; ``prefix`` is the deployment's own."""
+    return KvReleaseDatastore(kv, prefix)
+
+
+class MemoryReleaseDatastore(KvReleaseDatastore):
+    """A ``ReleaseDatastore`` in memory — the shared format over a ``MemoryKvStore``: tests and dev loops."""
+
+    def __init__(self, prefix: str = "airprompter/") -> None:
+        super().__init__(MemoryKvStore(), prefix)

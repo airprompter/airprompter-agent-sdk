@@ -97,7 +97,9 @@ from airprompter_agent_telemetry.spool.writer import (
 from airprompter_agent_sync.store.key_provider import KeyProvider, custom_key_provider, file_key, kms, os_keystore, unwrap_with_raw_key, vault, wrap_with_raw_key
 from airprompter_agent_sync.store.payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
 from airprompter_agent_sync.store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
-from airprompter_agent_sync.store.release_datastore import DatastoreRollbackResult, HydrationPlan, MemoryReleaseDatastore, ReleaseControl, ReleaseDatastore, ReleaseKey, StoredReleaseRow, clear_datastore_rollback, resolve_hydration, rollback_datastore, rollout_of
+from airprompter_agent_sync.store.release_datastore import DatastoreRollbackResult, HydrationPlan, KvReleaseDatastore, MemoryReleaseDatastore, ReleaseControl, ReleaseDatastore, ReleaseKey, StoredReleaseRow, clear_datastore_rollback, kv_release_datastore, prune_datastore, resolve_hydration, rollback_datastore, rollout_of
+from airprompter_agent_sync.store.kv_store import FileKvStore, KvEntry, KvStore, KvStoreReport, MemoryKvStore, check_kv_store
+from airprompter_agent_sync.store.datastore_records import DATASTORE_FORMAT, DatastoreRecordError, datastore_keys, decode_datastore_record, encode_datastore_record
 from airprompter_agent_sync.sync.pull_to_datastore import PullToDatastoreResult, pull_to_datastore
 from airprompter_agent_core.control.client import SyncClient
 from airprompter_agent_sync.sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
@@ -139,6 +141,20 @@ __version__ = SDK_VERSION
 
 __all__ = [
     "DatastoreOptions",
+    "DATASTORE_FORMAT",
+    "DatastoreRecordError",
+    "FileKvStore",
+    "KvEntry",
+    "KvReleaseDatastore",
+    "KvStore",
+    "KvStoreReport",
+    "MemoryKvStore",
+    "check_kv_store",
+    "datastore_keys",
+    "decode_datastore_record",
+    "encode_datastore_record",
+    "kv_release_datastore",
+    "prune_datastore",
     "DatastoreRollbackResult",
     "HydrationPlan",
     "MemoryReleaseDatastore",

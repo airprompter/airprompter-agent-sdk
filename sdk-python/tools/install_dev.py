@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ORDER = ["core", "sync", "runtime", "telemetry", "agent"]
+ORDER = ["core", "sync", "runtime", "telemetry", "agent", "datastore-s3", "datastore-postgres", "datastore-redis"]
 
 
 def main() -> int:

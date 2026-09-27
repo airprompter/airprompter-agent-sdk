@@ -1,6 +1,6 @@
 """The puller with the customer's datastore around it (T40): ``pull_bundle`` reading its memory (the edge state, the
 newest generation held) from the datastore and writing what it sealed back through it — the row and the edge state in
-one ``put``, never the edge before the row. The Agent key lives here and nowhere else; every runtime hydrates from the
+that order, never the edge before the row. The Agent key lives here and nowhere else; every runtime hydrates from the
 rows. A regional puller (``region="eu-west-1"``) keeps its own rows and edge state; a global one (``region=None``)
 writes the rows every region without its own reads. The same rules as ``pullToDatastore.ts``.
 
@@ -55,7 +55,9 @@ def pull_to_datastore(*, datastore: ReleaseDatastore, region: Optional[str] = No
                 not_after=str(result.not_after),
                 rollout=rollout_of(result.manifest),
             )
-            datastore.put(key, row, result.edge)
+            # The row, then its edge state — in that order, never together: an edge saved before its row could hide it.
+            datastore.put_release(key, row)
+            datastore.put_edge(key, result.edge)
             return PullToDatastoreResult(status="ok", key=key, stored=True, pull=result)
         # Nothing written: the edge moves only when the origin confirmed nothing moved.
         if result.status in ("unchanged", "nothing_promoted"):

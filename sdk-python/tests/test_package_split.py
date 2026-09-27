@@ -47,7 +47,7 @@ def test_direction_is_pinned_and_a_planted_upward_import_fails_the_lint():
     clean = lint("--json")
     assert clean.returncode == 0, clean.stderr
     edges = json.loads(clean.stdout[: clean.stdout.rindex("}") + 1])["edges"]
-    assert edges == ["agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "runtime→core", "sync→core", "telemetry→core"]
+    assert edges == ["agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "datastore-postgres→sync", "datastore-redis→sync", "datastore-s3→sync", "runtime→core", "sync→core", "telemetry→core"]
     probe = os.path.join(SDK_PY, "packages", "telemetry", "src", "airprompter_agent_telemetry", "_lint_probe.py")
     with open(probe, "w", encoding="utf-8") as f:
         f.write("from airprompter_agent_sync.store.slot_store import SlotStore\nPROBE = SlotStore\n")
@@ -138,3 +138,11 @@ def test_five_distributions_one_version_exact_pinned_siblings():
     from airprompter_agent.agent import SDK_VERSION as agent_version
 
     assert {core_version, agent_version} == versions, "SDK_VERSION is the lockstep version"
+    # T40: the datastore adapters ride the same version, pin sync alone, and never require a database client.
+    for name in ("datastore-s3", "datastore-postgres", "datastore-redis"):
+        with open(os.path.join(SDK_PY, "packages", name, "pyproject.toml"), encoding="utf-8") as f:
+            text = f.read()
+        assert f'name = "airprompter-{name}"' in text
+        assert text.split('version = "', 1)[1].split('"', 1)[0] in versions, f"{name} is on the lockstep version"
+        deps = text.split("dependencies = [", 1)[1].split("]", 1)[0]
+        assert [line.strip().strip('",') for line in deps.splitlines() if line.strip()] == [f"airprompter-agent-sync=={next(iter(versions))}"], f"{name} depends on sync alone"

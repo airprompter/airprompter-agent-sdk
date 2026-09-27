@@ -36,7 +36,12 @@ try {
   const tarballs = {};
   for (const name of Object.keys(FLOWS)) {
     const out = run(["pack", "--pack-destination", work, "--json"], join(root, "packages", name));
-    tarballs[name] = join(work, JSON.parse(out)[0].filename);
+    const packed = JSON.parse(out)[0];
+    // What a customer downloads is the build and its licence: never a build cache, a source tree or a test.
+    const stray = packed.files.map((file) => file.path).filter((path) => /(^|\/)\.tsbuildinfo$|^src\/|^test\/|\.test\.[cm]?js$/.test(path));
+    if (stray.length > 0) throw new Error(`${name}: the tarball ships ${stray.join(", ")}`);
+    if (!packed.files.some((file) => file.path === "LICENSE")) throw new Error(`${name}: the tarball has no LICENSE`);
+    tarballs[name] = join(work, packed.filename);
   }
   for (const [name, flow] of Object.entries(FLOWS)) {
     const project = join(work, `alone-${name}`);

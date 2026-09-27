@@ -38,6 +38,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/.tsbuildinfo",
     "README.md"
   ],
   "sideEffects": false,

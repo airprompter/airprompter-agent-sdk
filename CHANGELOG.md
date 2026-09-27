@@ -25,6 +25,8 @@ may change a public shape and says so here.
 - Publish size budgets: `@airprompter/agent-sync` 220 KB (was 160) — the KV layer, the record codec and the adapter check; `@airprompter/agent-sdk` 260 KB (was 240) — the datastore hydration.
 
 ### Fixed
+- Every npm package stopped shipping `dist/esm/.tsbuildinfo` — TypeScript's incremental-build cache, in every tarball since the packages split (37 KB in most, 168 KB in `datastore-s3`). `scripts/install-alone.mjs` fails a tarball that carries a build cache, a source tree, a test or no LICENSE.
+- The release workflow can be re-run after a partial failure: a version already on npm or PyPI is skipped instead of failing the run before the rest of the version goes out (a new npm package's first version must be published by hand before npm accepts a trusted publisher for it; `release.yml` says how).
 - The Node filesystem port's `listRecursive` returned directories as well as files; it returns files only, as the port documents and as `MemoryFs` and the Python port always did (`SlotStore.listSlotFiles` no longer lists `payloads`).
 
 ## 0.2.14 — 2026-09-17 (protocol 0.3.4)

@@ -48,5 +48,8 @@
     "test/**/*.ts",
     "../sdk-typescript/packages/*/src/**/*.ts",
     "../sdk-typescript/test/helpers/*.ts"
+  ],
+  "exclude": [
+    "../sdk-typescript/packages/datastore-*/**"
   ]
 }

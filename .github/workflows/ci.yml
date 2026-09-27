@@ -323,7 +323,8 @@ jobs:
           sudo install -d /etc/airprompter && sudo install -m 0600 deploy/systemd/airprompterd.env.example /etc/airprompter/airprompterd.env
           systemd-analyze verify deploy/systemd/airprompterd.service
       - name: WinSW service definition is well-formed XML
-        run: sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null && xmllint --noout deploy/windows/airprompterd.xml
+        # Refresh the index first: the runner image's cached one names package builds the mirror has since dropped (404).
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null && xmllint --noout deploy/windows/airprompterd.xml
       - name: launchd plist is well-formed (plutil runs on macOS; here the XML must at least parse)
         run: xmllint --noout deploy/launchd/com.airprompter.airprompterd.plist
       - name: Kubernetes DaemonSet

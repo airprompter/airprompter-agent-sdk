@@ -150,6 +150,14 @@ update-window timers on daemon threads.
    `next_pull_delay_ms` stretches the interval while nothing changes;
    `skip_pointer=True` is the "check now" a nudge or an operator uses
    ([docs/change-notification.md](../docs/change-notification.md)).
+   Or hand the SDK your datastore and skip the glue: implement the
+   eight-method `ReleaseDatastore` DAO over your table, run
+   `pull_to_datastore(datastore=, region=, …)` in the puller, and start
+   each runtime with `datastore={"store": …, "region": …, "poll_seconds": …}`
+   — it hydrates from the datastore at start and on `ap.hydrate()`, the
+   ramp walking as signed, a rollback set with `rollback_datastore()`
+   moving the whole fleet (or one region) down and held until the fleet
+   moves past it ([docs/datastore.md](../docs/datastore.md)).
 5. One shape is not a failure: the sync found a release **staged under
    `unlock_required`** and nothing active — a first production release,
    or a restart whose active slot is unusable beside a staged one. The

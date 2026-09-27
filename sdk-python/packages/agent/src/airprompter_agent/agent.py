@@ -54,6 +54,7 @@ from airprompter_agent_core.telemetry.feedback import normalize_feedback
 from airprompter_agent_telemetry.spool.writer import DirectorySink, MemorySink, Observation, SpoolSink, SpoolWriter, WriterIdentity, epoch_minute, segment_name
 from airprompter_agent_sync.store.key_provider import KeyProvider, file_key
 from airprompter_agent_sync.store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
+from airprompter_agent_sync.store.release_datastore import HydrationPlan, ReleaseDatastore, ReleaseKey, resolve_hydration
 from airprompter_agent_sync.sync.loop import required_models_missing
 from airprompter_agent_telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant, post_segment
 from airprompter_agent_core.control.client import SyncClient
@@ -146,6 +147,20 @@ class TelemetryOptions:
 
 
 @dataclass
+class DatastoreOptions:
+    """T40: the customer's own datastore as the fleet's copy of each release (a ``ReleaseDatastore`` DAO the application
+    implements; ``pull_to_datastore`` fills it). At start — after the host's own store, before the vendored bundle —
+    the runtime hydrates from it: the row for its ``region`` (else the global rows), verified through the same chain as
+    OTA, with the datastore's rollback in force. The signed manifest inside the row carries the ramp plan and the
+    directives, so dial-up percentages walk on this host's clock exactly as signed. ``ap.hydrate()`` re-reads it;
+    ``poll_seconds`` re-reads it on a timer. Every sealed row is opened with ``distribution_key``."""
+
+    store: ReleaseDatastore
+    region: Optional[str] = None
+    poll_seconds: Optional[float] = None
+
+
+@dataclass
 class VendoredBundle:
     #: A path to a ``.apbundle`` file, or the parsed document.
     bundle: Union[str, Mapping[str, Any]]
@@ -194,6 +209,9 @@ class AgentStatus:
     #: "unsourced": [{"tag", "arm", "names"}]}``: per slot and arm, the required variables neither a literal nor a
     #: source fills, so the call site must. Declarations only; no payload is read.
     variables: dict[str, Any] = field(default_factory=lambda: {"sources": [], "unsourced": []})
+    #: T40: the customer's datastore this runtime hydrates from — ``{"region", "last_hydrate_at", "last_outcome",
+    #: "newest_generation", "rows_from", "rollback"}``; None when none was given.
+    datastore: Optional[dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -415,6 +433,9 @@ class AirPrompterAgent:
         #: S3: attached to a daemon, the lease is the daemon's.
         self._daemon_lease_expires_at: Optional[str] = None
         self._bundle_not_after: Optional[str] = None
+        #: T40: what the last hydration from the customer's datastore found, and its poll timer.
+        self._datastore_status: Optional[dict[str, Any]] = None
+        self._datastore_timer = _Timer()
         # T9: directives from the latest manifest whose envelope verified — honoured even when that manifest was left staged,
         # held back, or ignored as the generation already held. A Freeze reaches a fleet that never unlocks.
         self._standing_directives: Optional[tuple[int, list[Mapping[str, Any]]]] = None
@@ -479,6 +500,7 @@ class AirPrompterAgent:
         sync: Optional[Union[SyncOptions, Mapping[str, Any]]] = None,
         vendored_bundle: Optional[Union[VendoredBundle, Mapping[str, Any]]] = None,
         distribution_key: Optional[DistributionKey] = None,
+        datastore: Optional[Union[DatastoreOptions, Mapping[str, Any]]] = None,
         apply: Optional[Union[ApplyOptions, Mapping[str, Any]]] = None,
         golden: Optional[Union[GoldenOptions, Mapping[str, Any]]] = None,
         heartbeat_seconds: Optional[float] = None,
@@ -510,6 +532,7 @@ class AirPrompterAgent:
             # The fleet's X25519 distribution private key: opens every sealed bundle this host is handed — the vendored
             # one and every apply_bundle() — when neither names its own. Held by runtimes, never by the puller.
             "distribution_key": distribution_key,
+            "datastore": _coerce(DatastoreOptions, datastore) if datastore is not None else None,
             "apply": _coerce(ApplyOptions, apply),
             "golden": _coerce(GoldenOptions, golden) if golden is not None else None,
             "heartbeat_seconds": heartbeat_seconds,
@@ -808,6 +831,8 @@ class AirPrompterAgent:
             except Exception as error:  # noqa: BLE001
                 self._log({"event": "staged_slot_unusable", "slot": staged, "reason": str(error)})
                 store.discard_staged()
+        if self._o.get("datastore") is not None:
+            self._take_datastore(now)
         if self._o.get("vendored_bundle") is not None:
             self._take_vendored_bundle(now)
         if self._active is None and self._client is not None:
@@ -831,6 +856,150 @@ class AirPrompterAgent:
             self._start_uploader()
         self._schedule_spool_close()
         self._schedule_window_unlock()
+        self._schedule_datastore_poll()
+
+    # ------------------------------------------------------------------ the customer's datastore (T40)
+
+    def _schedule_datastore_poll(self) -> None:
+        """Re-read the datastore on a timer, off the request path, when ``datastore.poll_seconds`` asks for it."""
+        options: Optional[DatastoreOptions] = self._o.get("datastore")
+        self._datastore_timer.cancel()
+        if options is None or not options.poll_seconds or self._stopped:
+            return
+
+        def tick() -> None:
+            try:
+                self.hydrate()
+            finally:
+                self._schedule_datastore_poll()
+
+        self._datastore_timer.thread = self._arm(max(1.0, float(options.poll_seconds)), tick)
+
+    def hydrate(self) -> dict[str, Any]:
+        """T40: hydrate from the customer's datastore now — the row for this region (else the global rows), the rollback
+        in force applied. One pass over the store at a time, like ``apply_bundle``. Never raises; the outcome says what
+        happened: a bundle outcome, ``rolled_back``, ``empty`` or ``unavailable``."""
+        if self._o.get("datastore") is None:
+            return {"outcome": "refused", "generation": None, "reason": "no_datastore"}
+        if self._daemon is not None:
+            return {"outcome": "refused", "generation": None, "reason": "daemon_attached"}
+        if self._store is None:
+            return {"outcome": "refused", "generation": None, "reason": "no_store"}
+        with self._sync_lock:
+            return self._take_datastore(self._now_iso())
+
+    def _datastore_key(self) -> ReleaseKey:
+        options: DatastoreOptions = self._o["datastore"]
+        return ReleaseKey(self._o["organization_id"], self._o["agent_id"], self._o["target"], options.region)
+
+    def _take_datastore(self, now: str) -> dict[str, Any]:
+        """One read of the datastore and what it asks of this host. Without a rollback in force the newest row is an
+        update like any ``apply_bundle`` (never below the held generation) — and a local hold the datastore no longer
+        asks for is released first. With one in force the row it names is served: below what the host holds it is a
+        forced downgrade (verified through the whole chain, stamped, ``forced_downgrade`` in the spool), and every
+        generation up to the rollback's ``held_back_below`` is held back until the fleet moves past it."""
+        options: DatastoreOptions = self._o["datastore"]
+        store = self._store
+        assert store is not None
+        key = self._datastore_key()
+
+        def record(plan: Optional[HydrationPlan], outcome: dict[str, Any]) -> dict[str, Any]:
+            previous = self._datastore_status or {}
+            rollback = previous.get("rollback")
+            if plan is not None:
+                control = plan.control
+                rollback = {"generation": control.generation, "held_back_below": control.held_back_below, "scope": plan.control_scope, "set_at": control.set_at, **({"reason": control.reason} if control.reason else {})} if control else None
+            self._datastore_status = {
+                "region": key.region,
+                "last_hydrate_at": now,
+                "last_outcome": outcome["outcome"],
+                "newest_generation": plan.newest if plan is not None else previous.get("newest_generation", 0),
+                "rows_from": plan.rows_from if plan is not None else previous.get("rows_from"),
+                "rollback": rollback,
+            }
+            return outcome
+
+        try:
+            plan = resolve_hydration(options.store, key)
+        except Exception as error:  # noqa: BLE001 — the datastore is down: keep serving what is held
+            detail = str(error)[:240]
+            self._log({"event": "datastore_unavailable", "region": key.region, "reason": detail})
+            return record(None, {"outcome": "unavailable", "generation": None, "detail": detail})
+        if plan.missing_rollback_generation is not None:
+            self._log({"event": "datastore_rollback_missing", "region": key.region, "generation": plan.missing_rollback_generation, "message": f"the datastore's rollback names generation {plan.missing_rollback_generation}, which it does not hold; serving the newest row"})
+        if plan.row is None:
+            return record(plan, {"outcome": "empty", "generation": None})
+        try:
+            vendored = self._o.get("vendored_bundle")
+            contents = open_bundle(json.loads(plan.row.bundle), {"agentId": self._o["agent_id"], "target": self._o["target"]}, self._o.get("distribution_key") or (vendored.distribution_key if vendored is not None else None))
+        except Exception as error:  # noqa: BLE001
+            self._log({"event": "datastore_row_unusable", "region": key.region, "generation": plan.row.generation, "reason": str(error)})
+            return record(plan, {"outcome": "refused", "generation": plan.row.generation, "reason": "unusable", "detail": str(error)})
+        generation = int(contents["manifest"]["payload"]["generation"])
+        control = plan.control
+        if control is None:
+            held_back = store.state.get("heldBackBelow")
+            if held_back is not None and generation > int(store.state.get("generation", 0)):
+                store.release_hold()
+                self._log({"event": "datastore_hold_released", "heldBackBelow": held_back, "generation": generation})
+            return record(plan, self._take_bundle(contents, "datastore", now))
+        held = max(int(store.state.get("generation", 0)), int(self._staged_manifest["payload"]["generation"]) if self._staged_manifest else 0)
+        if self._active is not None and self._active.generation == generation:
+            outcome: dict[str, Any] = {"outcome": "unchanged", "generation": generation}
+        elif self._active is not None and generation < held:
+            outcome = self._take_rollback(contents, control.held_back_below, now)
+        else:
+            # Up to (or, with nothing active, onto) the rollback's generation: an update like any other, past a hold the
+            # datastore's own rollback set — which is set again below either way.
+            store.release_hold()
+            outcome = self._take_bundle(contents, "datastore", now)
+        store.hold_back(control.held_back_below)
+        return record(plan, outcome)
+
+    def _take_rollback(self, contents: Mapping[str, Any], held_back_below: int, now: str) -> dict[str, Any]:
+        """The datastore's rollback below what the host holds — the whole chain, then a forced step down and a hold."""
+        store = self._store
+        assert store is not None
+        generation = int(contents["manifest"]["payload"]["generation"])
+        if instant(contents["notAfter"]) < instant(now):
+            self._log({"event": "datastore_rollback_refused", "reason": "expired", "generation": generation, "notAfter": contents["notAfter"]})
+            return {"outcome": "refused", "generation": generation, "reason": "expired"}
+        try:
+            verdict = verify_root_metadata(candidate=contents["keySet"], trusted=self._trusted_root, now=now)
+            if verdict.ok:
+                self._trusted_root = contents["keySet"]
+                store.accept_root(contents["keySet"])
+            payloads = bundle_payload_bytes(contents)
+            scope = {"organizationId": self._o["organization_id"], "agentId": self._o["agent_id"], "target": self._o["target"]}
+            # An older release is still a SIGNED release for this scope: everything but the counter is checked.
+            full = verify_manifest(manifest=contents["manifest"], root=self._trusted_root, now=now, scope=scope, stored_generation=0, payloads=payloads, countersign_root=self._o.get("countersign_root"), require_countersign=self._o.get("require_countersign"))
+            if not full.ok:
+                self._log({"event": "datastore_rollback_refused", "reason": full.reason, "generation": generation})
+                self._last_refusal = full.reason
+                return {"outcome": "refused", "generation": generation, "reason": full.reason}
+            missing = required_models_missing(contents["manifest"]["payload"], self._declared_models())
+            if missing:
+                self._log({"event": "datastore_rollback_refused", "reason": "model_unavailable", "generation": generation, "models": missing})
+                return {"outcome": "refused", "generation": generation, "reason": "model_unavailable", "detail": ", ".join(missing)}
+            # The inactive slot is overwritten: a staged release there is not approved for this host any more.
+            if store.state.get("staged"):
+                store.discard_staged()
+            store.stage(manifest=contents["manifest"], payloads=payloads, force=True)
+            slot = store.activate()
+            store.hold_back(held_back_below)
+            loaded = store.load(slot, **self._verify_options(now))
+            with self._lock:
+                self._active = loaded
+                self._staged_manifest = None
+                self._source = "store"
+                self._last_refusal = None
+            self.spool.refusal(at=now, reason="forced_downgrade", generation=generation, tag=None, at_ms=self._now_ms())
+            self._log({"event": "datastore_rolled_back", "generation": generation, "heldBackBelow": held_back_below})
+            self._emit_change()
+            return {"outcome": "rolled_back", "generation": generation, "heldBackBelow": held_back_below}
+        except Exception as error:  # noqa: BLE001
+            self._log({"event": "datastore_rollback_unusable", "reason": str(error), "generation": generation})
+            return {"outcome": "refused", "generation": generation, "reason": "unusable", "detail": str(error)}
 
     def _schedule_spool_close(self) -> None:
         """S6: once a minute, the windows of the minute that passed are written and the open segment closed — never the current minute."""
@@ -2001,6 +2170,7 @@ class AirPrompterAgent:
             ramp=self._ramp_status(manifest),
             ramps=self._ramp_statuses(manifest),
             variables=self._variables_status(),
+            datastore=(self._datastore_status or {"region": self._o["datastore"].region, "last_hydrate_at": None, "last_outcome": None, "newest_generation": 0, "rows_from": None, "rollback": None}) if self._o.get("datastore") is not None else None,
         )
 
     @property
@@ -2043,6 +2213,7 @@ class AirPrompterAgent:
         self._window_timer.cancel()
         self._spool_timer.cancel()
         self._heartbeat_timer.cancel()
+        self._datastore_timer.cancel()
         if self._uploader is not None:
             self._uploader.stop()
         # A pass or a heartbeat in flight finishes first.

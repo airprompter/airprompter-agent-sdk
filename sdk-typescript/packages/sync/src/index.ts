@@ -13,6 +13,8 @@
  * const store = await SlotStore.open({ stateDir, agentId, target: "prod", keyProvider: fileKey(join(stateDir, "store.key")) });
  * const pass = await syncOnce({ store, client, now, scope, trustedRoot, active: null, etag: null, applyPolicy: () => "activated" });
  * // pass.outcome: "activated" | "staged" | "unchanged" | "refused" | "unavailable" | … — never a throw past here
+ * // The fleet over the customer's own datastore: the puller writes through a DAO, runtimes hydrate from it.
+ * await pullToDatastore({ datastore, region: "eu-west-1", client, scope, trustedRoot, fetchRoot, now, distributionPublicKey });
  * ```
  */
 
@@ -25,6 +27,10 @@ export { encryptPayload, decryptPayload, payloadAad, PayloadDecryptError, isPayl
 export { syncOnce, jitteredDelayMs, requiredModelsMissing } from "./sync/loop.js";
 export { pullBundle, nextPullDelayMs, DEFAULT_MAX_POINTER_AGE_MS } from "./sync/pullBundle.js";
 export type { PullBundleInput, PullBundleResult, PullEdgeState } from "./sync/pullBundle.js";
+export { pullToDatastore } from "./sync/pullToDatastore.js";
+export type { PullToDatastoreInput, PullToDatastoreResult } from "./sync/pullToDatastore.js";
+export { MemoryReleaseDatastore, resolveHydration, rollbackDatastore, clearDatastoreRollback, rolloutOf, globalKeyOf } from "./store/releaseDatastore.js";
+export type { ReleaseDatastore, ReleaseKey, StoredReleaseRow, ReleaseControl, ReleaseRollout, RolloutExperiment, HydrationPlan, DatastoreRollbackResult } from "./store/releaseDatastore.js";
 export type { SyncPassInput, SyncPassOutput, SyncPassResult, ApplyPolicyDecision } from "./sync/loop.js";
 export { DaemonClient, DaemonError, isDaemonError, daemonSocketPath, DAEMON_MAX_LINE_BYTES, UNIX_SOCKET_PATH_MAX } from "./sync/daemon.js";
 export type { DaemonHello, DaemonSlotResponse, DaemonGenerationEvent, DaemonApplyPolicy, DaemonPolicyEvent, DaemonLeaseEvent, DaemonErrorCode } from "./sync/daemon.js";

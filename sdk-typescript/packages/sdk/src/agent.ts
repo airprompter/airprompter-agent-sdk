@@ -55,6 +55,7 @@ import { parseWindow, windowState, type UpdateWindow } from "@airprompter/agent-
 import { SyncClient, type FetchLike } from "@airprompter/agent-core";
 import { DaemonClient, DaemonError, daemonSocketPath } from "@airprompter/agent-sync";
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "@airprompter/agent-sync";
+import { resolveHydration, type HydrationPlan, type ReleaseDatastore, type ReleaseKey } from "@airprompter/agent-sync";
 
 import { PROTOCOL_VERSION, SDK_VERSION } from "@airprompter/agent-core";
 
@@ -91,6 +92,16 @@ export interface StartOptions {
   sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string; daemonSocketPath?: string };
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */
   vendoredBundle?: { bundle: Bundle | string; distributionKey?: DistributionKey };
+  /**
+   * T40: the customer's own datastore as the fleet's copy of each release (`ReleaseDatastore`, a DAO the application
+   * implements; `pullToDatastore` fills it). At start — after the host's own store, before the vendored bundle — the
+   * runtime hydrates from it: the row for its `region` (else the global rows), verified through the same chain as
+   * OTA, with the datastore's rollback in force (an older row, held until the fleet moves past it). The signed
+   * manifest inside the row carries the ramp plan and the directives, so dial-up percentages walk on this host's
+   * clock exactly as signed. `ap.hydrate()` re-reads it (on your `LISTEN`, your bus); `pollSeconds` re-reads it on a
+   * timer. Every sealed row is opened with `distributionKey`.
+   */
+  datastore?: { store: ReleaseDatastore; region?: string | null; pollSeconds?: number };
   /**
    * The fleet's X25519 distribution private key: opens every sealed bundle this host is handed — the vendored one
    * and every `applyBundle()` — when neither names its own. Held by runtimes, never by the puller.
@@ -242,6 +253,8 @@ export interface AgentStatus {
   lastSyncAt: string | null;
   /** T34: the last golden-set run before activation — counts only; null until one ran. */
   golden: { generation: number; met: boolean; reports: Array<{ tag: string; arm: string; cases: number; passed: number; minPassBps: number }> } | null;
+  /** T40: the customer's datastore this runtime hydrates from — absent when none was given. */
+  datastore?: DatastoreStatus;
   /**
    * Prompt variables and where they come from: the names this application can fill (registered sources), and per
    * slot and arm of the active release the required names no source fills — the ones every call site must pass.
@@ -254,6 +267,18 @@ export interface AgentStatus {
   lastSyncOutcome: string | null;
   consecutiveSyncFailures: number;
   nextSyncAt: string | null;
+}
+
+/** T40: what the last hydration from the customer's datastore found. */
+export interface DatastoreStatus {
+  region: string | null;
+  lastHydrateAt: string | null;
+  lastOutcome: HydrateOutcome["outcome"] | null;
+  /** The newest generation the datastore holds for this region (or the global rows); 0 when none. */
+  newestGeneration: number;
+  rowsFrom: "region" | "global" | null;
+  /** The fleet rollback in force, as the datastore says it. */
+  rollback: { generation: number; heldBackBelow: number; scope: "region" | "global"; setAt: string; reason?: string } | null;
 }
 
 export interface ReleaseChange {
@@ -364,7 +389,17 @@ export type BundleOutcome =
   | { outcome: "staged"; generation: number }
   | { outcome: "unchanged"; generation: number }
   | { outcome: "held_back"; generation: number; heldBackBelow: number }
-  | { outcome: "refused"; generation: number | null; reason: RefusalCode | "generation_rollback" | "expired" | "model_unavailable" | "unusable" | "daemon_attached" | "no_store"; held?: number; detail?: string };
+  | { outcome: "refused"; generation: number | null; reason: RefusalCode | "generation_rollback" | "expired" | "model_unavailable" | "unusable" | "daemon_attached" | "no_store" | "no_datastore"; held?: number; detail?: string };
+
+/**
+ * T40: what `hydrate()` did — a `BundleOutcome` for the row it read, `rolled_back` when the datastore's rollback moved
+ * this host down, `empty` when the datastore holds no row for it, `unavailable` when the datastore could not be read.
+ */
+export type HydrateOutcome =
+  | BundleOutcome
+  | { outcome: "rolled_back"; generation: number; heldBackBelow: number }
+  | { outcome: "empty"; generation: null }
+  | { outcome: "unavailable"; generation: null; detail: string };
 
 export class AgentStartError extends Error {
   constructor(
@@ -411,6 +446,8 @@ export class AirPrompterAgent {
   private daemonLeaseExpiresAt: string | null = null;
   private readonly contactListeners = new Set<(contact: { expiresAt: string | null; lastContactAt: string }) => void>();
   private bundleNotAfter: string | null = null;
+  private datastoreStatus: DatastoreStatus | null = null;
+  private datastoreTimer: ReturnType<typeof setInterval> | null = null;
   /**
    * T9: directives from the latest manifest whose envelope verified — honoured even when that manifest was left staged,
    * held back, or ignored as the generation already held. A Freeze reaches a fleet that never unlocks.
@@ -635,7 +672,7 @@ export class AirPrompterAgent {
    * nothing; one BELOW it is refused — a rollback is `rollback()`, never an older bundle; past `notAfter` it is
    * refused as an update (the store's release is fine) and applied only as the fallback, lease-expired. Never throws.
    */
-  private async takeBundle(contents: ReturnType<typeof openBundle>, source: "vendored_bundle" | "applied_bundle", now: string, verifyOptions: { now: string; root: RootMetadata; countersignRoot: RootMetadata | null; requireCountersign?: boolean }): Promise<BundleOutcome> {
+  private async takeBundle(contents: ReturnType<typeof openBundle>, source: "vendored_bundle" | "applied_bundle" | "datastore", now: string, verifyOptions: { now: string; root: RootMetadata; countersignRoot: RootMetadata | null; requireCountersign?: boolean }): Promise<BundleOutcome> {
     const store = this.store!;
     const generation = contents.manifest.payload.generation;
     const daysLeft = Math.floor((instant(contents.notAfter) - instant(now)) / 86_400_000);
@@ -791,6 +828,7 @@ export class AirPrompterAgent {
         store.discardStaged();
       }
     }
+    if (this.options.datastore) await this.takeDatastore(now, verifyOptions);
     if (this.options.vendoredBundle) await this.takeVendoredBundle(now, verifyOptions);
     if (!this.active && this.client) {
       // Nothing verified locally: one synchronous sync before serving is the only time the SDK waits on the network.
@@ -815,6 +853,148 @@ export class AirPrompterAgent {
     }
     this.startSpoolTimer();
     this.scheduleWindowUnlock();
+    this.startDatastorePoll();
+  }
+
+  /** T40: re-read the datastore on a timer, off the request path, when `datastore.pollSeconds` asks for it. */
+  private startDatastorePoll(): void {
+    const seconds = this.options.datastore?.pollSeconds;
+    if (!seconds || this.datastoreTimer) return;
+    this.datastoreTimer = setInterval(() => void this.hydrate(), Math.max(1, seconds) * 1000);
+    this.datastoreTimer.unref?.();
+  }
+
+  /**
+   * T40: hydrate from the customer's datastore now — the row for this region (else the global rows), the rollback in
+   * force applied. One pass over the store at a time, like `applyBundle`. Never throws; the outcome says what happened.
+   */
+  async hydrate(): Promise<HydrateOutcome> {
+    if (!this.options.datastore) return { outcome: "refused", generation: null, reason: "no_datastore" };
+    if (this.daemon) return { outcome: "refused", generation: null, reason: "daemon_attached" };
+    if (!this.store) return { outcome: "refused", generation: null, reason: "no_store" };
+    const now = this.nowIso();
+    const verifyOptions = { now, root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) };
+    const previous = this.syncing ?? Promise.resolve();
+    let outcome!: HydrateOutcome;
+    const pass = previous.catch(() => undefined).then(async () => { outcome = await this.takeDatastore(now, verifyOptions); });
+    const guarded: Promise<void> = pass.finally(() => { if (this.syncing === guarded) this.syncing = null; });
+    this.syncing = guarded;
+    await guarded;
+    return outcome;
+  }
+
+  private datastoreKey(): ReleaseKey {
+    return { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target, region: this.options.datastore?.region ?? null };
+  }
+
+  /**
+   * T40: one read of the datastore and what it asks of this host. Without a rollback in force the newest row is an
+   * update like any `applyBundle` (never below the held generation: a stale replica or a restored backup cannot move a
+   * host backwards) — and a local hold the datastore no longer asks for is released first, so the fleet's newest row
+   * is not held back by a rollback that was cleared. With one in force the row it names is served: below what the host
+   * holds it is a forced downgrade (verified through the whole chain, stamped on evidence, `forced_downgrade` in the
+   * spool), and every generation up to the rollback's `heldBackBelow` is held back until the fleet moves past it.
+   */
+  private async takeDatastore(now: string, verifyOptions: { now: string; root: RootMetadata; countersignRoot: RootMetadata | null; requireCountersign?: boolean }): Promise<HydrateOutcome> {
+    const datastore = this.options.datastore!;
+    const store = this.store!;
+    const key = this.datastoreKey();
+    const record = (plan: HydrationPlan | null, outcome: HydrateOutcome): HydrateOutcome => {
+      this.datastoreStatus = {
+        region: key.region,
+        lastHydrateAt: now,
+        lastOutcome: outcome.outcome,
+        newestGeneration: plan?.newest ?? this.datastoreStatus?.newestGeneration ?? 0,
+        rowsFrom: plan ? plan.rowsFrom : (this.datastoreStatus?.rowsFrom ?? null),
+        rollback: plan ? (plan.control ? { generation: plan.control.generation, heldBackBelow: plan.control.heldBackBelow, scope: plan.control.scope, setAt: plan.control.setAt, ...(plan.control.reason ? { reason: plan.control.reason } : {}) } : null) : (this.datastoreStatus?.rollback ?? null),
+      };
+      return outcome;
+    };
+    let plan: HydrationPlan;
+    try {
+      plan = await resolveHydration(datastore.store, key);
+    } catch (error) {
+      const detail = String((error as Error).message ?? error).slice(0, 240);
+      this.log({ event: "datastore_unavailable", region: key.region, reason: detail });
+      return record(null, { outcome: "unavailable", generation: null, detail });
+    }
+    if (plan.missingRollbackGeneration !== undefined) this.log({ event: "datastore_rollback_missing", region: key.region, generation: plan.missingRollbackGeneration, message: `the datastore's rollback names generation ${plan.missingRollbackGeneration}, which it does not hold; serving the newest row` });
+    if (!plan.row) return record(plan, { outcome: "empty", generation: null });
+    let contents: ReturnType<typeof openBundle>;
+    try {
+      contents = openBundle(JSON.parse(plan.row.bundle) as Bundle, { agentId: this.options.agentId, target: this.options.target }, this.options.distributionKey ?? this.options.vendoredBundle?.distributionKey);
+    } catch (error) {
+      this.log({ event: "datastore_row_unusable", region: key.region, generation: plan.row.generation, reason: (error as Error).message });
+      return record(plan, { outcome: "refused", generation: plan.row.generation, reason: "unusable", detail: (error as Error).message });
+    }
+    const control = plan.control;
+    if (!control) {
+      const heldBackBelow = store.state.heldBackBelow;
+      if (heldBackBelow !== undefined && contents.manifest.payload.generation > store.state.generation) {
+        store.releaseHold();
+        this.log({ event: "datastore_hold_released", heldBackBelow, generation: contents.manifest.payload.generation });
+      }
+      return record(plan, await this.takeBundle(contents, "datastore", now, verifyOptions));
+    }
+    const generation = contents.manifest.payload.generation;
+    const held = Math.max(store.state.generation, this.stagedManifest?.payload.generation ?? 0);
+    let outcome: HydrateOutcome;
+    if (this.active?.generation === generation) outcome = { outcome: "unchanged", generation };
+    else if (this.active && generation < held) outcome = await this.takeRollback(contents, control.heldBackBelow, now, verifyOptions);
+    else {
+      // Up to (or, with nothing active, onto) the rollback's generation: an update like any other, past a hold the
+      // datastore's own rollback set — which is set again below either way.
+      store.releaseHold();
+      outcome = await this.takeBundle(contents, "datastore", now, verifyOptions);
+    }
+    store.holdBack(control.heldBackBelow);
+    return record(plan, outcome);
+  }
+
+  /** T40: the datastore's rollback below what the host holds — the whole chain, then a forced step down and a hold. */
+  private async takeRollback(contents: ReturnType<typeof openBundle>, heldBackBelow: number, now: string, verifyOptions: { now: string; root: RootMetadata; countersignRoot: RootMetadata | null; requireCountersign?: boolean }): Promise<HydrateOutcome> {
+    const store = this.store!;
+    const generation = contents.manifest.payload.generation;
+    if (instant(contents.notAfter) < instant(now)) {
+      this.log({ event: "datastore_rollback_refused", reason: "expired", generation, notAfter: contents.notAfter });
+      return { outcome: "refused", generation, reason: "expired" };
+    }
+    try {
+      const rootVerdict = verifyRootMetadata({ candidate: contents.keySet, trusted: this.trustedRoot, now });
+      if (rootVerdict.ok) {
+        this.trustedRoot = contents.keySet;
+        store.acceptRoot(contents.keySet);
+      }
+      const payloads = bundlePayloadBytes(contents);
+      // An older release is still a SIGNED release for this scope: everything but the counter is checked.
+      const verdict = verifyManifest({ manifest: contents.manifest, root: this.trustedRoot, now, scope: { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target }, storedGeneration: 0, payloads, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) });
+      if (!verdict.ok) {
+        this.log({ event: "datastore_rollback_refused", reason: verdict.reason, generation });
+        this.lastRefusal = verdict.reason;
+        return { outcome: "refused", generation, reason: verdict.reason };
+      }
+      const missing = requiredModelsMissing(contents.manifest.payload, this.declaredModels());
+      if (missing.length > 0) {
+        this.log({ event: "datastore_rollback_refused", reason: "model_unavailable", generation, models: missing });
+        return { outcome: "refused", generation, reason: "model_unavailable", detail: missing.join(", ") };
+      }
+      // The inactive slot is overwritten: a staged release there is not approved for this host any more.
+      if (store.state.staged) store.discardStaged();
+      this.stagedManifest = null;
+      store.stage({ manifest: contents.manifest, payloads, force: true });
+      const slot = store.activate();
+      store.holdBack(heldBackBelow);
+      this.active = store.load(slot, { ...verifyOptions, root: this.trustedRoot });
+      this.source = "store";
+      this.lastRefusal = null;
+      this.spool.refusal({ at: now, reason: "forced_downgrade", generation, tag: null }, this.nowMs());
+      this.log({ event: "datastore_rolled_back", generation, heldBackBelow });
+      this.emitChange();
+      return { outcome: "rolled_back", generation, heldBackBelow };
+    } catch (error) {
+      this.log({ event: "datastore_rollback_unusable", reason: (error as Error).message, generation });
+      return { outcome: "refused", generation, reason: "unusable", detail: (error as Error).message };
+    }
   }
 
   /** S6: once a minute, the windows of the minute that passed are written and the open segment closed — off the request path, never the current minute. */
@@ -1921,6 +2101,7 @@ export class AirPrompterAgent {
       lastSyncOutcome: this.lastSyncOutcome,
       consecutiveSyncFailures: this.consecutiveSyncFailures,
       nextSyncAt: this.nextSyncMs === null || !this.timer ? null : new Date(this.nextSyncMs).toISOString(),
+      ...(this.options.datastore ? { datastore: this.datastoreStatus ?? { region: this.options.datastore.region ?? null, lastHydrateAt: null, lastOutcome: null, newestGeneration: 0, rowsFrom: null, rollback: null } } : {}),
     };
   }
 
@@ -1947,6 +2128,8 @@ export class AirPrompterAgent {
     this.windowTimer = null;
     if (this.spoolTimer) clearInterval(this.spoolTimer);
     this.spoolTimer = null;
+    if (this.datastoreTimer) clearInterval(this.datastoreTimer);
+    this.datastoreTimer = null;
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = null;
     if (this.heartbeating) await this.heartbeating;

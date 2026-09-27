@@ -21,6 +21,7 @@ from .agent import (
     AgentStatus,
     AirPrompterAgent,
     ApplyOptions,
+    DatastoreOptions,
     GoldenOptions,
     PromptHandle,
     ReleaseChange,
@@ -96,6 +97,8 @@ from airprompter_agent_telemetry.spool.writer import (
 from airprompter_agent_sync.store.key_provider import KeyProvider, custom_key_provider, file_key, kms, os_keystore, unwrap_with_raw_key, vault, wrap_with_raw_key
 from airprompter_agent_sync.store.payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
 from airprompter_agent_sync.store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
+from airprompter_agent_sync.store.release_datastore import DatastoreRollbackResult, HydrationPlan, MemoryReleaseDatastore, ReleaseControl, ReleaseDatastore, ReleaseKey, StoredReleaseRow, clear_datastore_rollback, resolve_hydration, rollback_datastore, rollout_of
+from airprompter_agent_sync.sync.pull_to_datastore import PullToDatastoreResult, pull_to_datastore
 from airprompter_agent_core.control.client import SyncClient
 from airprompter_agent_sync.sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
 from airprompter_agent_sync.sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
@@ -135,6 +138,20 @@ from airprompter_agent_runtime.release.resolver import Disabled, ReleaseResolver
 __version__ = SDK_VERSION
 
 __all__ = [
+    "DatastoreOptions",
+    "DatastoreRollbackResult",
+    "HydrationPlan",
+    "MemoryReleaseDatastore",
+    "PullToDatastoreResult",
+    "ReleaseControl",
+    "ReleaseDatastore",
+    "ReleaseKey",
+    "StoredReleaseRow",
+    "clear_datastore_rollback",
+    "pull_to_datastore",
+    "resolve_hydration",
+    "rollback_datastore",
+    "rollout_of",
     "APBUNDLE_INFO",
     "AppliedInference",
     "INFERENCE_KEYS",

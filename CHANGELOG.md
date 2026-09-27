@@ -10,6 +10,15 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### Added
+- Your datastore carries the release (T40, TypeScript and Python): a `ReleaseDatastore` DAO the application implements over its own table (`latest`, `get`, `generations`, `put` — the row and the puller's edge state in one transaction — `edge`, `putEdge`, `control`, `setControl`), with `MemoryReleaseDatastore` as the reference. `pullToDatastore` / `pull_to_datastore` is the puller around it: the edge state and the newest generation read from the datastore, the sealed row written back with a content-free `rollout` summary (arms, dial-up weights, ramp steps, disabled scopes) for the customer's own queries. `AirPrompterAgent.start({ datastore: { store, region, pollSeconds } })` hydrates from it after the host's own store and before the vendored bundle; `ap.hydrate()` re-reads it; `status().datastore` reports what it found. Every row is verified through the same chain as OTA; the signed manifest inside it carries the ramp, so dial-up percentages walk on each host's clock as signed. `docs/datastore.md`.
+- Fleet rollback held in the datastore: `rollbackDatastore` / `rollback_datastore` names an older row and the generation it steps down from; every runtime that hydrates next steps down (verified, stamped as a forced downgrade) and holds the newer generations back until a later promotion or `clearDatastoreRollback` ends it. An older row with no rollback in the datastore is still refused.
+- Regions: every row and rollback is keyed by region; a region with rows of its own serves them, one without reads the global rows; a regional rollback binds that region, a global one every region without its own.
+- `SlotStore.holdBack` / `releaseHold` (`hold_back` / `release_hold`): the store's existing `heldBackBelow`, set and cleared by the datastore's rollback. No store-format change.
+
+### Changed
+- `@airprompter/agent-sdk`'s publish size budget is 260 KB (was 240) — the datastore hydration.
+
 ## 0.2.14 — 2026-09-17 (protocol 0.3.4)
 
 ### Added

@@ -330,6 +330,23 @@ export class SlotStore {
     return previous;
   }
 
+  /**
+   * T40: hold generations at or below `generation` back — a fleet rollback read from the customer's datastore, which
+   * steps down through `stage({ force: true })` + `activate()` and then records what it stepped down from, exactly as
+   * `rollbackLocal` does. Never lowers a hold already in force.
+   */
+  holdBack(generation: number): void {
+    if (this.file.heldBackBelow !== undefined && this.file.heldBackBelow >= generation) return;
+    this.write({ ...this.file, heldBackBelow: generation });
+  }
+
+  /** T40: end a hold (the datastore's rollback was cleared): the held-back generations may be applied again. */
+  releaseHold(): void {
+    if (this.file.heldBackBelow === undefined) return;
+    const { heldBackBelow: _released, ...rest } = this.file;
+    this.write(rest as StoreFile);
+  }
+
   /** Discard a staged slot (a crashed apply, or a refused unlock). */
   discardStaged(): void {
     if (!this.file.staged) return;

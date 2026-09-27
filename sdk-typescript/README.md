@@ -139,6 +139,14 @@ variable the slot did not declare throws.
    `nextPullDelayMs` stretches the interval while nothing changes;
    `skipPointer: true` is the "check now" a nudge or an operator uses
    ([docs/change-notification.md](../docs/change-notification.md)).
+   Or hand the SDK your datastore and skip the glue: implement the
+   eight-method `ReleaseDatastore` DAO over your table, run
+   `pullToDatastore({ datastore, region, … })` in the puller, and start
+   each runtime with `datastore: { store, region, pollSeconds? }` — it
+   hydrates from the datastore at start and on `ap.hydrate()`, the ramp
+   walking as signed, a rollback set with `rollbackDatastore()` moving the
+   whole fleet (or one region) down and held until the fleet moves past it
+   ([docs/datastore.md](../docs/datastore.md)).
 5. One shape is not a failure: the sync found a release **staged under
    `unlock_required`** and nothing active — a first production release,
    or a restart whose active slot is unusable beside a staged one. The

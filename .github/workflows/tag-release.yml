@@ -1,0 +1,97 @@
+# Cuts release tags without a local push. Run it from the Actions tab (or the
+# API) with one or more tags and the commit on main they name; it pushes each
+# tag and then starts the Release workflow on it.
+#
+# A tag pushed with GITHUB_TOKEN does not trigger other workflows, so this job
+# dispatches release.yml (or ci.yml, for a protocol tag) on the new tag itself.
+# release.yml gates its publish jobs on github.ref, which a dispatch on a tag
+# ref sets exactly as a push does; the dispatch also runs its dry-run job,
+# which publishes nothing.
+#
+# The same workflow deletes a stale branch when `delete_branch` is given; it
+# refuses the default branch.
+
+name: Tag release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Tags to create, space-separated (e.g. sdk-typescript/v0.3.0 sdk-python/v0.3.0)"
+        required: false
+        default: ""
+      sha:
+        description: "Commit on main the tags point at (full or short SHA)"
+        required: false
+        default: ""
+      delete_branch:
+        description: "Optional: a branch to delete (never the default branch)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag and start the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+    env:
+      TAGS: ${{ inputs.tags }}
+      SHA: ${{ inputs.sha }}
+      DELETE_BRANCH: ${{ inputs.delete_branch }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the inputs
+        run: |
+          if [ -z "$TAGS" ] && [ -z "$DELETE_BRANCH" ]; then
+            echo "Nothing to do: give tags (with sha) or delete_branch"; exit 1
+          fi
+          if [ -n "$TAGS" ]; then
+            [ -n "$SHA" ] || { echo "tags need a sha"; exit 1; }
+            for tag in $TAGS; do
+              [[ "$tag" =~ ^(sdk-typescript|sdk-python|cli|conformance|protocol)/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+                || { echo "Not a release tag: $tag"; exit 1; }
+              if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+                echo "$tag already exists"; exit 1
+              fi
+            done
+            git cat-file -e "$SHA^{commit}" || { echo "Unknown commit: $SHA"; exit 1; }
+            git merge-base --is-ancestor "$SHA" "origin/$DEFAULT_BRANCH" \
+              || { echo "$SHA is not on $DEFAULT_BRANCH"; exit 1; }
+          fi
+          if [ -n "$DELETE_BRANCH" ] && [ "$DELETE_BRANCH" = "$DEFAULT_BRANCH" ]; then
+            echo "Refusing to delete the default branch"; exit 1
+          fi
+      - name: Push the tags
+        if: inputs.tags != ''
+        run: |
+          for tag in $TAGS; do git tag "$tag" "$SHA"; done
+          git push origin $(for tag in $TAGS; do echo "refs/tags/$tag"; done)
+      - name: Start the release on each tag
+        if: inputs.tags != ''
+        run: |
+          for tag in $TAGS; do
+            case "$tag" in
+              protocol/*) workflow=ci.yml ;;
+              *) workflow=release.yml ;;
+            esac
+            gh workflow run "$workflow" --ref "$tag"
+            echo "Started $workflow on $tag"
+          done
+      - name: Delete the branch
+        if: inputs.delete_branch != ''
+        run: git push origin --delete "$DELETE_BRANCH"

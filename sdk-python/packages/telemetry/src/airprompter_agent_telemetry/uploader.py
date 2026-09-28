@@ -25,6 +25,7 @@ Example::
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import os
@@ -41,6 +42,7 @@ import httpx
 from airprompter_agent_core._util import instant, iso_ms
 from airprompter_agent_core.ports import FsPort, OsFs, fs_failure_code
 from airprompter_agent_core.telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
+from .spool.manifest import MANIFEST_GRACE_MS, MANIFEST_NAME, manifest_name_of, read_segment_manifest, segment_name_of_manifest, sha256_hex
 from .spool.writer import HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epoch_minute, segment_name
 
 UPLOAD_BACKOFF_BASE_MS = 1000
@@ -304,15 +306,27 @@ class PassResult:
     held: bool = False
 
 
+def _takes_report(grant_for: Callable[..., GrantDecision]) -> bool:
+    """Whether a ``grant_for`` accepts the writer's report as a second argument (0.3.0); an older one takes the id alone."""
+    try:
+        parameters = list(inspect.signature(grant_for).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in parameters):
+        return True
+    return len([p for p in parameters if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]) >= 2
+
+
 class AirPrompterUploadSink:
-    """AirPrompter's sink (S13): one grant per writer prefix (the daemon's heartbeat carrying that writer's instance id), a
+    """AirPrompter's sink (S13): one grant per writer prefix (a heartbeat carrying that writer's instance id and its report), a
     POST of exactly the whole lines to the customer's own prefix. A lapsed grant is replaced once; a throttled heartbeat is
     a hold; a refused or unreachable bucket is a failure under backoff, the segment kept."""
 
     kind = "airprompter"
 
-    def __init__(self, *, grant_for: Callable[[str], GrantDecision], transport: Optional[httpx.BaseTransport] = None, now_ms: Optional[Callable[[], float]] = None, on_grant: Optional[Callable[[GrantDecision], None]] = None):
+    def __init__(self, *, grant_for: Callable[..., GrantDecision], transport: Optional[httpx.BaseTransport] = None, now_ms: Optional[Callable[[], float]] = None, on_grant: Optional[Callable[[GrantDecision], None]] = None):
         self._grant_for_writer = grant_for
+        self._grant_takes_report = _takes_report(grant_for)
         self._transport = transport
         self._now_ms = now_ms or (lambda: time.time() * 1000)
         self._on_grant = on_grant
@@ -321,12 +335,12 @@ class AirPrompterUploadSink:
     def status(self) -> dict[str, Any]:
         return {"grants": [{"instanceId": instance_id, "expiresAt": grant.expires_at} for instance_id, grant in self.grants.items()]}
 
-    def grant_for(self, instance_id: str) -> GrantDecision:
+    def grant_for(self, instance_id: str, report: Optional[dict[str, Any]] = None) -> GrantDecision:
         held = self.grants.get(instance_id)
         if held is not None and instant(held.expires_at) - GRANT_REFRESH_MARGIN_MS > self._now_ms():
             return GrantDecision("grant", grant=held)
         self.grants.pop(instance_id, None)
-        decision = self._grant_for_writer(instance_id)
+        decision = self._grant_for_writer(instance_id, report) if self._grant_takes_report else self._grant_for_writer(instance_id)
         if decision.kind == "grant" and decision.grant is not None:
             self.grants[instance_id] = decision.grant
             if self._on_grant is not None:
@@ -334,7 +348,7 @@ class AirPrompterUploadSink:
         return decision
 
     def ship(self, segment: UploadSegment) -> UploadOutcome:
-        decision = self.grant_for(segment.instance_id)
+        decision = self.grant_for(segment.instance_id, segment.report)
         if decision.kind == "hold":
             return UploadOutcome("hold", reason=decision.reason, retry_after_ms=int(decision.retry_after_seconds or 900) * 1000)
         if decision.kind != "grant" or decision.grant is None:
@@ -343,7 +357,7 @@ class AirPrompterUploadSink:
         if outcome.status == "refused" and outcome.expired:
             # The grant lapsed between the check and the bucket's clock: one fresh grant, one more try.
             self.grants.pop(segment.instance_id, None)
-            fresh = self.grant_for(segment.instance_id)
+            fresh = self.grant_for(segment.instance_id, segment.report)
             if fresh.kind == "grant" and fresh.grant is not None:
                 outcome = post_segment(grant=fresh.grant, segment=segment.segment, data=segment.data, transport=self._transport, now_ms=self._now_ms)
         if outcome.status == "ok":
@@ -359,7 +373,7 @@ class SpoolUploader:
         *,
         directory: str,
         instance_id: str,
-        grant_for: Optional[Callable[[str], GrantDecision]] = None,
+        grant_for: Optional[Callable[..., GrantDecision]] = None,
         transport: Optional[httpx.BaseTransport] = None,
         now_ms: Optional[Callable[[], float]] = None,
         fs: Optional[FsPort] = None,
@@ -372,8 +386,22 @@ class SpoolUploader:
         open_reclaim_ms: Optional[int] = None,
         interval_seconds: int = 300,
         sink: Optional[UploadSink] = None,
+        scope: Optional[Mapping[str, str]] = None,
+        manifest_grace_ms: Optional[int] = None,
+        on_pass: Optional[Callable[[PassResult], None]] = None,
     ):
+        """``scope`` (``{"agentId", "target"}``, ``protocol/daemon.md``): a segment whose manifest names another pair is left
+        alone for that pair's uploader. ``manifest_grace_ms``: how long a manifest-less segment waits for its writer to
+        add one (60 s with a scope, 0 without); an orphan manifest is deleted after the same wait. ``grant_for`` may take
+        ``(instance_id, report)`` — the writer's heartbeat report from its manifest, ``None`` without one. ``on_pass`` is called
+        after every pass with what it did; a raise from it is ignored."""
+        self._on_pass = on_pass
         self.dir = directory
+        self._scope = dict(scope) if scope else None
+        self._grace_ms = manifest_grace_ms if manifest_grace_ms is not None else (MANIFEST_GRACE_MS if scope else 0)
+        #: When this uploader first saw a manifest-less segment or an orphan manifest, on its own clock.
+        self._first_seen: dict[str, float] = {}
+        self._foreign_segments = 0
         self.instance_id = instance_id
         self._now_ms = now_ms
         self._fs: FsPort = fs or OsFs()
@@ -510,6 +538,7 @@ class SpoolUploader:
             total -= size
             if not removed:
                 continue
+            self._remove_manifest(name)
             evicted += 1
             evicted_bytes += size
         if evicted > 0:
@@ -521,9 +550,31 @@ class SpoolUploader:
                 n += 1
                 name = segment_name(self.instance_id, epoch_minute(at), n)
             self._guard("write_dropped_row", lambda: self._fs.write_file(os.path.join(self.dir, name), (json.dumps(row, separators=(",", ":")) + "\n").encode("utf-8"), 0o600))
+            # Written whole by this uploader: no writer will add a manifest, so it waits for no grace.
+            self._first_seen[name] = -math.inf
             self._dropped_segments += evicted
             self._log({"event": "spool_evicted", "segments": evicted, "bytes": evicted_bytes})
         return evicted
+
+    def _waited(self, name: str) -> bool:
+        """Whether ``name`` has waited out the grace since this uploader first saw it (always, with no grace)."""
+        if self._grace_ms <= 0:
+            return True
+        now = self._now()
+        seen = self._first_seen.get(name)
+        if seen is None:
+            self._first_seen[name] = now
+            return False
+        return now - seen >= self._grace_ms
+
+    def _remove_manifest(self, segment: str) -> None:
+        """A segment's manifest goes with it: after the ack, the eviction, the sink's drop. Gone already is fine."""
+        path = os.path.join(self.dir, manifest_name_of(segment))
+        try:
+            if self._fs.exists(path):
+                self._fs.unlink(path)
+        except OSError:
+            pass  # a sibling took it; the sweep deletes an orphan anyway
 
     def _read_segment(self, path: str) -> Optional[bytes]:
         data: list[bytes] = []
@@ -574,9 +625,34 @@ class SpoolUploader:
                 self._log({"event": "open_segment_reclaimed", "segment": name[: -len(".open")]})
 
             self._guard("reclaim_open", reclaim)
+        # A manifest whose segment is gone (acknowledged by a sibling, evicted), or a writer's temp file left by a crash, once past the grace.
+        present = set(names)
+        for seen in list(self._first_seen):
+            if (seen[len("orphan:"):] if seen.startswith("orphan:") else seen) not in present:
+                del self._first_seen[seen]
+        for name in names:
+            if MANIFEST_NAME.match(name):
+                segment = segment_name_of_manifest(name)
+                orphan = segment not in present and f"{segment}.open" not in present
+            else:
+                orphan = re.match(r"^seg-.+\.manifest\.json\.[0-9a-f]+\.tmp$", name) is not None
+            if not orphan:
+                continue
+            key = f"orphan:{name}"
+            now = self._now()
+            first = self._first_seen.get(key)
+            if first is None:
+                self._first_seen[key] = now
+            elif now - first >= max(self._grace_ms, MANIFEST_GRACE_MS):
+                self._guard("sweep_manifest", lambda name=name: self._fs.unlink(os.path.join(self.dir, name)))
+                self._first_seen.pop(key, None)
 
     def _quarantine(self, name: str, reason: str, detail: Any = None) -> None:
         self._guard("quarantine", lambda: self._fs.rename(os.path.join(self.dir, name), os.path.join(self.dir, "quarantine", name)))
+        # The pair moves together, so an operator reads the segment beside what its writer said about it.
+        manifest = manifest_name_of(name)
+        if self._fs.exists(os.path.join(self.dir, manifest)):
+            self._guard("quarantine_manifest", lambda: self._fs.rename(os.path.join(self.dir, manifest), os.path.join(self.dir, "quarantine", manifest)))
         self._quarantined_segments += 1
         self._log({"event": "segment_quarantined", "segment": name, "reason": reason, **({"detail": detail} if detail is not None else {})})
 
@@ -589,7 +665,13 @@ class SpoolUploader:
     def run_once(self) -> PassResult:
         """One pass: sweep, budget, then each closed segment oldest first — validate, grant, POST, move — until the spool is empty, a hold, or a failure. Never raises; one in flight at a time."""
         with self._in_flight:
-            return self._pass()
+            result = self._pass()
+        if self._on_pass is not None:
+            try:
+                self._on_pass(result)
+            except Exception:  # noqa: BLE001 — the hook is the caller's; a pass is never undone by it
+                pass
+        return result
 
     def _pass(self) -> PassResult:
         result = PassResult()
@@ -608,6 +690,30 @@ class SpoolUploader:
                 # Taken away between the listing and the read (a sibling's eviction): nothing to upload, nothing lost here.
                 if data is None:
                     continue
+                # protocol/daemon.md: the manifest says whose segment this is and what it must be.
+                report: Optional[dict[str, Any]] = None
+                found: list[Optional[dict[str, Any]]] = []
+                self._guard("read_manifest", lambda: found.append(read_segment_manifest(self._fs, self.dir, name)))
+                manifest = found[0] if found else None
+                if manifest is None:
+                    # Its writer may be about to add one: wait out the grace before shipping it under this uploader's own scope.
+                    if not self._waited(name):
+                        continue
+                elif not manifest["ok"]:
+                    self._quarantine(name, manifest["reason"])
+                    result.quarantined.append(name)
+                    continue
+                else:
+                    body = manifest["manifest"]
+                    if self._scope and (body.get("agentId") != self._scope.get("agentId") or body.get("target") != self._scope.get("target")):
+                        # Another agent's or target's: its own uploader ships it.
+                        self._foreign_segments += 1
+                        continue
+                    if body.get("bytes") != len(data) or body.get("sha256") != sha256_hex(data):
+                        self._quarantine(name, "manifest_mismatch")
+                        result.quarantined.append(name)
+                        continue
+                    report = body.get("report")
                 if len(data) > SEGMENT_MAX_BYTES:
                     self._quarantine(name, "oversize", len(data))
                     result.quarantined.append(name)
@@ -619,11 +725,12 @@ class SpoolUploader:
                     continue
                 if not inspection.rows:
                     # Nothing to say (an empty or partial-only segment): acknowledged locally, never uploaded.
-                    self._guard("ack_segment", lambda: self._fs.unlink(path))
+                    if self._guard("ack_segment", lambda: self._fs.unlink(path)):
+                        self._remove_manifest(name)
                     continue
                 # The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines.
                 payload = data[: data.rfind(b"\n") + 1] if inspection.partial_tail else data
-                outcome = self._sink.ship(UploadSegment(instance_id=instance_id, segment=name, rows=inspection.rows, data=payload))
+                outcome = self._sink.ship(UploadSegment(instance_id=instance_id, segment=name, rows=inspection.rows, data=payload, report=report))
                 if outcome.status == "hold":
                     retry_ms = int(outcome.retry_after_ms or 900_000)
                     self._backoff_until_ms = self._now() + retry_ms
@@ -633,14 +740,17 @@ class SpoolUploader:
                     return result
                 if outcome.status == "dropped":
                     # S13: the sink gave this segment up for good (the bridge's drop-and-count): deleted, counted, never silent.
-                    self._guard("drop_segment", lambda: self._fs.unlink(path))
+                    if self._guard("drop_segment", lambda: self._fs.unlink(path)):
+                        self._remove_manifest(name)
                     self._dropped_segments += 1
                     result.dropped += 1
                     self._log({"event": "segment_dropped_by_sink", "segment": name, "sink": self._sink.kind, "reason": outcome.reason})
                     continue
                 if outcome.status == "ok":
                     # S6: delete on ack. The object key is the file name, so a lost response replays to the same key; nothing is kept here.
-                    self._guard("ack_segment", lambda: self._fs.unlink(path))
+                    # The segment first, then its manifest: a crash between leaves an orphan manifest the sweep deletes.
+                    if self._guard("ack_segment", lambda: self._fs.unlink(path)):
+                        self._remove_manifest(name)
                     self._guard("stamp_upload", lambda: self._fs.write_file(os.path.join(self.dir, LAST_UPLOAD_MARKER), (iso_ms(self._now()) + "\n").encode("utf-8"), 0o600))
                     self._sent_segments += 1
                     self._last_upload_ms = self._now()
@@ -718,6 +828,7 @@ class SpoolUploader:
             "sentSegments": self._sent_segments,
             "quarantinedSegments": self._quarantined_segments,
             "droppedSegments": self._dropped_segments,
+            "foreignSegments": self._foreign_segments,
             "sink": self._sink.kind,
             "grants": list(sink_status(self._sink).get("grants") or []),
             "depth": self.depth(),

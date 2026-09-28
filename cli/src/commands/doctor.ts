@@ -5,7 +5,8 @@
  * this agent and target; the edge pointer when named), the root, the store
  * (present, opens, active slot re-verifies as a runtime would), the lease,
  * the key protection, the spool against its budget (and quarantine), the
- * daemon (reachable and its healthz), the policy pin. Reads only — nothing
+ * telemetry daemon (its discovery file live, for this scope, its folder
+ * writable), the policy pin. Reads only — nothing
  * here creates a store, writes a file or sends a heartbeat. Exit 0 when no
  * check fails (warnings are printed, not fatal); `refused` (1) otherwise.
  *
@@ -16,14 +17,15 @@
  * ```
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { SyncClient } from "../../../sdk-typescript/packages/core/src/control/client.js";
 import { instant } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
 import { SlotStore, isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
 import { fileKey } from "../../../sdk-typescript/packages/sync/src/store/keyProvider.js";
-import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
+import { nodeFs } from "../../../sdk-typescript/packages/core/src/ports/node.js";
+import { readDaemonDiscovery } from "../../../sdk-typescript/packages/telemetry/src/spool/manifest.js";
 import { HOST_SPOOL_BUDGET_BYTES } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
 import { LAST_UPLOAD_MARKER } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, parse, scopeOf, str, type OptionSpec } from "../args.js";
@@ -39,7 +41,6 @@ export const DOCTOR_OPTIONS: OptionSpec = {
   "base-url": { type: "string", default: "https://api.airprompter.com", help: "API base URL, asked for the manifest with the key in --api-key-env" },
   "api-key-env": { type: "string", default: "AIRPROMPTER_AGENT_KEY", help: "Environment variable holding the Agent key (never on argv); unset: the source check is skipped" },
   "edge-pointer-url": { type: "string", help: "The edge pointer to fetch, when the host uses one" },
-  socket: { type: "string", help: "Daemon socket path to ask (default: the store's daemon.sock)" },
   "spool-budget-bytes": { type: "string", help: "The closed-segment budget the host runs with (default 104857600)" },
   ...COMMON_OPTIONS,
 };
@@ -159,7 +160,7 @@ export async function doctor(argv: string[], ctx: Context): Promise<number> {
         const summary = summarizeManifest(loaded.manifest);
         checks.push(check("active_release", "ok", `slot ${state.active} verifies: generation ${summary.generation}, release ${summary.releaseDigest.slice(0, 19)}…, ${summary.slots} slots, signed by ${loaded.signingKeyId}`));
         const leaseFromIssue = instant(summary.issuedAt) + summary.leaseSeconds * 1000;
-        if (leaseFromIssue <= now) checks.push(check("lease", "warn", `the lease (${summary.leaseSeconds}s) lapsed from issue at ${new Date(leaseFromIssue).toISOString()} → ${summary.onLeaseExpiry}; only a runtime or daemon in contact renews it`, summary.onLeaseExpiry === "halt" ? "a runtime with no contact refuses every render under halt: restore the source (above) or apply a fresh release" : "a runtime with no contact serves this release degraded: restore the source (above) or apply a fresh release"));
+        if (leaseFromIssue <= now) checks.push(check("lease", "warn", `the lease (${summary.leaseSeconds}s) lapsed from issue at ${new Date(leaseFromIssue).toISOString()} → ${summary.onLeaseExpiry}; only a runtime in contact renews it`, summary.onLeaseExpiry === "halt" ? "a runtime with no contact refuses every render under halt: restore the source (above) or apply a fresh release" : "a runtime with no contact serves this release degraded: restore the source (above) or apply a fresh release"));
         else checks.push(check("lease", "ok", `${summary.leaseSeconds}s from the last contact (from issue it lapses ${new Date(leaseFromIssue).toISOString()}) → ${summary.onLeaseExpiry}`));
       } catch (error) {
         const reason = isStoreError(error) ? `${error.code}${error.detail ? `/${error.detail}` : ""}` : (error as Error).message;
@@ -174,39 +175,36 @@ export async function doctor(argv: string[], ctx: Context): Promise<number> {
     else checks.push(check("policy_pin", "ok", `${pin.value} (${pin.source === "operator" ? "set by an operator on this host" : `pinned from update ${pin.generation}`})`));
   }
 
-  // 7. The spool against its budget.
-  const spoolDir = join(storeDir, "spool", "telemetry");
+  // 7. The spool against its budget: the folder a live telemetry daemon published, else the store's own.
+  const found = readDaemonDiscovery(nodeFs, storeDir, { agentId: scope.agentId, target: scope.target, organizationId: scope.organizationId, nowMs: now });
+  const spoolDir = found.live ? found.discovery.spoolDir : join(storeDir, "spool", "telemetry");
   const tree = spoolTree(spoolDir);
   const share = tree.bytes / budget;
   const depth = `${tree.segments} unsent segment${tree.segments === 1 ? "" : "s"} (${tree.bytes} B, ${Math.round(share * 100)} % of the ${budget}-byte budget), ${tree.openSegments} open`;
-  if (share >= 1) checks.push(check("spool", "warn", `${depth}: at the budget, the oldest are being dropped`, "nothing is uploading: check the source and the daemon (below), or airprompter export-telemetry on a host that never calls home"));
-  else if (share >= 0.8) checks.push(check("spool", "warn", `${depth}: near the budget`, "uploads are not keeping up: check the source and the daemon (below)"));
+  if (share >= 1) checks.push(check("spool", "warn", `${depth}: at the budget, the oldest are being dropped`, "nothing is uploading: check the source and the telemetry daemon (below), or airprompter export-telemetry on a host that never calls home"));
+  else if (share >= 0.8) checks.push(check("spool", "warn", `${depth}: near the budget`, "uploads are not keeping up: check the source and the telemetry daemon (below)"));
   else checks.push(check("spool", "ok", depth));
   if (tree.quarantined > 0) checks.push(check("quarantine", "warn", `${tree.quarantined} quarantined segment${tree.quarantined === 1 ? "" : "s"} in ${join(spoolDir, "quarantine")}`, "a writer broke the spool contract: airprompter telemetry validate <segment> names the line and the field"));
-  if (tree.segments > 0 && tree.lastUpload && now - instant(tree.lastUpload) > 24 * 3600 * 1000) checks.push(check("last_upload", "warn", `last upload ${tree.lastUpload}, over a day ago, with segments waiting`, "check the source and the daemon (below)"));
+  if (tree.segments > 0 && tree.lastUpload && now - instant(tree.lastUpload) > 24 * 3600 * 1000) checks.push(check("last_upload", "warn", `last upload ${tree.lastUpload}, over a day ago, with segments waiting`, "check the source and the telemetry daemon (below)"));
   else if (tree.lastUpload) checks.push(check("last_upload", "ok", tree.lastUpload));
 
-  // 8. The daemon.
-  const socketPath = str(parsed, "socket") ?? daemonSocketPath({ stateDir, agentId: scope.agentId, target: scope.target });
-  if (!existsSync(socketPath)) checks.push(check("daemon", "skip", `none on this host (${socketPath}): SDKs sync in-process`));
-  else {
+  // 8. The telemetry daemon (protocol/daemon.md): optional — without one, a process with a key uploads its own spool.
+  if (found.live) {
+    const d = found.discovery;
+    let writable = true;
     try {
-      const client = await DaemonClient.connect({ socketPath, agentId: scope.agentId, target: scope.target, sdk: `airprompter-cli/${CLI_VERSION}`, timeoutMs: 3000 });
-      if (!client) checks.push(check("daemon", "fail", `${socketPath} exists but is not ours to trust or does not answer`, "a stale socket from a dead daemon: restart airprompterd (it reclaims the socket)"));
-      else {
-        try {
-          const healthz = (await client.request("healthz")) as { ok?: boolean; status?: string; reasons?: string[]; generation?: number };
-          const status = (await client.request("status")) as { pid?: number; uptimeSeconds?: number; clients?: number; lastSyncAt?: string | null; lastSyncOutcome?: string | null };
-          const detail = `pid ${status.pid}, up ${status.uptimeSeconds}s, ${status.clients} client${status.clients === 1 ? "" : "s"}, generation ${healthz.generation}, last sync ${status.lastSyncAt ?? "never"} (${status.lastSyncOutcome ?? "—"}); healthz ${healthz.status ?? (healthz.ok ? "ok" : "failing")}${healthz.reasons?.length ? `: ${healthz.reasons.join(", ")}` : ""}`;
-          checks.push(check("daemon", healthz.ok === false ? "fail" : healthz.status === "degraded" ? "warn" : "ok", detail, healthz.ok === false ? "the daemon serves nothing: its log names why (no verified release, a lapsed lease under halt)" : healthz.status === "degraded" ? "the daemon is serving but something is off: its log and airprompter status say what" : undefined));
-        } finally {
-          client.close();
-        }
-      }
-    } catch (error) {
-      checks.push(check("daemon", "fail", `${socketPath}: ${(error as Error).message}`, "a stale socket from a dead daemon, or one another user runs: restart airprompterd"));
+      accessSync(d.spoolDir, fsConstants.W_OK);
+    } catch {
+      writable = false;
     }
-  }
+    const detail = `airprompterd ${d.daemon.version} pid ${d.pid}, heartbeat ${d.heartbeatAt}, ships ${d.sink} from ${d.spoolDir}; sent ${d.upload.sentSegments}, quarantined ${d.upload.quarantinedSegments}, dropped ${d.upload.droppedSegments}${d.upload.backoffUntil ? `, backing off until ${d.upload.backoffUntil}` : ""}`;
+    if (!writable) checks.push(check("daemon", "fail", `${detail}; ${d.spoolDir} is not writable by this user`, "SDK processes cannot write where the daemon scans: give their user write access to the folder (or run them as the same user)"));
+    else if (d.sink === "none") checks.push(check("daemon", "warn", detail, "the daemon has no Agent key and no --upload-sink otlp: it ships nothing (processes with a key still upload their own)"));
+    else if (d.upload.backoffUntil && instant(d.upload.backoffUntil) > now) checks.push(check("daemon", "warn", detail, "uploads are failing: the daemon's log names why"));
+    else checks.push(check("daemon", "ok", detail));
+  } else if (found.reason === "absent") checks.push(check("daemon", "skip", `none on this host (${join(storeDir, "daemon.json")}): processes with a key upload their own spool`));
+  else if (found.reason === "stale") checks.push(check("daemon", "fail", `the daemon's file is stale (heartbeat ${found.discovery?.heartbeatAt ?? "unknown"}, pid ${found.discovery?.pid ?? "?"}): the daemon stopped without a clean exit`, "restart airprompterd; until then processes with a key upload their own spool, the rest keep it on disk"));
+  else checks.push(check("daemon", "fail", `${join(storeDir, "daemon.json")}: ${found.reason}`, found.reason === "scope" ? "the file names another agent or target: one daemon per agent and target" : "restart airprompterd: it rewrites the file"));
 
   // The verdict.
   const failed = checks.filter((c) => c.level === "fail");

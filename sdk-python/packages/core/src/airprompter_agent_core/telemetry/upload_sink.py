@@ -37,6 +37,9 @@ class UploadSegment:
     rows: list[dict[str, Any]]
     #: Exactly the whole lines, as bytes — what AirPrompter's sink posts.
     data: bytes
+    #: The writer's heartbeat report from the segment's manifest (``protocol/daemon.md``), without ``spool``; ``None`` for a
+    #: segment with no manifest. AirPrompter's sink sends it to obtain that writer's grant.
+    report: Optional[dict[str, Any]] = None
 
 
 @dataclass

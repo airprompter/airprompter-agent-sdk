@@ -102,7 +102,6 @@ from airprompter_agent_sync.store.kv_store import FileKvStore, KvEntry, KvStore,
 from airprompter_agent_sync.store.datastore_records import DATASTORE_FORMAT, DatastoreRecordError, datastore_keys, decode_datastore_record, encode_datastore_record
 from airprompter_agent_sync.sync.pull_to_datastore import PullToDatastoreResult, pull_to_datastore
 from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_sync.sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
 from airprompter_agent_sync.sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
 from airprompter_agent_core.checks import CHECK_BOUNDS, check_refusal, checks_refusals, estimate_tokens, evaluate_check, evaluate_checks, output_text_of, pattern_refusal, project_checks, validate_json_schema, value_at_path
 from airprompter_agent_runtime.inference import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
@@ -186,10 +185,6 @@ __all__ = [
     "BundleReleaseRefused",
     "CHECK_BOUNDS",
     "CanonicalJsonError",
-    "DAEMON_MAX_LINE_BYTES",
-    "DaemonClient",
-    "DaemonError",
-    "DaemonHello",
     "Delimiters",
     "DirectorySink",
     "Disabled",
@@ -304,7 +299,6 @@ __all__ = [
     "create_encrypted_bundle",
     "create_plaintext_bundle",
     "custom_key_provider",
-    "daemon_socket_path",
     "decrypt_payload",
     "default_of",
     "default_state_dir",

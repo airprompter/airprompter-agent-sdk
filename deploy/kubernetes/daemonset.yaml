@@ -1,16 +1,19 @@
-# airprompterd on every node: one sync loop per node, the store on a hostPath
-# the application pods mount read-write (they write their own spool segments
-# there; the daemon uploads them). Pods attach through the socket in the
-# store directory and need no Agent key of their own.
+# airprompterd on every node: the node's telemetry daemon (protocol/daemon.md).
+# It publishes daemon.json on a hostPath the application pods mount
+# read-write; the pods write their spool segments into the folder it names,
+# with a manifest each, and the daemon uploads them under the Agent key.
+# The pods load their releases themselves — their own store, the customer's
+# datastore or a vendored bundle — never from the daemon, and a pod that
+# hydrates from the datastore needs no Agent key at all.
 #
 #   kubectl create secret generic airprompterd --from-literal=AIRPROMPTER_AGENT_KEY=apa_live_…
-#   kubectl create configmap airprompterd-root --from-file=root.jwk.json
 #   kubectl apply -f deploy/kubernetes/daemonset.yaml
 #
 # Application pods: mount the same hostPath at the same mountPath, run as the
-# same runAsUser (10001), and start the SDK with sync.mode "daemon" and
-# stateDir "/var/lib/airprompter". If the daemon is not there, the SDK
-# syncs in-process — the DaemonSet is an optimization.
+# same runAsUser (10001), and start the SDK with stateDir
+# "/var/lib/airprompter" (or AIRPROMPTER_SPOOL_DIR / telemetry.spoolDir
+# pointing at the daemon's folder). If the daemon is not there, a pod with
+# a key uploads its own spool — the DaemonSet is an optimization.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -46,14 +49,6 @@ spec:
             - agt_…
             - --environment
             - prod
-            - --root
-            - /etc/airprompter/root.jwk.json
-            - --root-url
-            - https://EDGE/roots/prod/root.json
-            - --edge-pointer-url
-            - https://EDGE/g/TOKEN/generation.json
-            - --poll-seconds
-            - "30"
             - --json
           env:
             - name: XDG_STATE_HOME
@@ -66,12 +61,10 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /var/lib/airprompter
-            - name: root
-              mountPath: /etc/airprompter
-              readOnly: true
           livenessProbe:
             exec:
-              command: ["airprompter", "status", "--agent", "agt_…", "--environment", "prod", "--json"]
+              # Exits 1 when daemon.json is missing or its heartbeat is over ten minutes old.
+              command: ["airprompter", "status", "--agent", "agt_…", "--environment", "prod", "--require-daemon", "--json"]
             initialDelaySeconds: 10
             periodSeconds: 60
             timeoutSeconds: 5
@@ -91,7 +84,4 @@ spec:
           hostPath:
             path: /var/lib/airprompter
             type: DirectoryOrCreate
-        - name: root
-          configMap:
-            name: airprompterd-root
       terminationGracePeriodSeconds: 20

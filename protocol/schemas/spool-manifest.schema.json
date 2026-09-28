@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/0.3/spool-manifest.schema.json",
+  "title": "AirPrompter spool segment manifest (format 1)",
+  "description": "daemon.md › The segment manifest: `seg-<instanceId>-<epochMinute>-<n>.manifest.json`, written beside a closed segment after it is closed (temp file + rename). The telemetry daemon scans for these: it uploads only segments whose manifest names its own agent and target, checks the segment's size and SHA-256 against it, and obtains the writer's grant with the manifest's `report`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "kind",
+    "segment",
+    "bytes",
+    "sha256",
+    "rows",
+    "instanceId",
+    "organizationId",
+    "agentId",
+    "target",
+    "closedAt",
+    "report"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "kind": {
+      "const": "segment"
+    },
+    "segment": {
+      "type": "string",
+      "pattern": "^seg-[A-Za-z0-9_-]{1,64}-[0-9]{1,12}-[0-9]{1,6}\\.ndjson$",
+      "description": "The closed segment's file name, beside this manifest."
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1048576
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "instanceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "organizationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agentId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target": {
+      "type": "string",
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ]
+    },
+    "closedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "report": {
+      "description": "The writer's own heartbeat request (heartbeat.schema.json › request) as it stood when the segment closed, WITHOUT `spool`: the daemon adds its view of the host's spool and sends it to obtain this writer's upload grant. Content-free by the heartbeat's own schema.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "instanceId",
+        "sdk",
+        "syncMode",
+        "generation",
+        "applyState",
+        "storageProtection",
+        "catalog",
+        "lease"
+      ],
+      "properties": {
+        "protocol": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/protocol"
+        },
+        "instanceId": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/instanceId"
+        },
+        "instanceClass": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/instanceClass"
+        },
+        "heartbeatIntervalSeconds": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/heartbeatIntervalSeconds"
+        },
+        "sdk": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/sdk"
+        },
+        "host": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/host"
+        },
+        "syncMode": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/syncMode"
+        },
+        "generation": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/generation"
+        },
+        "activeReleaseDigest": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/activeReleaseDigest"
+        },
+        "stagedReleaseDigest": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/stagedReleaseDigest"
+        },
+        "applyState": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/applyState"
+        },
+        "refusal": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/refusal"
+        },
+        "applyPolicy": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/applyPolicy"
+        },
+        "unavailableModels": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/unavailableModels"
+        },
+        "signingKeyId": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/signingKeyId"
+        },
+        "storageProtection": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/storageProtection"
+        },
+        "catalog": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/catalog"
+        },
+        "lease": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/lease"
+        },
+        "localRollback": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/localRollback"
+        },
+        "unlockRequestsSeen": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/unlockRequestsSeen"
+        },
+        "disabled": {
+          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/disabled"
+        }
+      }
+    }
+  }
+}

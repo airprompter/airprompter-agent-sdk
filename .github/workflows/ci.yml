@@ -337,6 +337,8 @@ jobs:
         run: |
           docker build -f deploy/docker/Dockerfile -t airprompterd:ci .
           docker run --rm airprompterd:ci --version
+          # The telemetry daemon runs keyless (shipping nothing) and exits cleanly; a release-serving flag is refused by name.
+          docker run --rm airprompterd:ci daemon --org o --agent agt_1 --environment prod --exit-after 1
           code=0; docker run --rm airprompterd:ci daemon --org o --agent agt_1 --environment prod --root /nonexistent.json --exit-after 1 || code=$?; test "$code" -eq 2
 
   deploy-manifests-macos:

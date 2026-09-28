@@ -28,7 +28,8 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { errorNamed, experimentForTag, experimentsOf, nodeFs, protocolAtLeast } from "@airprompter/agent-core";
 import type { FsPort } from "@airprompter/agent-core";
-import { join } from "node:path";
+import { realpathSync } from "node:fs";
+import { join, resolve as resolvePath } from "node:path";
 
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "@airprompter/agent-core";
 import { rampWeightsAt } from "@airprompter/agent-core";
@@ -38,6 +39,7 @@ import { parseRunRef } from "@airprompter/agent-core";
 import type { Delimiters } from "@airprompter/agent-core";
 import { normalizeFeedback } from "@airprompter/agent-core";
 import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "@airprompter/agent-telemetry";
+import { readDaemonDiscovery, type DiscoveryResult } from "@airprompter/agent-telemetry";
 import { fileKey, type KeyProvider, type StorageProtection } from "@airprompter/agent-sync";
 import { requiredModelsMissing } from "@airprompter/agent-sync";
 import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "@airprompter/agent-sync";
@@ -53,7 +55,6 @@ import { JUDGE_RUBRICS, judgePrompt, judgeSignalsOf, parseJudgeReply, rubricFrom
 import { SpoolUploader, postSegment, type GrantDecision, type UploadGrant, type UploaderStatus } from "@airprompter/agent-telemetry";
 import { parseWindow, windowState, type UpdateWindow } from "@airprompter/agent-sync";
 import { SyncClient, type FetchLike } from "@airprompter/agent-core";
-import { DaemonClient, DaemonError, daemonSocketPath } from "@airprompter/agent-sync";
 import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "@airprompter/agent-sync";
 import { resolveHydration, type HydrationPlan, type ReleaseDatastore, type ReleaseKey } from "@airprompter/agent-sync";
 
@@ -65,10 +66,19 @@ export { PROTOCOL_VERSION, SDK_VERSION };
 /** A vendored bundle this close to its notAfter logs `vendored_bundle_expiring_soon` at start (the platform warns at the same distance). */
 export const VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30;
 
-export type SyncMode = "resident" | "on_invoke" | "daemon" | "offline";
+export type SyncMode = "resident" | "on_invoke" | "offline";
 
-/** Where the release comes from: this process's own store, a vendored bundle, or the host daemon over its socket. */
-export type ReleaseSource = "store" | "vendored_bundle" | "daemon";
+/** Where the release comes from: this process's own store (synced, applied, or hydrated from the datastore), or a vendored bundle. */
+export type ReleaseSource = "store" | "vendored_bundle";
+
+/**
+ * Where this process writes its spool (`protocol/daemon.md`): the `telemetry.spoolDir` option, `AIRPROMPTER_SPOOL_DIR`,
+ * the folder a live telemetry daemon published, or the store's own `spool/telemetry`.
+ */
+export type SpoolDirSource = "option" | "env" | "daemon" | "default";
+
+/** The environment variable that names the spool folder when `telemetry.spoolDir` does not. */
+export const SPOOL_DIR_ENV = "AIRPROMPTER_SPOOL_DIR";
 
 export interface StartOptions {
   organizationId: string;
@@ -89,7 +99,11 @@ export interface StartOptions {
   /** The customer's countersign root, when the target requires countersign. */
   countersignRoot?: RootMetadata;
   requireCountersign?: boolean;
-  sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string; daemonSocketPath?: string };
+  /**
+   * How this process syncs releases. `"daemon"` was removed in 0.3.0 — the telemetry daemon never serves releases — and
+   * `start()` refuses it with `invalid_options`.
+   */
+  sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string };
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */
   vendoredBundle?: { bundle: Bundle | string; distributionKey?: DistributionKey };
   /**
@@ -145,9 +159,17 @@ export interface StartOptions {
     /** Hosts: the closed-segment budget (default 100 MiB); the oldest unsent segments go past it and a `dropped` row says so. */
     spoolBudgetBytes?: number;
     /**
-     * S5: a resident host with no daemon uploads its own spool — the same `SpoolUploader` the daemon runs, in-process,
-     * on a timer off the request path, under this runtime's own grant. `false` leaves the spool for a daemon or an
-     * operator's `airprompter export-telemetry`; the budget still holds and `dropped` rows still count.
+     * The folder this process writes its spool to. Absent: `AIRPROMPTER_SPOOL_DIR`, else the folder a live telemetry
+     * daemon for this agent and target published (`<storeDir>/daemon.json`), else `<storeDir>/spool/telemetry`. An
+     * explicit folder never moves; a discovered one is re-read once a minute.
+     */
+    spoolDir?: string;
+    /**
+     * S5: a resident host whose spool no live telemetry daemon ships uploads it itself — the same `SpoolUploader` the
+     * daemon runs, in-process, on a timer off the request path, under this runtime's own grant. When a live daemon
+     * names this process's folder the daemon uploads and this process does not (re-checked once a minute, both ways).
+     * `false` leaves the spool for the daemon or an operator's `airprompter export-telemetry`; the budget still holds
+     * and `dropped` rows still count.
      */
     upload?: boolean;
     /**
@@ -171,7 +193,7 @@ export interface StartOptions {
   random?: () => number;
   logger?: (event: Record<string, unknown>) => void;
   /**
-   * T26: who reports on the heartbeat — this SDK by default; the daemon names itself `airprompterd`, the CLI
+   * T26: who reports on the heartbeat — this SDK by default; the telemetry daemon names itself `airprompterd`, the CLI
    * `airprompter-cli`. It names the *reporting software*, never the customer's app (the heartbeat schema is an enum,
    * so any other name is refused by the control plane); `start()` refuses it up front with `invalid_options`.
    */
@@ -215,7 +237,7 @@ export interface AgentStatus {
   stagedGeneration: number | null;
   applyState: "active" | "staged" | "awaiting_unlock" | "refused" | "vendored_fallback";
   lastRefusal: string | null;
-  storageProtection: StorageProtection | "daemon";
+  storageProtection: StorageProtection;
   signingKeyId: string | null;
   /** When the lease runs out: last successful contact + leaseSeconds (a vendored bundle's notAfter when nothing ever synced). */
   leaseExpiresAt: string | null;
@@ -247,9 +269,9 @@ export interface AgentStatus {
   heartbeat: { lastAt: string | null; nextAt: string | null; intervalSeconds: number; lastRefusal: string | null };
   spool: { depthSegments: number; depthBytes: number };
   source: ReleaseSource;
-  /** Attached to the host daemon (`sync.mode: "daemon"`), and whether that attachment is currently live. */
-  daemon: { attached: boolean; socketPath: string | null } | null;
-  /** The last sync pass this process ran (resident / on_invoke), for hosts and daemons that report it. */
+  /** Where the spool goes and who ships it (`protocol/daemon.md`). */
+  telemetry: TelemetryPlacement;
+  /** The last sync pass this process ran (resident / on_invoke). */
   lastSyncAt: string | null;
   /** T34: the last golden-set run before activation — counts only; null until one ran. */
   golden: { generation: number; met: boolean; reports: Array<{ tag: string; arm: string; cases: number; passed: number; minPassBps: number }> } | null;
@@ -262,11 +284,24 @@ export interface AgentStatus {
    * site) and a version this application cannot render is found there, not on the first request. Names only.
    */
   variables: { sources: string[]; unsourced: Array<{ tag: string; arm: string; names: string[] }> };
-  /** S5: this process's own uploader (a resident host with no daemon); null when a daemon, a memory sink or `telemetry.upload: false` owns the spool. */
+  /** S5: this process's own uploader; null when a live telemetry daemon, a memory sink or `telemetry.upload: false` owns the spool. */
   upload: UploaderStatus | null;
   lastSyncOutcome: string | null;
   consecutiveSyncFailures: number;
   nextSyncAt: string | null;
+}
+
+/** Where this process's spool goes and who ships it (`protocol/daemon.md`). */
+export interface TelemetryPlacement {
+  /** `directory` (segments in `spoolDir`) or `memory` (serverless; flushed at invocation end). */
+  sink: "directory" | "memory";
+  /** The folder segments are written to; null on the memory sink. */
+  spoolDir: string | null;
+  spoolDirFrom: SpoolDirSource | null;
+  /** `daemon`: a live telemetry daemon ships this folder. `self`: this process's own uploader. `none`: nobody here does. */
+  uploadedBy: "daemon" | "self" | "none";
+  /** The telemetry daemon for this agent and target, as its discovery file says; null when there is none. */
+  daemon: { live: boolean; pid: number; version: string; heartbeatAt: string; spoolDir: string } | null;
 }
 
 /** T40: what the last hydration from the customer's datastore found. */
@@ -292,8 +327,8 @@ export interface ReleaseChange {
  * - `failing` (ok: false): nothing verified to serve (generation 0); the lease lapsed under `onLeaseExpiry: "halt"`
  *   (every render refuses).
  * - `degraded` (ok: true): the lease lapsed under `degrade` (serving the last verified release); three or more
- *   consecutive sync failures; the uploader backing off; a forced downgrade in force; the daemon this process
- *   attached to is gone (serving what it holds); the spool at 80 % of its budget or more.
+ *   consecutive sync failures; the uploader backing off; a forced downgrade in force; the telemetry daemon's file has
+ *   gone stale and nothing here uploads instead (`upload_daemon_stale`); the spool at 80 % of its budget or more.
  * - `ok` otherwise. `reasons` names every rule that fired, in that order.
  */
 export interface Healthz {
@@ -311,13 +346,13 @@ export interface Healthz {
   lastSyncOutcome: string | null;
   consecutiveSyncFailures: number;
   forcedDowngrade: boolean;
-  daemon: { attached: boolean } | null;
+  telemetry: { uploadedBy: TelemetryPlacement["uploadedBy"]; daemon: "live" | "stale" | null };
   spool: { depthSegments: number; depthBytes: number; budgetBytes: number | null };
   lastUploadAt: string | null;
   backoffUntil: string | null;
 }
 
-/** The same rules on any status document — the daemon's healthz and a host's share it. */
+/** The same rules on any status document. */
 export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: number | null; nowMs: number }): Healthz {
   const reasons: string[] = [];
   const levels = { ok: 0, degraded: 1, failing: 2 } as const;
@@ -335,7 +370,8 @@ export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: numbe
   const backoffUntil = status.upload?.backoffUntil ?? null;
   if (backoffUntil && instant(backoffUntil) > input.nowMs) degraded("upload_backing_off");
   if (status.forcedDowngrade) degraded("forced_downgrade");
-  if (status.daemon && !status.daemon.attached) degraded("daemon_detached");
+  const telemetry = status.telemetry ?? null;
+  if (telemetry?.daemon && !telemetry.daemon.live && telemetry.uploadedBy === "none") degraded("upload_daemon_stale");
   const budgetBytes = input.spoolBudgetBytes ?? null;
   if (budgetBytes !== null && budgetBytes > 0 && status.spool.depthBytes >= budgetBytes * 0.8) degraded("spool_near_budget");
   const status_: Healthz["status"] = level;
@@ -354,7 +390,7 @@ export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: numbe
     lastSyncOutcome: status.lastSyncOutcome,
     consecutiveSyncFailures: status.consecutiveSyncFailures,
     forcedDowngrade: status.forcedDowngrade,
-    daemon: status.daemon ? { attached: status.daemon.attached } : null,
+    telemetry: { uploadedBy: telemetry?.uploadedBy ?? "none", daemon: telemetry?.daemon ? (telemetry.daemon.live ? "live" : "stale") : null },
     spool: { depthSegments: status.spool.depthSegments, depthBytes: status.spool.depthBytes, budgetBytes },
     lastUploadAt: status.upload?.lastUploadAt ?? null,
     backoffUntil,
@@ -389,7 +425,7 @@ export type BundleOutcome =
   | { outcome: "staged"; generation: number }
   | { outcome: "unchanged"; generation: number }
   | { outcome: "held_back"; generation: number; heldBackBelow: number }
-  | { outcome: "refused"; generation: number | null; reason: RefusalCode | "generation_rollback" | "expired" | "model_unavailable" | "unusable" | "daemon_attached" | "no_store" | "no_datastore"; held?: number; detail?: string };
+  | { outcome: "refused"; generation: number | null; reason: RefusalCode | "generation_rollback" | "expired" | "model_unavailable" | "unusable" | "no_store" | "no_datastore"; held?: number; detail?: string };
 
 /**
  * T40: what `hydrate()` did — a `BundleOutcome` for the row it read, `rolled_back` when the datastore's rollback moved
@@ -419,10 +455,6 @@ export function isAgentStartError(error: unknown): error is AgentStartError {
 export class AirPrompterAgent {
   private active: LoadedSlot | null = null;
   private source: ReleaseSource = "store";
-  private daemon: DaemonClient | null = null;
-  private daemonSocket: string | null = null;
-  private daemonStagedGeneration: number | null = null;
-  private daemonRefreshing: Promise<void> | null = null;
   private lastSyncMs: number | null = null;
   private lastSyncOutcome: string | null = null;
   /** The reason and detail behind the last sync outcome (`unavailable`/`refused`), for the boot error and the log. */
@@ -442,8 +474,6 @@ export class AirPrompterAgent {
   private lastContactMs: number | null = null;
   /** S3: the heartbeat named a generation the pointer has not shown; the next pass goes to the signed manifest. */
   private pointerBehind = false;
-  /** S3: attached to a daemon, the lease is the daemon's — its `slot` answer and `lease` events carry it. */
-  private daemonLeaseExpiresAt: string | null = null;
   private readonly contactListeners = new Set<(contact: { expiresAt: string | null; lastContactAt: string }) => void>();
   private bundleNotAfter: string | null = null;
   private datastoreStatus: DatastoreStatus | null = null;
@@ -457,8 +487,6 @@ export class AirPrompterAgent {
   /** S4: what the latest verified manifest asked for, and the generation whose advisory mismatch was already logged. */
   private manifestApplyPolicy: { generation: number; value: ApplyPolicy } | null = null;
   private applyPolicyAdvisoryLogged = 0;
-  /** S4: an attached SDK reports the daemon's policy (its `status` answer and `policy` events carry it). */
-  private daemonApplyPolicy: AgentStatus["applyPolicy"] | null = null;
   private windowTimer: ReturnType<typeof setTimeout> | null = null;
   /** S6: closes the windows of a minute that has passed, so an idle writer never parks a burst's last minute in an `.open` file. */
   private spoolTimer: ReturnType<typeof setInterval> | null = null;
@@ -476,8 +504,13 @@ export class AirPrompterAgent {
   private uploadIntervalSeconds = 300;
   private uploadRetryAfterMs: number | null = null;
   private spoolReporter: (() => SpoolReport) | null = null;
-  /** S5: the in-process uploader of a resident host with no daemon; null when a daemon, a memory sink, or `telemetry.upload: false` owns the spool. */
+  /** S5: the in-process uploader; null when a live telemetry daemon, a memory sink, or `telemetry.upload: false` owns the spool. */
   private uploader: SpoolUploader | null = null;
+  /** `protocol/daemon.md`: the folder, where it came from, and the daemon's discovery file as last read. */
+  private spoolDir: string;
+  private spoolDirFrom: SpoolDirSource;
+  private discovery: DiscoveryResult | null;
+  private placing: Promise<void> | null = null;
   private flushSegmentN = 0;
   private lastFlushMinute: number | null = null;
   private trustedRoot: RootMetadata;
@@ -490,33 +523,39 @@ export class AirPrompterAgent {
   private readonly stricterSaid = new Set<string>();
   readonly spool: SpoolWriter;
   private readonly sink: SpoolSink;
+  private readonly directorySink: DirectorySink | null;
   private readonly client: SyncClient | null;
 
   private constructor(
     private readonly options: StartOptions,
-    /** This process's own store; null when attached to the host daemon, which holds the store and its key. */
+    /** This process's own store. */
     private readonly store: SlotStore | null,
     trustedRoot: RootMetadata,
     /** The writer identity (S6): this PROCESS's own id, fresh at every start; never a hostname, never the store's. */
     private readonly ownInstanceId: string,
-    private readonly spoolDir: string,
+    placement: { dir: string; from: SpoolDirSource; discovery: DiscoveryResult | null },
     /**
      * S6: what the runRef key is derived from — the STORE's id (store.json), which every process on the host shares, so a
-     * runRef minted by one worker parses in another (feedback lands wherever the request lands). In daemon mode the daemon's
-     * `hello` names it.
+     * runRef minted by one worker parses in another (feedback lands wherever the request lands).
      */
     runRefSeed: string = ownInstanceId,
   ) {
+    this.spoolDir = placement.dir;
+    this.spoolDirFrom = placement.from;
+    this.discovery = placement.discovery;
     this.trustedRoot = trustedRoot;
     this.runRefKey = createHmac("sha256", Buffer.from(runRefSeed, "utf8")).update("runRef").digest();
     this.localWindow = options.apply?.window ? parseWindow(options.apply.window) : null;
     this.heartbeatIntervalSeconds = Math.min(3600, Math.max(30, Math.round(options.heartbeatSeconds ?? 300)));
     const serverless = (options.sync?.mode ?? "resident") === "on_invoke";
-    this.sink = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless) ? new MemorySink({ instanceId: ownInstanceId }, options.telemetry?.bufferBytes) : new DirectorySink(spoolDir, ownInstanceId, options.telemetry?.spoolBudgetBytes, options.fs);
+    const memory = options.telemetry?.sink === "memory" || (options.telemetry?.sink === undefined && serverless);
+    // Every closed segment gets its manifest: the writer's scope and its heartbeat report, for the telemetry daemon.
+    this.directorySink = memory ? null : new DirectorySink(placement.dir, ownInstanceId, options.telemetry?.spoolBudgetBytes, options.fs, { manifest: () => this.manifestContext(), now: () => this.nowMs() });
+    this.sink = this.directorySink ?? new MemorySink({ instanceId: ownInstanceId }, options.telemetry?.bufferBytes);
     this.spool = new SpoolWriter(this.sink, { instanceId: ownInstanceId, instanceClass: options.telemetry?.instanceClass ?? (serverless ? "ephemeral" : "resident"), sdk: `${SDK_NAME}/${SDK_VERSION}` });
     this.variables = new VariableSourceRegistry(options.variables);
     this.client =
-      options.apiKey && options.sync?.mode !== "offline" && options.sync?.mode !== "daemon"
+      options.apiKey && options.sync?.mode !== "offline"
         ? new SyncClient({ baseUrl: options.baseUrl ?? "https://api.airprompter.com", agentId: options.agentId, target: options.target, apiKey: options.apiKey, ...(options.fetch ? { fetch: options.fetch } : {}), userAgent: `${SDK_NAME}/${SDK_VERSION}` })
         : null;
   }
@@ -534,26 +573,16 @@ export class AirPrompterAgent {
     }
     const stateDir = options.stateDir ?? defaultStateDir();
     const pinnedRoot = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.root.hostedEnvironment ?? "prod", pinnedRoot: options.root.pinned }) : options.root;
-    if (options.sync?.mode === "daemon") {
-      // The host daemon holds the store and its key; this process attaches and never touches store files.
-      const socketPath = options.sync.daemonSocketPath ?? daemonSocketPath({ stateDir, agentId: options.agentId, target: options.target });
-      const client = await DaemonClient.connect({ socketPath, agentId: options.agentId, target: options.target, sdk: `${SDK_NAME}/${SDK_VERSION}` });
-      if (client) {
-        const storeDir = SlotStore.path({ stateDir, agentId: options.agentId, target: options.target });
-        const agent = new AirPrompterAgent(options, null, pinnedRoot, AirPrompterAgent.newInstanceId(), join(storeDir, "spool", "telemetry"), client.hello.storeId ?? client.hello.instanceId);
-        agent.daemonSocket = socketPath;
-        await agent.attachDaemon(client);
-        agent.startSpoolTimer();
-        return agent;
-      }
-      options.logger?.({ sdk: SDK_NAME, agentId: options.agentId, target: options.target, event: "daemon_absent", socketPath });
-      // No daemon on this host: in-process sync from this process's own store, exactly as resident mode.
-      options = { ...options, sync: { ...options.sync, mode: "resident" } };
+    if ((options.sync?.mode as string | undefined) === "daemon" || (options.sync as { daemonSocketPath?: unknown } | undefined)?.daemonSocketPath !== undefined) {
+      throw new AgentStartError(
+        "invalid_options",
+        'sync.mode "daemon" was removed in 0.3.0: the telemetry daemon (airprompterd) only ships telemetry and never serves a release. Start with the default mode (resident) — each process loads its release from its own store, the datastore or a vendored bundle — and keep the daemon running for telemetry (protocol/daemon.md)',
+      );
     }
     const keyProvider = options.keyProvider ?? fileKey(join(SlotStore.path({ stateDir, agentId: options.agentId, target: options.target }), "store.key"), options.fs ?? nodeFs);
     let store: SlotStore;
     try {
-      // S8: store.json records who wrote it — this SDK, or the daemon naming itself through `sdk`.
+      // S8: store.json records who wrote it — this SDK, or the CLI naming itself through `sdk`.
       store = await SlotStore.open({ stateDir, agentId: options.agentId, target: options.target, keyProvider, hooks: { writer: options.sdk ? { name: options.sdk.name, version: options.sdk.version } : { name: "agent-sdk-typescript", version: SDK_VERSION } }, ...(options.fs ? { fs: options.fs } : {}) });
     } catch (error) {
       if (isStoreError(error) && (error.code === "kek_unavailable" || error.code === "store_corrupt" || error.code === "store_newer")) throw new AgentStartError(error.code, error.message);
@@ -565,80 +594,9 @@ export class AirPrompterAgent {
     const trusted = stored && verifyRootMetadata({ candidate: stored, trusted: pinned, now: new Date(options.now?.() ?? Date.now()).toISOString() }).ok ? stored : pinned;
     // S6: the instance id is the PROCESS's, never the store's — N workers on one host are N instances in the fleet view, and
     // their same-minute windows keep distinct keys at ingest (the store's own id stays store.json's identity).
-    const agent = new AirPrompterAgent(options, store, trusted, AirPrompterAgent.newInstanceId(), join(store.dir, "spool", "telemetry"), store.instanceId);
+    const agent = new AirPrompterAgent(options, store, trusted, AirPrompterAgent.newInstanceId(), spoolPlacement(options, store.dir, options.now?.() ?? Date.now()), store.instanceId);
     await agent.boot();
     return agent;
-  }
-
-  /** Daemon mode: the active release comes over the socket; `generation` events refresh it; a lost daemon keeps what is held and reconnects. */
-  private async attachDaemon(client: DaemonClient): Promise<void> {
-    this.daemon = client;
-    this.daemonStagedGeneration = client.hello.stagedGeneration;
-    const { leaseExpiresAt, applyPolicy, ...slot } = await client.slot();
-    this.active = slot;
-    this.source = "daemon";
-    this.daemonLeaseExpiresAt = leaseExpiresAt;
-    this.daemonApplyPolicy = applyPolicy;
-    this.log({ event: "daemon_attached", generation: this.active.generation, daemon: client.hello.daemon });
-    client.onEvent((event) => {
-      if (event.event === "generation") {
-        this.daemonStagedGeneration = typeof event.stagedGeneration === "number" ? event.stagedGeneration : null;
-        void this.refreshFromDaemon();
-      }
-      // S3: the daemon is the process that talks to the origin; its contact is the fleet's lease.
-      if (event.event === "lease") this.daemonLeaseExpiresAt = typeof event.expiresAt === "string" ? event.expiresAt : null;
-      // S4: the host's policy is the daemon's store; an operator's `policy set` reaches every attached SDK at once.
-      if (event.event === "policy" && event.applyPolicy && typeof event.applyPolicy === "object") this.daemonApplyPolicy = event.applyPolicy as AgentStatus["applyPolicy"];
-      if (event.event === "shutdown") this.log({ event: "daemon_shutdown" });
-    });
-    client.onClose(() => {
-      if (this.daemon !== client) return;
-      this.daemon = null;
-      this.log({ event: "daemon_lost", socketPath: this.daemonSocket });
-      this.scheduleDaemonReconnect();
-    });
-  }
-
-  private async refreshFromDaemon(): Promise<void> {
-    if (!this.daemon) return;
-    if (this.daemonRefreshing) return this.daemonRefreshing;
-    this.daemonRefreshing = (async () => {
-      try {
-        const { leaseExpiresAt, applyPolicy, ...slot } = await this.daemon!.slot();
-        const changed = slot.generation !== this.active?.generation;
-        this.active = slot;
-        this.source = "daemon";
-        this.daemonLeaseExpiresAt = leaseExpiresAt ?? this.daemonLeaseExpiresAt;
-        this.daemonApplyPolicy = applyPolicy ?? this.daemonApplyPolicy;
-        this.lastRefusal = null;
-        if (changed) this.emitChange();
-      } catch (error) {
-        this.log({ event: "daemon_slot_unavailable", reason: (error as Error).message });
-      }
-    })().finally(() => {
-      this.daemonRefreshing = null;
-    });
-    return this.daemonRefreshing;
-  }
-
-  private scheduleDaemonReconnect(): void {
-    if (this.timer) clearTimeout(this.timer);
-    if (this.stopped) return;
-    this.timer = setTimeout(() => {
-      void (async () => {
-        try {
-          const client = await DaemonClient.connect({ socketPath: this.daemonSocket!, agentId: this.options.agentId, target: this.options.target, sdk: `${SDK_NAME}/${SDK_VERSION}` });
-          if (client) {
-            await this.attachDaemon(client);
-            return;
-          }
-        } catch (error) {
-          this.log({ event: "daemon_reconnect_failed", reason: (error as Error).message });
-        }
-        this.scheduleDaemonReconnect();
-      })();
-    }, jitteredDelayMs(this.options.sync?.pollSeconds ?? 30, this.options.random));
-    this.timer.unref?.();
   }
 
   /**
@@ -771,11 +729,9 @@ export class AirPrompterAgent {
    * a database, every runtime reads the newest row and hands it here when the generation rises. The same chain and
    * the same rules as a vendored bundle — verified before a byte is staged, the apply policy decides, never below the
    * held generation (a restored backup or a stale replica cannot move a host backwards) — and the swap is atomic:
-   * renders in flight finish on the release they resolved against. Attached to a daemon the host's store is the
-   * daemon's, and this refuses. Never throws on a bad bundle; the outcome says why.
+   * renders in flight finish on the release they resolved against. Never throws on a bad bundle; the outcome says why.
    */
   async applyBundle(bundle: Bundle | string, options: { distributionKey?: DistributionKey } = {}): Promise<BundleOutcome> {
-    if (this.daemon) return { outcome: "refused", generation: null, reason: "daemon_attached" };
     if (!this.store) return { outcome: "refused", generation: null, reason: "no_store" };
     const now = this.nowIso();
     let contents: ReturnType<typeof openBundle>;
@@ -846,11 +802,10 @@ export class AirPrompterAgent {
       this.schedule();
       // The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
       void this.heartbeatNow().finally(() => this.scheduleHeartbeat());
-      this.startUploader();
-    } else if (this.options.telemetry?.uploadSink && (this.options.sync?.mode ?? "resident") === "resident") {
-      // S13: a resident host with no client (offline, a vendored bundle) still ships its spool to the customer's own sink.
-      this.startUploader();
     }
+    // Who ships the spool: a live telemetry daemon naming this folder, else this process (with a client, or — S13 — a
+    // sink of the customer's own, offline too), else nobody until one appears. Re-checked by the spool timer.
+    await this.checkTelemetryDaemon();
     this.startSpoolTimer();
     this.scheduleWindowUnlock();
     this.startDatastorePoll();
@@ -870,7 +825,6 @@ export class AirPrompterAgent {
    */
   async hydrate(): Promise<HydrateOutcome> {
     if (!this.options.datastore) return { outcome: "refused", generation: null, reason: "no_datastore" };
-    if (this.daemon) return { outcome: "refused", generation: null, reason: "daemon_attached" };
     if (!this.store) return { outcome: "refused", generation: null, reason: "no_store" };
     const now = this.nowIso();
     const verifyOptions = { now, root: this.trustedRoot, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) };
@@ -1000,12 +954,85 @@ export class AirPrompterAgent {
   /** S6: once a minute, the windows of the minute that passed are written and the open segment closed — off the request path, never the current minute. */
   private startSpoolTimer(): void {
     if (this.spoolTimer || (this.options.sync?.mode ?? "resident") === "on_invoke") return;
-    this.spoolTimer = setInterval(() => this.spool.closeStaleWindows(this.nowMs()), 60_000);
+    this.spoolTimer = setInterval(() => {
+      this.spool.closeStaleWindows(this.nowMs());
+      void this.checkTelemetryDaemon();
+    }, 60_000);
     this.spoolTimer.unref?.();
   }
 
   /**
-   * S5: the daemon is an optimisation, never a requirement — a resident host with no daemon uploads its own spool. The
+   * `protocol/daemon.md`, once a minute and at boot: where to write (an explicit folder never moves; a discovered one
+   * follows the daemon's `daemon.json`) and who uploads — a live daemon naming this folder does, and this process's own
+   * uploader stops; when the daemon goes (its file stale or gone) the uploader starts again. Never throws.
+   */
+  async checkTelemetryDaemon(): Promise<TelemetryPlacement> {
+    if (this.placing) await this.placing;
+    else {
+      this.placing = this.placeTelemetry().finally(() => {
+        this.placing = null;
+      });
+      await this.placing;
+    }
+    return this.telemetryPlacement();
+  }
+
+  private async placeTelemetry(): Promise<void> {
+    try {
+      const sink = this.directorySink;
+      if (!sink || !this.store || this.stopped) return;
+      const placement = spoolPlacement(this.options, this.store.dir, this.nowMs());
+      this.discovery = placement.discovery;
+      const moved = placement.dir !== this.spoolDir;
+      if (moved) {
+        // The daemon published another folder (or went away and the store's is back): new segments go there.
+        sink.moveTo(placement.dir, this.nowMs());
+        this.log({ event: "spool_moved", from: this.spoolDir, to: placement.dir, source: placement.from });
+        this.spoolDir = placement.dir;
+      }
+      this.spoolDirFrom = placement.from;
+      // An uploader sweeps the folder it was started on: a move stops it, and a new one starts below if it is still ours.
+      const daemonShips = this.daemonShipsSpool();
+      if (this.uploader && (moved || daemonShips)) await this.stopUploader(daemonShips ? "upload_handed_to_daemon" : "uploader_restarted");
+      if (daemonShips) {
+        // The daemon ships this folder; nothing more to do here.
+      } else if ((this.options.sync?.mode ?? "resident") === "resident" && !this.uploader) {
+        this.startUploader();
+        if (this.uploader && this.discovery?.discovery) this.log({ event: "upload_taken_back", reason: this.discovery.live ? "daemon_ships_another_folder" : this.discovery.reason });
+      }
+    } catch (error) {
+      this.log({ event: "telemetry_placement_failed", reason: (error as Error).message });
+    }
+  }
+
+  /** A live daemon for this agent and target that ships somewhere (`sink` is not `none`) names the folder this process writes (the same path, symlinks resolved). */
+  private daemonShipsSpool(): boolean {
+    const found = this.discovery;
+    return !!found && found.live && found.discovery.sink !== "none" && samePath(found.discovery.spoolDir, this.spoolDir);
+  }
+
+  private async stopUploader(event: string): Promise<void> {
+    const uploader = this.uploader;
+    this.uploader = null;
+    this.spoolReporter = null;
+    if (uploader) await uploader.stop();
+    this.log({ event });
+  }
+
+  private telemetryPlacement(): TelemetryPlacement {
+    const found = this.discovery?.discovery ?? null;
+    const daemon = found && (this.discovery!.live || this.discovery!.reason === "stale") ? { live: this.discovery!.live, pid: found.pid, version: found.daemon?.version ?? "", heartbeatAt: found.heartbeatAt, spoolDir: found.spoolDir } : null;
+    if (!this.directorySink) return { sink: "memory", spoolDir: null, spoolDirFrom: null, uploadedBy: "none", daemon };
+    return { sink: "directory", spoolDir: this.spoolDir, spoolDirFrom: this.spoolDirFrom, uploadedBy: this.uploader ? "self" : this.daemonShipsSpool() ? "daemon" : "none", daemon };
+  }
+
+  /** What each closed segment's manifest carries: this writer's scope and its heartbeat report as it stands. */
+  private manifestContext(): { organizationId: string; agentId: string; target: string; report: Record<string, unknown> } {
+    return { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target, report: this.heartbeatBody() };
+  }
+
+  /**
+   * S5: the telemetry daemon is an optimisation, never a requirement — a resident host with no live daemon uploads its own spool. The
    * same uploader the daemon runs, in-process, on a timer off the request path: closed segments go out under this
    * runtime's own grant (its heartbeat's), a failed pass backs off and the next one retries, and past the budget the
    * oldest unsent segments are dropped and counted (`dropped` rows, the heartbeat's `spool.droppedSegments`). Nothing
@@ -1014,17 +1041,19 @@ export class AirPrompterAgent {
   private startUploader(): void {
     // S13: a sink of the customer's own (the OpenTelemetry bridge) needs no client and no grant: it runs offline too.
     const customSink = this.options.telemetry?.uploadSink;
-    if (this.uploader || (!customSink && !this.client) || !this.store) return;
+    if (this.uploader || (!customSink && !this.client) || !this.store || this.stopped) return;
     if (this.options.telemetry?.upload === false) return;
     // A memory sink has no directory to sweep; `flushTelemetry()` is its path.
-    if (typeof this.sink.drain === "function") return;
+    if (!this.directorySink) return;
     const uploader = new SpoolUploader({
       dir: this.spoolDir,
       instanceId: this.ownInstanceId,
+      // A shared folder: another agent's or target's segments are left for its own uploader.
+      scope: { agentId: this.options.agentId, target: this.options.target },
       ...(customSink
         ? { sink: customSink }
         : {
-            grantFor: (instanceId: string) => this.requestUploadGrant({ instanceId, instanceClass: this.options.telemetry?.instanceClass ?? "resident" }),
+            grantFor: (instanceId: string, report?: Record<string, unknown>) => this.requestUploadGrant({ instanceId, instanceClass: this.options.telemetry?.instanceClass ?? "resident", ...(report ? { report } : {}) }),
             fetch: this.options.fetch ?? (globalThis.fetch as unknown as FetchLike),
           }),
       now: () => this.nowMs(),
@@ -1050,7 +1079,7 @@ export class AirPrompterAgent {
     return { uploaded: result.uploaded.length, quarantined: result.quarantined.length, dropped: result.dropped, held: result.held };
   }
 
-  /** S3: contact with the origin — a signed manifest or an authenticated answer. Renews the lease and tells the daemon's clients. */
+  /** S3: contact with the origin — a signed manifest or an authenticated answer. Renews the lease and tells `onContact` listeners. */
   private markContact(): void {
     this.lastContactMs = this.nowMs();
     const contact = { expiresAt: this.leaseExpiresAt(), lastContactAt: new Date(this.lastContactMs).toISOString() };
@@ -1070,13 +1099,13 @@ export class AirPrompterAgent {
     }
   }
 
-  /** S3: the daemon subscribes to broadcast its lease to attached SDKs. */
+  /** S3: told at every contact with the origin, with the lease it renewed. */
   onContact(listener: (contact: { expiresAt: string | null; lastContactAt: string }) => void): () => void {
     this.contactListeners.add(listener);
     return () => void this.contactListeners.delete(listener);
   }
 
-  /** Called whenever the active or staged generation changes (sync, unlock, rollback, daemon event). */
+  /** Called whenever the active or staged generation changes (sync, unlock, rollback, applyBundle, hydrate). */
   onChange(listener: (change: ReleaseChange) => void): () => void {
     this.changeListeners.add(listener);
     return () => this.changeListeners.delete(listener);
@@ -1209,15 +1238,6 @@ export class AirPrompterAgent {
 
   /** One sync pass now (resident timers call this; on_invoke hosts call it from `invoke`). Never throws. */
   async syncNow(): Promise<void> {
-    if (this.daemon) {
-      try {
-        await this.daemon.request("sync");
-        await this.refreshFromDaemon();
-      } catch (error) {
-        this.log({ event: "daemon_sync_failed", reason: (error as Error).message });
-      }
-      return;
-    }
     if (!this.client || !this.store) return;
     // One pass over the store at a time. A pass already in flight — a sync, or an `applyBundle` — is the answer: this
     // call resolves when it ends and runs no sync of its own (the resident timer's next tick catches up).
@@ -1314,7 +1334,6 @@ export class AirPrompterAgent {
 
   /** S4: the policy in force on this host and where it comes from (see `AgentStatus.applyPolicy`). */
   private effectiveApplyPolicy(): AgentStatus["applyPolicy"] {
-    if (this.daemonSocket) return this.daemonApplyPolicy ?? { effective: this.options.apply?.policy ?? "auto", source: this.options.apply?.policy ? "local" : "manifest", manifestSaid: null };
     const local = this.options.apply?.policy;
     const pin = this.store?.state.applyPolicyPin ?? null;
     const manifestSaid = this.manifestApplyPolicy?.value ?? null;
@@ -1327,14 +1346,9 @@ export class AirPrompterAgent {
   /**
    * S4: an operator's act on this host — the one way a pinned policy loosens. `unlock_required` tightens the pin by
    * hand; `auto` loosens it, and a later manifest that says `unlock_required` tightens it again (a manifest may always
-   * tighten). Logged, and host-wide through the daemon when attached. Never called by sync.
+   * tighten). Logged, and host-wide through the store (every process sharing it reads the pin). Never called by sync.
    */
   async setApplyPolicy(value: ApplyPolicy, input: { by?: string } = {}): Promise<AgentStatus["applyPolicy"]> {
-    if (this.daemon) {
-      const result = (await this.daemon.request("policy", { value, ...(input.by ? { by: input.by } : {}) })) as { applyPolicy: AgentStatus["applyPolicy"] };
-      this.daemonApplyPolicy = result.applyPolicy;
-      return this.effectiveApplyPolicy();
-    }
     const store = this.store;
     if (!store) throw new AgentStartError("no_verified_release", "no store to record the policy in");
     const before = store.state.applyPolicyPin ?? null;
@@ -1442,7 +1456,7 @@ export class AirPrompterAgent {
       ...(status.applyState === "refused" && status.lastRefusal && /^[a-z_]+$/.test(status.lastRefusal) ? { refusal: status.lastRefusal } : {}),
       ...(status.applyState === "refused" && status.lastRefusal === "model_unavailable" && this.unavailableModels.length > 0 ? { unavailableModels: this.unavailableModels.slice(0, 16) } : {}),
       ...(status.signingKeyId ? { signingKeyId: status.signingKeyId } : {}),
-      storageProtection: status.storageProtection === "daemon" ? "custom" : status.storageProtection,
+      storageProtection: status.storageProtection,
       // 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
       // can warn about a `source: runtime` variable no live instance fills before the promotion, not after. Sent only
       // once the control plane has shown it speaks 0.3.4 (the active manifest's protocol): an older service refuses
@@ -1468,7 +1482,7 @@ export class AirPrompterAgent {
 
   /** One heartbeat now (resident timers call this; on_invoke hosts send one when the interval has elapsed). Never throws. */
   async heartbeatNow(): Promise<void> {
-    if (!this.client || this.daemon) return;
+    if (!this.client) return;
     if (this.heartbeating) return this.heartbeating;
     this.heartbeating = (async () => {
       try {
@@ -1499,7 +1513,7 @@ export class AirPrompterAgent {
 
   private scheduleHeartbeat(): void {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
-    if (this.stopped || !this.client || this.daemon) return;
+    if (this.stopped || !this.client) return;
     const delay = jitteredDelayMs(this.heartbeatIntervalSeconds, this.options.random);
     this.nextHeartbeatMs = this.nowMs() + delay;
     this.heartbeatTimer = setTimeout(() => {
@@ -1523,17 +1537,18 @@ export class AirPrompterAgent {
     }
   }
 
-  /** T26: the daemon's uploader tells the heartbeat what it knows about the spool (drops, quarantine, last upload, backoff). */
+  /** T26: an uploader other than this process's own tells the heartbeat what it knows about the spool (drops, quarantine, last upload, backoff). */
   setSpoolReporter(reporter: (() => SpoolReport) | null): void {
     this.spoolReporter = reporter;
   }
 
   /**
    * T26: an upload grant for one writer's prefix — a heartbeat carrying that writer's instance id (this runtime's own
-   * by default). A daemon uploading for the processes attached to it calls this once per writer; the answer is cached by
-   * the uploader until a minute before it lapses. Never throws.
+   * by default). The uploader asks once per writer whose segments sit in this folder (a sibling that exited, a
+   * reclaimed segment); `report` is that writer's own heartbeat report from its manifest, sent with this process's
+   * `spool` block. The answer is cached by the uploader until a minute before it lapses. Never throws.
    */
-  async requestUploadGrant(input: { instanceId?: string; instanceClass?: "resident" | "ephemeral" } = {}): Promise<GrantDecision> {
+  async requestUploadGrant(input: { instanceId?: string; instanceClass?: "resident" | "ephemeral"; report?: Record<string, unknown> } = {}): Promise<GrantDecision> {
     if (!this.client) return { kind: "unavailable", reason: "offline" };
     const own = input.instanceId === undefined || input.instanceId === this.ownInstanceId;
     if (own) {
@@ -1543,7 +1558,8 @@ export class AirPrompterAgent {
       return { kind: "unavailable", reason: this.lastHeartbeatRefusal ?? "heartbeat_failed" };
     }
     try {
-      const body = { ...this.heartbeatBody(), instanceId: input.instanceId, ...(input.instanceClass ? { instanceClass: input.instanceClass } : {}) };
+      const own = this.heartbeatBody();
+      const body = input.report ? { ...input.report, instanceId: input.instanceId, spool: own.spool } : { ...own, instanceId: input.instanceId, ...(input.instanceClass ? { instanceClass: input.instanceClass } : {}) };
       const result = await this.client.heartbeat(body);
       if (result.status === "ok") {
         const interval = Number(result.response.uploadIntervalSeconds);
@@ -1631,13 +1647,8 @@ export class AirPrompterAgent {
     }
   }
 
-  /** Make a staged release live (an operator's `airprompter unlock`, an update window, or the change-control hook). Host-wide when attached to a daemon. */
+  /** Make a staged release live (an operator's `airprompter unlock`, an update window, or the change-control hook). */
   async unlock(): Promise<{ generation: number } | null> {
-    if (this.daemon) {
-      const result = (await this.daemon.request("unlock")) as { generation: number | null };
-      await this.refreshFromDaemon();
-      return result.generation === null ? null : { generation: result.generation };
-    }
     const store = this.store!;
     if (!store.state.staged) return null;
     if (this.windowTimer) clearTimeout(this.windowTimer);
@@ -1652,15 +1663,10 @@ export class AirPrompterAgent {
 
   /**
    * Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence.
-   * Host-wide when attached to a daemon. Throws `StoreError` `release_staged` while a release is staged (a rollback
-   * is never a quiet unlock) and `no_previous_release` when this host has held one release only.
+   * Throws `StoreError` `release_staged` while a release is staged (a rollback is never a quiet unlock) and
+   * `no_previous_release` when this host has held one release only.
    */
   async rollback(): Promise<{ generation: number; forced: boolean }> {
-    if (this.daemon) {
-      const result = (await this.daemon.request("rollback")) as { generation: number; forced: boolean };
-      await this.refreshFromDaemon();
-      return { generation: result.generation, forced: result.forced };
-    }
     const store = this.store!;
     const before = store.state.generation;
     const slot = store.rollbackLocal();
@@ -1682,14 +1688,12 @@ export class AirPrompterAgent {
   private leaseExpiresAt(): string | null {
     const manifest = this.active?.manifest.payload;
     if (!manifest) return null;
-    // S3: attached to a daemon, the daemon's contact with the origin is the lease; a local socket answer is not contact.
-    if (this.source === "daemon" || this.daemon) return this.daemonLeaseExpiresAt;
     if (this.lastContactMs !== null) return new Date(this.lastContactMs + manifest.leaseSeconds * 1000).toISOString();
     if (this.bundleNotAfter && this.source === "vendored_bundle") return new Date(instant(this.bundleNotAfter)).toISOString();
     return new Date(instant(manifest.issuedAt) + manifest.leaseSeconds * 1000).toISOString();
   }
 
-  /** The lease: the facade's rule (it knows the daemon and the origin); the runtime knows nothing of contact. */
+  /** The lease: the facade's rule (it knows the origin); the runtime knows nothing of contact. */
   private guardLease(tag: string): void {
     const active = this.active!;
     const payload = active.manifest.payload;
@@ -2069,10 +2073,10 @@ export class AirPrompterAgent {
     return {
       instanceId: this.ownInstanceId,
       generation: this.active?.generation ?? 0,
-      stagedGeneration: this.daemonSocket ? this.daemonStagedGeneration : (this.stagedManifest?.payload.generation ?? null),
-      applyState: this.stagedManifest || (this.daemonSocket && this.daemonStagedGeneration !== null) ? "awaiting_unlock" : this.lastRefusal ? "refused" : this.source === "vendored_bundle" ? "vendored_fallback" : "active",
+      stagedGeneration: this.stagedManifest?.payload.generation ?? null,
+      applyState: this.stagedManifest ? "awaiting_unlock" : this.lastRefusal ? "refused" : this.source === "vendored_bundle" ? "vendored_fallback" : "active",
       lastRefusal: this.lastRefusal,
-      storageProtection: state ? this.store!.storageProtection : "daemon",
+      storageProtection: this.store?.storageProtection ?? "custom",
       signingKeyId: this.active?.signingKeyId ?? null,
       leaseExpiresAt,
       leaseExpired: leaseExpiresAt ? instant(leaseExpiresAt) <= this.nowMs() : false,
@@ -2093,7 +2097,7 @@ export class AirPrompterAgent {
       heartbeat: { lastAt: this.lastHeartbeatMs === null ? null : new Date(this.lastHeartbeatMs).toISOString(), nextAt: this.nextHeartbeatMs === null || !this.heartbeatTimer ? null : new Date(this.nextHeartbeatMs).toISOString(), intervalSeconds: this.heartbeatIntervalSeconds, lastRefusal: this.lastHeartbeatRefusal },
       spool: { depthSegments: depth.segments, depthBytes: depth.bytes },
       source: this.source,
-      daemon: this.daemonSocket ? { attached: this.daemon !== null, socketPath: this.daemonSocket } : null,
+      telemetry: this.telemetryPlacement(),
       lastSyncAt: this.lastSyncMs === null ? null : new Date(this.lastSyncMs).toISOString(),
       golden: this.lastGolden,
       variables: this.variablesStatus(),
@@ -2119,7 +2123,7 @@ export class AirPrompterAgent {
 
   private stopped = false;
 
-  /** Stop timers, detach from the daemon, and close the spool. */
+  /** Stop timers and uploads, and close the spool. */
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
@@ -2134,11 +2138,8 @@ export class AirPrompterAgent {
     this.heartbeatTimer = null;
     if (this.heartbeating) await this.heartbeating;
     if (this.syncing) await this.syncing;
-    if (this.daemonRefreshing) await this.daemonRefreshing;
+    if (this.placing) await this.placing;
     if (this.uploader) await this.uploader.stop();
-    const daemon = this.daemon;
-    this.daemon = null;
-    daemon?.close();
     // T33: an observation settled by a wrapped client's stream helper lands a few microtasks after the customer's own
     // await; one turn of the event loop lets everything in flight reach the spool before the windows close.
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -2150,7 +2151,7 @@ export class AirPrompterAgent {
     return this.ownInstanceId;
   }
 
-  /** S6: the store's id (store.json), shared by every process on the host; null when attached to a daemon. */
+  /** S6: the store's id (store.json), shared by every process on the host. */
   get storeInstanceId(): string | null {
     return this.store?.instanceId ?? null;
   }
@@ -2171,6 +2172,32 @@ export class AirPrompterAgent {
   refusalRow(row: Omit<RefusalRow, "type" | "v" | "instanceId">): void {
     this.spool.refusal(row, this.nowMs());
   }
+}
+
+/**
+ * `protocol/daemon.md` › What an SDK does: the folder this process writes — `telemetry.spoolDir`, else
+ * `AIRPROMPTER_SPOOL_DIR`, else a live daemon's published `spoolDir`, else `<storeDir>/spool/telemetry`.
+ */
+function spoolPlacement(options: StartOptions, storeDir: string, nowMs: number): { dir: string; from: SpoolDirSource; discovery: DiscoveryResult | null } {
+  const discovery = readDaemonDiscovery(options.fs ?? nodeFs, storeDir, { agentId: options.agentId, target: options.target, organizationId: options.organizationId, nowMs });
+  const explicit = options.telemetry?.spoolDir;
+  if (explicit) return { dir: resolvePath(explicit), from: "option", discovery };
+  const env = process.env[SPOOL_DIR_ENV];
+  if (env) return { dir: resolvePath(env), from: "env", discovery };
+  if (discovery.live) return { dir: resolvePath(discovery.discovery.spoolDir), from: "daemon", discovery };
+  return { dir: join(storeDir, "spool", "telemetry"), from: "default", discovery };
+}
+
+/** Two folders are one when they resolve to the same real path (a symlinked volume); a path that cannot be resolved compares as written. */
+function samePath(a: string, b: string): boolean {
+  const real = (path: string) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolvePath(path);
+    }
+  };
+  return resolvePath(a) === resolvePath(b) || real(a) === real(b);
 }
 
 function defaultStateDir(): string {

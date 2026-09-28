@@ -17,7 +17,9 @@
  */
 
 export { SpoolWriter, DirectorySink, MemorySink, SegmentPlanner, segmentName, SEGMENT_MAX_BYTES, HOST_SPOOL_BUDGET_BYTES, SERVERLESS_BUFFER_BYTES } from "./spool/writer.js";
-export type { SpoolSink, SinkFaults } from "./spool/writer.js";
+export type { SpoolSink, SinkFaults, DirectorySinkOptions, SegmentManifestSource } from "./spool/writer.js";
+export { SPOOL_MANIFEST_FORMAT, DAEMON_DISCOVERY_FORMAT, MANIFEST_GRACE_MS, DAEMON_DISCOVERY_MAX_AGE_MS, DAEMON_DISCOVERY_REFRESH_MS, DAEMON_DISCOVERY_FILE, MANIFEST_SUFFIX, MANIFEST_NAME, manifestNameOf, segmentNameOfManifest, sha256Hex, writeSegmentManifest, readSegmentManifest, daemonDiscoveryPath, readDaemonDiscovery, writeDaemonDiscovery, removeDaemonDiscovery } from "./spool/manifest.js";
+export type { SegmentManifest, DaemonDiscovery, DiscoveryResult } from "./spool/manifest.js";
 export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "@airprompter/agent-core";
 export type { Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "@airprompter/agent-core";
 export type { UploadSink, UploadSegment, UploadOutcome } from "@airprompter/agent-core";

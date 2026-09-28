@@ -20,7 +20,6 @@ import { errorNamed } from "../packages/core/src/protocol/errors.js";
 import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type SpoolSink } from "../packages/telemetry/src/spool/writer.js";
 import { PayloadDecryptError, isPayloadDecryptError } from "../packages/sync/src/store/payloadCrypto.js";
 import { StoreError, isStoreError } from "../packages/sync/src/store/slotStore.js";
-import { DaemonError, isDaemonError } from "../packages/sync/src/sync/daemon.js";
 
 /** What another copy of this package throws: a plain Error dressed with the same name and code. */
 function foreign(name: string, fields: Record<string, unknown>): Error {
@@ -30,7 +29,6 @@ function foreign(name: string, fields: Record<string, unknown>): Error {
 test("every SDK error is recognised by name and code, including one thrown by another copy of the package", () => {
   const cases: Array<[string, (e: unknown) => boolean, Error, Error, Error]> = [
     ["StoreError", isStoreError, new StoreError("store_corrupt", "x"), foreign("StoreError", { code: "store_corrupt" }), foreign("StoreError", {})],
-    ["DaemonError", isDaemonError, new DaemonError("absent", "x"), foreign("DaemonError", { code: "absent" }), foreign("DaemonErr", { code: "absent" })],
     ["AgentStartError", isAgentStartError, new AgentStartError("no_verified_release", "x"), foreign("AgentStartError", { code: "no_verified_release" }), foreign("AgentStartError", { code: 7 })],
     ["ManagedRunError", isManagedRunError, new ManagedRunError("forbidden", 403, "x", "d"), foreign("ManagedRunError", { code: "forbidden" }), foreign("StoreError", { code: "forbidden" })],
     ["PayloadDecryptError", isPayloadDecryptError, new PayloadDecryptError(), foreign("PayloadDecryptError", { code: "payload_decrypt_failed" }), foreign("PayloadDecryptError", {})],

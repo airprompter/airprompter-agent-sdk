@@ -5,8 +5,8 @@
  * across restarts, so a root pinned once verifies later generations and a
  * client never sees a fresh N; the SDK syncs from it exactly as from the
  * hosted service and honours `unlock_required` locally; the live conformance
- * runner passes against it; with `--daemon` the host's SDKs get generation
- * events over the socket.
+ * runner passes against it; a resident SDK pointed at it picks up the next
+ * save; `--daemon` (the release-serving daemon) is refused since 0.3.0.
  */
 
 import assert from "node:assert/strict";
@@ -18,7 +18,6 @@ import test from "node:test";
 
 import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js";
 import type { P256PublicJwk } from "../../sdk-typescript/packages/core/src/protocol/types.js";
-import { DaemonClient, daemonSocketPath } from "../../sdk-typescript/packages/sync/src/sync/daemon.js";
 import { parsePromptFile, parseVariables, readDevRelease, tagFromPath, DEV_API_KEY } from "../src/commands/dev.js";
 
 const cliRoot = join(import.meta.dirname, "..");
@@ -190,16 +189,13 @@ test("an SDK syncs from airprompter dev as from the hosted service; a save is a 
   }
 });
 
-test("the live conformance runner passes against airprompter dev; with --daemon the host's SDKs get the generations over the socket", { skip }, async () => {
+test("the live conformance runner passes against airprompter dev; a resident SDK pointed at it picks up the next save", { skip }, async () => {
   const work = mkdtempSync(join(tmpdir(), "ap-dev-"));
   const dir = fixture(work);
-  const dev = startDev(dir, ["--daemon", "--poll-seconds", "1"]);
+  const dev = startDev(dir, []);
   try {
     await until(() => dev.stdout.length > 0, () => `the facts (dev said: ${dev.stderr.join(" | ")})`);
     const facts = dev.facts();
-    const socketPath = String(facts.daemonSocket);
-    assert.equal(socketPath, daemonSocketPath({ stateDir: join(dir, ".airprompter-dev", "state"), agentId: "agt_dev", target: "dev" }));
-    await until(() => existsSync(socketPath), "the daemon socket");
 
     // The runner needs the conformance package's own dependencies (ajv); CI installs them before this suite.
     assert.ok(existsSync(join(cliRoot, "..", "conformance", "node_modules", "ajv")), "conformance/node_modules is installed (npm ci in conformance/)");
@@ -217,18 +213,44 @@ test("the live conformance runner passes against airprompter dev; with --daemon 
     assert.equal(code, 0, report.results.filter((r) => !r.ok).map((r) => `${r.route} ${r.rule}: ${r.detail}`).join("\n"));
     assert.ok(report.checks >= 20 && report.failures === 0, JSON.stringify({ checks: report.checks, failures: report.failures }));
 
-    // An SDK attached to the embedded daemon sees the next save as a generation event over the socket.
-    const client = await DaemonClient.connect({ socketPath, agentId: "agt_dev", target: "dev", sdk: "test/0" });
-    assert.ok(client, "attached");
-    const seen: number[] = [];
-    client!.onEvent((event) => {
-      if (event.event === "generation") seen.push(Number(event.generation));
+    // A resident SDK pointed at the registry sees the next save on its next pass.
+    const ap = await AirPrompterAgent.start({
+      organizationId: "org_dev",
+      agentId: "agt_dev",
+      target: "dev",
+      apiKey: DEV_API_KEY,
+      baseUrl: String(facts.baseUrl),
+      stateDir: join(work, "sdk-state"),
+      root: { pinned: JSON.parse(readFileSync(String(facts.root), "utf8")) as P256PublicJwk, hostedEnvironment: "dev" },
+      sync: { mode: "resident", pollSeconds: 3600, edgePointerUrl: String(facts.edgePointerUrl), rootUrl: String(facts.rootUrl) },
+      telemetry: { upload: false },
     });
-    writeFileSync(join(dir, "support", "reply.txt"), "Reply again to {{name}}.");
-    await until(() => seen.includes(2), () => `generation 2 over the socket (seen ${seen.join(",")}; dev said: ${dev.stderr.slice(-4).join(" | ")})`, 20_000);
-    client!.close();
+    try {
+      assert.equal(ap.generation, 1);
+      writeFileSync(join(dir, "support", "reply.txt"), "Reply again to {{name}}.");
+      await until(() => readFileSync(join(dir, ".airprompter-dev", "generation"), "utf8").trim() === "2", () => `generation 2 promoted (dev said: ${dev.stderr.slice(-4).join(" | ")})`, 20_000);
+      await ap.syncNow();
+      assert.equal(ap.generation, 2);
+    } finally {
+      await ap.stop();
+    }
   } finally {
     await dev.stop();
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("dev --daemon is refused since 0.3.0: SDKs sync from the registry directly", async () => {
+  const { run } = await import("../src/cli.js");
+  const { EXIT } = await import("../src/io.js");
+  const work = mkdtempSync(join(tmpdir(), "ap-dev-"));
+  try {
+    const dir = fixture(work);
+    const errors: string[] = [];
+    const ctx = { stdout: () => {}, stderr: (l: string) => errors.push(l), env: {}, cwd: work, now: () => Date.now(), fetch: null, isTTY: false };
+    assert.equal(await run(["dev", dir, "--daemon"], ctx), EXIT.usage);
+    assert.match(errors.join("\n"), /removed in 0\.3\.0/);
+  } finally {
     rmSync(work, { recursive: true, force: true });
   }
 });

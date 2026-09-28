@@ -70,10 +70,13 @@ try {
   check("verify --json names the step and reason", verifyDoc.ok === false && verifyDoc.step === "bundle" && verifyDoc.reason === "relabelled", verify.stdout);
 
   const status = run(["status", "--agent", "agt_1", "--environment", "prod", "--state-dir", join(work, "state"), "--json"]);
-  check("status on an empty host exits 0 with no active release", status.code === 0 && JSON.parse(status.stdout).activeSlot === null && JSON.parse(status.stdout).storageProtection === "file_key", status.stderr);
+  check("status on an empty host exits 0, creates no store and finds no daemon", status.code === 0 && JSON.parse(status.stdout).store === null && JSON.parse(status.stdout).daemon === null && !existsSync(join(work, "state", "airprompter", "agt_1", "prod", "store.key")), `${status.code}: ${status.stdout}${status.stderr}`);
 
-  const daemon = run(["daemon", "--org", "org_1", "--agent", "agt_1", "--environment", "prod", "--root", root, "--state-dir", join(work, "daemon-state"), "--exit-after", "1", "--json"], { env: { ...process.env, AIRPROMPTER_AGENT_KEY: "" } });
-  check("daemon with nothing verified refuses to listen (exit 1, not serving)", daemon.code === 1 && daemon.stderr.includes("not serving"), `${daemon.code}: ${daemon.stderr}`);
+  const daemonState = join(work, "daemon-state");
+  const daemon = run(["daemon", "--org", "org_1", "--agent", "agt_1", "--environment", "prod", "--state-dir", daemonState, "--exit-after", "1", "--json"], { env: { ...process.env, AIRPROMPTER_AGENT_KEY: "" } });
+  check("the telemetry daemon runs keyless (shipping nothing), exits 0 and takes daemon.json with it", daemon.code === 0 && daemon.stderr.includes("upload_off") && !existsSync(join(daemonState, "airprompter", "agt_1", "prod", "daemon.json")), `${daemon.code}: ${daemon.stderr}`);
+  const oldDaemon = run(["daemon", "--org", "org_1", "--agent", "agt_1", "--environment", "prod", "--root", root, "--state-dir", daemonState, "--json"]);
+  check("the release-serving daemon's --root is refused by name (exit 2)", oldDaemon.code === 2 && oldDaemon.stderr.includes("removed in 0.3.0"), `${oldDaemon.code}: ${oldDaemon.stderr}`);
 
   const noKey = run(["pull", "--org", "org_1", "--agent", "agt_1", "--environment", "prod", "--root", root, "--out", join(work, "b.apbundle")], { env: { ...process.env, AIRPROMPTER_AGENT_KEY: "" } });
   check("pull without the key env exits 2 and names the variable", noKey.code === 2 && noKey.stderr.includes("AIRPROMPTER_AGENT_KEY"), noKey.stderr);

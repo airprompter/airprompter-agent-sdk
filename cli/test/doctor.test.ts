@@ -1,7 +1,7 @@
 /**
  * S14: `airprompter doctor` against the fake control plane. A host a runtime just synced is healthy (one warning: the
  * file key); no store fails with the remedy; a wrong key fails the source with a 401 and names the variable; no key
- * skips the source; a spool at its budget and a quarantined segment warn; a stale daemon socket fails; a missing root
+ * skips the source; a spool at its budget and a quarantined segment warn; a stale telemetry daemon file fails; a missing root
  * file fails while a pinned JWK passes. Reads only: doctor never creates a store. Exit codes are the contract.
  */
 
@@ -14,7 +14,8 @@ import test from "node:test";
 import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js";
 import { publicJwkOf } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
 import { SlotStore } from "../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { daemonSocketPath } from "../../sdk-typescript/packages/sync/src/sync/daemon.js";
+import { nodeFs } from "../../sdk-typescript/packages/core/src/ports/node.js";
+import { writeDaemonDiscovery } from "../../sdk-typescript/packages/telemetry/src/spool/manifest.js";
 import { FakeControlPlane } from "../../sdk-typescript/test/helpers/controlPlane.js";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";
@@ -38,7 +39,7 @@ function harness(plane: FakeControlPlane, work: string, env: Record<string, stri
 
 const level = (checks: Check[], name: string) => checks.find((c) => c.name === name)?.level;
 
-test("doctor: a synced host is healthy; no store, a wrong key, a full spool, a stale socket and a missing root each say what and how to fix it", async () => {
+test("doctor: a synced host is healthy; no store, a wrong key, a full spool, a stale daemon and a missing root each say what and how to fix it", async () => {
   const work = mkdtempSync(join(tmpdir(), "ap-doctor-"));
   const plane = new FakeControlPlane(scope);
   plane.promote([plane.slot({ tag: "support.reply", text: "Reply {{name}}", variables: [{ name: "name", required: false, trust: "operator" }] })]);
@@ -105,18 +106,23 @@ test("doctor: a synced host is healthy; no store, a wrong key, a full spool, a s
     assert.equal(level(doc.checks, "quarantine"), "warn");
     assert.match(doc.checks.find((c) => c.name === "quarantine")!.remedy!, /telemetry validate/);
 
-    // A stale daemon socket (a file where the socket should be): the daemon check fails and says to restart it.
-    // (Windows names a pipe, not a file: nothing to plant; the daemon suite skips there too.)
-    if (process.platform !== "win32") {
-      const socketPath = daemonSocketPath({ stateDir, ...scope });
-      mkdirSync(join(socketPath, ".."), { recursive: true });
-      writeFileSync(socketPath, "");
+    // The telemetry daemon's file: live is ok and names what it ships; stale (a daemon that died) fails and says to restart it.
+    {
+      const storeDir = SlotStore.path({ stateDir, ...scope });
+      const discovery = (heartbeatAtMs: number) => ({ format: 1 as const, kind: "daemon" as const, daemon: { name: "airprompterd" as const, version: "0.3.0" }, pid: 4242, organizationId: scope.organizationId, agentId: scope.agentId, target: scope.target, spoolDir: join(storeDir, "spool", "telemetry"), startedAt: new Date(heartbeatAtMs).toISOString(), heartbeatAt: new Date(heartbeatAtMs).toISOString(), uploadIntervalSeconds: 300, sink: "airprompter" as const, upload: { lastUploadAt: null, backoffUntil: null, sentSegments: 3, quarantinedSegments: 0, droppedSegments: 0, depthSegments: 0, depthBytes: 0 } });
+      writeDaemonDiscovery(nodeFs, storeDir, discovery(Date.now()));
+      h = harness(plane, work);
+      await run(["doctor", ...scopeArgs, "--state-dir", stateDir, "--base-url", "https://api.test", "--json"], h.ctx);
+      doc = h.doc();
+      assert.equal(level(doc.checks, "daemon"), "ok");
+      assert.match(doc.checks.find((c) => c.name === "daemon")!.detail, /airprompterd 0\.3\.0 pid 4242.*ships airprompter.*sent 3/);
+      writeDaemonDiscovery(nodeFs, storeDir, discovery(Date.now() - 11 * 60_000));
       h = harness(plane, work);
       assert.equal(await run(["doctor", ...scopeArgs, "--state-dir", stateDir, "--base-url", "https://api.test", "--json"], h.ctx), EXIT.refused);
       doc = h.doc();
       assert.equal(level(doc.checks, "daemon"), "fail");
       assert.match(doc.checks.find((c) => c.name === "daemon")!.remedy!, /restart airprompterd/);
-      rmSync(socketPath);
+      rmSync(join(storeDir, "daemon.json"));
     }
 
     // A root file that is not there.

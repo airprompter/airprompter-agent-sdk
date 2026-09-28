@@ -2,11 +2,11 @@
  * `airprompter unlock`: make the staged release on this host live (T9,
  * D33). The operator's unlock — one of the three ways a release staged
  * under `unlock_required` activates (the others: the update window and the
- * runtime's `apply.onStaged` hook). Goes through the host daemon when one
- * runs (so every attached SDK switches at once); otherwise activates the
- * store's staged slot directly — a runtime started after that serves it; a
- * runtime already running in-process on the same state directory keeps its
- * own copy of the store and does not (on a shared host, run the daemon).
+ * runtime's `apply.onStaged` hook). Activates the store's staged slot
+ * directly — a runtime started after that serves it; a runtime already
+ * running on the same state directory keeps what it loaded and moves with
+ * its own `ap.unlock()`, the window or the hook (the telemetry daemon holds
+ * no store and serves no release, `protocol/daemon.md`).
  * `--generation N` refuses to unlock anything but generation N, so a change
  * ticket names exactly what went live.
  *
@@ -17,9 +17,7 @@
  */
 
 import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
-import { CLI_VERSION } from "../version.js";
-import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
+import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { CliError, EXIT, Output, refused, type Context } from "../io.js";
 
 export const UNLOCK_OPTIONS: OptionSpec = {
@@ -28,7 +26,6 @@ export const UNLOCK_OPTIONS: OptionSpec = {
   org: { type: "string", help: "Organization id (optional for unlock)" },
   generation: { type: "string", help: "Unlock only if the staged release is this generation (a change ticket names it)" },
   ...STORE_OPTIONS,
-  socket: { type: "string", help: "Daemon socket path (default: the store's daemon.sock when present)" },
   ...COMMON_OPTIONS,
 };
 
@@ -43,27 +40,6 @@ export async function unlock(argv: string[], ctx: Context): Promise<number> {
   const wanted = str(parsed, "generation");
   const wantedGeneration = wanted === undefined ? null : Number(wanted);
   if (wantedGeneration !== null && (!Number.isInteger(wantedGeneration) || wantedGeneration < 1)) throw new CliError(EXIT.usage, "--generation must be a positive integer");
-
-  // The daemon first: it holds the store on a shared host, and every attached SDK follows its switch.
-  const socketPath = str(parsed, "socket") ?? daemonSocketPath({ stateDir: str(parsed, "state-dir") ?? defaultStateDir(ctx), agentId: scope.agentId, target: scope.target });
-  const client = await DaemonClient.connect({ socketPath, agentId: scope.agentId, target: scope.target, sdk: `airprompter-cli/${CLI_VERSION}` }).catch(() => null);
-  if (client) {
-    try {
-      const status = await client.request("status");
-      const staged = typeof status.stagedGeneration === "number" ? status.stagedGeneration : null;
-      if (staged === null) throw refused("nothing is staged on this host", { reason: "not_staged" });
-      if (wantedGeneration !== null && staged !== wantedGeneration) throw refused(`generation ${staged} is staged, not ${wantedGeneration}`, { reason: "generation_mismatch", staged });
-      const result = await client.request("unlock");
-      out.field("via", "daemon");
-      out.field("generation", result.generation);
-      out.field("outcome", "activated");
-      out.line(`unlocked generation ${String(result.generation)} through the daemon; every attached runtime switches now`);
-      out.flush();
-      return EXIT.ok;
-    } finally {
-      client.close();
-    }
-  }
 
   let store;
   try {
@@ -82,7 +58,7 @@ export async function unlock(argv: string[], ctx: Context): Promise<number> {
   out.field("generation", staged.generation);
   out.field("previousGeneration", state.generation, "previous generation");
   out.field("outcome", "activated");
-  out.line(`unlocked generation ${staged.generation} (slot ${slot}); a runtime started from now serves it (a runtime already running in-process does not — use the daemon on a shared host)`);
+  out.line(`unlocked generation ${staged.generation} (slot ${slot}); a runtime started from now serves it (a runtime already running keeps what it loaded: it moves with its own ap.unlock(), the update window or its onStaged hook)`);
   out.flush();
   return EXIT.ok;
 }

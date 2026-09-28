@@ -2,12 +2,11 @@
  * `airprompter rollback`: make the previous release on this host live again,
  * now, without the control plane. The store keeps two slots; the other one
  * is the release this host served before, and flipping to it is instant and
- * offline. Goes through the host daemon when one runs (so every attached SDK
- * switches at once); otherwise flips the store directly — exactly what
- * `ap.rollback()` does in process. A runtime started after the flip serves
- * the previous release; a runtime already running in-process on the same
- * state directory keeps its own copy of the store and does not (on a shared
- * host, run the daemon so every runtime follows one store).
+ * offline. Flips the store directly — exactly what `ap.rollback()` does in
+ * process. A runtime started after the flip serves the previous release; a
+ * runtime already running on the same state directory keeps what it loaded
+ * and moves with its own `ap.rollback()` — or, across a fleet, with a
+ * rollback set in the customer's datastore (`docs/datastore.md`).
  *
  * The rules a rollback keeps: a step BELOW the stored generation is a forced
  * downgrade, recorded in `store.json` (`forcedDowngrade`) and reported on the
@@ -24,9 +23,7 @@
  */
 
 import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { DaemonClient, daemonSocketPath, isDaemonError } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
-import { CLI_VERSION } from "../version.js";
-import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
+import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { EXIT, Output, refused, type Context } from "../io.js";
 
 export const ROLLBACK_OPTIONS: OptionSpec = {
@@ -34,7 +31,6 @@ export const ROLLBACK_OPTIONS: OptionSpec = {
   environment: SCOPE_OPTIONS.environment!,
   org: { type: "string", help: "Organization id (optional for rollback)" },
   ...STORE_OPTIONS,
-  socket: { type: "string", help: "Daemon socket path (default: the store's daemon.sock when present)" },
   ...COMMON_OPTIONS,
 };
 
@@ -46,31 +42,6 @@ export async function rollback(argv: string[], ctx: Context): Promise<number> {
   }
   const out = new Output(ctx, flag(parsed, "json"));
   const scope = scopeOf({ ...parsed, values: { ...parsed.values, org: parsed.values.org ?? "-" } });
-
-  // The daemon first: it holds the store on a shared host, and every attached SDK follows its switch.
-  const socketPath = str(parsed, "socket") ?? daemonSocketPath({ stateDir: str(parsed, "state-dir") ?? defaultStateDir(ctx), agentId: scope.agentId, target: scope.target });
-  const client = await DaemonClient.connect({ socketPath, agentId: scope.agentId, target: scope.target, sdk: `airprompter-cli/${CLI_VERSION}` }).catch(() => null);
-  if (client) {
-    try {
-      let result: { generation: number; forced: boolean };
-      try {
-        result = (await client.request("rollback")) as { generation: number; forced: boolean };
-      } catch (error) {
-        // The daemon's store refused (nothing to go back to, a staged release): the same refusal, by the same name.
-        if (isDaemonError(error) && error.code === "refused" && typeof error.reason === "string") throw refused(`store: ${error.message}`, { reason: error.reason });
-        throw error;
-      }
-      out.field("via", "daemon");
-      out.field("generation", result.generation);
-      out.field("forced", result.forced);
-      out.field("outcome", "rolled_back");
-      out.line(`rolled back to generation ${result.generation} through the daemon${result.forced ? " (a forced downgrade: reported on the next heartbeat, and sync holds the newer generation back)" : ""}; every attached runtime switches now`);
-      out.flush();
-      return EXIT.ok;
-    } finally {
-      client.close();
-    }
-  }
 
   let store;
   try {
@@ -97,7 +68,7 @@ export async function rollback(argv: string[], ctx: Context): Promise<number> {
   out.field("previousGeneration", before, "previous generation");
   out.field("forced", forced);
   out.field("outcome", "rolled_back");
-  out.line(`rolled back to generation ${after} (slot ${slot}) from ${before}${forced ? "; a forced downgrade: reported on the next heartbeat, and sync holds generation " + before + " back" : ""}; a runtime started from now serves it (a runtime already running in-process does not — use the daemon on a shared host)`);
+  out.line(`rolled back to generation ${after} (slot ${slot}) from ${before}${forced ? "; a forced downgrade: reported on the next heartbeat, and sync holds generation " + before + " back" : ""}; a runtime started from now serves it (a runtime already running keeps what it loaded: it moves with its own ap.rollback(), or across a fleet with a rollback in the datastore)`);
   out.flush();
   return EXIT.ok;
 }

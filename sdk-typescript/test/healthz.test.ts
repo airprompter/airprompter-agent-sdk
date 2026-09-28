@@ -51,8 +51,13 @@ test("healthzOf: every rule, in order — failing beats degraded, reasons name e
   assert.deepEqual(at({ upload: { ...(base.upload ?? ({} as NonNullable<AgentStatus["upload"]>)), backoffUntil: new Date(T0 + 60_000).toISOString(), lastUploadAt: null } as AgentStatus["upload"] }).reasons, ["upload_backing_off"]);
   assert.deepEqual(at({ upload: { ...(base.upload ?? ({} as NonNullable<AgentStatus["upload"]>)), backoffUntil: new Date(T0 - 1).toISOString(), lastUploadAt: null } as AgentStatus["upload"] }).reasons, [], "a backoff already over is not a reason");
   assert.deepEqual(at({ forcedDowngrade: true }).reasons, ["forced_downgrade"]);
-  assert.deepEqual(at({ daemon: { attached: false, socketPath: "/x" } }).reasons, ["daemon_detached"]);
-  assert.deepEqual(at({ daemon: { attached: true, socketPath: "/x" } }).reasons, []);
+  const daemon = (live: boolean) => ({ live, pid: 42, version: "0.3.0", heartbeatAt: new Date(T0).toISOString(), spoolDir: "/x" });
+  const placed = (uploadedBy: "daemon" | "self" | "none", live: boolean | null): AgentStatus["telemetry"] => ({ sink: "directory", spoolDir: "/x", spoolDirFrom: "default", uploadedBy, daemon: live === null ? null : daemon(live) });
+  assert.deepEqual(at({ telemetry: placed("none", false) }).reasons, ["upload_daemon_stale"], "the daemon's file went stale and nothing here uploads");
+  assert.deepEqual(at({ telemetry: placed("self", false) }).reasons, [], "stale, but this process took the upload back");
+  assert.deepEqual(at({ telemetry: placed("daemon", true) }).reasons, []);
+  assert.deepEqual(at({ telemetry: placed("none", null) }).reasons, [], "no daemon at all is not a reason");
+  assert.deepEqual(at({ telemetry: placed("daemon", true) }).telemetry, { uploadedBy: "daemon", daemon: "live" });
   assert.deepEqual(at({ spool: { depthSegments: 80, depthBytes: 80 * 1024 * 1024 } }).reasons, ["spool_near_budget"], "80 % of the budget");
   assert.deepEqual(at({ spool: { depthSegments: 79, depthBytes: 79 * 1024 * 1024 } }).reasons, []);
   assert.deepEqual(at({ spool: { depthSegments: 80, depthBytes: 80 * 1024 * 1024 } }, null).reasons, [], "no budget known (a memory sink): no rule");

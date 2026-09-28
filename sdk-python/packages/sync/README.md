@@ -4,7 +4,8 @@ Pull and hold AirPrompter agent releases: `sync_once` (root → pointer →
 manifest → only the changed payloads → verify → stage → policy), the
 encrypted restart-safe two-slot store (`SlotStore`), the key providers
 (`file_key`, `custom_key_provider`, and the `[kms]`, `[vault]`, `[keyring]`
-extras), the apply policy and its update windows, and `DaemonClient`.
+extras), the apply policy and its update windows, and the customer's
+datastore (`KvStore`, `kv_release_datastore`, `pull_to_datastore`).
 Never imports the runtime or the telemetry distribution.
 
 ```python

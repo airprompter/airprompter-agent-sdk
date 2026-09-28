@@ -364,6 +364,49 @@ refused.update({
     "store.unknown-field.json": {"schema": "store", "reason": "store.json carries no prompt text and no free-form members", "document": {**store_v2, "lastPrompt": "You are..."}},
 })
 
+# daemon.md (draft 3): the telemetry daemon's discovery file, and the manifest an SDK writes beside each closed segment.
+# The manifest's report is the writer's own heartbeat request without `spool` — the daemon adds its view of the host.
+daemon_discovery = {
+    "format": 1,
+    "kind": "daemon",
+    "daemon": {"name": "airprompterd", "version": "0.3.0"},
+    "pid": 4242,
+    "organizationId": "org_7d3f9a2b",
+    "agentId": "agt_4e8c1b6d",
+    "target": "prod",
+    "spoolDir": "/var/lib/airprompter/airprompter/agt_4e8c1b6d/prod/spool/telemetry",
+    "startedAt": "2026-09-12T09:00:00Z",
+    "heartbeatAt": "2026-09-12T10:04:00Z",
+    "uploadIntervalSeconds": 300,
+    "sink": "airprompter",
+    "upload": {"lastUploadAt": "2026-09-12T10:03:30Z", "backoffUntil": None, "sentSegments": 41, "quarantinedSegments": 0, "droppedSegments": 0, "depthSegments": 3, "depthBytes": 41210},
+}
+segment_report = {k: v for k, v in heartbeat_request.items() if k != "spool"}
+segment_report = {**segment_report, "sdk": {"name": "agent-sdk-typescript", "version": "0.3.0", "protocolRange": ">=0.1.0 <1.0.0"}, "syncMode": "offline"}
+spool_manifest = {
+    "format": 1,
+    "kind": "segment",
+    "segment": "seg-inst_5f3c9a2b7e1d4c08-29817484-0.ndjson",
+    "bytes": 18234,
+    "sha256": "sha256:" + "5" * 64,
+    "rows": 12,
+    "instanceId": "inst_5f3c9a2b7e1d4c08",
+    "organizationId": "org_7d3f9a2b",
+    "agentId": "agt_4e8c1b6d",
+    "target": "prod",
+    "closedAt": "2026-09-12T10:04:10Z",
+    "report": segment_report,
+}
+refused.update({
+    "daemon.newer-format.json": {"schema": "daemon", "reason": "a reader ignores a discovery file of a format it does not know", "document": {**daemon_discovery, "format": 2}},
+    "daemon.with-key.json": {"schema": "daemon", "reason": "the discovery file names a folder and a status — never a key", "document": {**daemon_discovery, "apiKey": "apa_live_..."}},
+    "daemon.no-spool-dir.json": {"schema": "daemon", "reason": "a discovery file without the folder it scans tells an SDK nothing", "document": {k: v for k, v in daemon_discovery.items() if k != "spoolDir"}},
+    "spool-manifest.report-with-spool.json": {"schema": "spool-manifest", "reason": "the report leaves `spool` to the daemon, which reports the host's spool", "document": {**spool_manifest, "report": {**segment_report, "spool": heartbeat_request["spool"]}}},
+    "spool-manifest.no-digest.json": {"schema": "spool-manifest", "reason": "a manifest names its segment's SHA-256, so a changed segment is caught before it is sent", "document": {k: v for k, v in spool_manifest.items() if k != "sha256"}},
+    "spool-manifest.oversize.json": {"schema": "spool-manifest", "reason": "a segment is at most 1 MiB", "document": {**spool_manifest, "bytes": 2 * 1048576}},
+    "spool-manifest.prompt-text-in-report.json": {"schema": "spool-manifest", "reason": "the report is the heartbeat's closed shape: no free-form member, no prompt text", "document": {**spool_manifest, "report": {**segment_report, "lastPrompt": "You are..."}}},
+})
+
 root = sys.argv[1]
 os.makedirs(os.path.join(root, "refused"), exist_ok=True)
 def write(name, doc):
@@ -381,6 +424,8 @@ write("heartbeat.response.throttled.json", heartbeat_throttled)
 write("edge-pointer.json", edge_pointer)
 write("store.v1.json", store_v1)
 write("store.v2.json", store_v2)
+write("daemon.json", daemon_discovery)
+write("spool-manifest.json", spool_manifest)
 for name, entry in refused.items():
     write(os.path.join("refused", name), entry)
 print("releaseDigest", digest)

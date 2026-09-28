@@ -1,8 +1,9 @@
 /**
  * S13 in `airprompterd`: `--upload-sink otlp --otlp-endpoint …` ships every writer's windows to a collector on the
- * host, with no Agent key at all (the daemon runs offline from a vendored bundle); a collector that answers 500 costs
- * the segment (dropped and counted), never the spool; headers reach the collector and a `$VAR` value comes from the
- * environment, never argv; the daemon's log names the sink and carries no prompt text.
+ * host, with no Agent key anywhere (the SDK processes run offline from a vendored bundle, find the daemon's folder
+ * through `daemon.json` and hand it the upload); a collector that answers 500 costs the segment (dropped and counted),
+ * never the spool; headers reach the collector and a `$VAR` value comes from the environment, never argv; the
+ * daemon's log names the sink and carries no prompt text.
  */
 
 import assert from "node:assert/strict";
@@ -17,12 +18,11 @@ import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js
 import { createPlaintextBundle } from "../../sdk-typescript/packages/core/src/bundle/apbundle.js";
 import { publicJwkOf } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
 import { SlotStore } from "../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { daemonSocketPath } from "../../sdk-typescript/packages/sync/src/sync/daemon.js";
 import { FakeControlPlane } from "../../sdk-typescript/test/helpers/controlPlane.js";
 
 const cliRoot = join(import.meta.dirname, "..");
 const scope = { organizationId: "org_1", agentId: "agt_otel", target: "prod" as const };
-const skip = process.platform === "win32" ? "unix sockets differ on Windows; the ubuntu lane covers this" : false;
+const skip = process.platform === "win32" ? "signals differ on Windows; the ubuntu lane covers this" : false;
 
 const until = async (check: () => boolean, label: string | (() => string), timeoutMs = 20_000) => {
   const start = Date.now();
@@ -69,26 +69,22 @@ test("airprompterd --upload-sink otlp: an offline host's windows reach the colle
   plane.promote([plane.slot({ tag: "support.reply", text: "Reply warmly {{name}}", variables: [{ name: "name", required: false, trust: "operator" }] })]);
   const bundle = createPlaintextBundle({ createdAt: new Date().toISOString(), notAfter: "2027-01-01T00:00:00Z", manifest: plane.manifest!, keySet: plane.root, payloads: [...plane.payloads].map(([contentHash, bytes]) => ({ contentHash: contentHash as `sha256:${string}`, byteLength: bytes.length, bytes: bytes.toString("base64url") })) });
   const stateDir = join(work, "state");
-  // Seed the daemon's store from the bundle (an offline host: nothing to pull from, no key).
-  const seed = await AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, vendoredBundle: { bundle }, telemetry: { sink: "memory" } });
-  await seed.stop();
-  const rootPath = join(work, "root.jwk.json");
-  writeFileSync(rootPath, JSON.stringify(publicJwkOf(plane.rootKey)));
   const otlp = await collector(1);
-  const socketPath = daemonSocketPath({ stateDir, ...scope });
-  const daemon = startDaemon(["--org", scope.organizationId, "--agent", scope.agentId, "--environment", scope.target, "--root", rootPath, "--state-dir", stateDir, "--poll-seconds", "3600", "--upload-interval-seconds", "1", "--upload-sink", "otlp", "--otlp-endpoint", otlp.endpoint, "--otlp-header", "authorization=$OTEL_TOKEN", "--otlp-header", "x-tenant=acme", "--otlp-resource", "service.name=support-bot"], { OTEL_TOKEN: "Bearer secret-from-env" });
+  const discovery = join(SlotStore.path({ stateDir, ...scope }), "daemon.json");
+  // The daemon needs no root, no store and no key: it ships what the writers put in its folder.
+  const daemon = startDaemon(["--org", scope.organizationId, "--agent", scope.agentId, "--environment", scope.target, "--state-dir", stateDir, "--upload-interval-seconds", "1", "--upload-sink", "otlp", "--otlp-endpoint", otlp.endpoint, "--otlp-header", "authorization=$OTEL_TOKEN", "--otlp-header", "x-tenant=acme", "--otlp-resource", "service.name=support-bot"], { OTEL_TOKEN: "Bearer secret-from-env" });
   try {
-    await until(() => existsSync(socketPath), () => `the socket (daemon said: ${daemon.stderr.join(" | ")})`);
+    await until(() => existsSync(discovery), () => `daemon.json (daemon said: ${daemon.stderr.join(" | ")})`);
     const events = () => daemon.stderr.map((line) => JSON.parse(line) as Record<string, unknown>);
-    await until(() => events().some((e) => e.event === "serving"), "serving");
-    const serving = events().find((e) => e.event === "serving")!;
-    assert.match(String(serving.upload), /^otlp: every 1s$/, JSON.stringify(serving));
-    assert.ok(events().some((e) => e.event === "offline"), "no key: the daemon says it never calls home");
+    await until(() => events().some((e) => e.event === "shipping"), "shipping");
+    const shipping = events().find((e) => e.event === "shipping")!;
+    assert.match(String(shipping.upload), /^otlp: every 1s$/, JSON.stringify(shipping));
 
-    // Two writers attach and report; the daemon ships their closed windows to the collector.
-    const sdkA = await AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "daemon", pollSeconds: 1 } });
-    const sdkB = await AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "daemon", pollSeconds: 1 } });
+    // Two offline writers (a vendored bundle, no key) find the daemon's folder and hand it the upload.
+    const sdkA = await AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, vendoredBundle: { bundle } });
+    const sdkB = await AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, vendoredBundle: { bundle } });
     try {
+      assert.deepEqual([sdkA.status().telemetry.uploadedBy, sdkB.status().telemetry.uploadedBy], ["daemon", "daemon"]);
       const r = sdkA.prompt("support.reply").render({ name: "Ada" });
       sdkA.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12, tokens: { input: 3, output: 4 } });
       sdkA.spool.closeWindows(Date.now());
@@ -118,6 +114,7 @@ test("airprompterd --upload-sink otlp: an offline host's windows reach the colle
   } finally {
     daemon.child.kill("SIGTERM");
     await daemon.exited;
+    assert.equal(existsSync(discovery), false, "a clean stop takes daemon.json with it");
     await otlp.close();
     rmSync(work, { recursive: true, force: true });
   }
@@ -128,11 +125,9 @@ test("airprompterd --otlp-header name=$VAR: an unset variable is a usage error, 
   const { EXIT } = await import("../src/io.js");
   const work = mkdtempSync(join(tmpdir(), "ap-otel-usage-"));
   try {
-    const rootPath = join(work, "root.jwk.json");
-    writeFileSync(rootPath, JSON.stringify(publicJwkOf(new FakeControlPlane(scope).rootKey)));
     const errors: string[] = [];
     const ctx = { stdout: () => {}, stderr: (l: string) => errors.push(l), env: {}, cwd: work, now: () => Date.now(), fetch: null, isTTY: false };
-    const base = ["daemon", "--org", scope.organizationId, "--agent", scope.agentId, "--environment", scope.target, "--root", rootPath, "--state-dir", join(work, "state")];
+    const base = ["daemon", "--org", scope.organizationId, "--agent", scope.agentId, "--environment", scope.target, "--state-dir", join(work, "state")];
     assert.equal(await run([...base, "--upload-sink", "otlp", "--otlp-endpoint", "http://127.0.0.1:9/v1/metrics", "--otlp-header", "authorization=$OTEL_TOKEN"], ctx), EXIT.usage);
     assert.match(errors.join("\n"), /OTEL_TOKEN is not set/);
     assert.equal(await run([...base, "--upload-sink", "otlp"], ctx), EXIT.usage);

@@ -5,8 +5,8 @@
  *               the manifest only when the generation moved
  *   on_invoke:  the same pass at invocation start and end (serverless has
  *               no background timer)
- *   daemon:     delegate to the host's daemon socket when present (T26);
- *               until then, in-process
+ *   offline:    no pass at all — the store, the datastore or a vendored
+ *               bundle is what this host serves
  *
  * A pass never blocks a render and never throws past its caller: sync
  * failures degrade to the last verified release and are reported. Every

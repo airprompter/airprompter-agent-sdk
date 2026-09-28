@@ -72,8 +72,15 @@ def test_every_rule_in_order_failing_beats_degraded(state_dir):
     assert at(upload={"backoffUntil": iso_ms(T0 + 60_000), "lastUploadAt": None})["reasons"] == ["upload_backing_off"]
     assert at(upload={"backoffUntil": iso_ms(T0 - 1), "lastUploadAt": None})["reasons"] == [], "a backoff already over is not a reason"
     assert at(forced_downgrade=True)["reasons"] == ["forced_downgrade"]
-    assert at(daemon={"attached": False, "socket_path": "/x"})["reasons"] == ["daemon_detached"]
-    assert at(daemon={"attached": True, "socket_path": "/x"})["reasons"] == []
+    def placed(uploaded_by, live):
+        daemon = None if live is None else {"live": live, "pid": 42, "version": "0.3.0", "heartbeat_at": iso_ms(T0), "spool_dir": "/x"}
+        return {"sink": "directory", "spool_dir": "/x", "spool_dir_from": "default", "uploaded_by": uploaded_by, "daemon": daemon}
+
+    assert at(telemetry=placed("none", False))["reasons"] == ["upload_daemon_stale"], "the daemon's file went stale and nothing here uploads"
+    assert at(telemetry=placed("self", False))["reasons"] == [], "stale, but this process took the upload back"
+    assert at(telemetry=placed("daemon", True))["reasons"] == []
+    assert at(telemetry=placed("none", None))["reasons"] == [], "no daemon at all is not a reason"
+    assert at(telemetry=placed("daemon", True))["telemetry"] == {"uploadedBy": "daemon", "daemon": "live"}
     assert at(spool={"depth_segments": 80, "depth_bytes": 80 * MIB})["reasons"] == ["spool_near_budget"], "80 % of the budget"
     assert at(spool={"depth_segments": 79, "depth_bytes": 79 * MIB})["reasons"] == []
     assert at(None, spool={"depth_segments": 80, "depth_bytes": 80 * MIB})["reasons"] == [], "no budget known (a memory sink): no rule"
@@ -83,7 +90,7 @@ def test_every_rule_in_order_failing_beats_degraded(state_dir):
     code, headers, body = healthz_response(ok)
     assert code == 200 and headers["cache-control"] == "no-store"
     assert json.loads(body)["spool"] == {"depthSegments": 0, "depthBytes": 0, "budgetBytes": 100 * MIB}
-    assert set(json.loads(body)) == {"ok", "status", "reasons", "generation", "stagedGeneration", "applyState", "source", "leaseExpiresAt", "leaseExpired", "onLeaseExpiry", "lastSyncAt", "lastSyncOutcome", "consecutiveSyncFailures", "forcedDowngrade", "daemon", "spool", "lastUploadAt", "backoffUntil"}, "the wire document is the TypeScript SDK's"
+    assert set(json.loads(body)) == {"ok", "status", "reasons", "generation", "stagedGeneration", "applyState", "source", "leaseExpiresAt", "leaseExpired", "onLeaseExpiry", "lastSyncAt", "lastSyncOutcome", "consecutiveSyncFailures", "forcedDowngrade", "telemetry", "spool", "lastUploadAt", "backoffUntil"}, "the wire document is the TypeScript SDK's"
 
 
 def test_live_host_200_then_503_once_the_lease_lapsed_under_halt(state_dir):

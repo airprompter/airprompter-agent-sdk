@@ -2,7 +2,7 @@
 
 Thanks for looking. This repository holds the public half of AirPrompter
 Team Agents: the wire protocol, the TypeScript and Python SDKs, the CLI and
-daemon, and the conformance suite. Contributions are welcome — bug reports,
+telemetry daemon, and the conformance suite. Contributions are welcome — bug reports,
 fixes, new provider wrappers, deployment manifests, docs. The guide below is
 what a change needs to land.
 

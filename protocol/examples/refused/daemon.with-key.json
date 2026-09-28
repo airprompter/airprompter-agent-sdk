@@ -1,0 +1,31 @@
+{
+  "schema": "daemon",
+  "reason": "the discovery file names a folder and a status — never a key",
+  "document": {
+    "format": 1,
+    "kind": "daemon",
+    "daemon": {
+      "name": "airprompterd",
+      "version": "0.3.0"
+    },
+    "pid": 4242,
+    "organizationId": "org_7d3f9a2b",
+    "agentId": "agt_4e8c1b6d",
+    "target": "prod",
+    "spoolDir": "/var/lib/airprompter/airprompter/agt_4e8c1b6d/prod/spool/telemetry",
+    "startedAt": "2026-09-12T09:00:00Z",
+    "heartbeatAt": "2026-09-12T10:04:00Z",
+    "uploadIntervalSeconds": 300,
+    "sink": "airprompter",
+    "upload": {
+      "lastUploadAt": "2026-09-12T10:03:30Z",
+      "backoffUntil": null,
+      "sentSegments": 41,
+      "quarantinedSegments": 0,
+      "droppedSegments": 0,
+      "depthSegments": 3,
+      "depthBytes": 41210
+    },
+    "apiKey": "apa_live_..."
+  }
+}

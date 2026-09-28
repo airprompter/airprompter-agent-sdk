@@ -1,4 +1,4 @@
-# Spool format — local telemetry the daemon picks up
+# Spool format — local telemetry the telemetry daemon picks up
 
 The spool is a directory of append-only files on the host. The SDK writes
 to it; **any other instrumentation may write to it too** — an
@@ -8,20 +8,27 @@ line in your own logger. If a file is in the spool and matches the schema,
 the open-source SDKs: their responses carry tokens and timing, and a few
 lines of code turn those into a window row here.
 
-Status: **draft 2** — matches design decision D52/D66 and S6 (the disk
-budget as a published invariant). Breaking changes bump `protocol` major.
+Status: **draft 3** — matches design decision D52/D66, S6 (the disk
+budget as a published invariant) and, from SDKs 0.3.0, the segment
+manifest the telemetry daemon scans for (`daemon.md`). Draft 2 writers —
+segments without manifests — stay valid. Breaking changes bump `protocol` major.
 
 ## Location and permissions
 
 ```
-<stateDir>/airprompter/<agentId>/<target>/spool/telemetry/
-  seg-<instanceId>-<epochMinute>-<n>.ndjson      open or closed segment
-  sent/                                           segments acknowledged by S3, deleted after 24 h
-  quarantine/                                     segments the daemon could not parse (kept 24 h)
+<stateDir>/airprompter/<agentId>/<target>/spool/telemetry/     (or the folder a live daemon.json names)
+  seg-<instanceId>-<epochMinute>-<n>.ndjson          open (.open suffix) or closed segment
+  seg-<instanceId>-<epochMinute>-<n>.manifest.json   the closed segment's manifest (SDKs 0.3.0+)
+  quarantine/                                         segments (with their manifests) that failed the contract (kept 24 h)
 ```
 
-- Directory mode `0700`; files `0600`. The daemon runs as the same user or a
-  group the SDK's user belongs to.
+Where a process writes: its `telemetry.spoolDir` option, else
+`AIRPROMPTER_SPOOL_DIR`, else the `spoolDir` a live telemetry daemon
+publishes in `daemon.json` for the process's agent and target, else the
+default above (`daemon.md` › What an SDK does).
+
+- Directory mode `0700`; files `0600`. The telemetry daemon runs as the same
+  user as the SDK processes whose folder it scans, or a group they share.
 - `<stateDir>` defaults to the OS state directory (`$XDG_STATE_HOME`,
   `~/Library/Application Support`, `%LOCALAPPDATA%`); containers mount a
   volume there if segments must survive the container.
@@ -38,6 +45,16 @@ budget as a published invariant). Breaking changes bump `protocol` major.
   runtime's spool timer) and the uploader closes it — the partial last
   line is skipped at inspection, the rest uploads and counts against the
   budget like any segment (S6).
+- **The manifest.** Right after a segment is closed, a writer that knows
+  its scope writes `seg-…manifest.json` beside it (temp file + rename):
+  the segment's name, size, SHA-256 and row count, the writer's
+  organization, agent and target, and the writer's heartbeat report
+  without `spool` (`schemas/spool-manifest.schema.json`). A segment never
+  changes once its manifest exists. The daemon uploads only segments whose
+  manifest names its own agent and target, and quarantines a segment whose
+  size or digest no longer matches. A closed segment with no manifest (a
+  third-party writer, a reclaimed `.open`, an SDK before 0.3.0) is uploaded
+  under the daemon's own scope once it is a minute old.
 - Rotate when the minute changes or the file reaches **1 MiB**.
 - Names are unique per `(instanceId, epochMinute, n)`; the object key in S3
   is derived from the file name, which is what makes retries idempotent.
@@ -70,7 +87,7 @@ budget as a published invariant). Breaking changes bump `protocol` major.
   windows keep distinct keys at ingest (a shared id would replace one
   worker's window with another's). The `runRef` key is derived from the
   **store's** id, so a run reference minted by one worker parses in any
-  other on the host; a daemon names it in `hello.storeId`.
+  other on the host.
 - Serverless hosts keep a **256 KiB** memory buffer instead of a directory
   and flush at invocation end; past the buffer the oldest rows are evicted
   and one `dropped` row (rows counted as `segments`) closes the flush.
@@ -170,9 +187,9 @@ drops unknown fields and quarantines unknown rows. Writers that need to
 correlate to their own traces use the `runRef` on their side — it never
 enters a window.
 
-## Upload (for reference; implemented by the daemon)
+## Upload (for reference; implemented by the telemetry daemon)
 
-S5: on a host that runs no daemon, the runtime implements the same upload itself (`docs/telemetry.md` › Telemetry without a daemon).
+S5: on a host that runs no daemon, the runtime implements the same upload itself (`docs/telemetry.md` › Telemetry without a daemon). A runtime whose folder a live daemon scans leaves the upload to it (`daemon.md`).
 
 Heartbeat with the Agent key returns a presigned S3 POST grant (≤ 15 min,
 prefix `org/{org}/agent/{agent}/{target}/{instance}/`, ≤ 1 MiB, NDJSON,
@@ -184,7 +201,8 @@ grant is the throttle. Nothing AirPrompter runs is in the write path.
 A grant is per **instance prefix**, and the ingest processor quarantines a
 row whose `instanceId` is not the prefix's. A daemon uploading for several
 writers therefore holds one grant per writer, obtained by a heartbeat that
-names that writer's `instanceId` (see `daemon-socket.md` › The uploader);
+names that writer's `instanceId` — the writer's own report from its newest
+manifest, with the daemon's `spool` block (`daemon.md` › What the daemon does);
 a third-party writer's segment goes under the writer's own prefix, named
 by the segment file. Before any bytes leave the host every line is
 checked against `spool-rows.schema.json` and against the file name's

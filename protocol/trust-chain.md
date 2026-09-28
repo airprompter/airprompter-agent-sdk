@@ -154,10 +154,12 @@ retreat and a dial-down. Three rules:
    runtime whose pointer says less marks the pointer behind, fetches the
    signed manifest directly on its next pass (skipping the pointer), and
    only then trusts the pointer again.
-3. **A runtime attached to a host daemon takes the daemon's lease.** The
-   daemon is the process that talks to the origin; its `slot` answer and
-   its `lease` event carry `leaseExpiresAt`, and an attached SDK never
-   counts a local socket answer as contact with the registry.
+3. **Only the origin renews a lease.** A runtime hydrated from the
+   customer's datastore, or one running from a vendored bundle, counts no
+   read of its own as contact: its lease runs from the manifest's issue
+   (or the bundle's `notAfter`) until it reaches the origin. (Before 0.3.0
+   a runtime attached to a host daemon took the daemon's lease; that mode
+   is removed — `daemon.md`.)
 
 Together: a stale or pinned pointer costs at most one heartbeat interval
 of delay before the fleet sees what the origin has, and a runtime that can
@@ -193,7 +195,7 @@ host runs under is the host's, recorded in `store.json`
    heartbeat reports `applyPolicy: { effective, source }` so the fleet
    view can say the console's setting is advisory on that host.
 3. **Loosening is an operator's act.** `airprompter policy set … auto`
-   (host-wide through the daemon; `ap.setApplyPolicy("auto")` from a
+   (on the host's store; `ap.setApplyPolicy("auto")` from a
    process) rewrites the pin with `source: "operator"`, logged with who
    asked. The next manifest that says `unlock_required` tightens it again
    — rule 2 always holds.
@@ -211,7 +213,7 @@ host runs under is the host's, recorded in `store.json`
    manifest by halves.
 
 Vectors: `sdk-typescript/test/policy.test.ts`, `sdk-python/tests/test_policy.py`,
-`cli/test/cli.test.ts` "S4", `cli/test/daemon.test.ts`, and
+`cli/test/cli.test.ts` "S4", and
 `vectors/manifest-verify.json` "a directive of a kind the runtime does not
 honour".
 

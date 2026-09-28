@@ -125,8 +125,11 @@ nudge" button.
   The puller's own poll loop (`pullToDatastore` with `nextPullDelayMs`,
   [datastore.md](datastore.md)) stays; the nudge is a second trigger into
   the same pass.
-- `airprompterd` gains `--nudge-sqs <queue-url>` (and later a webhook
-  listener) so a daemon-run host reacts too.
+- A resident runtime takes the same nudge in process (an SQS long-poll or
+  a webhook the application already runs calling `ap.syncNow()`), and a
+  datastore-hydrated fleet reacts through `ap.hydrate()` on the customer's
+  own `LISTEN` / bus. (The telemetry daemon serves no release, so it has
+  nothing to nudge: `../protocol/daemon.md`.)
 
 ### Open decisions
 

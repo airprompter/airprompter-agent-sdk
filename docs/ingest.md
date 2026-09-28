@@ -110,8 +110,8 @@ Each created or updated version is on the workspace **board** as
 *submitted for review*. A reviewer approves it there; an approved version
 can be set up on an agent (a slot in the agent's release) and released
 to an environment — `dev`, `staging`, `prod` — exactly as a version
-authored in the app. From then on the sync library, the daemon and the
-hosted route serve it under the same trust chain as everything else; the
+authored in the app. From then on the sync library, the customer's
+datastore and the hosted route serve it under the same trust chain as everything else; the
 import touched no release and moved no pointer.
 
 ## The route

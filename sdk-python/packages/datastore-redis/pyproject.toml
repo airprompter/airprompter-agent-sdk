@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airprompter-datastore-redis"
-version = "0.2.15"
+version = "0.3.0"
 description = "The AirPrompter release datastore over Redis or Valkey: a KvStore with atomic Lua conditional writes and a sorted-set index, for kv_release_datastore. Bring your own client (redis-py)."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 # The client library is the application's: the adapter imports none, and the extras below only name a known-good one.
 dependencies = [
-  "airprompter-agent-sync==0.2.15",
+  "airprompter-agent-sync==0.3.0",
 ]
 
 [project.optional-dependencies]

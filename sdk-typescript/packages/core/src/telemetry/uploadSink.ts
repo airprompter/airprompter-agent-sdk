@@ -33,6 +33,11 @@ export interface UploadSegment {
   rows: SpoolRow[];
   /** Exactly the whole lines, as bytes — what AirPrompter's sink posts. */
   bytes: Uint8Array;
+  /**
+   * The writer's heartbeat report from the segment's manifest (`protocol/daemon.md`), without `spool`; absent for a
+   * segment with no manifest. AirPrompter's sink sends it to obtain that writer's grant.
+   */
+  report?: Record<string, unknown>;
 }
 
 /**

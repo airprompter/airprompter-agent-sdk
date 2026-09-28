@@ -1,7 +1,7 @@
 # AirPrompter Agent SDK
 
-Client-side software for **AirPrompter Team Agents**: the SDKs, CLI, daemon
-and wire protocol that let an application owned by you (or by a company you
+Client-side software for **AirPrompter Team Agents**: the SDKs, CLI, telemetry
+daemon and wire protocol that let an application owned by you (or by a company you
 work with) run prompts and workflows that were approved in AirPrompter —
 behind your own firewall, on your own model keys, with a local copy that
 survives restarts and works offline.
@@ -28,7 +28,7 @@ content, or make bytes live on a locked runtime.
 | [`cli/`](cli/) | `airprompter` — `pull`, `verify`, `apply`, `status`, `diff`, `unlock`, `rollback`, `keygen`, `export-telemetry`, `import-telemetry`, `login` + `import` (your prompts become reviewable versions), `dev` (a directory served as a registry: live sync while you edit, and the conformance target), and `airprompter daemon` (`airprompterd`). Shipped as signed single-file executables for macOS, Linux and Windows. |
 | [`conformance/`](conformance/) | Runner that executes `protocol/vectors` against every SDK, and `live.mjs` — the same schemas and trust chain over HTTP against a running registry (`airprompter dev`, Hangar, or the hosted service). The hosted service runs the same vectors. |
 | [`docs/`](docs/) | Customer documentation over the contract: the [threat model as written](docs/threat-model.md) with every claim mapped to a row and a vector, [key handling](docs/key-handling.md), [change-control recipes](docs/change-control.md), the [spool contract and OpenTelemetry mapping](docs/telemetry.md), [ingest — your prompts become approved versions](docs/ingest.md), [operator tooling — doctor, healthz, validate, the verify action, the conformance harness](docs/operator-tooling.md), [change notification — the pointer-first pull and the proposed nudge](docs/change-notification.md), [variables from your system](docs/variables.md), and the conformance suite read as narrative. Link-checked in CI. |
-| [`deploy/`](deploy/) | systemd unit, launchd plist, Windows service wrapper, Docker sidecar and Kubernetes DaemonSet manifests for the daemon. |
+| [`deploy/`](deploy/) | systemd unit, launchd plist, Windows service wrapper, Docker sidecar and Kubernetes DaemonSet manifests for the telemetry daemon (`airprompterd` ships the spool SDK processes write; it serves no release — [`protocol/daemon.md`](protocol/daemon.md)). |
 | [`examples/`](examples/) | A Python worker, and [`spool-writer/`](examples/spool-writer/) — telemetry windows written to the spool **without** the SDK, in TypeScript and Python, for teams instrumenting the provider SDKs themselves (checked by the conformance runner). |
 
 ## How the pieces fit
@@ -58,15 +58,15 @@ platforms in CI (release tag pending signing identities). The packages:
 <!-- compat-table:start -->
 | Package | Version | Protocol | Vectors and examples exercised | Conformance |
 |---|---|---|---|---|
-| `@airprompter/agent-core` | 0.2.15 | 0.3.4 | `canonical-json.json`, `manifest-verify.json`, `assignment.json`, `ramp.json`, `workflow-steps.json`, `checks.json` | green |
-| `@airprompter/agent-sync` | 0.2.15 | 0.3.4 | `examples/store.v1.json`, `examples/store.v2.json`, `examples/refused/*`, `datastore.json` | green |
-| `@airprompter/agent-runtime` | 0.2.15 | 0.3.4 | `ramp.json (walked by `ReleaseResolver` over a bundle release)` | green |
-| `@airprompter/agent-telemetry` | 0.2.15 | 0.3.4 | `spool.json`, `feedback.json` | green |
-| `@airprompter/otel-bridge` | 0.2.15 | 0.3.4 | `otel-mapping.json` | green |
-| `@airprompter/datastore-s3` | 0.2.15 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
-| `@airprompter/datastore-postgres` | 0.2.15 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
-| `@airprompter/datastore-redis` | 0.2.15 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
-| `@airprompter/agent-sdk` | 0.2.15 | 0.3.4 | `examples/heartbeat.*.json`, `examples/edge-pointer.json` | green |
+| `@airprompter/agent-core` | 0.3.0 | 0.3.4 | `canonical-json.json`, `manifest-verify.json`, `assignment.json`, `ramp.json`, `workflow-steps.json`, `checks.json` | green |
+| `@airprompter/agent-sync` | 0.3.0 | 0.3.4 | `examples/store.v1.json`, `examples/store.v2.json`, `examples/refused/*`, `datastore.json` | green |
+| `@airprompter/agent-runtime` | 0.3.0 | 0.3.4 | `ramp.json (walked by `ReleaseResolver` over a bundle release)` | green |
+| `@airprompter/agent-telemetry` | 0.3.0 | 0.3.4 | `spool.json`, `feedback.json` | green |
+| `@airprompter/otel-bridge` | 0.3.0 | 0.3.4 | `otel-mapping.json` | green |
+| `@airprompter/datastore-s3` | 0.3.0 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
+| `@airprompter/datastore-postgres` | 0.3.0 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
+| `@airprompter/datastore-redis` | 0.3.0 | 0.3.4 | `datastore.json (through `checkKvStore` and the shared records)` | green |
+| `@airprompter/agent-sdk` | 0.3.0 | 0.3.4 | `examples/heartbeat.*.json`, `examples/edge-pointer.json` | green |
 
 Generated by `sdk-typescript/scripts/compat-table.mjs` from the conformance run on protocol `0.3.4` (Node 22). One version across the nine packages; `@airprompter/agent-sdk` exact-pins its siblings; `@airprompter/otel-bridge` is optional and pins core; the three `@airprompter/datastore-*` adapters are optional and pin sync (their live-backend suites run in the adapters CI job; here they run where a backend is configured).
 <!-- compat-table:end -->

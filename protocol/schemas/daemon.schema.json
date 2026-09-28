@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.com/protocol/0.3/daemon.schema.json",
+  "title": "AirPrompter telemetry daemon discovery file (format 1)",
+  "description": "daemon.md › The discovery file: `<stateDir>/airprompter/<agentId>/<target>/daemon.json`, published by `airprompterd` (temp file + rename, mode 0600, refreshed at least every 60 s). An SDK process whose telemetry folder is `spoolDir` leaves the upload to the daemon while `heartbeatAt` is within 10 minutes and the scope is its own. Names a folder and a status — no key, no release.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "kind",
+    "daemon",
+    "pid",
+    "organizationId",
+    "agentId",
+    "target",
+    "spoolDir",
+    "startedAt",
+    "heartbeatAt",
+    "uploadIntervalSeconds",
+    "sink",
+    "upload"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "kind": {
+      "const": "daemon"
+    },
+    "daemon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "airprompterd"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "organizationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Null when the daemon was started without --org (it uploads under its key's scope either way)."
+    },
+    "agentId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target": {
+      "type": "string",
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ]
+    },
+    "spoolDir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path of the folder the daemon scans."
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "heartbeatAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "uploadIntervalSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sink": {
+      "type": "string",
+      "enum": [
+        "airprompter",
+        "otlp",
+        "none"
+      ],
+      "description": "Where segments go: AirPrompter under per-writer grants, the customer's OpenTelemetry collector, or nowhere (--no-upload: the spool stays for export)."
+    },
+    "upload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lastUploadAt",
+        "backoffUntil",
+        "sentSegments",
+        "quarantinedSegments",
+        "droppedSegments",
+        "depthSegments",
+        "depthBytes"
+      ],
+      "properties": {
+        "lastUploadAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "backoffUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "sentSegments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "quarantinedSegments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "droppedSegments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "depthSegments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "depthBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

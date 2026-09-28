@@ -8,19 +8,19 @@ TypeScript SDK's modules: what `verify` refuses, the runtime refuses too.
 airprompter pull     Fetch and verify the current release; write an encrypted .apbundle (--check compares the vendored one)
 airprompter verify   Run the verification chain on a bundle or a state directory and print the reasons
 airprompter apply    Stage a bundle into the store and activate it per the environment's policy
-airprompter status   Active and staged generation, lease, storage protection, spool depth, last upload
+airprompter status   Active and staged generation, lease, storage protection, spool depth, last upload, the telemetry daemon (--require-daemon: the liveness probe)
 airprompter unlock   Make the staged release live on this host (the operator's unlock; --generation N to name it)
 airprompter rollback The previous release on this host live again, now and offline (the other slot; a step below the stored generation is a forced downgrade, reported)
 airprompter policy   Show or set the apply policy this host holds (an update may tighten it; only this loosens it)
-airprompter doctor   Every reason this host is not serving the release it should, with the remedy (source, root, store, lease, key protection, spool, daemon, policy pin)
+airprompter doctor   Every reason this host is not serving the release it should, with the remedy (source, root, store, lease, key protection, spool, telemetry daemon, policy pin)
 airprompter diff     What a bundle would change against the active release on this host, or against another bundle (--against)
 airprompter keygen   Generate a distribution or countersign keypair
-airprompter daemon   airprompterd: one sync loop and one shared store per host, served to SDKs over a local socket
+airprompter daemon   airprompterd: the host's telemetry daemon — ships the spool SDK processes write (to AirPrompter or your collector); serves no release
 airprompter export-telemetry   Pack the spool's unsent segments into one file for a host that never calls home
 airprompter import-telemetry   Upload an exported telemetry file through the grant path on a connected host (idempotent)
 airprompter telemetry verify   Prove the spool's disk budget is an invariant, on this machine, with no registry
 airprompter telemetry validate <segment>…   A third-party writer's segments against the spool contract, line by line
-airprompter dev <dir>   Serve a directory of prompts as a registry over the protocol's routes (dev key, dev root, hot reload; --daemon serves the host's SDKs too)
+airprompter dev <dir>   Serve a directory of prompts as a registry over the protocol's routes (dev key, dev root, hot reload)
 airprompter login    Sign in as a workspace member and print the session token the write commands read (never an API key)
 airprompter import   A directory, a JSON/CSV export or a SQL query result becomes workspace prompts with reviewable versions (--dry-run plans)
 ```
@@ -34,42 +34,48 @@ Coming with a later ticket: `countersign` (T10).
 ## The daemon
 
 ```bash
-AIRPROMPTER_AGENT_KEY=… airprompter daemon \
-  --org org_… --agent agt_… --environment prod \
-  --root ./airprompter-root.jwk.json --root-url https://<edge>/roots/prod/root.json \
-  --edge-pointer-url https://<edge>/g/<token>/generation.json --poll-seconds 30 --json
+AIRPROMPTER_AGENT_KEY=… airprompter daemon --org org_… --agent agt_… --environment prod --json
+airprompter daemon --org org_… --agent agt_… --environment prod --upload-sink otlp --otlp-endpoint http://localhost:4318/v1/metrics
 ```
 
-The daemon is the runtime every SDK process runs, once per host: the
-same store, the same verification, the same apply policy — and a local
-socket (`<store>/daemon.sock`, mode `0600`; a named pipe on Windows)
-over which SDK processes started with `sync.mode: "daemon"` receive the
-verified release, `generation` events, and host-wide `unlock` /
-`rollback`. A process that finds no socket syncs in-process from its own
-store; a daemon that cannot obtain the store's key does not listen. Logs
-are one JSON object per line on stderr and never carry prompt text.
-`GET /healthz` on the socket answers `200` with a verified release active
-and `503` without (with `spoolDepth`, `lastUploadAt`, `backoffUntil`);
-`airprompter status` asks the daemon when it is there.
+`airprompterd` is the host's **telemetry daemon**
+([`../protocol/daemon.md`](../protocol/daemon.md)). It does one thing: ship
+the spool that SDK processes on the host write. It syncs no release, holds
+no store and no store key, and serves nothing — every SDK process loads its
+own release from its store, the customer's datastore or a vendored bundle.
+(0.3.0 removed the release-serving daemon: `sync.mode: "daemon"` is refused
+by the SDKs, and `--root`, `--root-url`, `--edge-pointer-url`,
+`--poll-seconds`, `--socket` and `--apply-policy` by this command.)
 
-With an Agent key the daemon also **uploads the spool**: every closed
-segment under the store's `spool/telemetry/` — its own, the attached SDK
-processes', and any third-party writer's — is checked line by line
-against the spool contract (a failing segment is quarantined whole, never
-sent), then POSTed straight to S3 under a presigned grant the daemon's
-heartbeat obtains **per writer** (a grant covers one instance prefix; the
-heartbeat names the writer). Acknowledged segments are deleted (S6 — the
-key is the file name, a replay is idempotent; `.last-upload` stamps the
-last one); failures back off with full jitter (1 s → 5 min); a
-hold from the grant issuer is honoured for exactly `retryAfterSeconds`;
-over the host budget (`--spool-budget-bytes`, 100 MiB) the oldest unsent
-segments go and the loss is reported as a `dropped` row. Passes run every
-`--upload-interval-seconds` (300) until a grant says otherwise; `--no-upload`
-leaves the spool on disk. `status` shows the uploader's state; the
-socket's `upload` op runs a pass now.
-Service manifests for systemd, launchd, Windows (WinSW), Docker and
-Kubernetes are in [`../deploy/`](../deploy/); the wire format is
-[`../protocol/daemon-socket.md`](../protocol/daemon-socket.md).
+It publishes `<store dir>/daemon.json` (mode `0600`, refreshed every
+minute, deleted on a clean stop) naming the folder it scans — by default
+`<store dir>/spool/telemetry`, where SDKs write anyway; `--spool-dir` moves
+it. An SDK process on the host with the same state directory finds the
+file, writes its segments into that folder with a **manifest** beside each
+(size, SHA-256, rows, the writer's scope and its heartbeat report), and runs
+no uploader of its own while the file is live; when the daemon stops or its
+file goes stale it takes the upload back within a minute.
+
+Each pass: segments whose manifest names another agent or target are left
+for that pair's daemon; a segment that does not match its manifest is
+quarantined with it; every other segment is checked line by line against
+the spool contract and POSTed straight to S3 under a presigned grant
+obtained **per writer** — a heartbeat carrying that writer's own report
+from its manifest, so a runtime that never talks to AirPrompter still
+appears in the fleet view as what it is. A segment with no manifest (a
+third-party writer, an SDK before 0.3.0) is uploaded after a minute under
+the daemon's own scope. Acknowledged segments are deleted with their
+manifests (S6); failures back off with full jitter (1 s → 5 min); a hold is
+honoured for exactly `retryAfterSeconds`; over the host budget
+(`--spool-budget-bytes`, 100 MiB) the oldest unsent segments go and the
+loss is reported as a `dropped` row. Passes run every
+`--upload-interval-seconds` (300) until a grant says otherwise. The Agent
+key is used for grants only; `--upload-sink otlp` needs none; `--no-upload`
+publishes the folder and ships nothing. Logs are one JSON object per line
+on stderr and never carry prompt text. `airprompter status` reads
+`daemon.json` (`--require-daemon` makes it the liveness probe); `doctor`
+checks it. Service manifests for systemd, launchd, Windows (WinSW), Docker
+and Kubernetes are in [`../deploy/`](../deploy/).
 
 ## The contract scripts can rely on
 
@@ -94,8 +100,7 @@ Kubernetes are in [`../deploy/`](../deploy/); the wire format is
 
 `airprompter dev ./prompts` serves a directory of prompt files as a registry
 over the protocol's routes — a dev key, a dev root kept beside the prompts,
-every save a generation, `unlock_required` honoured locally, `--daemon` for
-the host's SDKs — and it is the conformance target `conformance/live.mjs`
+every save a generation, `unlock_required` honoured locally — and it is the conformance target `conformance/live.mjs`
 exercises beside the hosted service. The recipe is
 [`../docs/change-control.md` §8](../docs/change-control.md#8-live-sync-while-you-edit-airprompter-dev-s12).
 
@@ -203,8 +208,8 @@ pins it in `store.json`; a later file may tighten it (`auto` →
 `unlock_required`) and never loosen it — `apply` says so when the file's
 value differs from the pin. `airprompter policy show` prints what is in
 force and where it came from; `airprompter policy set auto|unlock_required
-[--by …]` is the operator's act that loosens (or tightens by hand), logged,
-and host-wide through the daemon when one runs. Loosening is not an unlock:
+[--by …]` is the operator's act that loosens (or tightens by hand), logged
+in `store.json` and read by every runtime that starts on it. Loosening is not an unlock:
 a release already staged still waits for `airprompter unlock`.
 
 `keygen` refuses to write a private key inside a git worktree unless
@@ -245,7 +250,7 @@ generation and the segments; no prompt text, no responses — the spool
 never holds any. `import-telemetry` heartbeats once per instance the
 file names (as that instance, `syncMode: offline`, with the exported
 generation), takes the grant to that instance's prefix and posts each
-segment under its own name: the same path the daemon uploads by, so
+segment under its own name: the same path the telemetry daemon uploads by, so
 importing the same file twice re-puts the same keys and counts nothing
 twice. A hold is reported with the platform's retry and exits `1`; a
 file for another agent or environment is a usage error before any

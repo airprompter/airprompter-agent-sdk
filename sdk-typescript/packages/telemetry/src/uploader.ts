@@ -21,8 +21,9 @@
  * A grant is per INSTANCE prefix (`org/{org}/agent/{agent}/{target}/{instance}/`)
  * and the ingest processor holds every row to the prefix it arrived under,
  * so a daemon that uploads for several writers holds one grant per writer:
- * `grantFor(instanceId)` is the daemon's heartbeat carrying that writer's
- * instance id. The serverless path uses the same `postSegment` with the
+ * `grantFor(instanceId, report)` is a heartbeat carrying that writer's
+ * instance id and — from the segment's manifest (`protocol/daemon.md`) —
+ * that writer's own report. The serverless path uses the same `postSegment` with the
  * runtime's own grant at invocation end.
  *
  * @example
@@ -43,6 +44,7 @@ import { nodeFs } from "@airprompter/agent-core";
 import { fsFailureCode, type FsPort } from "@airprompter/agent-core";
 import { join } from "node:path";
 
+import { MANIFEST_GRACE_MS, MANIFEST_NAME, manifestNameOf, readSegmentManifest, segmentNameOfManifest, sha256Hex } from "./spool/manifest.js";
 import { HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epochMinute, segmentName, type ErrorClass, type SpoolRow } from "./spool/writer.js";
 import type { FetchLike, UploadSink } from "@airprompter/agent-core";
 
@@ -238,8 +240,11 @@ export interface UploaderOptions {
   dir: string;
   /** The daemon's own instance id: `dropped` rows written by the budget sweep name it. */
   instanceId: string;
-  /** A grant for one writer's prefix — the heartbeat carrying that writer's instance id (AirPrompter's sink). */
-  grantFor?: (instanceId: string) => Promise<GrantDecision>;
+  /**
+   * A grant for one writer's prefix — the heartbeat carrying that writer's instance id (AirPrompter's sink). `report` is
+   * the writer's heartbeat report from its newest manifest (without `spool`), absent for a segment with no manifest.
+   */
+  grantFor?: (instanceId: string, report?: Record<string, unknown>) => Promise<GrantDecision>;
   fetch?: FetchLike;
   /**
    * S13: where validated segments go. Absent: AirPrompter's sink over `grantFor` + `fetch`. The OpenTelemetry bridge
@@ -260,6 +265,18 @@ export interface UploaderOptions {
   openReclaimMs?: number;
   /** The cadence between passes when no grant has said otherwise (the grant's `uploadIntervalSeconds` wins). */
   intervalSeconds?: number;
+  /**
+   * `protocol/daemon.md`: the agent and target this uploader ships for. A segment whose manifest names another pair is
+   * left alone for that pair's uploader — never uploaded, never deleted. Absent: every manifest is this uploader's.
+   */
+  scope?: { agentId: string; target: string };
+  /**
+   * How long a closed segment with no manifest waits for its writer to add one before it is uploaded without (60 s when
+   * `scope` is set, 0 otherwise). An orphan manifest is deleted after the same wait.
+   */
+  manifestGraceMs?: number;
+  /** Called after every pass with what it did (the telemetry daemon refreshes its discovery file here). Never awaited; a throw is ignored. */
+  onPass?: (result: PassResult) => void;
 }
 
 export interface UploaderStatus {
@@ -275,6 +292,8 @@ export interface UploaderStatus {
   sentSegments: number;
   quarantinedSegments: number;
   droppedSegments: number;
+  /** Segments whose manifest names another agent or target, left for that pair's uploader. */
+  foreignSegments: number;
   /** Live grants by writer instance and when each lapses. */
   grants: Array<{ instanceId: string; expiresAt: string }>;
   depth: { segments: number; bytes: number };
@@ -297,14 +316,14 @@ export interface PassResult {
  * exactly the whole lines to the customer's own prefix; a grant that lapsed between the check and the bucket's clock is
  * refreshed once. `onGrant` lets the uploader take the grant's cadence.
  */
-export function airprompterUploadSink(input: { grantFor: (instanceId: string) => Promise<GrantDecision>; fetch: FetchLike; now?: () => number; onGrant?: (decision: Extract<GrantDecision, { kind: "grant" }>) => void }): UploadSink & { readonly grants: Map<string, UploadGrant> } {
+export function airprompterUploadSink(input: { grantFor: (instanceId: string, report?: Record<string, unknown>) => Promise<GrantDecision>; fetch: FetchLike; now?: () => number; onGrant?: (decision: Extract<GrantDecision, { kind: "grant" }>) => void }): UploadSink & { readonly grants: Map<string, UploadGrant> } {
   const now = input.now ?? (() => Date.now());
   const grants = new Map<string, UploadGrant>();
-  const grantFor = async (instanceId: string): Promise<GrantDecision> => {
+  const grantFor = async (instanceId: string, report?: Record<string, unknown>): Promise<GrantDecision> => {
     const held = grants.get(instanceId);
     if (held && Date.parse(held.expiresAt) - GRANT_REFRESH_MARGIN_MS > now()) return { kind: "grant", grant: held };
     grants.delete(instanceId);
-    const decision = await input.grantFor(instanceId);
+    const decision = await input.grantFor(instanceId, report);
     if (decision.kind === "grant") {
       grants.set(instanceId, decision.grant);
       input.onGrant?.(decision);
@@ -316,14 +335,14 @@ export function airprompterUploadSink(input: { grantFor: (instanceId: string) =>
     grants,
     status: () => ({ grants: [...grants].map(([instanceId, grant]) => ({ instanceId, expiresAt: grant.expiresAt })) }),
     async ship(segment) {
-      const decision = await grantFor(segment.instanceId);
+      const decision = await grantFor(segment.instanceId, segment.report);
       if (decision.kind === "hold") return { status: "hold", retryAfterMs: decision.retryAfterSeconds * 1000, ...(decision.reason !== undefined ? { reason: decision.reason } : {}) };
       if (decision.kind === "unavailable") return { status: "failed", reason: `grant:${decision.reason}` };
       let outcome = await postSegment({ grant: decision.grant, segment: segment.segment, bytes: segment.bytes, fetch: input.fetch, now });
       if (outcome.status === "refused" && outcome.expired) {
         // The grant lapsed between the check and the bucket's clock: one fresh grant, one more try.
         grants.delete(segment.instanceId);
-        const fresh = await grantFor(segment.instanceId);
+        const fresh = await grantFor(segment.instanceId, segment.report);
         if (fresh.kind === "grant") outcome = await postSegment({ grant: fresh.grant, segment: segment.segment, bytes: segment.bytes, fetch: input.fetch, now });
       }
       if (outcome.status === "ok") return { status: "ok" };
@@ -345,6 +364,9 @@ export class SpoolUploader {
   private sentSegments = 0;
   private quarantinedSegments = 0;
   private droppedSegments = 0;
+  private foreignSegments = 0;
+  /** When this uploader first saw a manifest-less segment or an orphan manifest, on its own clock: the grace runs from there. */
+  private readonly firstSeen = new Map<string, number>();
   private reclaimedSegments = 0;
   private capEvictedFiles = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -445,7 +467,7 @@ export class SpoolUploader {
     return (this.options.budgetBytes ?? HOST_SPOOL_BUDGET_BYTES) + writers * SEGMENT_MAX_BYTES + (this.options.quarantineCapBytes ?? QUARANTINE_CAP_BYTES) + (this.options.exportedCapBytes ?? EXPORTED_CAP_BYTES);
   }
 
-  /** Attached SDK processes and the daemon both write here; over the host budget the OLDEST unsent segments go and the loss is one `dropped` row under the daemon's own id. */
+  /** Every SDK process on the host and the uploader itself write here; over the host budget the OLDEST unsent segments go and the loss is one `dropped` row under the daemon's own id. */
   enforceBudget(): number {
     const budget = this.options.budgetBytes ?? HOST_SPOOL_BUDGET_BYTES;
     const segments: Array<{ name: string; size: number }> = [];
@@ -458,6 +480,7 @@ export class SpoolUploader {
       const removed = this.guard("evict_segment", () => this.fs.unlink(join(this.options.dir, segment.name)));
       total -= segment.size;
       if (!removed) continue;
+      this.removeManifest(segment.name);
       evicted += 1;
       evictedBytes += segment.size;
     }
@@ -468,10 +491,38 @@ export class SpoolUploader {
       let name = segmentName(this.options.instanceId, epochMinute(at), n);
       while (this.fs.exists(join(this.options.dir, name)) || this.fs.exists(join(this.options.dir, `${name}.open`))) name = segmentName(this.options.instanceId, epochMinute(at), (n += 1));
       this.guard("write_dropped_row", () => this.fs.writeFile(join(this.options.dir, name), Buffer.from(`${JSON.stringify(row)}\n`, "utf8"), 0o600));
+      // Written whole by this uploader: no writer will add a manifest, so it waits for no grace.
+      this.firstSeen.set(name, -Infinity);
       this.droppedSegments += evicted;
       this.log({ event: "spool_evicted", segments: evicted, bytes: evictedBytes });
     }
     return evicted;
+  }
+
+  private get graceMs(): number {
+    return this.options.manifestGraceMs ?? (this.options.scope ? MANIFEST_GRACE_MS : 0);
+  }
+
+  /** Whether `name` has waited out the grace since this uploader first saw it (always, with no grace). */
+  private waited(name: string): boolean {
+    if (this.graceMs <= 0) return true;
+    const now = this.now();
+    const seen = this.firstSeen.get(name);
+    if (seen === undefined) {
+      this.firstSeen.set(name, now);
+      return false;
+    }
+    return now - seen >= this.graceMs;
+  }
+
+  /** A segment's manifest goes with it: after the ack, the eviction, the sink's drop. Gone already is fine. */
+  private removeManifest(segment: string): void {
+    const path = join(this.options.dir, manifestNameOf(segment));
+    try {
+      if (this.fs.exists(path)) this.fs.unlink(path);
+    } catch {
+      // A sibling took it; the sweep deletes an orphan anyway.
+    }
   }
 
   /** The segment's bytes, or null when it is gone (counted as a fault, never thrown). */
@@ -527,10 +578,28 @@ export class SpoolUploader {
         this.log({ event: "open_segment_reclaimed", segment: name.slice(0, -".open".length) });
       });
     }
+    // A manifest whose segment is gone (acknowledged by a sibling, evicted), or a writer's temp file left by a crash, once it is past the grace.
+    const present = new Set(names);
+    for (const seen of [...this.firstSeen.keys()]) if (!present.has(seen.startsWith("orphan:") ? seen.slice("orphan:".length) : seen)) this.firstSeen.delete(seen);
+    for (const name of names) {
+      const orphan = MANIFEST_NAME.test(name) ? !present.has(segmentNameOfManifest(name)) && !present.has(`${segmentNameOfManifest(name)}.open`) : /^seg-.+\.manifest\.json\.[0-9a-f]+\.tmp$/.test(name);
+      if (!orphan) continue;
+      const key = `orphan:${name}`;
+      const now = this.now();
+      const seen = this.firstSeen.get(key);
+      if (seen === undefined) this.firstSeen.set(key, now);
+      else if (now - seen >= Math.max(this.graceMs, MANIFEST_GRACE_MS)) {
+        this.guard("sweep_manifest", () => this.fs.unlink(join(this.options.dir, name)));
+        this.firstSeen.delete(key);
+      }
+    }
   }
 
   private quarantine(name: string, reason: string, detail?: unknown): void {
     this.guard("quarantine", () => this.fs.rename(join(this.options.dir, name), join(this.options.dir, "quarantine", name)));
+    // The pair moves together, so an operator reads the segment beside what its writer said about it.
+    const manifest = manifestNameOf(name);
+    if (this.fs.exists(join(this.options.dir, manifest))) this.guard("quarantine_manifest", () => this.fs.rename(join(this.options.dir, manifest), join(this.options.dir, "quarantine", manifest)));
     this.quarantinedSegments += 1;
     this.log({ event: "segment_quarantined", segment: name, reason, ...(detail !== undefined ? { detail } : {}) });
   }
@@ -540,6 +609,13 @@ export class SpoolUploader {
     if (this.inFlight) return this.inFlight;
     this.inFlight = this.pass().finally(() => {
       this.inFlight = null;
+    });
+    void this.inFlight.then((result) => {
+      try {
+        this.options.onPass?.(result);
+      } catch {
+        // The hook is the caller's; a pass is never undone by it.
+      }
     });
     return this.inFlight;
   }
@@ -560,6 +636,32 @@ export class SpoolUploader {
         // Taken away between the listing and the read (a sibling's eviction): nothing to upload, nothing lost here.
         if (read === null) continue;
         const bytes = read;
+        // protocol/daemon.md: the manifest says whose segment this is and what it must be.
+        let report: Record<string, unknown> | undefined;
+        let manifest: ReturnType<typeof readSegmentManifest> = null;
+        this.guard("read_manifest", () => void (manifest = readSegmentManifest(this.fs, this.options.dir, name)));
+        const found = manifest as ReturnType<typeof readSegmentManifest>;
+        if (found === null) {
+          // Its writer may be about to add one: wait out the grace before shipping it under this uploader's own scope.
+          if (!this.waited(name)) continue;
+        } else if (!found.ok) {
+          this.quarantine(name, found.reason);
+          result.quarantined.push(name);
+          continue;
+        } else {
+          const scope = this.options.scope;
+          if (scope && (found.manifest.agentId !== scope.agentId || found.manifest.target !== scope.target)) {
+            // Another agent's or target's: its own uploader ships it.
+            this.foreignSegments += 1;
+            continue;
+          }
+          if (found.manifest.bytes !== bytes.length || found.manifest.sha256 !== sha256Hex(bytes)) {
+            this.quarantine(name, "manifest_mismatch");
+            result.quarantined.push(name);
+            continue;
+          }
+          report = found.manifest.report;
+        }
         if (bytes.length > SEGMENT_MAX_BYTES) {
           this.quarantine(name, "oversize", bytes.length);
           result.quarantined.push(name);
@@ -573,12 +675,12 @@ export class SpoolUploader {
         }
         if (inspection.rows.length === 0) {
           // Nothing to say (an empty or partial-only segment): acknowledged locally, never uploaded.
-          this.guard("ack_segment", () => this.fs.unlink(path));
+          if (this.guard("ack_segment", () => this.fs.unlink(path))) this.removeManifest(name);
           continue;
         }
         // The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines.
         const payload = inspection.partialTail ? Buffer.from(bytes.subarray(0, bytes.lastIndexOf(0x0a) + 1)) : bytes;
-        const outcome = await this.sink.ship({ instanceId, segment: name, rows: inspection.rows, bytes: payload });
+        const outcome = await this.sink.ship({ instanceId, segment: name, rows: inspection.rows, bytes: payload, ...(report ? { report } : {}) });
         if (outcome.status === "hold") {
           this.backoffUntilMs = this.now() + outcome.retryAfterMs;
           this.lastError = `hold:${outcome.reason ?? "retry_after"}`;
@@ -588,7 +690,7 @@ export class SpoolUploader {
         }
         if (outcome.status === "dropped") {
           // S13: the sink gave this segment up for good (the bridge's drop-and-count): deleted, counted, never silent.
-          this.guard("drop_segment", () => this.fs.unlink(path));
+          if (this.guard("drop_segment", () => this.fs.unlink(path))) this.removeManifest(name);
           this.droppedSegments += 1;
           result.dropped += 1;
           this.log({ event: "segment_dropped_by_sink", segment: name, sink: this.sink.kind, reason: outcome.reason });
@@ -596,7 +698,8 @@ export class SpoolUploader {
         }
         if (outcome.status === "ok") {
           // S6: delete on ack. The object key is the file name, so a lost response replays to the same key; nothing is kept here.
-          this.guard("ack_segment", () => this.fs.unlink(path));
+          // The segment first, then its manifest: a crash between leaves an orphan manifest the sweep deletes, never a segment without one twice.
+          if (this.guard("ack_segment", () => this.fs.unlink(path))) this.removeManifest(name);
           this.guard("stamp_upload", () => this.fs.writeFile(join(this.options.dir, LAST_UPLOAD_MARKER), Buffer.from(`${new Date(this.now()).toISOString()}\n`, "utf8"), 0o600));
           this.sentSegments += 1;
           this.lastUploadMs = this.now();
@@ -670,6 +773,7 @@ export class SpoolUploader {
       sentSegments: this.sentSegments,
       quarantinedSegments: this.quarantinedSegments,
       droppedSegments: this.droppedSegments,
+      foreignSegments: this.foreignSegments,
       sink: this.sink.kind,
       grants: ((this.sink.status?.() as { grants?: Array<{ instanceId: string; expiresAt: string }> } | undefined)?.grants ?? []),
       depth: this.depth(),

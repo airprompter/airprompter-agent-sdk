@@ -40,7 +40,12 @@ What must never be in a row: prompt text, model output, end-user
 identifiers, error messages, stack traces. The row shape has no field for
 them and ingest drops unknown fields; the `runRef` stays on your side.
 
-The daemon itself (`airprompterd`, `cli/`) validates every row against
+The telemetry daemon (`airprompterd`, `cli/`) — or the SDK's own uploader
+on a host without one — validates every row against
 `protocol/schemas/spool-rows.schema.json` before upload and quarantines a
 segment it cannot parse, so a mistake here costs one segment, never the
-fleet's data.
+fleet's data. A writer here adds no manifest (`protocol/daemon.md`): the
+daemon waits a minute for one, then uploads the segment under its own
+agent and target. Write a `seg-….manifest.json` beside each closed
+segment (`protocol/schemas/spool-manifest.schema.json`) to be reported as
+your own instance.

@@ -6,8 +6,27 @@ counts, token totals, a 16-bucket latency histogram, error classes, output
 check counts and declared feedback outcomes — written to a local spool and
 uploaded under a short-lived grant to your organization's own prefix.
 The spool is a **public contract** (design D66): any process, in any
-language, can write to it and be picked up by the daemon — or by the
-runtime itself, on a host that runs none.
+language, can write to it and be picked up by the telemetry daemon
+(`airprompterd`, [`../protocol/daemon.md`](../protocol/daemon.md)) — or by
+the runtime itself, on a host that runs none.
+
+## Where the spool goes
+
+An SDK writes to one folder, chosen at start and re-checked once a minute:
+`telemetry.spoolDir` (`TelemetryOptions(spool_dir=…)`), else
+`AIRPROMPTER_SPOOL_DIR`, else the folder a live telemetry daemon for the
+same agent and target publishes in `<store dir>/daemon.json`, else
+`<store dir>/spool/telemetry`. Beside every segment it closes it writes a
+**manifest** (`seg-….manifest.json`: size, SHA-256, rows, the writer's
+scope, and its heartbeat report without `spool`). When a live daemon ships
+that folder the process runs no uploader of its own — the daemon uploads
+under each writer's own grant, with the writer's own report, so a runtime
+hydrated from your datastore with no Agent key still shows in the fleet as
+what it is. When the daemon stops, a process with a key takes the upload
+back within a minute; one without keeps the segments on disk and its
+`healthz` says `upload_daemon_stale`. `ap.status().telemetry` says which
+folder, where it came from and who uploads. The daemon never serves a
+release: every process loads its own.
 
 ## The contract, in one table
 
@@ -19,7 +38,7 @@ runtime itself, on a host that runs none.
 | Latency | 16 fixed bucket edges every writer uses | `schemas/latency-buckets.json`; `vectors/spool.json` 32 values |
 | Feedback | `outcomes[signal] = {n, sum}` from the declared catalogue only; `goldenPass` is the runtime's own | `schemas/feedback-signals.schema.json`; `vectors/feedback.json` |
 | Never in the spool | prompt text, model output, end-user identifiers, stack traces, application error messages — no field exists for them; unknown fields are dropped and unknown rows quarantined at ingest | [What must never be in the spool](../protocol/spool-format.md#what-must-never-be-in-the-spool) |
-| Upload | heartbeat → presigned S3 POST grant (≤ 15 min, ≤ 1 MiB, the instance's own prefix); backoff with full jitter; acknowledged segments deleted (S6); a refused grant is the throttle | [Upload](../protocol/spool-format.md#upload-for-reference-implemented-by-the-daemon); `sdk-typescript/test/uploader.test.ts` |
+| Upload | heartbeat → presigned S3 POST grant (≤ 15 min, ≤ 1 MiB, the instance's own prefix); backoff with full jitter; acknowledged segments deleted (S6); a refused grant is the throttle | [Upload](../protocol/spool-format.md#upload-for-reference-implemented-by-the-telemetry-daemon); `sdk-typescript/test/uploader.test.ts` |
 | Offline | `airprompter export-telemetry` / `import-telemetry` carry the spool as one file, idempotent by key | [The spool over a file](../protocol/spool-format.md#the-spool-over-a-file-t16) |
 | Third-party writers | `examples/spool-writer/` (TypeScript and Python, dependency-free) pass the same vectors | [Writing to the spool without our SDK](../protocol/spool-format.md#writing-to-the-spool-without-our-sdk) |
 
@@ -68,7 +87,7 @@ Three ways to run it:
 
 ```sh
 # The daemon, for every writer on the host — no AIRPROMPTER_AGENT_KEY at all:
-airprompterd --org … --agent … --environment prod --root root.jwk.json \
+airprompterd --org … --agent … --environment prod \
   --upload-sink otlp --otlp-endpoint http://localhost:4318/v1/metrics \
   --otlp-header 'authorization=$OTEL_TOKEN' --otlp-resource service.name=support-bot
 ```
@@ -134,9 +153,9 @@ cases your host will meet.
 
 ## Telemetry without a daemon (S5)
 
-The daemon is an optimisation, never a requirement. A resident host with
-no `airprompterd` runs the same uploader in-process (`SpoolUploader`, the
-one the daemon runs): closed segments go out under the runtime's **own**
+The daemon is an optimisation, never a requirement. A resident host whose
+spool no live `airprompterd` ships runs the same uploader in-process
+(`SpoolUploader`, the one the daemon runs): closed segments go out under the runtime's **own**
 grant, on a timer with a random phase (never on the request path), a
 failed pass backs off with full jitter and the next one retries, and past
 the host budget the oldest unsent segments are dropped and counted — one
@@ -145,9 +164,8 @@ fleet view's "metric batches waiting" — never silently. `ap.status().upload`
 says what the uploader is doing; `ap.uploadNow()` runs one pass by hand.
 `telemetry.upload: false` (`TelemetryOptions(upload=False)`) leaves the
 spool for a daemon or for `airprompter export-telemetry`; the budget still
-holds and the loss is still counted. The daemon itself starts its runtime
-with the uploader off and runs the host's own, one grant per attached
-writer.
+holds and the loss is still counted. The daemon holds one grant per writer
+whose segments it ships, each obtained with that writer's own report.
 
 Serverless (`on_invoke`) hosts keep no spool: the invocation's rows sit in
 a memory buffer and `invoke()` POSTs them as one segment under the

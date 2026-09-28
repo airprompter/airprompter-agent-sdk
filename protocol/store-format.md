@@ -7,9 +7,12 @@ and, from format 2, the apply-policy pin (S4) and the writer. It sits at
 (`slots/A`, `slots/B`: a signed manifest and encrypted payloads each) and
 the spool. No prompt text is ever in it.
 
-It is a **cross-package contract** (S8): `airprompterd` — the daemon
-binary — writes it, and the application's SDK reads it, and the two
-deploy on different days. Once the SDK ships as separate packages
+It is a **cross-package contract** (S8): the `airprompter` CLI (`apply`,
+`unlock`, `rollback`, `policy set`) writes it, and the application's SDK
+reads and writes it, and the two deploy on different days. (Before 0.3.0
+the release-serving `airprompterd` wrote it too; a store it wrote still
+opens, `writer.name: "airprompterd"`. The 0.3.0 daemon ships telemetry only
+and never opens a store: `daemon.md`.) Once the SDK ships as separate packages
 (`@airprompter/agent-core` reads, `airprompter` writes) the format is the
 seam between them, so it carries a version and a rule.
 

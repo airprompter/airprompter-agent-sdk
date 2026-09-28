@@ -4,8 +4,8 @@
  * retreat honoured), the rendered text with its run reference, the
  * provider wrappers that attribute a model call to a render and classify
  * what came back, and the hosted-execution client. Consumes a
- * `LoadedRelease` from `@airprompter/agent-core` — the slot store, a daemon
- * or a bundle the customer loaded — and never imports the sync or the
+ * `LoadedRelease` from `@airprompter/agent-core` — the slot store or a
+ * bundle the customer loaded — and never imports the sync or the
  * telemetry package (S10). `variables/` is how the application fills a
  * prompt's variables from its own system at render time.
  *

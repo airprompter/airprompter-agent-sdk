@@ -1,6 +1,6 @@
 """``airprompter_agent_sync`` — pulling and holding releases: the encrypted restart-safe slot store, the key
-providers, the sync pass and its loop, the apply policy and its windows, and the daemon client. What the store or the
-daemon loads is a ``LoadedSlot`` (a ``LoadedRelease`` for ``airprompter_agent_runtime``); this package never imports
+providers, the sync pass and its loop, the apply policy and its windows, and the customer's datastore. What the store
+loads is a ``LoadedSlot`` (a ``LoadedRelease`` for ``airprompter_agent_runtime``); this package never imports
 the runtime or the telemetry package (S10).
 
 Example::
@@ -43,16 +43,11 @@ from .store.release_datastore import (
 )
 from .store.payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
 from .store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
-from .sync.daemon import DAEMON_MAX_LINE_BYTES, DaemonClient, DaemonError, DaemonHello, daemon_socket_path
 from .sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
 from .sync.pull_bundle import DEFAULT_MAX_POINTER_AGE_MS, PullBundleResult, PullEdgeState, next_pull_delay_ms, pull_bundle
 from .sync.pull_to_datastore import PullToDatastoreResult, pull_to_datastore
 
 __all__ = [
-    "DAEMON_MAX_LINE_BYTES",
-    "DaemonClient",
-    "DaemonError",
-    "DaemonHello",
     "KeyProvider",
     "LoadedSlot",
     "PayloadDecryptError",
@@ -63,7 +58,6 @@ __all__ = [
     "UpdateWindow",
     "WindowState",
     "custom_key_provider",
-    "daemon_socket_path",
     "decrypt_payload",
     "encrypt_payload",
     "file_key",

@@ -21,11 +21,11 @@ remedy? }] }`.
 | `root` (with `--root`) | the file is missing, is neither a pinned JWK nor a root document, or is a root document that has lapsed | — |
 | `store` | no store on this host, the store key cannot be obtained, `store.json` is unreadable | — |
 | `active_release` | no active release; the active slot does not re-verify as the runtime would on start (the reason is named) | — |
-| `lease` | — | the lease lapsed from issue and no runtime or daemon is in contact (`degrade` or `halt` named) |
+| `lease` | — | the lease lapsed from issue and no runtime is in contact (`degrade` or `halt` named) |
 | `key_protection` | — | `file_key` (the store key is a file next to the store) |
 | `policy_pin` | — | no apply policy pinned yet |
 | `spool` / `quarantine` / `last_upload` | — | closed segments at ≥ 80 % of the budget, or at the budget (eviction); quarantined segments present; the last upload over a day old with segments waiting |
-| `daemon` | the socket exists but is not ours or does not answer (a stale socket); the daemon's healthz is failing | the daemon's healthz is degraded |
+| `daemon` | the telemetry daemon's `daemon.json` is stale (it died without a clean exit), unreadable or for another scope; its spool folder is not writable by this user | it ships nothing (no key, no `--upload-sink otlp`); its uploads are backing off |
 
 Rules: doctor **reads only** — it never creates a store, writes a file or
 sends a heartbeat (the source check is a manifest GET). A key comes from
@@ -37,7 +37,7 @@ otherwise. Nothing printed is prompt text. Vector:
 
 ## In-process `healthz` — the probe answer, in the SDK
 
-Today only the daemon answered `GET /healthz`. Now every runtime does:
+Every runtime answers `GET /healthz`:
 
 ```ts
 // TypeScript: any framework
@@ -51,17 +51,17 @@ code, headers, body = ap.healthz_response()          # 200 / 503, {"content-type
 doc = ap.healthz()                                   # the document
 ```
 
-The document is the same everywhere — the SDKs, the daemon's `/healthz`
-and its `healthz` op — with `ok` as the liveness answer and `status` as
-the one degraded middle:
+The document is the same in both SDKs, with `ok` as the liveness answer
+and `status` as the one degraded middle:
 
 - **failing** (`ok: false`, 503): nothing verified to serve (generation 0);
   the lease lapsed under `onLeaseExpiry: "halt"` (every render refuses).
 - **degraded** (`ok: true`, 200): the lease lapsed under `degrade` (serving
   the last verified release); three or more consecutive sync failures; the
-  uploader is backing off; a forced downgrade is in force; the daemon this
-  process attached to is gone (serving what it holds); the spool is at 80 %
-  of its budget or more.
+  uploader is backing off; a forced downgrade is in force; the telemetry
+  daemon that shipped this process's spool has gone stale and nothing here
+  uploads instead (`upload_daemon_stale`); the spool is at 80 % of its
+  budget or more.
 - **ok** otherwise. `reasons` names every rule that fired, in that order,
   and `failing` beats `degraded`.
 
@@ -69,7 +69,11 @@ The rest of the document is what a probe dashboard wants next to the
 verdict: `generation`, `stagedGeneration`, `applyState`, `source`,
 `leaseExpiresAt` / `leaseExpired` / `onLeaseExpiry`, `lastSyncAt` /
 `lastSyncOutcome` / `consecutiveSyncFailures`, `forcedDowngrade`,
-`daemon`, `spool` (with `budgetBytes`), `lastUploadAt`, `backoffUntil`.
+`telemetry` (`uploadedBy`: `daemon` / `self` / `none`, and the daemon's
+state: `live` / `stale` / `null`), `spool` (with `budgetBytes`),
+`lastUploadAt`, `backoffUntil`. The telemetry daemon itself is probed with
+`airprompter status --require-daemon` (exit `1` when its `daemon.json` is
+missing or stale).
 `Cache-Control: no-store`; `HEAD` is answered; other methods get 405.
 Vectors: `sdk-typescript/test/healthz.test.ts`,
 `sdk-python/tests/test_healthz.py`.

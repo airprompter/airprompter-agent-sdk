@@ -2,7 +2,7 @@
  * `airprompter dev ./dir` (S12): a directory of prompts served as a registry
  * over the protocol's own routes — the manifest, the payloads, the heartbeat,
  * the catalogue, the edge pointer and the root — signed with a dev key under
- * a dev root, so an SDK, a daemon or the CLI syncs from it exactly as from
+ * a dev root, so an SDK or the CLI syncs from it exactly as from
  * the hosted service. Git customers get live sync while they edit; Hangar (a
  * self-hosted registry) gets a runnable conformance target; the conformance
  * runner's live mode (`conformance/live.mjs`) exercises it beside hosted.
@@ -32,10 +32,10 @@
  *   `applyPolicy: "unlock_required"` (or `--apply-policy`), every generation
  *   is staged by the clients and waits for `airprompter unlock` on the host —
  *   the same flow as production, on the laptop.
- * - **The daemon socket carries the generations.** With `--daemon`, an
- *   embedded `airprompterd` attached to this server serves the host's SDKs
- *   over the local socket, and every promotion reaches them as a
- *   `generation` event within one poll.
+ * - **SDKs sync from it directly.** Point a resident SDK at the registry
+ *   (`baseUrl`, the edge pointer, the root) with a short `pollSeconds`, and
+ *   every promotion reaches it within one poll. (`--daemon` was removed in
+ *   0.3.0 with the release-serving daemon: `protocol/daemon.md`.)
  * - **Nothing here is trusted beyond the machine.** The API key is a
  *   fixed dev key (`apa_dev_local`), the root is self-made, the listener is
  *   loopback unless `--host` says otherwise; a manifest signed here never
@@ -43,7 +43,7 @@
  *
  * @example
  * ```sh
- * airprompter dev ./prompts --port 4180 --daemon
+ * airprompter dev ./prompts --port 4180
  * AIRPROMPTER_AGENT_KEY=apa_dev_local airprompter pull --org org_dev --agent agt_dev --environment dev \
  *   --root ./prompts/.airprompter-dev/root.pub.json --base-url http://127.0.0.1:4180 --out ./release.apbundle --plaintext
  * ```
@@ -52,16 +52,12 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-import { AirPrompterAgent } from "../../../sdk-typescript/packages/sdk/src/agent.js";
 import type { ManifestPayload, ManifestSlot, P256PrivateJwk, SlotVariable, Target } from "../../../sdk-typescript/packages/core/src/protocol/types.js";
 import { sha256Prefixed } from "../../../sdk-typescript/packages/core/src/protocol/canonicalJson.js";
 import { publicJwkOf } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
 import { FakeControlPlane, serveOverHttp } from "../../../sdk-typescript/packages/core/src/testing/controlPlane.js";
-import { daemonSocketPath } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
-import { SlotStore } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
 
 import { COMMON_OPTIONS, flag, helpFor, parse, str, type OptionSpec } from "../args.js";
-import { DaemonServer } from "../daemon/server.js";
 import { EXIT, Output, usage, type Context } from "../io.js";
 import { CLI_VERSION, PROTOCOL_VERSION } from "../version.js";
 
@@ -76,9 +72,7 @@ export const DEV_OPTIONS: OptionSpec = {
   port: { type: "string", default: "4180", help: "Listen port (0 picks a free one)" },
   "apply-policy": { type: "string", help: "The manifest's apply policy: auto (default) or unlock_required (every generation waits for airprompter unlock on each host)" },
   "lease-seconds": { type: "string", help: "The manifest's lease (default 3600)" },
-  daemon: { type: "boolean", help: "Also run airprompterd attached to this server: SDKs on this host get generation events over the local socket" },
-  "state-dir": { type: "string", help: "The embedded daemon's state directory (default: <dir>/.airprompter-dev/state)" },
-  "poll-seconds": { type: "string", default: "2", help: "The embedded daemon's poll interval" },
+  daemon: { type: "boolean", help: "Removed in 0.3.0: point SDKs at the registry directly (resident mode, a short pollSeconds)" },
   "exit-after": { type: "string", help: "Seconds to run before exiting (tests and smoke checks)" },
   ...COMMON_OPTIONS,
 };
@@ -255,9 +249,10 @@ export function promoteRelease(plane: FakeControlPlane, release: DevRelease, ove
 export async function dev(argv: string[], ctx: Context): Promise<number> {
   const parsed = parse(argv, DEV_OPTIONS);
   if (flag(parsed, "help")) {
-    ctx.stdout(helpFor("dev", "<directory> [--port 4180] [--apply-policy unlock_required] [--daemon]", DEV_OPTIONS));
+    ctx.stdout(helpFor("dev", "<directory> [--port 4180] [--apply-policy unlock_required]", DEV_OPTIONS));
     return EXIT.ok;
   }
+  if (flag(parsed, "daemon")) throw usage("--daemon was removed in 0.3.0 with the release-serving daemon: point SDKs at this registry directly (resident mode, a short pollSeconds; protocol/daemon.md)");
   const dir = parsed.positionals[0];
   if (!dir) throw usage("dev takes the directory to serve: airprompter dev ./prompts");
   if (!existsSync(dir) || !statSync(dir).isDirectory()) throw usage(`${dir} is not a directory`);
@@ -270,8 +265,6 @@ export async function dev(argv: string[], ctx: Context): Promise<number> {
   const port = Number(str(parsed, "port") ?? "4180");
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw usage("--port must be 0–65535");
   const host = str(parsed, "host") ?? "127.0.0.1";
-  const pollSeconds = Number(str(parsed, "poll-seconds") ?? "2");
-  if (!Number.isFinite(pollSeconds) || pollSeconds < 1) throw usage("--poll-seconds must be at least 1");
   const json = flag(parsed, "json");
   const out = new Output(ctx, json);
   const log = (event: Record<string, unknown>) => ctx.stderr(json ? JSON.stringify({ at: new Date(ctx.now()).toISOString(), ...event }) : `${new Date(ctx.now()).toISOString()} ${event.event ?? "log"} ${Object.entries(event).filter(([k]) => k !== "event").map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(" ")}`);
@@ -327,33 +320,8 @@ export async function dev(argv: string[], ctx: Context): Promise<number> {
     log({ event: "watch_unavailable", reason: (error as Error).message });
   }
 
-  // The embedded daemon: airprompterd attached to this server, so every SDK on the host sees each generation.
-  let daemonServer: DaemonServer | null = null;
-  let agent: AirPrompterAgent | null = null;
-  if (flag(parsed, "daemon")) {
-    const stateDir = str(parsed, "state-dir") ?? join(dir, DEV_DIR, "state");
-    mkdirSync(stateDir, { recursive: true });
-    const socketPath = daemonSocketPath({ stateDir, agentId: scope.agentId, target: scope.target });
-    agent = await AirPrompterAgent.start({
-      ...scope,
-      apiKey: DEV_API_KEY,
-      baseUrl: server.baseUrl,
-      stateDir,
-      root: { pinned: publicJwkOf(keys.rootKey), hostedEnvironment: scope.target },
-      sync: { mode: "resident", pollSeconds, edgePointerUrl: `${server.baseUrl}/edge/${scope.agentId}/${scope.target}/generation.json`, rootUrl: `${server.baseUrl}/roots/${scope.target}/root.json` },
-      telemetry: { upload: false },
-      ...(ctx.fetch ? { fetch: ctx.fetch } : {}),
-      now: ctx.now,
-      logger: log,
-      sdk: { name: "airprompterd", version: CLI_VERSION },
-    });
-    daemonServer = new DaemonServer(agent, { socketPath, version: CLI_VERSION, protocol: PROTOCOL_VERSION, agentId: scope.agentId, target: scope.target, now: ctx.now, logger: log, uploader: null });
-    await daemonServer.listen();
-    out.field("daemonSocket", socketPath, "daemon socket");
-    out.field("stateDir", SlotStore.path({ stateDir, agentId: scope.agentId, target: scope.target }), "daemon store");
-  }
   out.flush();
-  log({ event: "serving", baseUrl: server.baseUrl, generation: plane.generation, daemon: daemonServer !== null });
+  log({ event: "serving", baseUrl: server.baseUrl, generation: plane.generation });
 
   const exitAfter = str(parsed, "exit-after");
   await new Promise<void>((resolve) => {
@@ -364,8 +332,6 @@ export async function dev(argv: string[], ctx: Context): Promise<number> {
   });
   if (timer) clearTimeout(timer);
   watcher?.close();
-  if (daemonServer) await daemonServer.close();
-  if (agent) await agent.stop();
   await server.close();
   log({ event: "stopped", generation: plane.generation });
   return EXIT.ok;

@@ -21,8 +21,9 @@
  * ```
  */
 
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
+import { manifestNameOf, writeSegmentManifest } from "./manifest.js";
 import { nodeFs, fsFailureCode, latencyBucketIndex, minuteOf, epochMinute, LATENCY_BUCKET_EDGES_MS, type FsPort, type ErrorClass, type Observation, type WindowRow, type RefusalRow, type DroppedRow, type SpoolRow } from "@airprompter/agent-core";
 
 export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "@airprompter/agent-core";
@@ -135,6 +136,18 @@ export interface SinkFaults {
 }
 
 /**
+ * What a `DirectorySink` writes into each closed segment's manifest (`protocol/daemon.md`): the writer's scope and its
+ * heartbeat report as it stands. Returning `null` writes no manifest (the segment still uploads, after the grace).
+ */
+export type SegmentManifestSource = () => { organizationId: string; agentId: string; target: string; report: Record<string, unknown> } | null;
+
+export interface DirectorySinkOptions {
+  /** Add a manifest beside every segment this sink closes (0.3.0; the telemetry daemon reads it). */
+  manifest?: SegmentManifestSource;
+  now?: () => number;
+}
+
+/**
  * Segments on disk, through an `FsPort`. Never throws: the request path calls
  * `append`, and a full disk, an I/O error or a file a sibling process took
  * away are counted, reported as a `dropped` row when writing works again,
@@ -148,19 +161,44 @@ export class DirectorySink implements SpoolSink {
   private readonly fs: FsPort;
   readonly faults: SinkFaults = { pendingRows: 0, pendingBytes: 0, byCode: {}, last: null };
 
+  private currentDir: string;
+
   constructor(
-    readonly dir: string,
+    dir: string,
     private readonly instanceId: string,
     private readonly budgetBytes: number = HOST_SPOOL_BUDGET_BYTES,
     fs: FsPort = nodeFs,
+    private readonly sinkOptions: DirectorySinkOptions = {},
   ) {
     this.fs = fs;
+    this.currentDir = dir;
     this.planner = new SegmentPlanner(instanceId);
+    this.openDir();
+    this.recoverOpenSegments();
+  }
+
+  /** The folder segments are written to now. */
+  get dir(): string {
+    return this.currentDir;
+  }
+
+  private openDir(): void {
+    const dir = this.currentDir;
     this.guard("open_spool", () => {
       this.fs.mkdirp(join(dir, "exported"), 0o700);
       this.fs.mkdirp(join(dir, "quarantine"), 0o700);
     });
-    this.recoverOpenSegments();
+  }
+
+  /**
+   * Write to another folder from the next row on (`protocol/daemon.md`: a telemetry daemon published one). The open
+   * segment is closed where it is, with its manifest; closed segments stay where they are. Never throws.
+   */
+  moveTo(dir: string, nowMs: number): void {
+    if (dir === this.currentDir) return;
+    this.flush(nowMs);
+    this.currentDir = dir;
+    this.openDir();
   }
 
   /** Run a filesystem step; on failure count it by code and return false. The sink never throws. */
@@ -183,7 +221,7 @@ export class DirectorySink implements SpoolSink {
     for (const name of names) {
       if (name.startsWith(`seg-${this.instanceId}-`) && name.endsWith(".ndjson.open")) {
         const path = join(this.dir, name);
-        this.guard("recover_open_segment", () => {
+        const recovered = this.guard("recover_open_segment", () => {
           const fd = this.fs.open(path, "r+");
           try {
             this.fs.fsync(fd);
@@ -192,8 +230,19 @@ export class DirectorySink implements SpoolSink {
           }
           this.fs.rename(path, path.slice(0, -".open".length));
         });
+        if (recovered) this.writeManifest(name.slice(0, -".open".length));
       }
     }
+  }
+
+  /** The segment's manifest, after the segment is closed. A failure is counted, never thrown: the daemon uploads a manifest-less segment after its grace. */
+  private writeManifest(segment: string): boolean {
+    const source = this.sinkOptions.manifest;
+    if (!source) return false;
+    return this.guard("write_manifest", () => {
+      const context = source();
+      if (context) writeSegmentManifest(this.fs, this.dir, segment, { ...context, closedAtMs: this.sinkOptions.now?.() ?? Date.now() });
+    });
   }
 
   append(row: SpoolRow, nowMs: number): void {
@@ -275,7 +324,9 @@ export class DirectorySink implements SpoolSink {
     const synced = this.guard("fsync_segment", () => this.fs.fsync(fd));
     this.guard("close_segment", () => this.fs.close(fd));
     // A segment that did not fsync is not closed: it stays `.open` for the next start to recover (its bytes are on disk or they are not).
-    if (synced) this.guard("close_segment", () => this.fs.rename(openPath, openPath.slice(0, -".open".length)));
+    if (synced && this.guard("close_segment", () => this.fs.rename(openPath, openPath.slice(0, -".open".length)))) {
+      this.writeManifest(basename(openPath).slice(0, -".open".length));
+    }
   }
 
   /** Over the host budget: evict the OLDEST closed, unsent segments and say how much went (spool-format.md). A file a sibling took away is skipped. */
@@ -297,10 +348,21 @@ export class DirectorySink implements SpoolSink {
       const removed = this.guard("evict_segment", () => this.fs.unlink(join(this.dir, name)));
       total -= size;
       if (!removed) continue;
+      this.dropManifest(name);
       evicted += 1;
       evictedBytes += size;
     }
     return evicted > 0 ? { segments: evicted, bytes: evictedBytes } : null;
+  }
+
+  /** An evicted segment takes its manifest with it. */
+  private dropManifest(segment: string): void {
+    try {
+      const path = join(this.dir, manifestNameOf(segment));
+      if (this.fs.exists(path)) this.fs.unlink(path);
+    } catch {
+      // Gone already: the daemon's sweep deletes an orphan manifest anyway.
+    }
   }
 
   closedSegments(): string[] {

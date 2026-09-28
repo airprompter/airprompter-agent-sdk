@@ -27,10 +27,11 @@ import os
 import re
 import threading
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Callable, Mapping, Optional, Union
 
 from airprompter_agent_core._util import fsync_dir, iso_seconds, now_ms
 from airprompter_agent_core.ports import FsPort, fs_failure_code, fs_or_default
+from .manifest import manifest_name_of, write_segment_manifest
 from airprompter_agent_core.telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
 
 __all__ = ["ERROR_CLASSES", "LATENCY_BUCKET_EDGES_MS", "Observation", "SpoolRow", "epoch_minute", "latency_bucket_index", "minute_of", "SEGMENT_MAX_BYTES", "HOST_SPOOL_BUDGET_BYTES", "SERVERLESS_BUFFER_BYTES", "segment_name", "SegmentPlanner", "SpoolSink", "MemorySink", "DirectorySink", "WriterIdentity", "SpoolWriter"]
@@ -141,8 +142,22 @@ class DirectorySink(SpoolSink):
 
     kind = "directory"
 
-    def __init__(self, directory: str, instance_id: str, budget_bytes: int = HOST_SPOOL_BUDGET_BYTES, fs: Optional[FsPort] = None):
+    def __init__(
+        self,
+        directory: str,
+        instance_id: str,
+        budget_bytes: int = HOST_SPOOL_BUDGET_BYTES,
+        fs: Optional[FsPort] = None,
+        *,
+        manifest: Optional[Callable[[], Optional[Mapping[str, Any]]]] = None,
+        now: Optional[Callable[[], float]] = None,
+    ):
+        """``manifest`` (0.3.0): called at every close for ``{"organizationId", "agentId", "target", "report"}`` — the
+        writer's scope and heartbeat report — and written beside the segment for the telemetry daemon
+        (``protocol/daemon.md``); returning ``None`` writes none."""
         self.dir = directory
+        self._manifest = manifest
+        self._now = now
         self._instance_id = instance_id
         self._budget = budget_bytes
         self._fs = fs_or_default(fs)
@@ -151,8 +166,59 @@ class DirectorySink(SpoolSink):
         self._planner = SegmentPlanner(instance_id)
         self._lock = threading.RLock()
         self.faults: dict[str, Any] = {"pendingRows": 0, "pendingBytes": 0, "byCode": {}, "last": None}
-        if self._guard("open_spool", lambda: (self._fs.mkdirp(os.path.join(directory, "exported"), 0o700), self._fs.mkdirp(os.path.join(directory, "quarantine"), 0o700))):
+        if self._open_dir():
             self._recover_open_segments()
+
+    def _open_dir(self) -> bool:
+        directory = self.dir
+        return self._guard("open_spool", lambda: (self._fs.mkdirp(os.path.join(directory, "exported"), 0o700), self._fs.mkdirp(os.path.join(directory, "quarantine"), 0o700)))
+
+    def move_to(self, directory: str, now_ms_: float) -> None:
+        """Write to another folder from the next row on (``protocol/daemon.md``: a telemetry daemon published one). The
+        open segment is closed where it is, with its manifest; closed segments stay where they are. Never raises."""
+        with self._lock:
+            if directory == self.dir:
+                return
+            self.flush(now_ms_)
+            self.dir = directory
+            self._open_dir()
+
+    def _write_manifest(self, segment: str) -> bool:
+        """The segment's manifest, after the segment is closed. A failure is counted, never raised: the daemon uploads a
+        manifest-less segment after its grace."""
+        source = self._manifest
+        if source is None:
+            return False
+
+        def write() -> None:
+            try:
+                context = source()
+                if context:
+                    write_segment_manifest(
+                        self._fs,
+                        self.dir,
+                        segment,
+                        organization_id=context["organizationId"],
+                        agent_id=context["agentId"],
+                        target=context["target"],
+                        report=context["report"],
+                        closed_at_ms=self._now() if self._now else now_ms(),
+                    )
+            except OSError:
+                raise
+            except Exception as error:  # the report is the agent's status: never let it break the request path
+                raise OSError(f"manifest: {error}") from error
+
+        return self._guard("write_manifest", write)
+
+    def _drop_manifest(self, segment: str) -> None:
+        """An evicted segment takes its manifest with it."""
+        path = os.path.join(self.dir, manifest_name_of(segment))
+        try:
+            if self._fs.exists(path):
+                self._fs.unlink(path)
+        except OSError:
+            pass  # gone already: the daemon's sweep deletes an orphan manifest anyway
 
     def _guard(self, step: str, run: Any) -> bool:
         """Run a filesystem step; a failure is counted by code and returns False. The sink never raises."""
@@ -182,7 +248,8 @@ class DirectorySink(SpoolSink):
                         self._fs.close(fd)
                     self._fs.rename(path, path[: -len(".open")])
 
-                self._guard("recover_open_segment", recover)
+                if self._guard("recover_open_segment", recover):
+                    self._write_manifest(name[: -len(".open")])
 
     def _lose(self, rows: int, byte_count: int) -> None:
         self.faults["pendingRows"] += rows
@@ -254,9 +321,9 @@ class DirectorySink(SpoolSink):
         synced = self._guard("fsync_segment", lambda: self._fs.fsync(fd))
         self._guard("close_segment", lambda: self._fs.close(fd))
         # A segment that did not fsync is not closed: it stays ``.open`` for the next start to recover.
-        if synced:
-            self._guard("close_segment", lambda: self._fs.rename(open_path, open_path[: -len(".open")]))
+        if synced and self._guard("close_segment", lambda: self._fs.rename(open_path, open_path[: -len(".open")])):
             self._guard("fsync_dir", lambda: fsync_dir(self.dir))
+            self._write_manifest(os.path.basename(open_path)[: -len(".open")])
 
     def _enforce_budget(self) -> Optional[tuple[int, int]]:
         """Over the host budget: evict the OLDEST closed, unsent segments and say how much went. A file a sibling took away is skipped."""
@@ -273,6 +340,7 @@ class DirectorySink(SpoolSink):
             total -= size
             if not removed:
                 continue
+            self._drop_manifest(name)
             evicted += 1
             evicted_bytes += size
         return (evicted, evicted_bytes) if evicted > 0 else None

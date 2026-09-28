@@ -169,9 +169,9 @@ expected to fill the variable. In managed mode a `source: runtime` variable is f
 before the run is posted, required or not (the catalogue has no text to scan). Every runtime's heartbeat carries
 `catalog.variables` — the names `ap.variables.names()` answers, never a value, an empty list when there are none —
 once the release it serves was sealed at 0.3.4 (an older service refuses a key it does not know, so the SDK waits
-for that signal). A host whose
-SDKs attach to `airprompterd` is the exception for now: the daemon heartbeats for them and knows no sources, so it
-reports no names — attached SDKs will hand theirs over in `hello` with the service's 0.3.4 release.
+for that signal). A process whose telemetry the host's `airprompterd` ships is reported the same way: the daemon
+sends that process's own heartbeat report from its segment manifests, `catalog.variables` included
+(`../protocol/daemon.md`).
 
 What lands with the service's 0.3.4 release, not yet live: the Slots › Variables editor for these fields; a seal
 that refuses a version whose text uses a placeholder the slot does not declare (`variable_undeclared`, so a runtime

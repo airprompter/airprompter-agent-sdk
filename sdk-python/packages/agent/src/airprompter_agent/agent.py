@@ -51,6 +51,7 @@ from airprompter_agent_runtime.wrap import WrapHooks, wrap_client
 from airprompter_agent_core.render.run_ref import parse_run_ref
 from airprompter_agent_core.render.template import Delimiters
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
+from airprompter_agent_telemetry.spool.manifest import read_daemon_discovery
 from airprompter_agent_telemetry.spool.writer import DirectorySink, MemorySink, Observation, SpoolSink, SpoolWriter, WriterIdentity, epoch_minute, segment_name
 from airprompter_agent_sync.store.key_provider import KeyProvider, file_key
 from airprompter_agent_sync.store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
@@ -58,7 +59,6 @@ from airprompter_agent_sync.store.release_datastore import HydrationPlan, Releas
 from airprompter_agent_sync.sync.loop import required_models_missing
 from airprompter_agent_telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant, post_segment
 from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_sync.sync.daemon import DaemonClient, daemon_socket_path
 from airprompter_agent_sync.sync.loop import jittered_delay_ms, sync_once
 from airprompter_agent_core.checks import evaluate_checks, output_text_of
 from airprompter_agent_core.golden import GoldenInvoke, GoldenReport, golden_reports_meet, manifest_has_golden, parse_golden_set, run_golden_set
@@ -87,11 +87,16 @@ T = TypeVar("T")
 
 @dataclass
 class SyncOptions:
-    mode: str = "resident"  # "resident" | "on_invoke" | "daemon" | "offline"
+    #: ``"resident"`` | ``"on_invoke"`` | ``"offline"``. ``"daemon"`` was removed in 0.3.0 — the telemetry daemon never
+    #: serves releases — and ``start()`` refuses it with ``invalid_options``.
+    mode: str = "resident"
     poll_seconds: float = 30
     edge_pointer_url: Optional[str] = None
     root_url: Optional[str] = None
-    daemon_socket_path: Optional[str] = None
+
+
+#: The environment variable that names the spool folder when ``telemetry.spool_dir`` does not (``protocol/daemon.md``).
+SPOOL_DIR_ENV = "AIRPROMPTER_SPOOL_DIR"
 
 
 @dataclass
@@ -134,9 +139,15 @@ class TelemetryOptions:
     buffer_bytes: Optional[int] = None
     #: Hosts: the closed-segment budget (default 100 MiB); the oldest unsent segments go past it and a ``dropped`` row says so.
     spool_budget_bytes: Optional[int] = None
-    #: S5: a resident host with no daemon uploads its own spool — the same uploader the daemon runs, in-process, on a timer
-    #: off the request path, under this runtime's own grant. ``False`` leaves the spool for a daemon or an operator's export.
+    #: S5: a resident host whose spool no live telemetry daemon ships uploads it itself — the same uploader the daemon runs,
+    #: in-process, on a timer off the request path, under this runtime's own grant. When a live daemon names this process's
+    #: folder the daemon uploads and this process does not (re-checked once a minute, both ways). ``False`` leaves the
+    #: spool for the daemon or an operator's export.
     upload: bool = True
+    #: The folder this process writes its spool to. ``None``: ``AIRPROMPTER_SPOOL_DIR``, else the folder a live telemetry
+    #: daemon for this agent and target published (``<storeDir>/daemon.json``), else ``<storeDir>/spool/telemetry``. An
+    #: explicit folder never moves; a discovered one is re-read once a minute (``protocol/daemon.md``).
+    spool_dir: Optional[str] = None
     #: S13: where the uploader ships validated segments. ``None``: AirPrompter's sink (a grant per writer, a PUT to your prefix).
     #: ``OtlpUploadSink(...)`` from ``airprompter_agent_telemetry.otel`` sends the windows to your OpenTelemetry collector
     #: instead — no grant is ever requested — and a customer's own sink takes the same segments.
@@ -177,7 +188,7 @@ class AgentStatus:
     staged_generation: Optional[int]
     apply_state: str  # "active" | "staged" | "awaiting_unlock" | "refused" | "vendored_fallback"
     last_refusal: Optional[str]
-    storage_protection: str  # a StorageProtection, or "daemon"
+    storage_protection: str  # a StorageProtection
     signing_key_id: Optional[str]
     lease_expires_at: Optional[str]
     lease_expired: bool
@@ -189,8 +200,7 @@ class AgentStatus:
     window: Optional[dict[str, Any]]  # {"source", "open", "opens_at", "closes_at"}
     heartbeat: dict[str, Any]  # {"last_at", "next_at", "interval_seconds", "last_refusal"}
     spool: dict[str, int]  # {"depth_segments", "depth_bytes"}
-    source: str  # "store" | "vendored_bundle" | "daemon"
-    daemon: Optional[dict[str, Any]]
+    source: str  # "store" | "vendored_bundle"
     last_sync_at: Optional[str]
     last_sync_outcome: Optional[str]
     consecutive_sync_failures: int
@@ -199,8 +209,12 @@ class AgentStatus:
     golden: Optional[dict[str, Any]] = None
     #: S4: the apply policy in force and where it comes from — {"effective", "source": local|pinned|operator|manifest, "manifestSaid"}.
     apply_policy: dict[str, Any] = field(default_factory=lambda: {"effective": "auto", "source": "manifest", "manifestSaid": None})
-    #: S5: this process's own uploader (a resident host with no daemon); None when a daemon, a memory sink or ``upload=False`` owns the spool.
+    #: S5: this process's own uploader; None when a live telemetry daemon, a memory sink or ``upload=False`` owns the spool.
     upload: Optional[dict[str, Any]] = None
+    #: Where the spool goes and who ships it (``protocol/daemon.md``): ``{"sink": "directory"|"memory", "spool_dir",
+    #: "spool_dir_from": "option"|"env"|"daemon"|"default", "uploaded_by": "daemon"|"self"|"none", "daemon": None |
+    #: {"live", "pid", "version", "heartbeat_at", "spool_dir"}}``.
+    telemetry: dict[str, Any] = field(default_factory=lambda: {"sink": "memory", "spool_dir": None, "spool_dir_from": None, "uploaded_by": "none", "daemon": None})
     #: S9: the ramp plan as this host walks it — {"experimentId", "weightBps", "arms", "step", "nextStepAt", "plan"}; None without an experiment.
     ramp: Optional[dict[str, Any]] = None
     #: S16: one entry per experiment the active manifest carries (per slot); ``ramp`` is the first of them.
@@ -224,15 +238,15 @@ _HEALTHZ_LEVELS = {"ok": 0, "degraded": 1, "failing": 2}
 
 
 def healthz_of(status: AgentStatus, *, spool_budget_bytes: Optional[int], now_ms: float) -> dict[str, Any]:
-    """S14: what a probe asks, over any status document (the daemon's healthz shares it). ``ok`` is the liveness
+    """S14: what a probe asks, over any status document. ``ok`` is the liveness
     answer; ``status`` adds the one degraded middle. The rules, each a vector (``tests/test_healthz.py``):
 
     - ``failing`` (ok False): nothing verified to serve (generation 0); the lease lapsed under ``on_lease_expiry="halt"``.
     - ``degraded`` (ok True): the lease lapsed under ``degrade``; three or more consecutive sync failures; the uploader
-      backing off; a forced downgrade in force; the daemon this process attached to is gone; the spool at 80 % of its
-      budget or more.
+      backing off; a forced downgrade in force; the telemetry daemon's file went stale and nothing here uploads instead
+      (``upload_daemon_stale``); the spool at 80 % of its budget or more.
     - ``ok`` otherwise. ``reasons`` names every rule that fired, in that order. Keys are the wire document's (camelCase),
-      the same as the TypeScript SDK's and the daemon's."""
+      the same as the TypeScript SDK's."""
     reasons: list[str] = []
     level = "ok"
 
@@ -255,8 +269,10 @@ def healthz_of(status: AgentStatus, *, spool_budget_bytes: Optional[int], now_ms
         raise_to("degraded", "upload_backing_off")
     if status.forced_downgrade:
         raise_to("degraded", "forced_downgrade")
-    if status.daemon is not None and not status.daemon.get("attached"):
-        raise_to("degraded", "daemon_detached")
+    telemetry = status.telemetry or {}
+    daemon = telemetry.get("daemon")
+    if daemon is not None and not daemon.get("live") and telemetry.get("uploaded_by") == "none":
+        raise_to("degraded", "upload_daemon_stale")
     depth_bytes = int(status.spool.get("depth_bytes", 0))
     if spool_budget_bytes is not None and spool_budget_bytes > 0 and depth_bytes >= spool_budget_bytes * 0.8:
         raise_to("degraded", "spool_near_budget")
@@ -275,7 +291,7 @@ def healthz_of(status: AgentStatus, *, spool_budget_bytes: Optional[int], now_ms
         "lastSyncOutcome": status.last_sync_outcome,
         "consecutiveSyncFailures": status.consecutive_sync_failures,
         "forcedDowngrade": status.forced_downgrade,
-        "daemon": {"attached": bool(status.daemon.get("attached"))} if status.daemon is not None else None,
+        "telemetry": {"uploadedBy": telemetry.get("uploaded_by", "none"), "daemon": None if daemon is None else ("live" if daemon.get("live") else "stale")},
         "spool": {"depthSegments": int(status.spool.get("depth_segments", 0)), "depthBytes": depth_bytes, "budgetBytes": spool_budget_bytes},
         "lastUploadAt": (status.upload or {}).get("lastUploadAt"),
         "backoffUntil": backoff_until,
@@ -311,6 +327,32 @@ def _coerce(kind, value):
     if isinstance(value, Mapping):
         return kind(**value)
     raise TypeError(f"expected {kind.__name__} or a mapping, got {type(value).__name__}")
+
+
+def _spool_placement(options: Mapping[str, Any], store_dir: str, at_ms: float) -> dict[str, Any]:
+    """``protocol/daemon.md`` › What an SDK does: the folder this process writes — ``telemetry.spool_dir``, else
+    ``AIRPROMPTER_SPOOL_DIR``, else a live daemon's published ``spoolDir``, else ``<storeDir>/spool/telemetry``."""
+    discovery = read_daemon_discovery(_default_fs(), store_dir, agent_id=options["agent_id"], target=options["target"], organization_id=options.get("organization_id"), now_ms=at_ms)
+    telemetry: TelemetryOptions = options["telemetry"]
+    if telemetry.spool_dir:
+        return {"dir": os.path.abspath(telemetry.spool_dir), "from": "option", "discovery": discovery}
+    env = os.environ.get(SPOOL_DIR_ENV)
+    if env:
+        return {"dir": os.path.abspath(env), "from": "env", "discovery": discovery}
+    if discovery["live"]:
+        return {"dir": os.path.abspath(discovery["discovery"]["spoolDir"]), "from": "daemon", "discovery": discovery}
+    return {"dir": os.path.join(store_dir, "spool", "telemetry"), "from": "default", "discovery": discovery}
+
+
+def _same_path(a: str, b: str) -> bool:
+    """Two folders are one when they resolve to the same real path (a symlinked volume)."""
+    return os.path.abspath(a) == os.path.abspath(b) or os.path.realpath(a) == os.path.realpath(b)
+
+
+def _default_fs() -> Any:
+    from airprompter_agent_core.ports import fs_or_default
+
+    return fs_or_default(None)
 
 
 def default_state_dir() -> str:
@@ -396,7 +438,7 @@ class WorkflowHandle(Workflow):
 
 
 class AirPrompterAgent:
-    def __init__(self, options: dict[str, Any], store: Optional[SlotStore], trusted_root: Mapping[str, Any], own_instance_id: str, spool_dir: str, run_ref_seed: Optional[str] = None):
+    def __init__(self, options: dict[str, Any], store: Optional[SlotStore], trusted_root: Mapping[str, Any], own_instance_id: str, placement: Mapping[str, Any], run_ref_seed: Optional[str] = None):
         self._o = options
         self._store = store
         self._trusted_root: Mapping[str, Any] = trusted_root
@@ -409,9 +451,6 @@ class AirPrompterAgent:
         self._heartbeat_lock = threading.Lock()
         self._active: Optional[LoadedSlot] = None
         self._source = "store"
-        self._daemon: Optional[DaemonClient] = None
-        self._daemon_socket: Optional[str] = None
-        self._daemon_staged_generation: Optional[int] = None
         self._last_sync_ms: Optional[float] = None
         self._last_sync_outcome: Optional[str] = None
         self._consecutive_sync_failures = 0
@@ -430,8 +469,6 @@ class AirPrompterAgent:
         self._last_contact_ms: Optional[float] = None
         #: S3: the heartbeat named a generation the pointer has not shown; the next pass goes to the signed manifest.
         self._pointer_behind = False
-        #: S3: attached to a daemon, the lease is the daemon's.
-        self._daemon_lease_expires_at: Optional[str] = None
         self._bundle_not_after: Optional[str] = None
         #: T40: what the last hydration from the customer's datastore found, and its poll timer.
         self._datastore_status: Optional[dict[str, Any]] = None
@@ -443,8 +480,6 @@ class AirPrompterAgent:
         #: S4: what the latest verified manifest asked for, and the generation whose advisory mismatch was already logged.
         self._manifest_apply_policy: Optional[tuple[int, str]] = None
         self._apply_policy_advisory_logged = 0
-        #: S4: an attached SDK reports the daemon's policy (its ``slot`` answer and ``policy`` events carry it).
-        self._daemon_apply_policy: Optional[dict[str, Any]] = None
         self._heartbeat_interval_seconds = min(3600, max(30, int(round(options.get("heartbeat_seconds") or 300))))
         self._last_heartbeat_ms: Optional[float] = None
         self._next_heartbeat_ms: Optional[float] = None
@@ -460,12 +495,16 @@ class AirPrompterAgent:
         self._flush_lock = threading.Lock()
         self._flush_segment_n = 0
         self._last_flush_minute: Optional[int] = None
-        self._spool_dir = spool_dir
+        #: ``protocol/daemon.md``: the folder, where it came from, and the daemon's discovery file as last read.
+        self._spool_dir: str = placement["dir"]
+        self._spool_dir_from: str = placement["from"]
+        self._discovery: Optional[dict[str, Any]] = placement.get("discovery")
+        self._placing = threading.Lock()
         self._local_window: Optional[UpdateWindow] = parse_window(self._apply_options.window) if self._apply_options.window else None
         self._stamped_refusals: set[str] = set()
         self._stopped = False
         # S6: the runRef key is derived from the STORE's id, which every process on the host shares, so a run_ref minted by one
-        # worker parses in another; in daemon mode the daemon's hello names it.
+        # worker parses in another.
         self._run_ref_key = hmac.new((run_ref_seed or own_instance_id).encode("utf-8"), b"runRef", hashlib.sha256).digest()
         # T33: the last renders by text hash, so a wrapped client can tell which slot a call is.
         self._renders = RenderRegistry()
@@ -475,10 +514,12 @@ class AirPrompterAgent:
         self._stricter_said: set[str] = set()
         serverless = self._sync_options.mode == "on_invoke"
         sink_kind = self._telemetry.sink or ("memory" if serverless else "directory")
-        self._sink: SpoolSink = MemorySink({"instanceId": own_instance_id}, self._telemetry.buffer_bytes or 256 * 1024) if sink_kind == "memory" else DirectorySink(spool_dir, own_instance_id, self._telemetry.spool_budget_bytes or 100 * 1024 * 1024)
+        # Every closed segment gets its manifest: the writer's scope and its heartbeat report, for the telemetry daemon.
+        self._directory_sink: Optional[DirectorySink] = None if sink_kind == "memory" else DirectorySink(self._spool_dir, own_instance_id, self._telemetry.spool_budget_bytes or 100 * 1024 * 1024, manifest=self._manifest_context, now=self._now_ms)
+        self._sink: SpoolSink = self._directory_sink if self._directory_sink is not None else MemorySink({"instanceId": own_instance_id}, self._telemetry.buffer_bytes or 256 * 1024)
         self.spool = SpoolWriter(self._sink, WriterIdentity(own_instance_id, self._telemetry.instance_class or ("ephemeral" if serverless else "resident"), _USER_AGENT))
         self._client: Optional[SyncClient] = None
-        if options.get("api_key") and self._sync_options.mode not in ("offline", "daemon"):
+        if options.get("api_key") and self._sync_options.mode != "offline":
             self._client = SyncClient(base_url=options.get("base_url") or "https://api.airprompter.com", agent_id=options["agent_id"], target=options["target"], api_key=options["api_key"], transport=options.get("transport"), user_agent=_USER_AGENT)
 
     # ------------------------------------------------------------------ start
@@ -518,6 +559,14 @@ class AirPrompterAgent:
         ``variables`` is how this application fills prompt variables from its own system: a literal per name, or a
         source (``{"resolve": callable, "trust": "operator"|"end_user", ...}``) consulted for a declared variable the
         version's text uses and the call site did not pass. ``ap.variables.provide()`` adds more after start."""
+        raw_sync = sync if isinstance(sync, Mapping) else (vars(sync) if sync is not None else {})
+        if raw_sync.get("mode") == "daemon" or "daemon_socket_path" in raw_sync:
+            raise AgentStartError(
+                "invalid_options",
+                'sync mode "daemon" was removed in 0.3.0: the telemetry daemon (airprompterd) only ships telemetry and never serves a release. '
+                "Start with the default mode (resident) — each process loads its release from its own store, the datastore or a vendored bundle — "
+                "and keep the daemon running for telemetry (protocol/daemon.md)",
+            )
         sync_options = _coerce(SyncOptions, sync)
         options: dict[str, Any] = {
             "organization_id": organization_id,
@@ -548,21 +597,6 @@ class AirPrompterAgent:
         resolved_state_dir = state_dir or default_state_dir()
         # The root is scoped to the HOSTED environment (the public service is "prod"), never to this app's target.
         pinned_root = trusted_root_from_pinned_key(purpose="platform", environment=root.get("hosted_environment", "prod"), pinned_root=root["pinned"]) if "pinned" in root else root
-        if sync_options.mode == "daemon":
-            # The host daemon holds the store and its key; this process attaches and never touches store files.
-            socket_path = sync_options.daemon_socket_path or daemon_socket_path(state_dir=resolved_state_dir, agent_id=agent_id, target=target)
-            client = DaemonClient.connect(socket_path=socket_path, agent_id=agent_id, target=target, sdk=_USER_AGENT)
-            if client:
-                store_dir = SlotStore.path(state_dir=resolved_state_dir, agent_id=agent_id, target=target)
-                agent = cls(options, None, pinned_root, cls.new_instance_id(), os.path.join(store_dir, "spool", "telemetry"), client.hello.store_id or client.hello.instance_id)
-                agent._daemon_socket = socket_path
-                agent._attach_daemon(client)
-                agent._schedule_spool_close()
-                return agent
-            if logger:
-                logger({"sdk": SDK_NAME, "agentId": agent_id, "target": target, "event": "daemon_absent", "socketPath": socket_path})
-            # No daemon on this host: in-process sync from this process's own store, exactly as resident mode.
-            options["sync"] = SyncOptions(mode="resident", poll_seconds=sync_options.poll_seconds, edge_pointer_url=sync_options.edge_pointer_url, root_url=sync_options.root_url, daemon_socket_path=sync_options.daemon_socket_path)
         provider = key_provider or file_key(os.path.join(SlotStore.path(state_dir=resolved_state_dir, agent_id=agent_id, target=target), "store.key"))
         try:
             # S8: store.json records who wrote it — this SDK by default.
@@ -577,85 +611,9 @@ class AirPrompterAgent:
         trusted = stored if stored and verify_root_metadata(candidate=stored, trusted=pinned_root, now=now_iso).ok else pinned_root
         # S6: the instance id is the PROCESS's, never the store's — N workers on one host are N instances in the fleet view, and
         # their same-minute windows keep distinct keys at ingest (the store's own id stays store.json's identity).
-        agent = cls(options, store, trusted, cls.new_instance_id(), os.path.join(store.dir, "spool", "telemetry"), store.instance_id)
+        agent = cls(options, store, trusted, cls.new_instance_id(), _spool_placement(options, store.dir, now() if now else now_ms()), store.instance_id)
         agent._boot()
         return agent
-
-    # ------------------------------------------------------------------ daemon attachment
-
-    def _attach_daemon(self, client: DaemonClient) -> None:
-        """Daemon mode: the active release comes over the socket; ``generation`` events refresh it; a lost daemon keeps what is held and reconnects."""
-        with self._lock:
-            self._daemon = client
-            self._daemon_staged_generation = client.hello.staged_generation
-            self._active = client.slot()
-            self._source = "daemon"
-            # S3: the daemon is the process that talks to the origin; its lease is the fleet's. The socket is not contact.
-            self._daemon_lease_expires_at = client.last_lease_expires_at
-            self._daemon_apply_policy = client.last_apply_policy
-        self._log({"event": "daemon_attached", "generation": self._active.generation, "daemon": client.hello.daemon})
-
-        def on_event(event: dict[str, Any]) -> None:
-            if event.get("event") == "generation":
-                staged = event.get("stagedGeneration")
-                self._daemon_staged_generation = staged if isinstance(staged, int) else None
-                self._refresh_from_daemon()
-            if event.get("event") == "lease":
-                expires = event.get("expiresAt")
-                self._daemon_lease_expires_at = expires if isinstance(expires, str) else None
-            # S4: the host's policy is the daemon's store; an operator's ``policy set`` reaches every attached SDK at once.
-            if event.get("event") == "policy" and isinstance(event.get("applyPolicy"), Mapping):
-                self._daemon_apply_policy = dict(event["applyPolicy"])
-            if event.get("event") == "shutdown":
-                self._log({"event": "daemon_shutdown"})
-
-        def on_close() -> None:
-            if self._daemon is not client:
-                return
-            self._daemon = None
-            self._log({"event": "daemon_lost", "socketPath": self._daemon_socket})
-            self._schedule_daemon_reconnect()
-
-        client.on_event(on_event)
-        client.on_close(on_close)
-
-    def _refresh_from_daemon(self) -> None:
-        daemon = self._daemon
-        if not daemon:
-            return
-        try:
-            slot = daemon.slot()
-        except Exception as error:  # noqa: BLE001
-            self._log({"event": "daemon_slot_unavailable", "reason": str(error)})
-            return
-        with self._lock:
-            changed = slot.generation != (self._active.generation if self._active else None)
-            self._active = slot
-            self._source = "daemon"
-            if daemon.last_lease_expires_at is not None:
-                self._daemon_lease_expires_at = daemon.last_lease_expires_at
-            if daemon.last_apply_policy is not None:
-                self._daemon_apply_policy = daemon.last_apply_policy
-            self._last_refusal = None
-        if changed:
-            self._emit_change()
-
-    def _schedule_daemon_reconnect(self) -> None:
-        self._timer.cancel()
-        if self._stopped:
-            return
-
-        def reconnect() -> None:
-            try:
-                client = DaemonClient.connect(socket_path=self._daemon_socket or "", agent_id=self._o["agent_id"], target=self._o["target"], sdk=_USER_AGENT)
-                if client:
-                    self._attach_daemon(client)
-                    return
-            except Exception as error:  # noqa: BLE001
-                self._log({"event": "daemon_reconnect_failed", "reason": str(error)})
-            self._schedule_daemon_reconnect()
-
-        self._timer.thread = self._arm(jittered_delay_ms(self._sync_options.poll_seconds, self._rand) / 1000, reconnect)
 
     # ------------------------------------------------------------------ boot
 
@@ -778,10 +736,8 @@ class AirPrompterAgent:
         into a database, every runtime reads the newest row and hands it here when the generation rises. The same chain
         and the same rules as a vendored bundle — verified before a byte is staged, the apply policy decides, never
         below the held generation (a restored backup or a stale replica cannot move a host backwards) — and the swap is
-        atomic: renders in flight finish on the release they resolved against. Attached to a daemon the host's store is
-        the daemon's, and this refuses. Never raises on a bad bundle; the outcome says why."""
-        if self._daemon is not None:
-            return {"outcome": "refused", "generation": None, "reason": "daemon_attached"}
+        atomic: renders in flight finish on the release they resolved against. Never raises on a bad bundle; the outcome
+        says why."""
         if self._store is None:
             return {"outcome": "refused", "generation": None, "reason": "no_store"}
         now = self._now_iso()
@@ -850,10 +806,9 @@ class AirPrompterAgent:
             self._schedule()
             # The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
             threading.Thread(target=self._first_heartbeat, name="airprompter-heartbeat", daemon=True).start()
-            self._start_uploader()
-        elif self._client is None and self._sync_options.mode == "resident" and self._telemetry.upload_sink is not None:
-            # S13: offline (no key) with a sink of the customer's own: the windows still leave, to their collector.
-            self._start_uploader()
+        # Who ships the spool: a live telemetry daemon naming this folder, else this process (with a client, or — S13 — a
+        # sink of the customer's own, offline too), else nobody until one appears. Re-checked by the spool timer.
+        self.check_telemetry_daemon()
         self._schedule_spool_close()
         self._schedule_window_unlock()
         self._schedule_datastore_poll()
@@ -881,8 +836,6 @@ class AirPrompterAgent:
         happened: a bundle outcome, ``rolled_back``, ``empty`` or ``unavailable``."""
         if self._o.get("datastore") is None:
             return {"outcome": "refused", "generation": None, "reason": "no_datastore"}
-        if self._daemon is not None:
-            return {"outcome": "refused", "generation": None, "reason": "daemon_attached"}
         if self._store is None:
             return {"outcome": "refused", "generation": None, "reason": "no_store"}
         with self._sync_lock:
@@ -1010,25 +963,94 @@ class AirPrompterAgent:
         def tick() -> None:
             try:
                 self.spool.close_stale_windows(self._now_ms())
+                self.check_telemetry_daemon()
             finally:
                 self._schedule_spool_close()
 
         self._spool_timer.thread = self._arm(60.0, tick)
 
+    def check_telemetry_daemon(self) -> dict[str, Any]:
+        """``protocol/daemon.md``, once a minute and at boot: where to write (an explicit folder never moves; a discovered one
+        follows the daemon's ``daemon.json``) and who uploads — a live daemon naming this folder does, and this process's
+        own uploader stops; when the daemon goes (its file stale or gone) the uploader starts again. Never raises."""
+        with self._placing:
+            try:
+                self._place_telemetry()
+            except Exception as error:  # noqa: BLE001
+                self._log({"event": "telemetry_placement_failed", "reason": str(error)})
+        return self._telemetry_placement()
+
+    def _place_telemetry(self) -> None:
+        sink = self._directory_sink
+        if sink is None or self._store is None or self._stopped:
+            return
+        placement = _spool_placement(self._o, self._store.dir, self._now_ms())
+        self._discovery = placement["discovery"]
+        moved = placement["dir"] != self._spool_dir
+        if moved:
+            # The daemon published another folder (or went away and the store's is back): new segments go there.
+            sink.move_to(placement["dir"], self._now_ms())
+            self._log({"event": "spool_moved", "from": self._spool_dir, "to": placement["dir"], "source": placement["from"]})
+            self._spool_dir = placement["dir"]
+        self._spool_dir_from = placement["from"]
+        # An uploader sweeps the folder it was started on: a move stops it, and a new one starts below if it is still ours.
+        daemon_ships = self._daemon_ships_spool()
+        if self._uploader is not None and (moved or daemon_ships):
+            self._stop_uploader("upload_handed_to_daemon" if daemon_ships else "uploader_restarted")
+        if not daemon_ships and self._sync_options.mode == "resident" and self._uploader is None:
+            self._start_uploader()
+            found = (self._discovery or {}).get("discovery")
+            if self._uploader is not None and found:
+                self._log({"event": "upload_taken_back", "reason": "daemon_ships_another_folder" if (self._discovery or {}).get("live") else (self._discovery or {}).get("reason")})
+
+    def _daemon_ships_spool(self) -> bool:
+        """A live daemon for this agent and target that ships somewhere (``sink`` is not ``none``) names the folder this
+        process writes (the same path, symlinks resolved)."""
+        found = self._discovery
+        return bool(found and found.get("live") and found["discovery"].get("sink") != "none" and _same_path(found["discovery"]["spoolDir"], self._spool_dir))
+
+    def _stop_uploader(self, event: str) -> None:
+        uploader = self._uploader
+        self._uploader = None
+        if uploader is not None:
+            uploader.stop()
+        self._log({"event": event})
+
+    def _telemetry_placement(self) -> dict[str, Any]:
+        found = (self._discovery or {}).get("discovery")
+        live = bool((self._discovery or {}).get("live"))
+        daemon = None
+        if found and (live or (self._discovery or {}).get("reason") == "stale"):
+            daemon = {"live": live, "pid": found.get("pid"), "version": (found.get("daemon") or {}).get("version", ""), "heartbeat_at": found.get("heartbeatAt"), "spool_dir": found.get("spoolDir")}
+        if self._directory_sink is None:
+            return {"sink": "memory", "spool_dir": None, "spool_dir_from": None, "uploaded_by": "none", "daemon": daemon}
+        uploaded_by = "self" if self._uploader is not None else ("daemon" if self._daemon_ships_spool() else "none")
+        return {"sink": "directory", "spool_dir": self._spool_dir, "spool_dir_from": self._spool_dir_from, "uploaded_by": uploaded_by, "daemon": daemon}
+
+    def _manifest_context(self) -> dict[str, Any]:
+        """What each closed segment's manifest carries: this writer's scope and its heartbeat report as it stands."""
+        return {"organizationId": self._o["organization_id"], "agentId": self._o["agent_id"], "target": self._o["target"], "report": self.heartbeat_body()}
+
     def _start_uploader(self) -> None:
-        """S5: the daemon is an optimisation, never a requirement — a resident host with no daemon uploads its own spool. The same
+        """S5: the telemetry daemon is an optimisation, never a requirement — a resident host with no live daemon uploads its own spool. The same
         uploader the daemon runs, in-process, on a timer off the request path: closed segments go out under this runtime's own
         grant, a failed pass backs off, and past the budget the oldest unsent segments are dropped and counted. Never blocks a render."""
         # S13: a sink of the customer's own (the OpenTelemetry bridge) needs no client and no grant: it runs offline too.
         custom_sink = self._telemetry.upload_sink
-        if self._uploader is not None or (custom_sink is None and self._client is None) or self._store is None or not self._telemetry.upload:
+        if self._uploader is not None or (custom_sink is None and self._client is None) or self._store is None or not self._telemetry.upload or self._stopped:
             return
-        if callable(getattr(self._sink, "drain", None)):
+        if self._directory_sink is None:
             return  # a memory sink has no directory to sweep; flush_telemetry() is its path
+
+        def grant_for(instance_id: str, report: Optional[dict[str, Any]] = None) -> GrantDecision:
+            return self.request_upload_grant(instance_id=instance_id, instance_class=self._telemetry.instance_class or "resident", report=report)
+
         uploader = SpoolUploader(
             directory=self._spool_dir,
             instance_id=self._own_instance_id,
-            **({"sink": custom_sink} if custom_sink is not None else {"grant_for": lambda instance_id: self.request_upload_grant(instance_id=instance_id, instance_class=self._telemetry.instance_class or "resident")}),
+            # A shared folder: another agent's or target's segments are left for its own uploader.
+            scope={"agentId": self._o["agent_id"], "target": self._o["target"]},
+            **({"sink": custom_sink} if custom_sink is not None else {"grant_for": grant_for}),
             transport=self._o.get("transport"),
             now_ms=self._now_ms,
             rand=self._rand,
@@ -1056,7 +1078,7 @@ class AirPrompterAgent:
     # ------------------------------------------------------------------ plumbing
 
     def on_change(self, listener: Callable[[ReleaseChange], None]) -> Callable[[], None]:
-        """Called whenever the active or staged generation changes (sync, unlock, rollback, daemon event)."""
+        """Called whenever the active or staged generation changes (sync, unlock, rollback, apply_bundle, hydrate)."""
         self._change_listeners.append(listener)
         return lambda: self._change_listeners.remove(listener) if listener in self._change_listeners else None
 
@@ -1207,14 +1229,6 @@ class AirPrompterAgent:
 
     def sync_now(self) -> None:
         """One sync pass now (resident timers call this; on_invoke hosts call it from ``invoke``). Never raises."""
-        daemon = self._daemon
-        if daemon is not None:
-            try:
-                daemon.request("sync")
-                self._refresh_from_daemon()
-            except Exception as error:  # noqa: BLE001
-                self._log({"event": "daemon_sync_failed", "reason": str(error)})
-            return
         if self._client is None or self._store is None:
             return
         with self._sync_lock:
@@ -1313,8 +1327,6 @@ class AirPrompterAgent:
     def _effective_apply_policy(self) -> dict[str, Any]:
         """S4: the policy in force on this host and where it comes from (see ``AgentStatus.apply_policy``)."""
         local = self._apply_options.policy
-        if self._daemon_socket:
-            return dict(self._daemon_apply_policy) if self._daemon_apply_policy else {"effective": local or "auto", "source": "local" if local else "manifest", "manifestSaid": None}
         pin = self._store.state.get("applyPolicyPin") if self._store else None
         manifest_said = self._manifest_apply_policy[1] if self._manifest_apply_policy else None
         if local == "unlock_required":
@@ -1326,15 +1338,9 @@ class AirPrompterAgent:
     def set_apply_policy(self, value: str, *, by: Optional[str] = None) -> dict[str, Any]:
         """S4: an operator's act on this host — the one way a pinned policy loosens. ``unlock_required`` tightens the pin by
         hand; ``auto`` loosens it, and a later manifest that says ``unlock_required`` tightens it again. Logged; host-wide
-        through the daemon when attached. Never called by sync."""
+        through the store (every process sharing it reads the pin). Never called by sync."""
         if value not in ("auto", "unlock_required"):
             raise ValueError("apply policy is auto or unlock_required")
-        daemon = self._daemon
-        if daemon is not None:
-            result = daemon.request("policy", {"value": value, **({"by": by} if by else {})})
-            if isinstance(result.get("applyPolicy"), Mapping):
-                self._daemon_apply_policy = dict(result["applyPolicy"])
-            return self._effective_apply_policy()
         store = self._store
         if store is None:
             raise AgentStartError("no_verified_release", "no store to record the policy in")
@@ -1447,7 +1453,7 @@ class AirPrompterAgent:
             "heartbeatIntervalSeconds": self._heartbeat_interval_seconds,
             "generation": {"active": status.generation, **({"staged": status.staged_generation} if status.staged_generation is not None else {})},
             "applyState": apply_state,
-            "storageProtection": "custom" if status.storage_protection == "daemon" else status.storage_protection,
+            "storageProtection": status.storage_protection,
             # 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
             # can warn about a `source: runtime` variable no live instance fills before the promotion, not after. Sent only
             # once the control plane has shown it speaks 0.3.4 (the active manifest's protocol): an older service refuses
@@ -1484,7 +1490,7 @@ class AirPrompterAgent:
 
     def heartbeat_now(self) -> None:
         """One heartbeat now (resident timers call this; on_invoke hosts send one when the interval has elapsed). Never raises."""
-        if self._client is None or self._daemon is not None:
+        if self._client is None:
             return
         with self._heartbeat_lock:
             try:
@@ -1538,9 +1544,11 @@ class AirPrompterAgent:
             retry = response.get("retryAfterSeconds")
             self._upload_retry_after_ms = self._now_ms() + float(retry) * 1000 if isinstance(retry, (int, float)) and retry > 0 else None
 
-    def request_upload_grant(self, *, instance_id: Optional[str] = None, instance_class: Optional[str] = None) -> GrantDecision:
+    def request_upload_grant(self, *, instance_id: Optional[str] = None, instance_class: Optional[str] = None, report: Optional[Mapping[str, Any]] = None) -> GrantDecision:
         """T26: an upload grant for one writer's prefix — a heartbeat carrying that writer's instance id (this runtime's own by
-        default). Never raises."""
+        default). The uploader asks once per writer whose segments sit in this folder (a sibling that exited, a reclaimed
+        segment); ``report`` is that writer's own heartbeat report from its manifest, sent with this process's ``spool``
+        block. Never raises."""
         if self._client is None:
             return GrantDecision("unavailable", reason="offline")
         own = instance_id is None or instance_id == self._own_instance_id
@@ -1552,7 +1560,8 @@ class AirPrompterAgent:
                 return GrantDecision("hold", retry_after_seconds=max(1, math.ceil((self._upload_retry_after_ms - self._now_ms()) / 1000)), reason="retry_after")
             return GrantDecision("unavailable", reason=self._last_heartbeat_refusal or "heartbeat_failed")
         try:
-            body = {**self.heartbeat_body(), "instanceId": instance_id, **({"instanceClass": instance_class} if instance_class else {})}
+            own_body = self.heartbeat_body()
+            body = {**report, "instanceId": instance_id, "spool": own_body["spool"]} if report else {**own_body, "instanceId": instance_id, **({"instanceClass": instance_class} if instance_class else {})}
             result = self._client.heartbeat(body)
             if result.status == "ok":
                 response = result.response or {}
@@ -1610,7 +1619,7 @@ class AirPrompterAgent:
 
     def _schedule_heartbeat(self) -> None:
         self._heartbeat_timer.cancel()
-        if self._stopped or self._client is None or self._daemon is not None:
+        if self._stopped or self._client is None:
             return
         delay_ms = jittered_delay_ms(self._heartbeat_interval_seconds, self._rand)
         self._next_heartbeat_ms = self._now_ms() + delay_ms
@@ -1648,12 +1657,7 @@ class AirPrompterAgent:
     # ------------------------------------------------------------------ unlock / rollback
 
     def unlock(self) -> Optional[dict[str, int]]:
-        """Make a staged release live (an operator's ``airprompter unlock``, an update window, or the change-control hook). Host-wide when attached to a daemon."""
-        daemon = self._daemon
-        if daemon is not None:
-            result = daemon.request("unlock")
-            self._refresh_from_daemon()
-            return None if result.get("generation") is None else {"generation": int(result["generation"])}
+        """Make a staged release live (an operator's ``airprompter unlock``, an update window, or the change-control hook)."""
         store = self._store
         assert store is not None
         with self._lock:
@@ -1670,13 +1674,8 @@ class AirPrompterAgent:
 
     def rollback(self) -> dict[str, Any]:
         """Instant local rollback to the other slot. Forced when it goes below the stored generation; stamped on evidence.
-        Host-wide when attached to a daemon. Raises ``StoreError`` ``release_staged`` while a release is staged (a rollback is
-        never a quiet unlock) and ``no_previous_release`` when this host has held one release only."""
-        daemon = self._daemon
-        if daemon is not None:
-            result = daemon.request("rollback")
-            self._refresh_from_daemon()
-            return {"generation": int(result["generation"]), "forced": bool(result.get("forced"))}
+        Raises ``StoreError`` ``release_staged`` while a release is staged (a rollback is never a quiet unlock) and
+        ``no_previous_release`` when this host has held one release only."""
         store = self._store
         assert store is not None
         with self._lock:
@@ -1704,9 +1703,6 @@ class AirPrompterAgent:
         if self._active is None:
             return None
         payload = self._active.manifest["payload"]
-        # S3: attached to a daemon, the daemon's contact with the origin is the lease; a local socket answer is not contact.
-        if self._source == "daemon" or self._daemon is not None:
-            return self._daemon_lease_expires_at
         if self._last_contact_ms is not None:
             return iso_ms(self._last_contact_ms + payload["leaseSeconds"] * 1000)
         if self._bundle_not_after and self._source == "vendored_bundle":
@@ -1714,7 +1710,7 @@ class AirPrompterAgent:
         return iso_ms(instant(payload["issuedAt"]) + payload["leaseSeconds"] * 1000)
 
     def _guard_lease(self, tag: str) -> LoadedSlot:
-        """The lease: the facade's rule (it knows the daemon and the origin); the runtime knows nothing of contact."""
+        """The lease: the facade's rule (it knows the origin); the runtime knows nothing of contact."""
         active = self._active
         assert active is not None
         payload = active.manifest["payload"]
@@ -2122,7 +2118,7 @@ class AirPrompterAgent:
         lease_expires_at = self._lease_expires_at()
         depth_of = getattr(self._sink, "depth", None)
         depth = depth_of() if callable(depth_of) else {"segments": 0, "bytes": 0}
-        if self._staged_manifest is not None or (self._daemon_socket and self._daemon_staged_generation is not None):
+        if self._staged_manifest is not None:
             apply_state = "awaiting_unlock"
         elif self._last_refusal:
             apply_state = "refused"
@@ -2138,10 +2134,10 @@ class AirPrompterAgent:
         return AgentStatus(
             instance_id=self._own_instance_id,
             generation=self._active.generation if self._active else 0,
-            staged_generation=self._daemon_staged_generation if self._daemon_socket else (self._staged_manifest["payload"]["generation"] if self._staged_manifest else None),
+            staged_generation=self._staged_manifest["payload"]["generation"] if self._staged_manifest else None,
             apply_state=apply_state,
             last_refusal=self._last_refusal,
-            storage_protection=self._store.storage_protection if self._store else "daemon",
+            storage_protection=self._store.storage_protection if self._store else "custom",
             signing_key_id=self._active.signing_key_id if self._active else None,
             lease_expires_at=lease_expires_at,
             lease_expired=instant(lease_expires_at) <= self._now_ms() if lease_expires_at else False,
@@ -2159,7 +2155,6 @@ class AirPrompterAgent:
             },
             spool={"depth_segments": depth["segments"], "depth_bytes": depth["bytes"]},
             source=self._source,
-            daemon={"attached": self._daemon is not None, "socket_path": self._daemon_socket} if self._daemon_socket else None,
             last_sync_at=None if self._last_sync_ms is None else iso_ms(self._last_sync_ms),
             last_sync_outcome=self._last_sync_outcome,
             consecutive_sync_failures=self._consecutive_sync_failures,
@@ -2167,6 +2162,7 @@ class AirPrompterAgent:
             golden=self._last_golden,
             apply_policy=self._effective_apply_policy(),
             upload=self._uploader.status() if self._uploader is not None else None,
+            telemetry=self._telemetry_placement(),
             ramp=self._ramp_status(manifest),
             ramps=self._ramp_statuses(manifest),
             variables=self._variables_status(),
@@ -2187,7 +2183,7 @@ class AirPrompterAgent:
 
     @property
     def instance_id(self) -> str:
-        """The runtime's own random id (the store's, or a fresh one per daemon-attached process; never a hostname)."""
+        """The runtime's own random id — this process's, fresh at every start (S6); never a hostname, never the store's."""
         return self._own_instance_id
 
     @staticmethod
@@ -2207,24 +2203,21 @@ class AirPrompterAgent:
         self.spool.refusal(at=at, reason=reason, generation=generation, tag=tag, at_ms=self._now_ms())
 
     def stop(self) -> None:
-        """Stop timers, detach from the daemon, and close the spool."""
+        """Stop timers and uploads, and close the spool."""
         self._stopped = True
         self._timer.cancel()
         self._window_timer.cancel()
         self._spool_timer.cancel()
         self._heartbeat_timer.cancel()
         self._datastore_timer.cancel()
-        if self._uploader is not None:
-            self._uploader.stop()
+        with self._placing:
+            if self._uploader is not None:
+                self._uploader.stop()
         # A pass or a heartbeat in flight finishes first.
         with self._heartbeat_lock:
             pass
         with self._sync_lock:
             pass
-        daemon = self._daemon
-        self._daemon = None
-        if daemon is not None:
-            daemon.close()
         self.spool.close_windows(self._now_ms())
         if self._client is not None:
             self._client.close()

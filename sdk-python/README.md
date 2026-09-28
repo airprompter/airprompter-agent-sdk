@@ -9,7 +9,7 @@ serving.
 
 Python 3.10+, `cryptography` and `httpx`. The same protocol, the same
 conformance vectors and the same on-disk store as the TypeScript SDK — a
-store one SDK wrote is a store the other (and the host daemon) opens.
+store one SDK wrote is a store the other (and the `airprompter` CLI) opens.
 
 ```bash
 pip install airprompter-agent            # + [openai] [anthropic] [litellm] [kms] [vault] [keyring]
@@ -24,8 +24,8 @@ TypeScript packages one for one:
 | Distribution | Import package | Install it alone when | Depends on |
 | --- | --- | --- | --- |
 | `airprompter-agent-core` | `airprompter_agent_core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane client, the port protocols. Nothing here opens a file, a socket or a thread at import. The CI kit is `airprompter_agent_core.testing`. | — |
-| `airprompter-agent-sync` | `airprompter_agent_sync` | Your CI pulls and verifies releases (`sync_once`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, `DaemonClient`). Key providers are its extras: `[kms]`, `[vault]`, `[keyring]`. | core |
-| `airprompter-agent-runtime` | `airprompter_agent_runtime` | Your application renders and assigns over a release **it already holds** — a bundle you loaded, a release from the store or a daemon — with no store, daemon or network of its own (`BundleRelease` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`); the hosted-execution client (`ManagedAgent`). | core |
+| `airprompter-agent-sync` | `airprompter_agent_sync` | Your CI pulls and verifies releases (`sync_once`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). Key providers are its extras: `[kms]`, `[vault]`, `[keyring]`. | core |
+| `airprompter-agent-runtime` | `airprompter_agent_runtime` | Your application renders and assigns over a release **it already holds** — a bundle you loaded, a release from the store or a datastore row — with no store or network of its own (`BundleRelease` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`); the hosted-execution client (`ManagedAgent`). | core |
 | `airprompter-agent-telemetry` | `airprompter_agent_telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`); `airprompter_agent_telemetry.otel` sends the windows to your OpenTelemetry collector instead (`OtlpUploadSink`, `spool_rows_to_otlp`) — no grant, no Agent key. | core |
 | `airprompter-agent` | `airprompter_agent` | One install with today's `AirPrompterAgent`: the facade over the four, every public name re-exported, `airprompter_agent.integrations.*` for the openai / anthropic / LiteLLM clients. | all four |
 
@@ -173,11 +173,22 @@ update-window timers on daemon threads.
 Sync modes: `resident` (timer + jitter, edge pointer first so idle
 instances never wake a Lambda), `on_invoke` (serverless: `ap.invoke(fn)`
 syncs before and after the handler; telemetry goes to a memory sink you
-drain with `ap.drain_memory_sink()` at invocation end), `daemon` (attach
-to the host's `airprompterd` over its Unix socket: no key, no store of its
-own, `generation` events push new releases; with no daemon on the host
-the runtime syncs in-process exactly as `resident`), `offline` (no
-`api_key`: serve the store or the bundle, never call home).
+drain with `ap.drain_memory_sink()` at invocation end), `offline` (no
+`api_key`: serve the store, the datastore or the bundle, never call home).
+`daemon` was removed in 0.3.0 and is refused with
+`AgentStartError("invalid_options")`: the host's `airprompterd` ships
+telemetry only and never serves a release.
+
+Telemetry and the host's daemon (`protocol/daemon.md`): the spool goes to
+`TelemetryOptions(spool_dir=…)`, else `AIRPROMPTER_SPOOL_DIR`, else the
+folder a live `airprompterd` for this agent and target publishes in
+`<store dir>/daemon.json`, else `<store dir>/spool/telemetry`; every closed
+segment gets a manifest beside it. While a live daemon ships that folder
+this process runs no uploader (the daemon uploads under this writer's own
+grant, with this writer's own report); otherwise a resident host uploads
+its own spool, re-checked every minute both ways. `ap.status().telemetry`
+says which folder and who uploads; `ap.check_telemetry_daemon()` re-checks
+now.
 
 ## Apply policy
 
@@ -188,7 +199,8 @@ instantly; going below the stored generation is a forced downgrade,
 stamped in the store and in the spool, and the control plane's current
 generation is held back until it moves past the one you left. The local
 side can be stricter than the manifest (`apply={"policy": "unlock_required"}`),
-never looser. In `daemon` mode both calls act for the whole host.
+never looser. Both calls act on this process and the store it shares;
+another process already running on the same store keeps what it loaded.
 
 Every process is its own instance (S6): `ap.instance_id` is minted at
 start, never the store's; N workers are N instances in the fleet view and
@@ -369,11 +381,11 @@ a `run_ref` minted there).
 | Render, trust-aware fencing, `run_ref`, feedback catalogue | ✓ | ✓ |
 | Spool writer: minute windows, segments, both budgets, `dropped` rows | ✓ | ✓ (same vectors) |
 | Sync: resident / on_invoke / offline, edge pointer, root rotation, held-back generations | ✓ | ✓ |
-| Daemon attach (`daemon-socket.md`) | Unix socket + Windows named pipe | Unix socket (Windows named pipe: next phase — falls back to in-process) |
+| Telemetry daemon (`daemon.md`): `daemon.json` discovery, segment manifests, the hand-over both ways | ✓ | ✓ (same vectors) |
 | Apply control: update window (DST-safe), `on_staged` hook, Freeze precedence, heartbeat | ✓ | ✓ (`zoneinfo`) |
 | `observe()`: OpenAI / Anthropic / Bedrock usage, error classes | ✓ | ✓ + SDK objects, async variant |
 | Managed mode (catalogue, run, stream, typed refusals, 429 retry) | ✓ | ✓ |
 | Variable sources (`variables`, `needs()`, `status().variables`, fenced by the stricter trust, workflow steps, managed fill) | ✓ (`renderAsync`) | ✓ (`render()` runs plain callables on threads; `render_async()` awaits coroutine functions) |
 | Provider wrappers | `ap.wrap()` for openai / Anthropic, AI SDK middleware | `ap.wrap()` for openai / anthropic (sync + async), explicit helpers, LiteLLM callback |
-| Spool upload on hosts | `airprompterd` uploads every writer's segments (T26); with no daemon the runtime uploads its own (S5) | ✓ (`SpoolUploader`, `upload_now()`, `TelemetryOptions(upload=False)`) |
+| Spool upload on hosts | `airprompterd` uploads every writer's segments under that writer's own report (T26, 0.3.0); with no live daemon the runtime uploads its own (S5) | ✓ (`SpoolUploader`, `upload_now()`, `TelemetryOptions(upload=False)`) |
 | Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓, awaited before `invoke()` returns (S5) | ✓ (`flush_telemetry()`, `request_upload_grant()`, `TelemetryOptions(flush="background")` opt-out) |

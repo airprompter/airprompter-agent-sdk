@@ -62,8 +62,8 @@ ap = AirPrompterAgent.start(..., apply=ApplyOptions(on_staged=on_staged))
 
 When the ticket is approved after the hook returned, an operator runs
 `airprompter unlock --agent … --environment prod --generation N` on the
-host (or `ap.unlock()` from any process on it — host-wide in daemon mode),
-or the next update window activates it.
+host (a process started from then on serves it; a running process moves
+with its own `ap.unlock()`), or the next update window activates it.
 
 ## 2. An update window with an out-of-hours veto
 
@@ -192,24 +192,23 @@ dev key under a dev root it makes once and keeps beside the prompts
 (`.airprompter-dev/keys.json`, mode 0600; `root.pub.json` is what a client
 pins). Every save that changes the release is a new generation; an
 unchanged save is not; a file that does not parse is reported and the last
-good generation keeps serving. An SDK, a daemon or the CLI syncs from it
+good generation keeps serving. An SDK or the CLI syncs from it
 exactly as from the hosted service, and the same chain applies: a manifest
 signed here never verifies against a production root.
 
 ```bash
 airprompter dev ./prompts --port 4180                # generation 1; every save is generation + 1
 AIRPROMPTER_AGENT_KEY=apa_dev_local node app.js       # the SDK: baseUrl http://127.0.0.1:4180, root ./prompts/.airprompter-dev/root.pub.json
-airprompter dev ./prompts --apply-policy unlock_required --daemon
+airprompter dev ./prompts --apply-policy unlock_required
 ```
 
 Change control is honoured on the laptop too: with `release.json`'s
 `applyPolicy: "unlock_required"` (or `--apply-policy`), every generation is
 staged by the clients and waits for `airprompter unlock` on the host, the
 update window or the hook — the same flow as production, so a team can
-rehearse its recipe before a release carries it. With `--daemon`, an
-embedded `airprompterd` attached to the server serves the host's SDKs over
-the local socket, and every promotion reaches them as a `generation`
-event within one poll (S3). A file's front matter names the slot's
+rehearse its recipe before a release carries it. A resident SDK pointed at
+the registry with a short `pollSeconds` picks up every promotion within
+one poll (S3). A file's front matter names the slot's
 `model:`, `variables:` (`name!` required, `name?` end-user text — fenced
 exactly as in production; `name=default` and `name~` from 0.3.4; without
 the line every `{{placeholder}}` is an optional operator variable) and

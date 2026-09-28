@@ -3,8 +3,8 @@
  * is the customer's: the first verified manifest pins it in store.json
  * (trust-on-first-use), a later manifest may tighten it (`auto` →
  * `unlock_required`) and never loosen it. Loosening is this command — an
- * operator's act on the host, logged, host-wide through the daemon when
- * one runs. `policy show` prints what is in force and where it came from;
+ * operator's act on the host, logged in store.json, read by every runtime
+ * that starts on it. `policy show` prints what is in force and where it came from;
  * `policy set auto|unlock_required` records the operator's choice.
  *
  * @example
@@ -15,9 +15,7 @@
  */
 
 import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { DaemonClient, daemonSocketPath } from "../../../sdk-typescript/packages/sync/src/sync/daemon.js";
-import { CLI_VERSION } from "../version.js";
-import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
+import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { CliError, EXIT, Output, refused, type Context } from "../io.js";
 
 export const POLICY_OPTIONS: OptionSpec = {
@@ -26,7 +24,6 @@ export const POLICY_OPTIONS: OptionSpec = {
   org: { type: "string", help: "Organization id (optional for policy)" },
   by: { type: "string", help: "Who is making the change, for the log (a name or a ticket; never a secret)" },
   ...STORE_OPTIONS,
-  socket: { type: "string", help: "Daemon socket path (default: the store's daemon.sock when present)" },
   ...COMMON_OPTIONS,
 };
 
@@ -50,24 +47,6 @@ export async function policy(argv: string[], ctx: Context): Promise<number> {
   const scope = scopeOf({ ...parsed, values: { ...parsed.values, org: parsed.values.org ?? "-" } });
   const by = str(parsed, "by");
 
-  // The daemon first: it holds the store on a shared host, and every attached SDK adopts its policy at once.
-  const socketPath = str(parsed, "socket") ?? daemonSocketPath({ stateDir: str(parsed, "state-dir") ?? defaultStateDir(ctx), agentId: scope.agentId, target: scope.target });
-  const client = await DaemonClient.connect({ socketPath, agentId: scope.agentId, target: scope.target, sdk: `airprompter-cli/${CLI_VERSION}` }).catch(() => null);
-  if (client) {
-    try {
-      const answer = verb === "set" ? await client.request("policy", { value: wanted, ...(by ? { by } : {}) }) : await client.request("status");
-      const applyPolicy = answer.applyPolicy as { effective: string; source: string; manifestSaid: string | null };
-      out.field("via", "daemon");
-      out.field("applyPolicy", applyPolicy, "apply policy");
-      if (verb === "set") out.line(`policy set to ${wanted} through the daemon; every attached runtime runs under it now`);
-      out.line(`in force: ${applyPolicy.effective} (${applyPolicy.source})${applyPolicy.manifestSaid && applyPolicy.manifestSaid !== applyPolicy.effective ? ` — the console asked for ${applyPolicy.manifestSaid}; that setting is advisory on this host` : ""}`);
-      out.flush();
-      return EXIT.ok;
-    } finally {
-      client.close();
-    }
-  }
-
   let store;
   try {
     store = await openStore(parsed, ctx, scope);
@@ -81,7 +60,7 @@ export async function policy(argv: string[], ctx: Context): Promise<number> {
     out.field("via", "store");
     out.field("previous", before);
     out.field("applyPolicy", store.state.applyPolicyPin, "apply policy");
-    out.line(`policy set to ${wanted} on this host (was ${before ? `${before.value}, ${before.source}` : "not pinned"}); a runtime started from now runs under it (a runtime already running in-process does not — use the daemon on a shared host)`);
+    out.line(`policy set to ${wanted} on this host (was ${before ? `${before.value}, ${before.source}` : "not pinned"}); a runtime started from now runs under it (a runtime already running keeps its policy until it restarts or calls ap.setApplyPolicy())`);
     out.flush();
     return EXIT.ok;
   }

@@ -90,8 +90,9 @@ examples, the tools and the scripts — and CI runs it.
    reviews within a few business days; small fixes usually land the same
    week.
 4. Releases are cut by maintainers by tag (`sdk-typescript/vX.Y.Z`,
-   `sdk-python/vX.Y.Z`, `protocol/vX.Y.Z`, `cli/vX.Y.Z`); the workflow
-   publishes with provenance. You do not need to bump versions in a PR
+   `sdk-python/vX.Y.Z`, `protocol/vX.Y.Z`, `cli/vX.Y.Z`), pushed by hand
+   or with the **Tag release** workflow (tags and a commit on `main`); the
+   workflow publishes with provenance. You do not need to bump versions in a PR
    unless asked.
 
 ## Questions

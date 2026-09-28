@@ -33,7 +33,11 @@
 #                          (the harness with the protocol's vectors bundled
 #                          at pack time), with provenance (S14).
 #
-# `workflow_dispatch` runs a dry run: it builds the protocol SBOM, signs it
+# Tags are pushed by hand or by tag-release.yml, which then dispatches this
+# workflow on the tag (a GITHUB_TOKEN tag push starts no workflow); the publish
+# jobs gate on github.ref, so a dispatch on a tag publishes as a push does.
+#
+# `workflow_dispatch` also runs a dry run: it builds the protocol SBOM, signs it
 # keyless with cosign, and uploads the signed artifacts — the release path
 # is exercised end to end without publishing anything.
 

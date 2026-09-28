@@ -119,7 +119,7 @@ jobs:
       - name: Publish with provenance
         run: npm publish --provenance --access public
         working-directory: conformance
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
 
@@ -179,7 +179,7 @@ jobs:
           # T40: the datastore adapters are optional and pin sync; they go out after it.
           for adapter in s3 postgres redis; do publish "@airprompter/datastore-$adapter" "datastore-$adapter"; done
         working-directory: sdk-typescript
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: agent-sdk.spdx.json
           generate_release_notes: true
@@ -223,7 +223,7 @@ jobs:
           packages-dir: sdk-python/dist
           # A distribution already on PyPI is skipped, so a run that failed part-way can be re-run.
           skip-existing: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: airprompter-agent.spdx.json
           generate_release_notes: true
@@ -331,7 +331,7 @@ jobs:
           path: cli
           format: spdx-json
           output-file: dist/${{ matrix.artifact }}.spdx.json
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true

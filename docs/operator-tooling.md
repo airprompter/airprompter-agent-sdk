@@ -97,7 +97,7 @@ segment over the 1 MiB cap is refused. Exit `0` when every segment fits,
 ## The verify action — `airprompter verify` on every bundle a pull request commits
 
 ```yaml
-- uses: airprompter/airprompter-agent-sdk/action/verify@cli/v0.1.0
+- uses: airprompter/airprompter-agent-sdk/action/verify@cli/v0.3.0
   with:
     bundle: bundles/*.apbundle     # one per line for several
     org: org_…

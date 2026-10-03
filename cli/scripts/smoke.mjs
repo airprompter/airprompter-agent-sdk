@@ -30,7 +30,8 @@ const run = (args, opts = {}) => {
 const work = mkdtempSync(join(tmpdir(), "airprompter-smoke-"));
 try {
   const version = run(["--version"]);
-  check("--version exits 0 and prints a version", version.code === 0 && /^\d+\.\d+\.\d+/.test(version.stdout.trim()), `${version.code}: ${version.stdout}${version.stderr}`);
+  const expectedVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  check("--version matches the release package", version.code === 0 && version.stdout.trim() === expectedVersion, `${version.code}: expected ${expectedVersion}; got ${version.stdout}${version.stderr}`);
 
   const help = run(["--help"]);
   check("--help lists every command", help.code === 0 && ["pull", "verify", "apply", "status", "doctor", "diff", "keygen", "dev", "login", "import"].every((c) => help.stdout.includes(`  ${c}`)));

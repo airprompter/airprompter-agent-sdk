@@ -10,6 +10,11 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## CLI 0.3.0 — 2026-10-03 (SDK 0.3.0, protocol 0.3.4)
+
+- Ships the CLI changes documented under SDK 0.3.0 as four signed single-file executables. The daemon now ships telemetry only; `status`, `doctor`, `unlock`, `rollback` and `policy` use the local store and daemon discovery file. Operators upgrading from CLI 0.1.0 must remove the retired release-serving daemon flags and `dev --daemon`.
+- The verify action can be pinned to `action/verify@cli/v0.3.0`.
+
 ## 0.3.0 — 2026-09-28 (protocol 0.3.4)
 
 The daemon ships telemetry and nothing else; every process loads its own release — from its store, from the

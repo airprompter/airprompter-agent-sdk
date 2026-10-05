@@ -48,6 +48,7 @@ from airprompter_agent_core.protocol.assignment import ramp_weights_at
 from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from airprompter_agent_runtime.wrap import WrapHooks, wrap_client
+from airprompter_agent_core.protocol.assignment import copy_audience_tags, valid_audience_label, AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION
 from airprompter_agent_core.render.run_ref import parse_run_ref
 from airprompter_agent_core.render.template import Delimiters
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
@@ -392,21 +393,22 @@ class PromptHandle:
     """One prompt slot for one subject: ``render()`` (the call site's values, literals, and plain-callable sources
     on worker threads), ``render_async()`` (coroutine-function sources too), ``needs()`` and ``variables()``."""
 
-    def __init__(self, agent: "AirPrompterAgent", tag: str, subject: Optional[str]):
+    def __init__(self, agent: "AirPrompterAgent", tag: str, subject: Optional[str], tags: Optional[Mapping[str,str]] = None):
         self._agent = agent
         self._tag = tag
         self._subject = subject
+        self._tags = copy_audience_tags(tags) if tags is not None else None
 
     def render(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> Rendered:
         """Synchronous: the call site's values, literal sources and plain-callable sources (each on a worker thread
         under its timeout). A coroutine-function source in the way is ``VariableSourceRequiredError``."""
         merged = {**(values or {}), **kwargs}
-        return self._agent._render(self._tag, self._subject, merged)
+        return self._agent._render(self._tag, self._subject, merged, self._tags)
 
     async def render_async(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> Rendered:
         """The same render with every source awaited (each under its own timeout), values fenced by the stricter trust."""
         merged = {**(values or {}), **kwargs}
-        return await self._agent._render_async(self._tag, self._subject, merged)
+        return await self._agent._render_async(self._tag, self._subject, merged, self._tags)
 
     def needs(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> list[str]:
         """The required names a render would still lack after these values and the registered sources — check it at
@@ -415,7 +417,7 @@ class PromptHandle:
         return unsourced(variables=self.variables(), values=merged, registry=self._agent.variables)
 
     def variables(self) -> list[Mapping[str, Any]]:
-        return list(self._agent._resolve_slot(self._tag, self._subject)[0].get("variables", []))
+        return list(self._agent._resolve_slot(self._tag, self._subject, tags=copy_audience_tags({**self._agent._audience_tags, **(self._tags or {})}))[0].get("variables", []))
 
 
 @dataclass(frozen=True)
@@ -505,6 +507,11 @@ class AirPrompterAgent:
         self._stopped = False
         # S6: the runRef key is derived from the STORE's id, which every process on the host shares, so a run_ref minted by one
         # worker parses in another.
+        self._audience_server_supported = False
+        self._audience_tags = copy_audience_tags(options.get("tags") or {})
+        self._audience_tag_keys = set(self._audience_tags)
+        self._audience_prompt_labels = {}
+        for tag,label in (options.get("prompt_labels") or {}).items(): self._register_prompt_label(tag,label)
         self._run_ref_key = hmac.new((run_ref_seed or own_instance_id).encode("utf-8"), b"runRef", hashlib.sha256).digest()
         # T33: the last renders by text hash, so a wrapped client can tell which slot a call is.
         self._renders = RenderRegistry()
@@ -553,6 +560,8 @@ class AirPrompterAgent:
         random: Optional[Callable[[], float]] = None,
         logger: Optional[Callable[[dict[str, Any]], None]] = None,
         variables: Optional[Mapping[str, VariableSourceInput]] = None,
+        tags: Optional[Mapping[str,str]] = None,
+        prompt_labels: Optional[Mapping[str,str]] = None,
     ) -> "AirPrompterAgent":
         """``root`` is ``{"pinned": <P-256 public JWK>}`` for this environment, or a full root document (from the bundle or a previous accept).
         ``api_key`` absent means offline: serve the store or the vendored bundle, never call home.
@@ -569,6 +578,8 @@ class AirPrompterAgent:
             )
         sync_options = _coerce(SyncOptions, sync)
         options: dict[str, Any] = {
+            "tags": tags,
+            "prompt_labels": prompt_labels,
             "organization_id": organization_id,
             "agent_id": agent_id,
             "target": target,
@@ -1409,6 +1420,7 @@ class AirPrompterAgent:
         resolver = ReleaseResolver(
             release=release,
             run_ref_key=self._run_ref_key,
+            tags=lambda: self._audience_tags,
             agent_id=self._o["agent_id"],
             target=self._o["target"],
             instance_id=self._own_instance_id,
@@ -1478,6 +1490,10 @@ class AirPrompterAgent:
             body["activeReleaseDigest"] = active_digest
         if staged_digest:
             body["stagedReleaseDigest"] = staged_digest
+        active_payload = self._active.manifest["payload"] if self._active else {}
+        if self._audience_server_supported or (active_payload.get("protocol") == AUDIENCE_PROTOCOL_VERSION and AUDIENCE_CAPABILITY in active_payload.get("requiredCapabilities", [])):
+            body["capabilities"] = [AUDIENCE_CAPABILITY]
+            body["registration"] = {"tagKeys": sorted(self._audience_tag_keys), "prompts": [{"tag": tag, "displayName": label} for tag,label in sorted(self._audience_prompt_labels.items())]}
         if status.apply_state == "refused" and status.last_refusal and _REFUSAL_WORD.match(status.last_refusal):
             body["refusal"] = status.last_refusal
             if status.last_refusal == "model_unavailable" and self._unavailable_models:
@@ -1499,6 +1515,7 @@ class AirPrompterAgent:
                     response = result.response or {}
                     behind = False
                     with self._lock:
+                        self._audience_server_supported = response.get("protocol") == AUDIENCE_PROTOCOL_VERSION and AUDIENCE_CAPABILITY in response.get("capabilities", [])
                         self._last_heartbeat_ms = self._now_ms()
                         self._last_heartbeat_refusal = None
                         self._last_contact_ms = self._now_ms()
@@ -1729,12 +1746,12 @@ class AirPrompterAgent:
                     raise RenderRefusedError("lease_expired", tag, active.generation)
         return active
 
-    def _resolve_slot(self, tag: str, subject: Optional[str]) -> tuple[Mapping[str, Any], str, Optional[int]]:
+    def _resolve_slot(self, tag: str, subject: Optional[str], return_resolved: bool = False, tags: Optional[Mapping[str,str]] = None):
         """S10: the runtime resolves; the facade turns a refusal into the spool row and the raised error, and guards the lease."""
         resolver = self._resolver()
         active = self._active
         assert active is not None
-        outcome = resolver.resolve(tag, subject)
+        outcome = resolver.resolve(tag, subject, tags)
         if not outcome.ok:
             if outcome.reason == "no_slot":
                 raise KeyError(f"no slot {tag} on generation {active.generation}")
@@ -1742,12 +1759,28 @@ class AirPrompterAgent:
             raise RenderRefusedError("disabled", tag, active.generation)
         self._guard_lease(tag)
         assert outcome.slot is not None
-        return outcome.slot.slot, outcome.slot.arm, outcome.slot.bucket
+        return outcome.slot if return_resolved else (outcome.slot.slot, outcome.slot.arm, outcome.slot.bucket)
 
     # ------------------------------------------------------------------ render
 
-    def prompt(self, tag: str, *, subject: Optional[str] = None) -> PromptHandle:
-        return PromptHandle(self, tag, subject)
+    def set_tags(self, tags: Mapping[str,str]) -> None:
+        """Replace local process tags; remember only key names for registration."""
+        copied = copy_audience_tags(tags)
+        with self._lock:
+            keys = self._audience_tag_keys | set(copied)
+            if len(keys) > 64: raise ValueError("audience_tag_names_limit")
+            self._audience_tag_keys = keys
+            self._audience_tags = copied
+
+    def _register_prompt_label(self, tag: str, label: str) -> None:
+        if not isinstance(tag,str) or not re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*",tag) or len(tag) > 128 or not valid_audience_label(label): raise ValueError("prompt_label_invalid")
+        if tag not in self._audience_prompt_labels and len(self._audience_prompt_labels) >= 32: raise ValueError("prompt_labels_limit")
+        self._audience_prompt_labels[tag] = label
+
+    def prompt(self, tag: str, *, subject: Optional[str] = None, tags: Optional[Mapping[str,str]] = None, display_name: Optional[str] = None) -> PromptHandle:
+        with self._lock:
+            self._register_prompt_label(tag, display_name if display_name is not None else self._audience_prompt_labels.get(tag, tag))
+        return PromptHandle(self, tag, subject, tags)
 
     @dataclass(frozen=True)
     class _Prepared:
@@ -1763,11 +1796,15 @@ class AirPrompterAgent:
         def row(self) -> dict[str, Any]:
             return {"tag": self.resolved.slot["tag"], "version_id": self.resolved.slot["versionId"], "arm": self.resolved.arm, "model": self.resolved.slot["model"]}
 
-    def _prepare(self, tag: str, subject: Optional[str], values: Mapping[str, Any]) -> "AirPrompterAgent._Prepared":
+    def _prepare(self, tag: str, subject: Optional[str], values: Mapping[str, Any], tags: Optional[Mapping[str,str]] = None) -> "AirPrompterAgent._Prepared":
         with self._lock:
             resolver = self._resolver()
-            slot, arm, bucket = self._resolve_slot(tag, subject)
-            resolved = ReleaseSlot(slot, arm, bucket)
+            local_tags = copy_audience_tags({**self._audience_tags, **tags}) if tags is not None else self._audience_tags
+            keys = self._audience_tag_keys | set(local_tags)
+            if len(keys) > 64: raise ValueError("audience_tag_names_limit")
+            self._audience_tag_keys = keys
+            resolved = self._resolve_slot(tag, subject, True, local_tags)
+            slot = resolved.slot
             text = resolver.text_of(slot)
             plan = plan_fill(tag=tag, variables=slot.get("variables", []), text=text, values=values, registry=self.variables)
             return AirPrompterAgent._Prepared(resolver, resolved, text, plan)
@@ -1775,20 +1812,20 @@ class AirPrompterAgent:
     def _finish(self, prepared: "AirPrompterAgent._Prepared", filled: FilledRender) -> Rendered:
         rendered = self._render_observed(lambda: prepared.resolver.render(prepared.resolved, filled.values, fenced=filled.fenced, text=prepared.text), prepared.row)
         # The registry keeps its own copy of the block: the one handed out is the caller's to edit.
-        self._renders.register(rendered.text, Attribution(rendered.tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference)))
+        self._renders.register(rendered.text, Attribution(rendered.tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference), rendered.audience_ids, rendered.run_minute))
         self._say_stricter(rendered.tag, prepared.resolved.slot, filled)
         return rendered
 
     def _context(self, prepared: "AirPrompterAgent._Prepared", tag: str, subject: Optional[str]) -> VariableSourceContext:
         return VariableSourceContext(tag=tag, name="", subject=subject, version_id=prepared.resolved.slot["versionId"], arm=prepared.resolved.arm)
 
-    def _render(self, tag: str, subject: Optional[str], values: Mapping[str, Any]) -> Rendered:
-        prepared = self._prepare(tag, subject, values)
+    def _render(self, tag: str, subject: Optional[str], values: Mapping[str, Any], tags: Optional[Mapping[str,str]] = None) -> Rendered:
+        prepared = self._prepare(tag, subject, values, tags)
         # The lock is released here: a source is the customer's code and may take its time.
         return self._finish(prepared, self._fill_observed(lambda: fill_sync(prepared.plan, self._context(prepared, tag, subject), self.variables), tag, prepared.row))
 
-    async def _render_async(self, tag: str, subject: Optional[str], values: Mapping[str, Any]) -> Rendered:
-        prepared = self._prepare(tag, subject, values)
+    async def _render_async(self, tag: str, subject: Optional[str], values: Mapping[str, Any], tags: Optional[Mapping[str,str]] = None) -> Rendered:
+        prepared = self._prepare(tag, subject, values, tags)
         filled = await self._fill_observed_async(lambda: fill_async(prepared.plan, self._context(prepared, tag, subject), self.variables), tag, prepared.row)
         return self._finish(prepared, filled)
 
@@ -1848,11 +1885,11 @@ class AirPrompterAgent:
         there is one, names the workflow slot."""
         with self._lock:
             resolver = self._resolver()
-            slot, arm, bucket = self._resolve_slot(tag, subject)
-            resolved = ReleaseSlot(slot, arm, bucket)
+            resolved = self._resolve_slot(tag, subject, return_resolved=True)
+            slot = resolved.slot
             workflow = resolver.workflow(resolved)
             for step in workflow.steps:
-                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference)))
+                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute))
         row = {"tag": tag, "version_id": slot["versionId"], "arm": workflow.arm, "model": workflow.model}
         declared = list(slot.get("variables", []))
 
@@ -1864,7 +1901,7 @@ class AirPrompterAgent:
 
         def finish(step: WorkflowStep, filled: FilledRender) -> str:
             text = self._render_observed(lambda: resolver.render_text(tag=step.step_id, text=step.text, variables=declared, values=filled.values, fenced=filled.fenced), row)
-            self._renders.register(text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference)))
+            self._renders.register(text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute))
             self._say_stricter(step.step_id, slot, filled)
             return text
 
@@ -1936,7 +1973,7 @@ class AirPrompterAgent:
             return {"passed": 0, "failed": 0, "results": []}
         outcome = evaluate_checks(declared, text, output_tokens)
         if record and (outcome["passed"] or outcome["failed"]):
-            self.spool.checks(tag=target.tag, version_id=target.version_id, arm=target.arm, model=target.model, passed=outcome["passed"], failed=outcome["failed"], at_ms=self._now_ms())
+            self.spool.checks(tag=target.tag, version_id=target.version_id, arm=target.arm, model=target.model, passed=outcome["passed"], failed=outcome["failed"], at_ms=self._now_ms(), audience_ids=target.audience_ids, run_minute=target.run_minute)
         return outcome
 
     def _declared_checks_for(self, tag: str, arm: str) -> list[Mapping[str, Any]]:
@@ -1972,8 +2009,8 @@ class AirPrompterAgent:
             return rendered
         if isinstance(rendered, WorkflowStep):
             facts = parse_run_ref(rendered.run_ref, self._run_ref_key)
-            return ObserveTarget(rendered.step_id, rendered.version_id, facts.arm if facts else "none", model or rendered.model or "unknown")
-        return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model)
+            return ObserveTarget(rendered.step_id, rendered.version_id, facts.arm if facts else "none", model or rendered.model or "unknown", rendered.audience_ids, rendered.run_minute)
+        return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model, rendered.audience_ids, rendered.run_minute)
 
     # ------------------------------------------------------------------ T33: wrapped clients
 
@@ -1990,7 +2027,7 @@ class AirPrompterAgent:
         """``with ap.attribute(rendered):`` — every wrapped call inside the block is that render's, whatever text it carries."""
         target = self._target_of(rendered, None)
         # The observe target carries no settings; the rendered prompt (or the workflow step) does.
-        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, copy_inference(getattr(rendered, "inference", None))))
+        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, copy_inference(getattr(rendered, "inference", None)), target.audience_ids, target.run_minute))
 
     def attribution_for(self, params: Any) -> Optional[Attribution]:
         """The render a request's parameters name: an explicit scope first, else a message whose text is a recent render."""
@@ -2000,7 +2037,7 @@ class AirPrompterAgent:
         return WrapHooks(attribute=self.attribution_for, begin=self._begin_observation, log=self._log)
 
     def _begin_observation(self, attribution: Attribution, model: str) -> PendingObservation:
-        target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model)
+        target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model, attribution.audience_ids, attribution.run_minute)
         return PendingObservation(target, lambda o: self.spool.observe(o, self._now_ms()), model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
 
     def golden(self, *, invoke: Optional[GoldenInvoke] = None, tag: Optional[str] = None, staged: bool = False, concurrency: Optional[int] = None) -> list[GoldenReport]:
@@ -2097,7 +2134,7 @@ class AirPrompterAgent:
             arm = next((a for a in experiment["arms"] if a["arm"] == facts.arm), None)
             override = next((entry for entry in (arm or {}).get("overrides", []) if entry["tag"] == facts.tag), None)
         slot = override or (next((entry for entry in payload["slots"] if entry["tag"] == facts.tag), None) if payload else None)
-        self.spool.outcomes(tag=facts.tag, version_id=facts.version_id, arm=facts.arm, model=slot["model"] if slot else "unknown", outcomes=normalized.outcomes, at_ms=self._now_ms())
+        self.spool.outcomes(tag=facts.tag, version_id=facts.version_id, arm=facts.arm, model=slot["model"] if slot and slot["versionId"] == facts.version_id else "unknown", outcomes=normalized.outcomes, at_ms=self._now_ms(), audience_ids=facts.audience_ids, outcome_run_minute=facts.run_minute)
         return True
 
     # ------------------------------------------------------------------ status

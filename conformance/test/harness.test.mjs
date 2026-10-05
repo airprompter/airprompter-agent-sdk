@@ -143,3 +143,13 @@ test("the published package is self-contained: npm pack carries the vectors, sch
     rmSync(work, { recursive: true, force: true });
   }
 });
+
+// An implementation which treats every selector as fleet-wide must fail the new section.
+test("audience harness rejects broadening a targeted deployment", async () => {
+  const adapter = await moduleAdapter(referencePath);
+  const call = adapter.call;
+  adapter.call = async (fn,args) => fn === "audiencePredicate" ? {result:{valid:true,matches:true}} : call(fn,args);
+  const report = await runHarness({adapter,vectors:vectorsDir(),only:"audiences",log:quiet});
+  assert.equal(report.ok,false);
+  assert.ok(report.failed >= 10);
+});

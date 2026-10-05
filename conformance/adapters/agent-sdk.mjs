@@ -34,6 +34,8 @@ const refusing = (fn) => (args) => {
 };
 
 export const ops = {
+  audiencePredicate: ({selector,tags}) => ({valid:core.validAudienceSelector(selector), matches:core.matchesAudience(selector,tags)}),
+  audienceValidator: ({kind,value}) => ({valid:kind === "key" ? core.validAudienceKey(value) : kind === "label" ? core.validAudienceLabel(value) : core.validAudienceInstant(value)}),
   canonicalJson: refusing(({ json }) => {
     const text = core.canonicalJson(JSON.parse(json));
     return { text, sha256: core.sha256Prefixed(Buffer.from(text, "utf8")) };

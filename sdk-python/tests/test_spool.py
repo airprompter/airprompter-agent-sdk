@@ -91,6 +91,20 @@ def test_feedback_vectors():
         assert _stable({"accepted": got.accepted, "outcomes": got.outcomes, "rejected": got.rejected}) == _stable(c["expected"]), f"{c['name']}: {got}"
 
 
+def test_audience_manual_checks_only_attach_to_a_measured_open_run():
+    sink=MemorySink(); writer=SpoolWriter(sink,IDENTITY)
+    audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",)
+    dimensions={"tag":"support.reply","version_id":"ver_1","arm":"candidate","model":"gpt-5","audience_ids":audience_ids,"run_minute":"2026-09-12T14:03:00Z"}
+    writer.checks(**dimensions,passed=1,failed=0,at_ms=T0)
+    assert sink.drain() == [], "checks alone cannot create a v2 zero-run row"
+    writer.observe(Observation(tag=dimensions["tag"],version_id=dimensions["version_id"],arm=dimensions["arm"],model=dimensions["model"],status="ok",latency_ms=10,audience_ids=audience_ids,run_minute=dimensions["run_minute"]),T0)
+    writer.checks(**dimensions,passed=1,failed=0,at_ms=T0)
+    writer.close_windows(T0)
+    rows=[r for r in sink.drain() if r.get("type")=="window"]
+    assert len(rows)==1 and rows[0]["v"]==2 and rows[0]["count"]==1
+    assert rows[0]["audienceIds"]==list(audience_ids) and rows[0]["checks"]=={"passed":1,"failed":0}
+
+
 def _segments(directory):
     return sorted(n for n in os.listdir(directory) if n.startswith("seg-") and n.endswith(".ndjson"))
 

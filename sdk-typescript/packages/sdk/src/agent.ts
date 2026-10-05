@@ -35,7 +35,7 @@ import { bundlePayloadBytes, openBundle, type DistributionKey } from "@airprompt
 import { rampWeightsAt } from "@airprompter/agent-core";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
 import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, SlotVariable, Target, UploadSink } from "@airprompter/agent-core";
-import { parseRunRef } from "@airprompter/agent-core";
+import { copyAudienceTags, validAudienceKey, validAudienceLabel, AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION, parseRunRef } from "@airprompter/agent-core";
 import type { Delimiters } from "@airprompter/agent-core";
 import { normalizeFeedback } from "@airprompter/agent-core";
 import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "@airprompter/agent-telemetry";
@@ -81,6 +81,10 @@ export type SpoolDirSource = "option" | "env" | "daemon" | "default";
 export const SPOOL_DIR_ENV = "AIRPROMPTER_SPOOL_DIR";
 
 export interface StartOptions {
+  /** Local SDK tags only. Names are registered; values are never persisted or transmitted. */
+  tags?: Readonly<Record<string,string>>;
+  /** SDK-owned prompt labels, registered under their stable prompt tags. */
+  promptLabels?: Readonly<Record<string,string>>;
   organizationId: string;
   agentId: string;
   target: Target;
@@ -515,6 +519,10 @@ export class AirPrompterAgent {
   private lastFlushMinute: number | null = null;
   private trustedRoot: RootMetadata;
   private readonly runRefKey: Buffer;
+  private audienceServerSupported = false;
+  private audienceTags: Readonly<Record<string,string>> = {};
+  private readonly audienceTagKeys = new Set<string>();
+  private readonly audiencePromptLabels = new Map<string,string>();
   /** T33: the last renders by text hash, so a wrapped client can tell which slot a call is. */
   private readonly renders = new RenderRegistry();
   /** The application's variable sources (`start({ variables })`, `ap.variables.provide()`). */
@@ -544,6 +552,8 @@ export class AirPrompterAgent {
     this.spoolDirFrom = placement.from;
     this.discovery = placement.discovery;
     this.trustedRoot = trustedRoot;
+    this.setTags(options.tags ?? {});
+    for (const [tag,label] of Object.entries(options.promptLabels ?? {})) this.registerPromptLabel(tag,label);
     this.runRefKey = createHmac("sha256", Buffer.from(runRefSeed, "utf8")).update("runRef").digest();
     this.localWindow = options.apply?.window ? parseWindow(options.apply.window) : null;
     this.heartbeatIntervalSeconds = Math.min(3600, Math.max(30, Math.round(options.heartbeatSeconds ?? 300)));
@@ -1389,6 +1399,7 @@ export class AirPrompterAgent {
       target: this.options.target,
       instanceId: this.ownInstanceId,
       nowMs: () => this.nowMs(),
+      tags: () => this.audienceTags,
       ...(this.options.delimiters ? { delimiters: this.options.delimiters } : {}),
       standingDirectives: this.standingDirectives,
     });
@@ -1443,6 +1454,10 @@ export class AirPrompterAgent {
     const report = this.spoolReporter?.() ?? null;
     return {
       protocol: PROTOCOL_VERSION,
+      ...((this.audienceServerSupported || (this.active?.manifest.payload.protocol === AUDIENCE_PROTOCOL_VERSION && this.active.manifest.payload.requiredCapabilities?.includes(AUDIENCE_CAPABILITY))) ? {
+        capabilities: [AUDIENCE_CAPABILITY],
+        registration: {tagKeys: [...this.audienceTagKeys].sort(), prompts: [...this.audiencePromptLabels].sort(([a],[b])=>a.localeCompare(b)).map(([tag,displayName])=>({tag,displayName}))},
+      } : {}),
       instanceId: this.ownInstanceId,
       instanceClass: this.options.telemetry?.instanceClass ?? ((this.options.sync?.mode ?? "resident") === "on_invoke" ? "ephemeral" : "resident"),
       sdk: this.options.sdk ?? { name: "agent-sdk-typescript", version: SDK_VERSION },
@@ -1524,6 +1539,7 @@ export class AirPrompterAgent {
 
   /** T26: the heartbeat's answer carries the grant (or a hold) and the upload cadence. */
   private takeGrant(response: Record<string, unknown>): void {
+    this.audienceServerSupported = response.protocol === AUDIENCE_PROTOCOL_VERSION && Array.isArray(response.capabilities) && response.capabilities.includes(AUDIENCE_CAPABILITY);
     const interval = Number(response.uploadIntervalSeconds);
     if (Number.isFinite(interval) && interval >= 1) this.uploadIntervalSeconds = interval;
     const grant = response.uploadGrant as UploadGrant | undefined;
@@ -1715,33 +1731,56 @@ export class AirPrompterAgent {
   }
 
   /** S10: the runtime resolves; the facade turns a refusal into the spool row and the thrown error, and guards the lease. */
-  private resolveSlot(tag: string, subject: string | undefined): { slot: ManifestSlot; arm: string; bucket: number | null } {
+  private resolveSlot(tag: string, subject: string | undefined, tags?: Readonly<Record<string,string>>): { slot: ManifestSlot; arm: string; bucket: number | null; audienceIds?: readonly string[]; runMinute?: string } {
     const resolver = this.resolver();
     const active = this.active!;
-    const outcome = resolver.resolve(tag, subject);
+    const outcome = resolver.resolve(tag, subject, tags);
     if (!outcome.ok) {
       if (outcome.reason === "no_slot") throw new Error(`no slot ${tag} on generation ${active.generation}`);
       this.stampRefusal("disabled", active.generation, outcome.tag);
       throw new RenderRefusedError("disabled", tag, active.generation);
     }
     this.guardLease(tag);
-    return { slot: outcome.slot, arm: outcome.arm, bucket: outcome.bucket };
+    return { slot: outcome.slot, arm: outcome.arm, bucket: outcome.bucket, ...(outcome.audienceIds ? {audienceIds: outcome.audienceIds, runMinute: outcome.runMinute} : {}) };
   }
 
-  prompt(tag: string, options: { subject?: string } = {}) {
+  /** Replace process tags locally. Registration remembers key names, never their values. */
+  setTags(tags: Readonly<Record<string,string>>): void {
+    const copied = copyAudienceTags(tags);
+    const keys = new Set([...this.audienceTagKeys,...Object.keys(copied)]);
+    if (keys.size > 64) throw new Error("audience_tag_names_limit");
+    keys.forEach(key=>this.audienceTagKeys.add(key));
+    this.audienceTags = copied;
+  }
+
+  private registerPromptLabel(tag: string, label: string): void {
+    if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(tag) || tag.length > 128 || !validAudienceLabel(label)) throw new Error("prompt_label_invalid");
+    if (!this.audiencePromptLabels.has(tag) && this.audiencePromptLabels.size >= 32) throw new Error("prompt_labels_limit");
+    this.audiencePromptLabels.set(tag,label);
+  }
+
+  prompt(tag: string, options: { subject?: string; tags?: Readonly<Record<string,string>>; displayName?: string } = {}) {
+    this.registerPromptLabel(tag, options.displayName ?? this.audiencePromptLabels.get(tag) ?? tag);
+    // Snapshot caller-owned selectors now; process tags from setTags() remain live per render.
+    const tagOverride = options.tags ? copyAudienceTags(options.tags) : undefined;
+
     // Every path captures the resolver and the resolved slot FIRST: a release that activates while a source is being
     // awaited must not mix generation N+1's text with generation N's run reference. The payload is decoded once here
     // and handed to the resolver's render.
     const prepare = (values: RenderValues) => {
       const resolver = this.resolver();
-      const resolved = this.resolveSlot(tag, options.subject);
+      const localTags = tagOverride ? copyAudienceTags({...this.audienceTags,...tagOverride}) : this.audienceTags;
+      const keys = new Set([...this.audienceTagKeys,...Object.keys(localTags)]);
+      if (keys.size > 64) throw new Error("audience_tag_names_limit");
+      keys.forEach(key=>this.audienceTagKeys.add(key));
+      const resolved = this.resolveSlot(tag, options.subject, localTags);
       const text = resolver.textOf(resolved.slot);
       const plan = planFill({ tag, variables: resolved.slot.variables, text, values, registry: this.variables });
       return { resolver, resolved, text, plan };
     };
     const finish = (prepared: ReturnType<typeof prepare>, filled: FilledRender): Rendered => {
       const rendered = this.renderObserved(() => prepared.resolver.render(prepared.resolved, filled.values, { fenced: filled.fenced, text: prepared.text }), { tag, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model });
-      this.renders.register(rendered.text, { tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
+      this.renders.register(rendered.text, { ...(rendered.audienceIds ? {audienceIds: rendered.audienceIds,runMinute: rendered.runMinute} : {}), tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
       this.sayStricter(tag, prepared.resolved.slot, filled);
       return rendered;
     };
@@ -1757,8 +1796,9 @@ export class AirPrompterAgent {
       return finish(prepared, filled);
     };
     /** The required names a render would still lack after these values and the registered sources — check it at start-up. */
-    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: this.resolveSlot(tag, options.subject).slot.variables, values, registry: this.variables });
-    return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, options.subject).slot.variables };
+    const localTags = () => tagOverride ? copyAudienceTags({...this.audienceTags,...tagOverride}) : this.audienceTags;
+    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: this.resolveSlot(tag, options.subject, localTags()).slot.variables, values, registry: this.variables });
+    return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, options.subject, localTags()).slot.variables };
   }
 
   /**
@@ -1810,7 +1850,7 @@ export class AirPrompterAgent {
   workflow(tag: string, options: { subject?: string } = {}) {
     const resolved = this.resolveSlot(tag, options.subject);
     const workflow = this.resolver().workflow(resolved);
-    for (const step of workflow.steps) this.renders.register(step.text, { tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
+    for (const step of workflow.steps) this.renders.register(step.text, { ...(step.audienceIds ? {audienceIds: step.audienceIds,runMinute: step.runMinute} : {}), tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
     /**
      * A step's text with its variables filled — the workflow's declarations, the same precedence and the same
      * fencing as a prompt (the resolver renders both), each step scanned on its own: a source is called for step 3
@@ -1825,7 +1865,7 @@ export class AirPrompterAgent {
       const plan = planFill({ tag: step.stepId, variables: resolved.slot.variables, text: step.text, values, registry: this.variables });
       const filled = await this.fillObserved(plan, { tag: step.stepId, subject: options.subject, versionId: step.versionId, arm: workflow.arm }, row);
       const text = this.renderObserved(() => resolver.renderText({ tag: step.stepId, text: step.text, variables: resolved.slot.variables, values: filled.values, fenced: filled.fenced }), row);
-      this.renders.register(text, { tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
+      this.renders.register(text, { ...(step.audienceIds ? {audienceIds: step.audienceIds,runMinute: step.runMinute} : {}), tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
       this.sayStricter(step.stepId, resolved.slot, filled);
       return text;
     };
@@ -1845,7 +1885,7 @@ export class AirPrompterAgent {
    * it is counted. Nothing of the response but its usage and finish reason
    * is read; nothing of an error but its code and status.
    */
-  async observe<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model">, call: () => Promise<T> | T, options: ObserveOptions = {}): Promise<T> {
+  async observe<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "runMinute">, call: () => Promise<T> | T, options: ObserveOptions = {}): Promise<T> {
     // T29: the slot's declared output checks run on the result here, on the host, and only their counts leave.
     const declared = this.declaredChecksFor(rendered.tag, rendered.arm);
     const evaluate: ObserveOptions["evaluate"] | undefined =
@@ -1864,13 +1904,13 @@ export class AirPrompterAgent {
    * T29: run the slot's declared output checks on an output you already have (an app that calls the model without
    * `observe()`, or one that wants the per-check results), and count them on the window. Never throws.
    */
-  checks(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model">, output: unknown, options: { outputTokens?: number | null; record?: boolean } = {}): CheckOutcome {
+  checks(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "runMinute">, output: unknown, options: { outputTokens?: number | null; record?: boolean } = {}): CheckOutcome {
     const declared = this.declaredChecksFor(rendered.tag, rendered.arm);
     const text = typeof output === "string" ? output : outputTextOf(output);
     if (declared.length === 0 || text === null) return { passed: 0, failed: 0, results: [] };
     const outcome = evaluateChecks(declared, { text, outputTokens: options.outputTokens ?? null });
     if (options.record !== false && (outcome.passed > 0 || outcome.failed > 0)) {
-      this.spool.checks({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model }, { passed: outcome.passed, failed: outcome.failed }, this.nowMs());
+      this.spool.checks({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.audienceIds !== undefined ? {audienceIds:rendered.audienceIds,runMinute:rendered.runMinute} : {}) }, { passed: outcome.passed, failed: outcome.failed }, this.nowMs());
     }
     return outcome;
   }
@@ -1898,12 +1938,13 @@ export class AirPrompterAgent {
   }
 
   /** Run `fn` with every wrapped call inside it (across awaits) attributed to `rendered`, whatever text it carries. */
-  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "inference"> | (Pick<Rendered, "versionId" | "model" | "inference"> & { stepId: string; arm?: string; runRef?: string }), fn: () => T): T {
+  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "inference" | "audienceIds" | "runMinute"> | (Pick<Rendered, "versionId" | "model" | "inference"> & { stepId: string; arm?: string; runRef?: string }), fn: () => T): T {
     // A workflow step attributes under its step id (`<tag>#<n>`); its arm is the one its run reference carries (the
     // workflow's), unless the caller names one.
     const tag = "stepId" in rendered ? rendered.stepId : rendered.tag;
     const arm = rendered.arm ?? ("runRef" in rendered && rendered.runRef ? parseRunRef(rendered.runRef, this.runRefKey)?.arm : undefined) ?? "none";
-    return withAttribution({ tag, versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
+    const cohort = "audienceIds" in rendered ? rendered : ("runRef" in rendered && rendered.runRef ? parseRunRef(rendered.runRef, this.runRefKey) : null);
+    return withAttribution({ ...(cohort?.audienceIds ? {audienceIds: cohort.audienceIds,runMinute: cohort.runMinute} : {}), tag, versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
   }
 
   /** A Vercel AI SDK middleware for `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })`. */
@@ -2007,7 +2048,7 @@ export class AirPrompterAgent {
     const payload = this.active?.manifest.payload;
     const override = payload ? experimentForTag(payload, facts.tag)?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag) : undefined;
     const slot = override ?? payload?.slots.find((entry) => entry.tag === facts.tag);
-    this.spool.outcomes({ tag: facts.tag, versionId: facts.versionId, arm: facts.arm, model: slot?.model ?? "unknown" }, normalized.outcomes, this.nowMs());
+    this.spool.outcomes({ tag: facts.tag, versionId: facts.versionId, arm: facts.arm, model: slot?.versionId === facts.versionId ? slot.model : "unknown", ...(facts.audienceIds ? {audienceIds: facts.audienceIds,outcomeRunMinute: facts.runMinute} : {}) }, normalized.outcomes, this.nowMs());
     return true;
   }
 

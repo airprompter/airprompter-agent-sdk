@@ -12,6 +12,10 @@ Example::
 
 from __future__ import annotations
 
+import json
+import re
+from ..protocol.assignment import valid_audience_ids
+
 import hashlib
 import hmac
 from dataclasses import dataclass
@@ -31,6 +35,8 @@ class RunRefFacts:
     arm: str
     generation: int
     bucket: Optional[int]
+    audience_ids: Optional[tuple[str, ...]] = None
+    run_minute: Optional[str] = None
 
 
 def _mac(body: str, key: bytes) -> str:
@@ -39,12 +45,14 @@ def _mac(body: str, key: bytes) -> str:
 
 def mint_run_ref(facts: RunRefFacts, key: bytes) -> str:
     body = _SEP.join([facts.agent_id, facts.target, facts.tag, facts.version_id, facts.arm, str(facts.generation), "-" if facts.bucket is None else str(facts.bucket)])
+    if facts.audience_ids is not None:
+        body += _SEP + json.dumps([facts.audience_ids, facts.run_minute], separators=(",", ":"))
     return f"{b64url_encode(body.encode('utf-8'))}.{_mac(body, key)}"
 
 
 def parse_run_ref(token: str, key: bytes) -> Optional[RunRefFacts]:
     dot = token.rfind(".")
-    if dot <= 0:
+    if dot <= 0 or len(token) > 4096:
         return None
     try:
         body = b64url_decode(token[:dot]).decode("utf-8")
@@ -55,10 +63,19 @@ def parse_run_ref(token: str, key: bytes) -> Optional[RunRefFacts]:
     if len(mac) != len(expected) or not hmac.compare_digest(mac.encode("ascii", "replace"), expected.encode("ascii")):
         return None
     parts = body.split(_SEP)
-    if len(parts) != 7:
+    if len(parts) not in (7, 8):
         return None
-    agent_id, target, tag, version_id, arm, generation, bucket = parts
+    cohort = {}
+    if len(parts) == 8:
+        try:
+            ids, minute = json.loads(parts[7])
+            if not valid_audience_ids(ids) or not isinstance(minute,str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z",minute): return None
+            from .._util import instant
+            instant(minute)
+            cohort = {"audience_ids": tuple(ids), "run_minute": minute}
+        except (ValueError, TypeError): return None
+    agent_id, target, tag, version_id, arm, generation, bucket = parts[:7]
     try:
-        return RunRefFacts(agent_id, target, tag, version_id, arm, int(generation), None if bucket == "-" else int(bucket))
+        return RunRefFacts(agent_id, target, tag, version_id, arm, int(generation), None if bucket == "-" else int(bucket), **cohort)
     except ValueError:
         return None

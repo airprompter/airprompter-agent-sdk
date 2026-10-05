@@ -1,3 +1,4 @@
+import { audiencePredicate } from "./reference.mjs";
 // Reference implementation of protocol/trust-chain.md: thumbprints, ES256
 // over canonical bytes (P1363, base64url), root-metadata acceptance (R1–R5)
 // and manifest verification (M1–M12). Written from the prose; checked
@@ -100,7 +101,7 @@ export function verifyRootMetadata({ candidate, trusted, now }) {
   return { ok: true };
 }
 
-const SUPPORTED_PROTOCOL_MAJORS = new Set([0]);
+const SUPPORTED_PROTOCOL_MAJORS = new Set([0,1]);
 /** M13 (S4): the directive kinds a runtime honours. */
 const DIRECTIVE_KINDS = new Set(["request_unlock", "disable"]);
 
@@ -174,6 +175,7 @@ export function verifyManifest({
 }) {
   const payload = manifest.payload;
   if (!(instant(root.signed.expires) > instant(now))) return { ok: false, reason: "root_expired" };
+  if (!validAudiencePayload(payload)) return {ok:false,reason:"protocol_unsupported"};
   const major = Number(payload.protocol.split(".")[0]);
   if (!SUPPORTED_PROTOCOL_MAJORS.has(major)) return { ok: false, reason: "protocol_unsupported" };
 
@@ -221,4 +223,34 @@ export function verifyManifest({
     }
   }
   return { ok: true, signingKeyId: usable[0].keyId, generation: payload.generation };
+}
+
+/** Independent audience envelope validation, before signature/payload fetch. */
+function validAudiencePayload(p) {
+  const object=v=>v!==null && typeof v === "object" && !Array.isArray(v);
+  const keys=(v,allowed)=>Object.keys(v).every(k=>allowed.includes(k));
+  const id=v=>typeof v === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(v);
+  if (p.experiments !== undefined && !Array.isArray(p.experiments)) return false;
+  const experiments=p.experiments??[];
+  if (experiments.some(e=>!object(e))) return false;
+  const targeted=p.requiredCapabilities!==undefined || p.observations!==undefined || experiments.some(e=>e.audience!==undefined) || (object(p.experiment) && p.experiment.audience!==undefined);
+  // Major 0 remains legacy-compatible. Major 1 always requires its frozen audience negotiation envelope.
+  if (!targeted) return Number(String(p.protocol).split(".")[0]) !== 1;
+  if (p.protocol!=="1.0.0" || JSON.stringify(p.requiredCapabilities)!== '["audience_v1"]' || p.experiment!==undefined || !Array.isArray(p.slots) || !Array.isArray(p.observations) || p.observations.length<1 || p.observations.length>8 || experiments.length>32) return false;
+  const seen=new Set();
+  for (const o of p.observations) {
+    if (!object(o) || !keys(o,["audienceId","selector","tag","observeFrom"]) || !id(o.audienceId) || seen.has(o.audienceId) || !audiencePredicate({selector:o.selector,tags:{}}).valid || !p.slots.some(slot=>object(slot)&&slot.tag===o.tag)) return false;
+    if (typeof o.observeFrom!=="string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(o.observeFrom) || !Number.isFinite(Date.parse(o.observeFrom))) return false;
+    const date=o.observeFrom.slice(0,10), midnight=Date.parse(date+"T00:00:00Z");
+    if (!Number.isFinite(midnight) || new Date(midnight).toISOString().slice(0,10)!==date || Number(o.observeFrom.slice(11,13))>=24) return false;
+    seen.add(o.audienceId);
+  }
+  return experiments.every(e=> {
+    const a=e.audience;
+    if (!object(a) || !keys(a,["audienceId","selector"]) || !id(a.audienceId) || !audiencePredicate({selector:a.selector,tags:{}}).valid || !Array.isArray(e.arms) || e.arms.length<2 || e.arms.length>8) return false;
+    const o=p.observations.find(o=>o.audienceId===a.audienceId && o.tag===e.tag);
+    if (!o || JSON.stringify(o.selector)!==JSON.stringify(a.selector)) return false;
+    if (e.arms.some(arm=>!object(arm) || !Number.isInteger(arm.weightBps) || arm.weightBps<0 || arm.weightBps>10000 || typeof arm.arm!=="string" || arm.arm.length>32 || !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(arm.arm) || !Array.isArray(arm.overrides))) return false;
+    return e.arms.reduce((n,arm)=>n+arm.weightBps,0)===10000 && new Set(e.arms.map(a=>a.arm)).size===e.arms.length && e.arms[0].releaseDigest===p.releaseDigest && e.arms[0].overrides.length===0 && e.arms.every(arm=>arm.overrides.length<=1 && arm.overrides.every(pin=>object(pin)&&pin.tag===e.tag));
+  });
 }

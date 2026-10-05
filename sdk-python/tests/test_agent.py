@@ -503,3 +503,77 @@ def test_s18_pinned_root_is_scoped_to_the_hosted_environment_not_the_target(stat
     with pytest.raises(AgentStartError) as wrong:
         AirPrompterAgent.start(**kw, state_dir=tempfile.mkdtemp(prefix="ap-s18-"), root={"pinned": public_jwk_of(plane.root_key), "hosted_environment": "staging"}, sync=sync)
     assert wrong.value.code == "no_verified_release"
+
+
+def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
+    from airprompter_agent_core.protocol import canonical_bytes, sign_bytes
+    plane = FakeControlPlane(SCOPE)
+    base = plane.slot(tag="support.reply", text="Published", version_id="ver_base")
+    candidate = plane.slot(tag="support.reply", text="Candidate {{candidate_value}}", version_id="ver_candidate", variables=[{"name":"candidate_value","required":True,"trust":"operator"}])
+    candidate["outputChecks"] = [{"kind":"enum","name":"category","path":"category","values":["ok"]}]
+    audience = {"audienceId":"aud_AAAAAAAAAAAAAAAAAAAAAA", "selector":{"mode":"tags","match":"all","conditions":[{"key":"device_id","value":"private-device-042"}]}}
+    manifest = plane.promote([base], protocol="1.0.0", experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
+    manifest["payload"]["requiredCapabilities"] = ["audience_v1"]
+    manifest["payload"]["observations"] = [{**audience,"tag":base["tag"],"observeFrom":"2026-09-12T14:00:00Z"}]
+    manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
+    plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
+    clock = [instant("2026-09-12T14:03:10Z")]
+    ap = start(plane,state_dir,now=lambda:clock[0],tags={"device_id":"private-device-042","region":"secret-west"})
+    try:
+        handle = ap.prompt(base["tag"],display_name="Support reply")
+        rendered = handle.render(candidate_value="ok")
+        assert rendered.text == "Candidate ok"
+        assert rendered.audience_ids == (audience["audienceId"],)
+        ap.observe(rendered, lambda: {"content":[{"type":"text","text":"{\"category\":\"ok\"}"}],"usage":{"input_tokens":1,"output_tokens":1}})
+        assert ap.checks(rendered, "{\"category\":\"ok\"}")["passed"] == 1
+        from airprompter_agent_runtime.release.resolver import WorkflowStep
+        from airprompter_agent_runtime.attribution import current_attribution
+        step = WorkflowStep("support.flow#1",1,rendered.version_id,"step",rendered.run_ref,audience_ids=rendered.audience_ids,run_minute=rendered.run_minute)
+        captured=[]; original_observe=ap.spool.observe
+        ap.spool.observe=lambda observation, at_ms: captured.append(observation)
+        try: ap.observe(step,lambda:{"usage":{"input_tokens":1,"output_tokens":1}})
+        finally: ap.spool.observe=original_observe
+        assert captured[0].audience_ids == rendered.audience_ids and captured[0].run_minute == rendered.run_minute
+        with ap.attribute(step):
+            assert current_attribution().audience_ids == rendered.audience_ids and current_attribution().run_minute == rendered.run_minute
+        heartbeat = ap.heartbeat_body()
+        assert heartbeat["registration"]["tagKeys"] == ["device_id","region"]
+        assert "private-device-042" not in json.dumps(heartbeat) and "secret-west" not in json.dumps(heartbeat)
+        ap.set_tags({"device_id":"private-device-043"})
+        assert handle.render().text == "Published" and handle.render().audience_ids == ()
+        assert ap.prompt(base["tag"],tags={"device_id":"private-device-042"}).render(candidate_value="ok").text == "Candidate ok"
+        # Slot discovery helpers must use the same local override as render().
+        handle = ap.prompt(base["tag"], tags={"device_id":"private-device-042"})
+        assert handle.variables() == candidate["variables"]
+        assert handle.needs() == ["candidate_value"]
+        clock[0] += 120_000
+        assert ap.feedback(rendered.run_ref,thumbs="up")
+    finally:
+        ap.stop()
+    path = os.path.join(state_dir,"airprompter","agt_1","prod","spool","telemetry")
+    rows=[]
+    for name in os.listdir(path):
+        if name.endswith(".ndjson"):
+            with open(os.path.join(path,name)) as f: rows.extend(json.loads(line) for line in f if line.strip())
+    feedback = next(r for r in rows if r.get("outcomes",{}).get("thumbs"))
+    assert feedback["v"] == 2 and feedback["count"] == 0 and feedback["versionId"] == "ver_candidate"
+    assert feedback["outcomeRunMinute"] == "2026-09-12T14:03:00Z" and feedback["audienceIds"] == [audience["audienceId"]]
+    measured = next(r for r in rows if r.get("checks"))
+    assert measured["v"] == 2 and measured["count"] == 1 and measured["audienceIds"] == [audience["audienceId"]]
+    assert measured["checks"] == {"passed":2,"failed":0}
+
+
+
+
+def test_ambiguous_cohort_text_requires_scope():
+    from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution
+    registry=RenderRegistry(2)
+    a=Attribution("support.reply","ver_a","control","gpt-5",audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",),run_minute="2026-09-12T14:03:00Z")
+    b=Attribution("support.reply","ver_a","control","gpt-5",audience_ids=(),run_minute=a.run_minute)
+    registry.register("identical",a)
+    assert registry.match(["identical"]) == a
+    registry.register("identical",b)
+    assert registry.match(["identical"]) is None
+    registry.register("identical",a)
+    assert registry.match(["identical"]) is None
+    with attribution_scope(a): assert current_attribution() == a

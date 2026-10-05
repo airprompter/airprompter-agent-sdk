@@ -12,6 +12,7 @@
  * ```
  */
 
+import { validAudienceIds, validAudienceMinute } from "../protocol/assignment.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export interface RunRefFacts {
@@ -22,12 +23,16 @@ export interface RunRefFacts {
   arm: string;
   generation: number;
   bucket: number | null;
+  audienceIds?: readonly string[];
+  runMinute?: string;
 }
 
 const SEP = "·";
 
 export function mintRunRef(facts: RunRefFacts, key: Uint8Array): string {
-  const body = [facts.agentId, facts.target, facts.tag, facts.versionId, facts.arm, String(facts.generation), facts.bucket === null ? "-" : String(facts.bucket)].join(SEP);
+  const legacyBody = [facts.agentId, facts.target, facts.tag, facts.versionId, facts.arm, String(facts.generation), facts.bucket === null ? "-" : String(facts.bucket)].join(SEP);
+  // A negotiated extension authenticates opaque memberships and the ORIGINAL minute. No raw tags.
+  const body = facts.audienceIds ? legacyBody + SEP + JSON.stringify([facts.audienceIds, facts.runMinute]) : legacyBody;
   // 22 base64url characters (132 bits) of the MAC: a forgery stays infeasible and the ref stays short enough to keep beside a trace.
   const mac = createHmac("sha256", key).update(body, "utf8").digest("base64url").slice(0, 22);
   return `${Buffer.from(body, "utf8").toString("base64url")}.${mac}`;
@@ -35,13 +40,25 @@ export function mintRunRef(facts: RunRefFacts, key: Uint8Array): string {
 
 export function parseRunRef(token: string, key: Uint8Array): RunRefFacts | null {
   const dot = token.lastIndexOf(".");
-  if (dot <= 0) return null;
+  if (dot <= 0 || token.length > 4096) return null;
   const body = Buffer.from(token.slice(0, dot), "base64url").toString("utf8");
   const mac = token.slice(dot + 1);
+  // timingSafeEqual throws when decoded byte lengths differ. Check the protocol's exact base64url MAC shape first.
+  if (!/^[A-Za-z0-9_-]{22}$/.test(mac)) return null;
   const expected = createHmac("sha256", key).update(body, "utf8").digest("base64url").slice(0, 22);
   if (mac.length !== expected.length || !timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
   const parts = body.split(SEP);
-  if (parts.length !== 7) return null;
+  if (parts.length !== 7 && parts.length !== 8) return null;
+  let cohort: {audienceIds: string[];runMinute: string} | undefined;
+  if (parts.length === 8) {
+    try {
+      const extension = JSON.parse(parts[7]!);
+      if (!Array.isArray(extension) || extension.length !== 2) return null;
+      const [ids,minute] = extension;
+      if (!validAudienceIds(ids) || !validAudienceMinute(minute)) return null;
+      cohort = {audienceIds: ids,runMinute: minute};
+    } catch {return null;}
+  }
   const [agentId, target, tag, versionId, arm, generation, bucket] = parts as [string, string, string, string, string, string, string];
-  return { agentId, target, tag, versionId, arm, generation: Number(generation), bucket: bucket === "-" ? null : Number(bucket) };
+  return { agentId, target, tag, versionId, arm, generation: Number(generation), bucket: bucket === "-" ? null : Number(bucket), ...cohort };
 }

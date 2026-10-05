@@ -97,6 +97,8 @@ export interface RampStep {
 }
 
 export interface Experiment {
+  /** 0.4.0: absence is legacy fleet allocation. */
+  audience?: import("./assignment.js").AudienceSnapshot;
   experimentId: string;
   /** S16: the one slot this experiment splits — required on every `experiments[]` entry, absent on the legacy single one. */
   tag?: string;
@@ -126,6 +128,8 @@ export const DIRECTIVE_KINDS: ReadonlySet<string> = new Set<Directive["kind"]>([
 export type ApplyPolicy = "auto" | "unlock_required";
 
 export interface ManifestPayload {
+  requiredCapabilities?: string[];
+  observations?: import("./assignment.js").AudienceObservation[];
   protocol: string;
   organizationId: string;
   agentId: string;

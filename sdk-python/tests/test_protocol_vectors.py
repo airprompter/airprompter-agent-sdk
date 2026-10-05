@@ -149,3 +149,21 @@ def test_variable_default_and_source_are_digest_bound_only_when_present():
     assert release_digest([{**slot, "variables": [{**slot["variables"][0], "default": None, "source": None}]}]) == plain
     assert release_digest([{**slot, "variables": [{**slot["variables"][0], "default": "warm"}]}]) != plain
     assert release_digest([{**slot, "variables": [{**slot["variables"][0], "source": "runtime"}]}]) != plain
+
+
+def test_audience_vectors():
+    from airprompter_agent_core import matches_audience, valid_audience_selector
+    from airprompter_agent_core.protocol.assignment import valid_audience_instant, valid_audience_key, valid_audience_label
+    for case in vector("audiences.json")["cases"]:
+        assert valid_audience_selector(case["selector"]) == case["valid"], case["name"]
+        assert matches_audience(case["selector"], case["tags"]) == case["matches"], case["name"]
+    for case in vector("audiences.json")["validators"]:
+        actual = {"key":valid_audience_key, "label":valid_audience_label, "instant":valid_audience_instant}[case["kind"]](case["value"])
+        assert actual == case["valid"], case["name"]
+
+
+def test_signed_audience_vectors():
+    for case in vector("audiences.json")["manifests"]:
+        verdict=verify_manifest(manifest=case["manifest"],root=case["root"],now=case["now"],scope=case["scope"],stored_generation=case["storedGeneration"])
+        assert verdict.ok == case["expected"]["ok"], case["name"]
+        if not verdict.ok: assert verdict.reason == case["expected"]["reason"], case["name"]

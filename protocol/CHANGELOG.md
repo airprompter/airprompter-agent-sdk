@@ -1,5 +1,14 @@
 # Protocol changelog
 
+## 1.0.0 · Audience targeting (unpublished)
+
+- Exact local All/Any tags and explicit fleet targeting; names-only negotiated registration.
+- Signed audience observations, original-cohort authenticated run references and version-2 feedback windows.
+- Major-version refusal protects older SDKs from ignoring targeted rollout rules; major-0 reading remains supported.
+- Shared audience vectors and independent conformance checks. SDK packages advance together to 0.4.0.
+- Metrics contract requires A/B p50 and p90 together on one shared latency graph; no service deployment or package publication is implied.
+
+
 ## Unreleased
 
 ### The daemon ships telemetry only; your datastore carries the release (SDKs 0.3.0; `VERSION` unchanged — nothing on the wire between a runtime and AirPrompter changes)

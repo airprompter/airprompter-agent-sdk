@@ -394,17 +394,19 @@ class SpoolWriter:
         self._open_minute: Optional[str] = None
         self._lock = threading.RLock()
 
-    def _window(self, *, tag: str, version_id: str, arm: str, model: str, status: str, error_class: Optional[str], usage_source: Optional[str], at_ms: float) -> SpoolRow:
-        minute = minute_of(at_ms)
+    def _window(self, *, tag: str, version_id: str, arm: str, model: str, status: str, error_class: Optional[str], usage_source: Optional[str], at_ms: float, audience_ids: Optional[tuple[str,...]] = None, outcome_run_minute: Optional[str] = None, run_minute: Optional[str] = None) -> SpoolRow:
+        minute = minute_of(at_ms) if outcome_run_minute else run_minute or minute_of(at_ms)
         if self._open_minute is not None and self._open_minute != minute:
             self.close_windows(at_ms)
         self._open_minute = minute
-        key = " ".join([tag, version_id, arm, model, status, error_class or ""])
+        key = json.dumps([tag,version_id,arm,model,status,error_class,audience_ids,outcome_run_minute],separators=(",", ":"))
         row = self._open.get(key)
         if row is None:
             row = {
                 "type": "window",
-                "v": 1,
+                "v": 2 if audience_ids is not None else 1,
+                **({"audienceIds": list(audience_ids)} if audience_ids is not None else {}),
+                **({"outcomeRunMinute": outcome_run_minute} if outcome_run_minute else {}),
                 "minute": minute,
                 "instanceId": self._identity.instance_id,
                 "instanceClass": self._identity.instance_class,
@@ -425,7 +427,7 @@ class SpoolWriter:
 
     def observe(self, observation: Observation, at_ms: float) -> None:
         with self._lock:
-            row = self._window(tag=observation.tag, version_id=observation.version_id, arm=observation.arm, model=observation.model, status=observation.status, error_class=observation.error_class, usage_source=observation.usage_source, at_ms=at_ms)
+            row = self._window(tag=observation.tag, version_id=observation.version_id, arm=observation.arm, model=observation.model, status=observation.status, error_class=observation.error_class, usage_source=observation.usage_source, at_ms=at_ms, audience_ids=observation.audience_ids,run_minute=observation.run_minute)
             row["count"] += 1
             bucket = latency_bucket_index(observation.latency_ms)
             row["latencyMs"]["buckets"][bucket] += 1
@@ -442,17 +444,27 @@ class SpoolWriter:
             if observation.outcomes:
                 _merge_outcomes(row, observation.outcomes)
 
-    def checks(self, *, tag: str, version_id: str, arm: str, model: str, passed: int, failed: int, at_ms: float) -> None:
+    def checks(self, *, tag: str, version_id: str, arm: str, model: str, passed: int, failed: int, at_ms: float, audience_ids: Optional[tuple[str,...]] = None, run_minute: Optional[str] = None) -> None:
         """T29: output-check counts against a run already counted (an app that evaluated after the fact): the run's window, no extra count."""
         with self._lock:
+            if audience_ids is not None:
+                # Audience v2 rejects checks-only zero-run rows. Update only the still-open measured cohort row.
+                minute = run_minute or minute_of(at_ms)
+                if self._open_minute != minute: return
+                key = json.dumps([tag,version_id,arm,model,"ok",None,audience_ids,None],separators=(",", ":"))
+                row = self._open.get(key)
+                if row is None or row["count"] == 0: return
+                current = row.get("checks") or {"passed": 0, "failed": 0}
+                row["checks"] = {"passed": current["passed"] + passed, "failed": current["failed"] + failed}
+                return
             row = self._window(tag=tag, version_id=version_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms)
             current = row.get("checks") or {"passed": 0, "failed": 0}
             row["checks"] = {"passed": current["passed"] + passed, "failed": current["failed"] + failed}
 
-    def outcomes(self, *, tag: str, version_id: str, arm: str, model: str, outcomes: Mapping[str, Union[int, float, bool]], at_ms: float) -> None:
+    def outcomes(self, *, tag: str, version_id: str, arm: str, model: str, outcomes: Mapping[str, Union[int, float, bool]], at_ms: float, audience_ids: Optional[tuple[str,...]] = None, outcome_run_minute: Optional[str] = None) -> None:
         """Quality signals against a run already counted: they ride on the run's window (status ok) and never add to ``count``."""
         with self._lock:
-            _merge_outcomes(self._window(tag=tag, version_id=version_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms), outcomes)
+            _merge_outcomes(self._window(tag=tag, version_id=version_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms, audience_ids=audience_ids,outcome_run_minute=outcome_run_minute), outcomes)
 
     def refusal(self, *, at: str, reason: str, generation: int, tag: Optional[str], at_ms: float) -> None:
         self._sink.append({"type": "refusal", "v": 1, "instanceId": self._identity.instance_id, "at": at, "reason": reason, "generation": generation, "tag": tag}, at_ms)
@@ -477,4 +489,3 @@ class SpoolWriter:
     @property
     def open_window_count(self) -> int:
         return len(self._open)
-

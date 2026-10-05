@@ -25,6 +25,13 @@ import { FakeControlPlane, newKey } from "./helpers/controlPlane.js";
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
 const tempDir = () => mkdtempSync(join(tmpdir(), "ap-agent-"));
 
+test("runRef rejects malformed non-ASCII MAC input without throwing", () => {
+  const body = Buffer.from("agt_1·prod·support.reply·ver_1·none·1·-", "utf8").toString("base64url");
+  const key = Buffer.alloc(32);
+  assert.equal(parseRunRef(`${body}.é`, key), null);
+  assert.equal(parseRunRef(`${body}.${"A".repeat(21)}é`, key), null);
+});
+
 function triageSlots(plane: FakeControlPlane) {
   return [
     plane.slot({
@@ -471,4 +478,95 @@ test("a FIRST release staged under unlock_required starts the host: nothing serv
   assert.equal(again.prompt("support.reply").render({ name: "Ann" }).text, "Reply politely to Ann.");
   await again.stop();
   rmSync(stateDir, { recursive: true, force: true });
+});
+
+import { signBytes } from "../packages/core/src/protocol/trust.js";
+import { canonicalBytes } from "../packages/core/src/protocol/canonicalJson.js";
+
+test("broadcast targeting: one device, mutable local tags, names-only heartbeat and late frozen feedback", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const base = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
+  const candidate = plane.slot({tag:"support.reply",text:"Candidate",versionId:"ver_candidate"});
+  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"tags" as const,match:"all" as const,conditions:[{key:"device_id",value:"private-device-042"}]}};
+  const manifest = plane.promote([base],{protocol:"1.0.0",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
+  manifest.payload.requiredCapabilities=["audience_v1"];
+  manifest.payload.observations=[{...audience,tag:base.tag,observeFrom:"2026-09-12T14:00:00Z"}];
+  manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
+  (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));
+  let clock=Date.parse("2026-09-12T14:03:10Z");
+  const ap=await start(plane,stateDir,{now:()=>clock,tags:{device_id:"private-device-042",region:"secret-west"}});
+  try {
+    const handle=ap.prompt(base.tag,{displayName:"Support reply"});
+    const rendered=handle.render();
+    assert.equal(rendered.text,"Candidate");
+    assert.deepEqual(rendered.audienceIds,[audience.audienceId]);
+    const heartbeat=JSON.stringify(ap.heartbeatBody());
+    assert.equal(heartbeat.includes("private-device-042"),false);
+    assert.equal(heartbeat.includes("secret-west"),false);
+    assert.deepEqual((ap.heartbeatBody().registration as any).tagKeys,["device_id","region"]);
+    ap.setTags({device_id:"private-device-043"});
+    assert.equal(handle.render().text,"Published");
+    assert.deepEqual(handle.render().audienceIds,[]);
+    assert.equal(ap.prompt(base.tag,{tags:{device_id:"private-device-042"}}).render().text,"Candidate");
+    const tagOverrides = { device_id: "private-device-042" };
+    const frozenHandle = ap.prompt(base.tag,{tags:tagOverrides});
+    tagOverrides.device_id = "private-device-043";
+    assert.equal(frozenHandle.render().text,"Candidate","prompt options are snapshotted when the handle is created");
+    clock+=120_000;
+    assert.equal(ap.feedback(rendered.runRef,{thumbs:"up"}),true);
+  } finally {await ap.stop();}
+  const spoolDir=join(stateDir,"airprompter","agt_1","prod","spool","telemetry");
+  const rows=readdirSync(spoolDir).filter(n=>n.endsWith(".ndjson")).flatMap(n=>readFileSync(join(spoolDir,n),"utf8").trim().split("\n").map(line=>JSON.parse(line)));
+  const feedback=rows.find(r=>r.type==="window" && r.outcomes?.thumbs);
+  assert.equal(feedback.v,2);
+  assert.deepEqual(feedback.outcomes.thumbs,{n:1,sum:1});
+  assert.equal(feedback.count,0);
+  assert.equal(feedback.versionId,"ver_candidate");
+  assert.equal(feedback.arm,"candidate");
+  assert.equal(feedback.outcomeRunMinute,"2026-09-12T14:03:00Z");
+  assert.deepEqual(feedback.audienceIds,[audience.audienceId]);
+  rmSync(stateDir,{recursive:true,force:true});
+});
+
+import { RenderRegistry, withAttribution, currentAttribution } from "../packages/runtime/src/wrap/attribution.js";
+import { validAudienceInstant } from "../packages/core/src/protocol/assignment.js";
+test("identical text never guesses different captured cohorts; explicit attribution remains available", () => {
+  const registry=new RenderRegistry(2);
+  const a={tag:"support.reply",versionId:"ver_a",arm:"control",model:"gpt-5",audienceIds:["aud_AAAAAAAAAAAAAAAAAAAAAA"],runMinute:"2026-09-12T14:03:00Z"};
+  const b={...a,audienceIds:[]};
+  registry.register("identical",a);assert.deepEqual(registry.match(["identical"]),a);
+  registry.register("identical",b);assert.equal(registry.match(["identical"]),undefined);
+  registry.register("identical",a);assert.equal(registry.match(["identical"]),undefined);
+  withAttribution(a,()=>assert.deepEqual(currentAttribution(),a));
+  assert.equal(validAudienceInstant("2026-02-30T12:00:00Z"),false);
+  assert.equal(validAudienceInstant("2026-09-12T24:00:00Z"),false);
+});
+
+test("manual output checks retain audience attribution only on an open measured run", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const plain = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
+  const checked = {...plain,outputChecks:[{name:"category",kind:"enum" as const,path:"category",values:["ok"]}]};
+  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"all" as const}};
+  const manifest=plane.promote([checked],{protocol:"1.0.0"});
+  manifest.payload.requiredCapabilities=["audience_v1"];
+  manifest.payload.observations=[{...audience,tag:checked.tag,observeFrom:"2026-09-12T14:00:00Z"}];
+  manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
+  (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));
+  const ap=await start(plane,stateDir,{now:()=>Date.parse("2026-09-12T14:03:10Z"),telemetry:{sink:"memory"}});
+  try {
+    const rendered=ap.prompt(checked.tag).render();
+    assert.deepEqual(ap.checks(rendered,'{"category":"ok"}').results.map(r=>r.verdict),["pass"]);
+    assert.deepEqual(ap.drainMemorySink(),[],"manual checks alone cannot create a v2 zero-run row");
+    await ap.observe(rendered,()=>({choices:[{message:{content:'{"category":"ok"}'}}],usage:{prompt_tokens:4,completion_tokens:1}}));
+    assert.deepEqual(ap.checks(rendered,'{"category":"ok"}').results.map(r=>r.verdict),["pass"]);
+    await ap.stop();
+    const rows=ap.drainMemorySink().filter((r:any)=>r.type==="window") as any[];
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].v,2);
+    assert.equal(rows[0].count,1);
+    assert.deepEqual(rows[0].audienceIds,[audience.audienceId]);
+    assert.deepEqual(rows[0].checks,{passed:2,failed:0});
+  } finally { await ap.stop(); rmSync(stateDir,{recursive:true,force:true}); }
 });

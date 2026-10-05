@@ -1,3 +1,4 @@
+import { audiencePredicate, audienceValidator } from "../reference.mjs";
 // The reference implementations behind the harness's adapter contract
 // (ADAPTER.md). This is the adapter every other one is measured against:
 // `node harness.mjs --adapter adapters/reference.mjs` must pass every
@@ -23,6 +24,8 @@ const refusal = (error) => {
 };
 
 export const ops = {
+  audiencePredicate,
+  audienceValidator,
   canonicalJson({ json }) {
     try {
       const text = canonicalJson(JSON.parse(json));

@@ -58,7 +58,7 @@ test("the validator accepts every row the vectors expect and refuses the shapes 
   assert.deepEqual(validateSpoolRow({ ...base, latencyMs: { buckets: [1], sum: 1 } }), { ok: false, reason: "latencyMs" });
   assert.deepEqual(validateSpoolRow({ ...base, errorClass: "exploded" }), { ok: false, reason: "errorClass" });
   assert.deepEqual(validateSpoolRow({ ...base, outcomes: { thumbs: { n: 1, sum: 1 }, "Free Text": { n: 1, sum: 0 } } }), { ok: false, reason: "outcomes:Free Text" });
-  assert.deepEqual(validateSpoolRow({ ...base, v: 2 }), { ok: false, reason: "v" });
+  assert.deepEqual(validateSpoolRow({ ...base, v: 2 }), { ok: false, reason: "audienceIds" });
   assert.deepEqual(validateSpoolRow({ type: "refusal", v: 1, at: "2026-09-12T14:03:00Z", instanceId: WRITER_A, reason: "bored", generation: 1, tag: null }), { ok: false, reason: "reason" });
   assert.deepEqual(validateSpoolRow("a line"), { ok: false, reason: "not_an_object" });
   const segment = Buffer.from(`${JSON.stringify(base)}\n${JSON.stringify(windowRow(WRITER_B, "2026-09-12T14:03:00Z"))}\nnot json\n{"type":"window","v":1,"partial`, "utf8");

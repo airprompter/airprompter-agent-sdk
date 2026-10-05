@@ -21,10 +21,9 @@ import { keyThumbprint, publicJwkOf, releaseDigest, signBytes } from "../protoco
 import { experimentsOf } from "../protocol/types.js";
 import type { Manifest, ManifestPayload, ManifestSlot, P256PrivateJwk, RootMetadata, RootMetadataSigned, Target } from "../protocol/types.js";
 import type { FetchLike } from "../control/client.js";
-import { PROTOCOL_VERSION } from "../protocol/version.js";
 
-/** The protocol version this checkout of the repository declares; manifests the fake signs carry it. */
-export const PROTOCOL = PROTOCOL_VERSION;
+/** Legacy fixtures stay on the pre-audience wire unless a test opts into a future protocol explicitly. */
+export const PROTOCOL = "0.3.4";
 
 export function newKey(): P256PrivateJwk {
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });

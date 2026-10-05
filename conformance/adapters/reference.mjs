@@ -6,6 +6,7 @@
 //   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs
 //   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs --only canonical-json,trust-manifest --json
 
+import { audiencePredicate, audienceValidator } from "../reference.mjs";
 import { AssignmentError, CanonicalJsonError, assignArm, canonicalJson, effectiveArms, orderedSteps, rampWeightsAt, sha256Prefixed, validateRamp } from "../reference.mjs";
 import { experimentConflict, experimentsOf, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../trust.mjs";
 import { SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "../spool.mjs";
@@ -23,6 +24,8 @@ const refusal = (error) => {
 };
 
 export const ops = {
+  audiencePredicate,
+  audienceValidator,
   canonicalJson({ json }) {
     try {
       const text = canonicalJson(JSON.parse(json));

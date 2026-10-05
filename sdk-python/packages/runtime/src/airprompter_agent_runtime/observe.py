@@ -151,12 +151,14 @@ class ObserveTarget:
     version_id: str
     arm: str
     model: str
+    audience_ids: Optional[tuple[str, ...]] = None
+    run_minute: Optional[str] = None
 
 
 def _observation(target: ObserveTarget, model: str, started: float, now: Callable[[], float], result: Any, error: Any, checks: Optional[Mapping[str, int]], evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> Observation:
     latency = max(0.0, now() - started)
     if error is not None:
-        return Observation(tag=target.tag, version_id=target.version_id, arm=target.arm, model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable", checks=checks)
+        return Observation(audience_ids=target.audience_ids, run_minute=target.run_minute, tag=target.tag, version_id=target.version_id, arm=target.arm, model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable", checks=checks)
     usage = normalize_usage(result)
     error_class = classify_result(result)
     if checks is None and evaluate is not None:
@@ -166,6 +168,8 @@ def _observation(target: ObserveTarget, model: str, started: float, now: Callabl
         except Exception:  # noqa: BLE001
             checks = None
     return Observation(
+        audience_ids=target.audience_ids,
+        run_minute=target.run_minute,
         tag=target.tag,
         version_id=target.version_id,
         arm=target.arm,

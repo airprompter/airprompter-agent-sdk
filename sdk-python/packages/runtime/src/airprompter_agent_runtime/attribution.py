@@ -41,6 +41,8 @@ class Attribution:
     model: str
     #: 0.3.1: the slot's inference settings, applied to the wrapped call (``inference.py``).
     inference: Optional[Mapping[str, Any]] = None
+    audience_ids: Optional[tuple[str,...]] = None
+    run_minute: Optional[str] = None
 
 
 _scope: contextvars.ContextVar[Optional[Attribution]] = contextvars.ContextVar("airprompter_attribution", default=None)
@@ -66,18 +68,20 @@ def hash_text(text: str) -> str:
 
 
 class RenderRegistry:
-    """The last ``capacity`` renders by text hash; the newest wins a collision. Thread-safe."""
+    """Bounded text lookup; ambiguous audience cohorts require an explicit scope. Thread-safe."""
 
     def __init__(self, capacity: int = 256):
         self._capacity = capacity
-        self._entries: "OrderedDict[str, Attribution]" = OrderedDict()
+        self._entries: "OrderedDict[str, Optional[Attribution]]" = OrderedDict()
         self._lock = threading.Lock()
 
     def register(self, text: str, attribution: Attribution) -> None:
         key = hash_text(text)
         with self._lock:
+            previous = self._entries.get(key)
+            ambiguous = key in self._entries and (previous is None or ((getattr(previous,"audience_ids",None) is not None or getattr(attribution,"audience_ids",None) is not None) and (previous.tag, previous.version_id, previous.arm, previous.audience_ids, previous.run_minute) != (attribution.tag, attribution.version_id, attribution.arm, attribution.audience_ids, attribution.run_minute)))
             self._entries.pop(key, None)
-            self._entries[key] = attribution
+            self._entries[key] = None if ambiguous else attribution
             while len(self._entries) > self._capacity:
                 self._entries.popitem(last=False)
 

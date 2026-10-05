@@ -2,54 +2,174 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://airprompter.com/protocol/telemetry-window/1",
   "title": "Telemetry window row (draft 1)",
-  "description": "One minute of one dimension set. Content-free by schema: additionalProperties is false everywhere, and no field can carry prompt text, model output or end-user identifiers.",
+  "description": "One minute of one dimension set. Content-free by schema: additionalProperties is false everywhere, and no field can carry prompt text, model output or end-user identifiers. v2 requires opaque audience memberships; delayed feedback is a zero-run row naming its authenticated original run minute. Cross-field sums, sort order and timestamps are semantic conformance checks.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["type", "v", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "usageSource", "count", "latencyMs", "tokens"],
+  "required": [
+    "type",
+    "v",
+    "minute",
+    "instanceId",
+    "instanceClass",
+    "tag",
+    "versionId",
+    "arm",
+    "model",
+    "status",
+    "usageSource",
+    "count",
+    "latencyMs",
+    "tokens"
+  ],
   "properties": {
-    "type": { "const": "window" },
-    "v": { "const": 1 },
-    "minute": { "type": "string", "format": "date-time", "description": "UTC minute boundary" },
-    "instanceId": { "type": "string", "pattern": "^[A-Za-z0-9._~-]{8,64}$" },
-    "instanceClass": { "enum": ["resident", "ephemeral"] },
-    "tag": { "type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$", "maxLength": 128 },
-    "versionId": { "type": "string", "maxLength": 128 },
-    "arm": { "type": "string", "pattern": "^[a-z0-9_-]{1,32}$", "description": "control, candidate, or a named arm; 'none' when no experiment" },
-    "model": { "type": "string", "maxLength": 128 },
-    "status": { "enum": ["ok", "error", "refused"] },
-    "errorClass": {
-      "anyOf": [
-        { "type": "null" },
-        { "enum": ["render_missing_variable", "context_length_exceeded", "output_schema_invalid", "truncated", "content_filter", "provider_error", "provider_timeout", "provider_rate_limited"] }
+    "type": {
+      "const": "window"
+    },
+    "v": {
+      "enum": [
+        1,
+        2
       ]
     },
-    "usageSource": { "enum": ["reported", "measured", "estimated", "unavailable"] },
-    "count": { "type": "integer", "minimum": 0, "description": "Runs observed in this minute. 0 when the window carries only feedback filed against runs from an earlier minute." },
+    "minute": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC minute boundary"
+    },
+    "instanceId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._~-]{8,64}$"
+    },
+    "instanceClass": {
+      "enum": [
+        "resident",
+        "ephemeral"
+      ]
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "versionId": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "arm": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]{1,32}$",
+          "description": "control, candidate, or a named arm; 'none' when no experiment"
+        },
+        {
+          "type": "string",
+          "maxLength": 32,
+          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+        }
+      ]
+    },
+    "model": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "error",
+        "refused"
+      ]
+    },
+    "errorClass": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "render_missing_variable",
+            "context_length_exceeded",
+            "output_schema_invalid",
+            "truncated",
+            "content_filter",
+            "provider_error",
+            "provider_timeout",
+            "provider_rate_limited"
+          ]
+        }
+      ]
+    },
+    "usageSource": {
+      "enum": [
+        "reported",
+        "measured",
+        "estimated",
+        "unavailable"
+      ]
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Runs observed in this minute. 0 when the window carries only feedback filed against runs from an earlier minute."
+    },
     "latencyMs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["buckets", "sum"],
+      "required": [
+        "buckets",
+        "sum"
+      ],
       "properties": {
-        "buckets": { "type": "array", "minItems": 16, "maxItems": 16, "items": { "type": "integer", "minimum": 0 }, "description": "Counts against the fixed edges in latency-buckets.json" },
-        "sum": { "type": "integer", "minimum": 0 }
+        "buckets": {
+          "type": "array",
+          "minItems": 16,
+          "maxItems": 16,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Counts against the fixed edges in latency-buckets.json"
+        },
+        "sum": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "tokens": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["input", "output"],
+      "required": [
+        "input",
+        "output"
+      ],
       "properties": {
-        "input": { "type": "integer", "minimum": 0 },
-        "cachedInput": { "type": "integer", "minimum": 0 },
-        "output": { "type": "integer", "minimum": 0 }
+        "input": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cachedInput": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "checks": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "passed": { "type": "integer", "minimum": 0 },
-        "failed": { "type": "integer", "minimum": 0 }
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "outcomes": {
@@ -60,11 +180,166 @@
         "^[a-z][a-zA-Z0-9]{0,31}$": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["n", "sum"],
-          "properties": { "n": { "type": "integer", "minimum": 0 }, "sum": { "type": "number" } }
+          "required": [
+            "n",
+            "sum"
+          ],
+          "properties": {
+            "n": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sum": {
+              "type": "number"
+            }
+          }
         }
       }
     },
-    "sdk": { "type": "string", "maxLength": 64, "description": "writer name/version, e.g. agent-sdk-ts/0.1.0 or a third-party writer" }
-  }
+    "sdk": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "writer name/version, e.g. agent-sdk-ts/0.1.0 or a third-party writer"
+    },
+    "audienceIds": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^aud_[A-Za-z0-9_-]{22}$"
+      }
+    },
+    "outcomeRunMinute": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:00(?:\\.000)?Z$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "v": {
+            "const": 2
+          }
+        },
+        "required": [
+          "v"
+        ],
+        "type": "object"
+      },
+      "then": {
+        "required": [
+          "audienceIds"
+        ],
+        "properties": {
+          "minute": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:00(?:\\.000)?Z$"
+          },
+          "arm": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "count": {
+                  "const": 0
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
+            },
+            "then": {
+              "required": [
+                "outcomes",
+                "outcomeRunMinute"
+              ],
+              "properties": {
+                "outcomes": {
+                  "type": "object",
+                  "minProperties": 1
+                },
+                "latencyMs": {
+                  "properties": {
+                    "sum": {
+                      "const": 0
+                    },
+                    "buckets": {
+                      "type": "array",
+                      "items": {
+                        "const": 0
+                      }
+                    }
+                  },
+                  "type": "object"
+                },
+                "tokens": {
+                  "properties": {
+                    "input": {
+                      "const": 0
+                    },
+                    "cachedInput": {
+                      "const": 0
+                    },
+                    "output": {
+                      "const": 0
+                    }
+                  },
+                  "type": "object"
+                },
+                "checks": {
+                  "properties": {
+                    "passed": {
+                      "const": 0
+                    },
+                    "failed": {
+                      "const": 0
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            }
+          }
+        ],
+        "type": "object"
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "audienceIds"
+              ],
+              "type": "object"
+            },
+            {
+              "required": [
+                "outcomeRunMinute"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "properties": {
+          "arm": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,32}$",
+            "description": "control, candidate, or a named arm; 'none' when no experiment"
+          }
+        },
+        "type": "object"
+      }
+    }
+  ]
 }

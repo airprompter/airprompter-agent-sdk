@@ -148,3 +148,105 @@ export function orderedSteps<S extends { stepId: string; ordinal: number }>(slot
   });
   return sorted;
 }
+
+/** 1.0.0: exact local predicates. device_id=device-042 and region=west share one model. */
+export type AudienceSelector = { mode: "all" } | { mode: "tags"; match: "all" | "any"; conditions: Array<{ key: string; value: string }> };
+export interface AudienceSnapshot { audienceId: string; selector: AudienceSelector }
+export interface AudienceObservation extends AudienceSnapshot { tag: string; observeFrom: string }
+export const AUDIENCE_CAPABILITY = "audience_v1";
+export const AUDIENCE_PROTOCOL_VERSION = "1.0.0";
+const audienceObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const audienceKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every(k => keys.includes(k));
+const audienceString = (v: unknown, max: number) => typeof v === "string" && v.length <= max && !/[\u0000-\u001f\u007f]/u.test(v);
+/** RFC 3339 calendar validity: Date.parse alone normalizes impossible dates. */
+export function validAudienceInstant(v: unknown): v is string {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(v) || v.startsWith("0000-") || !Number.isFinite(Date.parse(v))) return false;
+  const offset = /[+-](\d{2}):(\d{2})$/.exec(v);
+  if (offset && (Number(offset[1]) > 23 || Number(offset[2]) > 59)) return false;
+  const date = v.slice(0,10), midnight = Date.parse(date+"T00:00:00Z");
+  return Number.isFinite(midnight) && new Date(midnight).toISOString().slice(0,10) === date && Number(v.slice(11,13)) < 24 && Number(v.slice(14,16)) < 60 && Number(v.slice(17,19)) < 60;
+}
+export const validAudienceMinute = (v:unknown):v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z$/.test(v) && validAudienceInstant(v);
+export const validAudienceKey = (v: unknown): v is string => audienceString(v,64) && (v as string).trim().length > 0;
+export const validAudienceLabel = (v: unknown): v is string => audienceString(v,128) && (v as string).trim().length > 0;
+export const validAudienceIds = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((id,i) => typeof id === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(id) && (i === 0 || v[i-1] < id));
+export function validAudienceSelector(v: unknown): v is AudienceSelector {
+  if (!audienceObject(v)) return false;
+  if (v.mode === "all") return audienceKeys(v,["mode"]);
+  if (v.mode !== "tags" || !audienceKeys(v,["mode","match","conditions"]) || !["all","any"].includes(String(v.match)) || !Array.isArray(v.conditions) || v.conditions.length < 1 || v.conditions.length > 16) return false;
+  const pairs = new Set<string>(), keys = new Set<string>();
+  return v.conditions.every(c => {
+    if (!audienceObject(c) || !audienceKeys(c,["key","value"]) || !validAudienceKey(c.key) || !audienceString(c.value,256)) return false;
+    const pair = JSON.stringify([c.key,c.value]);
+    if (pairs.has(pair) || (v.match === "all" && keys.has(c.key))) return false;
+    pairs.add(pair); keys.add(c.key); return true;
+  });
+}
+/** Invalid/missing values never broaden targeting. Values never leave this local operation. */
+export function matchesAudience(selector: AudienceSelector, tags: Readonly<Record<string,string>>): boolean {
+  if (!validAudienceSelector(selector)) return false;
+  if (selector.mode === "all") return true;
+  const exact = (c: {key:string;value:string}) => Object.prototype.hasOwnProperty.call(tags,c.key) && typeof tags[c.key] === "string" && tags[c.key] === c.value;
+  return selector.match === "all" ? selector.conditions.every(exact) : selector.conditions.some(exact);
+}
+export function copyAudienceTags(tags: Readonly<Record<string,string>>): Readonly<Record<string,string>> {
+  if (!audienceObject(tags) || Object.keys(tags).length > 64 || Object.entries(tags).some(([k,v]) => !validAudienceKey(k) || !audienceString(v,256))) throw new Error("audience_tags_invalid");
+  return Object.freeze(Object.fromEntries(Object.entries(tags)));
+}
+/** Refuse an unknown/malformed targeted wire before applying payloads; preserve legacy manifests. */
+export function validAudienceManifest(p: import("./types.js").ManifestPayload): boolean {
+  if (p.experiments !== undefined && !Array.isArray(p.experiments)) return false;
+  const experiments = p.experiments ?? [];
+  if (experiments.some(e => !audienceObject(e))) return false;
+  const targeted = p.requiredCapabilities !== undefined || p.observations !== undefined || experiments.some(e => e.audience !== undefined) || (audienceObject(p.experiment) && p.experiment.audience !== undefined);
+  // Major 0 remains legacy-compatible. Major 1 always requires its frozen audience negotiation envelope.
+  if (!targeted) return Number(String(p.protocol).split(".")[0]) !== 1;
+  if (p.protocol !== AUDIENCE_PROTOCOL_VERSION || JSON.stringify(p.requiredCapabilities) !== JSON.stringify([AUDIENCE_CAPABILITY]) || p.experiment !== undefined || !Array.isArray(p.observations) || p.observations.length < 1 || p.observations.length > 8 || !Array.isArray(p.slots) || experiments.length > 32) return false;
+  const ids = new Set<string>();
+  for (const o of p.observations) {
+    if (!audienceObject(o) || !audienceKeys(o,["audienceId","selector","tag","observeFrom"]) || !validAudienceIds([o.audienceId]) || !validAudienceSelector(o.selector) || ids.has(o.audienceId) || !p.slots.some(s => audienceObject(s) && s.tag === o.tag) || !validAudienceInstant(o.observeFrom)) return false;
+    ids.add(o.audienceId);
+  }
+  const fingerprint = (s: AudienceSelector) => s.mode === "all" ? "all" : JSON.stringify([s.mode,s.match,s.conditions.map(c => [c.key,c.value])]);
+  return experiments.every(e => {
+    if (!Array.isArray(e.arms) || e.arms.some(arm => !audienceObject(arm) || !Number.isInteger(arm.weightBps) || arm.weightBps < 0 || arm.weightBps > 10000 || typeof arm.arm !== "string" || !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(arm.arm) || arm.arm.length > 32 || !Array.isArray(arm.overrides))) return false;
+    const a = e.audience;
+    if (!a || !audienceObject(a) || !audienceKeys(a,["audienceId","selector"]) || !validAudienceSelector(a.selector)) return false;
+    const o = p.observations!.find(o => o.audienceId === a.audienceId && o.tag === e.tag);
+    return !!o && fingerprint(o.selector) === fingerprint(a.selector) && e.arms.length >= 2 && e.arms.length <= 8 && e.arms.reduce((sum,arm)=>sum+arm.weightBps,0) === 10000 && new Set(e.arms.map(arm=>arm.arm)).size === e.arms.length && e.arms[0]!.releaseDigest === p.releaseDigest && e.arms[0]!.overrides.length === 0 && e.arms.every(arm => arm.overrides.every(pin => audienceObject(pin) && pin.tag === e.tag) && arm.overrides.length <= 1);
+  });
+}
+/** Multiple memberships annotate one run; fleet folding must not add them together. */
+export function capturedAudienceIds(observations: readonly AudienceObservation[], tag: string, tags: Readonly<Record<string,string>>, nowMs: number): string[] {
+  return observations.filter(o => o.tag === tag && Date.parse(o.observeFrom) <= nowMs && matchesAudience(o.selector,tags)).map(o=>o.audienceId).sort();
+}
+
+/** Text-only attribution is unsafe when identical text names distinct original cohorts. */
+export function ambiguousAudienceAttribution(previous: {tag:string;versionId:string;arm:string;audienceIds?:readonly string[];runMinute?:string} | null | undefined, next: {tag:string;versionId:string;arm:string;audienceIds?:readonly string[];runMinute?:string}): boolean {
+  if (previous === null) return true;
+  if (previous === undefined || (previous.audienceIds === undefined && next.audienceIds === undefined)) return false;
+  return JSON.stringify([previous.tag,previous.versionId,previous.arm,previous.audienceIds,previous.runMinute]) !== JSON.stringify([next.tag,next.versionId,next.arm,next.audienceIds,next.runMinute]);
+}
+
+/** What `disable` directives say, as data. */
+export function disabledFrom(directives: readonly import("./types.js").Directive[]): {agent:boolean;slots:string[];arms:string[];armsByExperiment:Record<string,string[]>} {
+  const slots: string[] = [];
+  const arms: string[] = [];
+  const armsByExperiment: Record<string, string[]> = {};
+  let agent = false;
+  for (const directive of directives) {
+    if (directive.kind !== "disable") continue;
+    if (directive.scope === "agent") agent = true;
+    else if (directive.scope === "arm" && directive.arm) {
+      if (directive.experimentId) (armsByExperiment[directive.experimentId] ??= []).push(directive.arm);
+      else arms.push(directive.arm);
+    } else if (directive.tag) slots.push(directive.tag);
+  }
+  return { agent, slots, arms, armsByExperiment };
+}
+
+
+/** The block as handed out: a copy, frozen — a caller that edits it edits nothing the runtime holds. */
+export function snapshotInference(inference: import("./types.js").SlotInference): import("./types.js").SlotInference {
+  return Object.freeze({ ...inference, ...(inference.stopSequences ? { stopSequences: Object.freeze([...inference.stopSequences]) } : {}) }) as import("./types.js").SlotInference;
+}

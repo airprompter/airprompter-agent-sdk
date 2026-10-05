@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 from typing import Any, Callable, Optional
 
@@ -18,9 +17,8 @@ from airprompter_agent_core._util import instant, iso_ms, now_ms
 from airprompter_agent_core.protocol.canonical_json import canonical_bytes, sha256_prefixed
 from airprompter_agent_core.protocol.trust import experiments_of, generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
 
-#: The protocol version this checkout of the repository declares; manifests the fake signs carry it.
-with open(os.path.join(os.path.dirname(__file__), "..", "..", "protocol", "VERSION"), encoding="utf-8") as _f:
-    PROTOCOL = _f.read().strip()
+#: Default fake manifests stay on the pre-audience wire; audience tests opt into 1.0.0 explicitly.
+PROTOCOL = "0.3.4"
 
 new_key = generate_p256_jwk
 

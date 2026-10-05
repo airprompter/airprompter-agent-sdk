@@ -5,7 +5,7 @@ JSON lines on stdin / stdout: ``{"id", "fn", "args"}`` in, ``{"id", "result"}``
 or ``{"id", "error": {"reason", "message"}}`` out. Any language writes one of
 these; this one is the proof that the vectors the harness owns are runnable
 against an SDK the harness never imports. See ``conformance/ADAPTER.md`` for
-the twenty-one operations. Usage::
+the twenty-three operations. Usage::
 
     node conformance/harness.mjs --adapter-command "python3 examples/conformance-adapter/python/adapter.py"
 
@@ -21,7 +21,7 @@ import sys
 from typing import Any, Callable
 
 from airprompter_agent_core.checks import checks_refusals, evaluate_checks, pattern_refusal, project_checks
-from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, ordered_steps, ramp_weights_at, validate_ramp
+from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, matches_audience, ordered_steps, ramp_weights_at, valid_audience_instant, valid_audience_key, valid_audience_label, valid_audience_selector, validate_ramp
 from airprompter_agent_core.protocol.canonical_json import canonical_json, sha256_prefixed
 from airprompter_agent_core.protocol.trust import experiment_conflict, experiment_for_tag, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
@@ -55,6 +55,18 @@ def _verdict(v: Any) -> dict[str, Any]:
     if getattr(v, "generation", None) is not None:
         out["generation"] = v.generation
     return out
+
+
+def op_audience_predicate(a: dict) -> dict:
+    return {"valid": valid_audience_selector(a["selector"]), "matches": matches_audience(a["selector"], a["tags"])}
+
+
+def op_audience_validator(a: dict) -> dict:
+    validators = {"key": valid_audience_key, "label": valid_audience_label, "instant": valid_audience_instant}
+    validator = validators.get(a["kind"])
+    if validator is None:
+        return {"valid": False}
+    return {"valid": validator(a["value"])}
 
 
 def op_canonical_json(a: dict) -> dict:
@@ -163,6 +175,8 @@ def op_spool_rows_to_otlp(a: dict) -> dict:
 
 
 OPS: dict[str, Callable[[dict], dict]] = {
+    "audiencePredicate": op_audience_predicate,
+    "audienceValidator": op_audience_validator,
     "canonicalJson": op_canonical_json,
     "orderedSteps": op_ordered_steps,
     "assignArm": op_assign_arm,

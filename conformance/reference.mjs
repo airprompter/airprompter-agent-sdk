@@ -235,3 +235,35 @@ export function effectiveArms({ arms, ramp, disabledArms, nowMs }) {
   effective[firstLive] = { ...effective[firstLive], weightBps: effective[firstLive].weightBps + reassigned };
   return effective;
 }
+
+/** Audience vectors use an independent reference predicate: exact strings, bounded closed selectors. */
+export function audiencePredicate({selector,tags}) {
+  const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
+  const only = (v,keys) => Object.keys(v).every(k=>keys.includes(k));
+  const str = (v,n) => typeof v === "string" && v.length <= n && !/[\u0000-\u001f\u007f]/u.test(v);
+  let valid = object(selector);
+  if (valid && selector.mode === "all") valid = only(selector,["mode"]);
+  else if (valid) {
+    valid = selector.mode === "tags" && only(selector,["mode","match","conditions"]) && ["all","any"].includes(selector.match) && Array.isArray(selector.conditions) && selector.conditions.length > 0 && selector.conditions.length <= 16;
+    const seenPairs = new Set(), seenKeys = new Set();
+    if (valid) for (const c of selector.conditions) {
+      if (!object(c) || !only(c,["key","value"]) || !str(c.key,64) || !c.key.trim() || !str(c.value,256)) {valid=false;break;}
+      const pair=JSON.stringify([c.key,c.value]);
+      if (seenPairs.has(pair) || (selector.match === "all" && seenKeys.has(c.key))) {valid=false;break;}
+      seenPairs.add(pair);seenKeys.add(c.key);
+    }
+  }
+  const exact = c => Object.hasOwn(tags,c.key) && typeof tags[c.key] === "string" && tags[c.key] === c.value;
+  return {valid, matches:valid && (selector.mode === "all" || (selector.match === "all" ? selector.conditions.every(exact) : selector.conditions.some(exact)))};
+}
+
+/** Independent future-audience scalar validators; expectations share vectors with both SDKs. */
+export function audienceValidator({kind,value}) {
+  const str = (v,n) => typeof v === "string" && v.length <= n && !/[\u0000-\u001f\u007f]/u.test(v);
+  if (kind === "key" || kind === "label") return {valid:str(value,kind === "key" ? 64 : 128) && value.trim().length > 0};
+  if (kind !== "instant" || typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || value.startsWith("0000-") || !Number.isFinite(Date.parse(value))) return {valid:false};
+  const offset=/[+-](\d{2}):(\d{2})$/.exec(value);
+  if (offset && (Number(offset[1]) > 23 || Number(offset[2]) > 59)) return {valid:false};
+  const date=value.slice(0,10), midnight=Date.parse(date+"T00:00:00Z");
+  return {valid:Number.isFinite(midnight) && new Date(midnight).toISOString().slice(0,10)===date && Number(value.slice(11,13))<24 && Number(value.slice(14,16))<60 && Number(value.slice(17,19))<60};
+}

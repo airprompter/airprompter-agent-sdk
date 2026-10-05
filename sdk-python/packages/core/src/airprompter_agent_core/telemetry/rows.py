@@ -38,6 +38,9 @@ class Observation:
     usage_source: Optional[str] = None  # "reported" | "measured" | "estimated" | "unavailable"
     checks: Optional[Mapping[str, int]] = None  # passed / failed
     outcomes: Optional[Mapping[str, Union[int, float, bool]]] = None
+    run_minute: Optional[str] = None
+    audience_ids: Optional[tuple[str, ...]] = None
+    outcome_run_minute: Optional[str] = None
 
     @classmethod
     def from_wire(cls, row: Mapping[str, Any]) -> "Observation":
@@ -54,6 +57,8 @@ class Observation:
             usage_source=row.get("usageSource"),
             checks=row.get("checks"),
             outcomes=row.get("outcomes"),
+            audience_ids=tuple(row["audienceIds"]) if "audienceIds" in row else None,
+            outcome_run_minute=row.get("outcomeRunMinute"),
         )
 
 

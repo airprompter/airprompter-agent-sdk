@@ -15,11 +15,11 @@
 
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
 
-import { isAssignmentError, validateRamp } from "./assignment.js";
+import { isAssignmentError, validateRamp, validAudienceManifest } from "./assignment.js";
 import { canonicalBytes, canonicalJson, sha256Prefixed } from "./canonicalJson.js";
 import { DIRECTIVE_KINDS, experimentConflict, experimentsOf, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type SlotInference, type Target } from "./types.js";
 
-export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([0]);
+export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([0, 1]);
 
 /** RFC 7638: sha256 over canonical {crv, kty, x, y}, lowercase hex. */
 export function keyThumbprint(jwk: P256PublicJwk): string {
@@ -145,6 +145,7 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
   const { manifest, root } = input;
   const payload = manifest.payload;
   if (!(instant(root.signed.expires) > instant(input.now))) return { ok: false, reason: "root_expired" };
+  if (!validAudienceManifest(payload)) return { ok: false, reason: "protocol_unsupported" };
   const major = Number(payload.protocol.split(".")[0]);
   if (!SUPPORTED_PROTOCOL_MAJORS.has(major)) return { ok: false, reason: "protocol_unsupported" };
 

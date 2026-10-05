@@ -32,10 +32,11 @@ export function vectorsDir(override) {
   throw new Error("no protocol/vectors directory: pass --vectors <dir>");
 }
 
-export const OPERATIONS = ["canonicalJson", "orderedSteps", "assignArm", "experimentForTag", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
+export const OPERATIONS = ["audiencePredicate", "audienceValidator", "canonicalJson", "orderedSteps", "assignArm", "experimentForTag", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
 
 /** Which operations each section needs; a section runs only when its adapter has them all. */
 export const SECTIONS = {
+  audiences: ["audiencePredicate","audienceValidator","verifyManifest"],
   "canonical-json": ["canonicalJson"],
   "workflow-steps": ["orderedSteps"],
   assignment: ["assignArm"],
@@ -175,6 +176,11 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
   };
 
   const sections = {
+    audiences: async () => {
+      for (const c of readJson("audiences.json").cases) await expectOk(c.name,"audiencePredicate",{selector:c.selector,tags:c.tags},r => sameJson(r,{valid:c.valid,matches:c.matches}) || `got ${short(r)}`);
+      for (const c of readJson("audiences.json").validators) await expectOk(c.name,"audienceValidator",c,r => r.valid===c.valid || `got ${short(r)}`);
+      for (const c of readJson("audiences.json").manifests) await expectOk(c.name,"verifyManifest",c,r => r.ok===c.expected.ok && (r.ok || r.reason===c.expected.reason) || `got ${short(r)}`);
+    },
     "canonical-json": async () => {
       const cj = readJson("canonical-json.json");
       for (const v of cj.vectors) await expectOk(v.name, "canonicalJson", { json: JSON.stringify(v.input) }, (r) => (r.text === v.canonical && r.sha256 === v.sha256 ? true : `text ${r.text === v.canonical ? "matches" : "differs"}, digest ${r.sha256 === v.sha256 ? "matches" : "differs"}`));

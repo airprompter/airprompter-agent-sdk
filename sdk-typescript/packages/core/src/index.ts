@@ -55,3 +55,15 @@ export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } fr
 export type { Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "./telemetry/rows.js";
 export type { UploadSink, UploadSegment, UploadOutcome } from "./telemetry/uploadSink.js";
 export { normalizeFeedback, BOOLEAN_SIGNALS, UNIT_SIGNALS, COUNT_SIGNALS, RUNTIME_SIGNALS, CATALOGUE, OUTCOME_NAME, type NormalizedFeedback, type FeedbackRejection } from "./telemetry/feedback.js";
+
+// 0.4.0 audience primitives live with assignment; never export observed values.
+export { AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION, validAudienceKey, validAudienceLabel, validAudienceIds, validAudienceSelector, matchesAudience, copyAudienceTags, validAudienceManifest, capturedAudienceIds } from "./protocol/assignment.js";
+export type { AudienceSelector, AudienceSnapshot, AudienceObservation } from "./protocol/assignment.js";
+
+export { ambiguousAudienceAttribution } from "./protocol/assignment.js";
+
+export { disabledFrom } from "./protocol/assignment.js";
+
+export { snapshotInference } from "./protocol/assignment.js";
+
+export { validAudienceInstant, validAudienceMinute } from "./protocol/assignment.js";

@@ -22,7 +22,7 @@
  * ```
  */
 
-import { assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";
+import { snapshotInference, disabledFrom, matchesAudience, capturedAudienceIds, minuteOf, assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";
 
 export interface Rendered {
   text: string;
@@ -34,6 +34,9 @@ export interface Rendered {
   generation: number;
   runRef: string;
   tag: string;
+  /** Original cohort, frozen at render. */
+  audienceIds?: readonly string[];
+  runMinute?: string;
 }
 
 export interface Disabled {
@@ -55,6 +58,7 @@ export function disabledArmsFor(disabled: DisabledDetail, experimentId: string):
 
 export interface ResolverInput {
   release: LoadedRelease;
+  tags?: () => Readonly<Record<string,string>>;
   /** The run reference key (an HMAC key derived from the store's id, so run refs stay stable across processes). */
   runRefKey: Uint8Array;
   agentId: string;
@@ -70,29 +74,9 @@ export interface ResolverInput {
   standingDirectives?: { generation: number; directives: readonly Directive[] } | null;
 }
 
-export type ResolveOutcome = ({ ok: true } & ReleaseSlot) | { ok: false; reason: "disabled" | "no_slot"; tag: string | null };
+export type ResolveOutcome = ({ ok: true; audienceIds?: readonly string[]; runMinute?: string } & ReleaseSlot) | { ok: false; reason: "disabled" | "no_slot"; tag: string | null };
 
-/** What `disable` directives say, as data. */
-export function disabledFrom(directives: readonly Directive[]): DisabledDetail {
-  const slots: string[] = [];
-  const arms: string[] = [];
-  const armsByExperiment: Record<string, string[]> = {};
-  let agent = false;
-  for (const directive of directives) {
-    if (directive.kind !== "disable") continue;
-    if (directive.scope === "agent") agent = true;
-    else if (directive.scope === "arm" && directive.arm) {
-      if (directive.experimentId) (armsByExperiment[directive.experimentId] ??= []).push(directive.arm);
-      else arms.push(directive.arm);
-    } else if (directive.tag) slots.push(directive.tag);
-  }
-  return { agent, slots, arms, armsByExperiment };
-}
-
-/** The block as handed out: a copy, frozen — a caller that edits it edits nothing the runtime holds. */
-function frozenInference(inference: SlotInference): SlotInference {
-  return Object.freeze({ ...inference, ...(inference.stopSequences ? { stopSequences: Object.freeze([...inference.stopSequences]) } : {}) }) as SlotInference;
-}
+export { disabledFrom } from "@airprompter/agent-core";
 
 export class ReleaseResolver {
   constructor(private readonly input: ResolverInput) {}
@@ -138,8 +122,11 @@ export class ReleaseResolver {
   }
 
   /** The slot a subject gets for a tag, or why not. Refusals are data: the facade records them. */
-  resolve(tag: string, subject?: string): ResolveOutcome {
+  resolve(tag: string, subject?: string, tagsOverride?: Readonly<Record<string,string>>): ResolveOutcome {
     const payload = this.payload;
+    const now = this.input.nowMs();
+    const tags = tagsOverride ?? this.input.tags?.() ?? {};
+    const cohort = payload.observations ? { audienceIds: Object.freeze(capturedAudienceIds(payload.observations,tag,tags,now)), runMinute: minuteOf(now) } : {};
     const disabled = this.disabled();
     if (disabled.agent) return { ok: false, reason: "disabled", tag: null };
     if (disabled.slots.includes(tag)) return { ok: false, reason: "disabled", tag };
@@ -147,14 +134,14 @@ export class ReleaseResolver {
     if (!slot) return { ok: false, reason: "no_slot", tag };
     // S16: the experiment for this slot — its own salt and arms, so two slots split independently.
     const experiment = this.experimentFor(tag);
-    if (!experiment) return { ok: true, slot, arm: "none", bucket: null };
+    if (!experiment || (experiment.audience && !matchesAudience(experiment.audience.selector,tags))) return { ok: true, slot, arm: "none", bucket: null, ...cohort };
     const subjectValue = experiment.subjectKey === "instance" || subject === undefined ? this.input.instanceId : subject;
     const arms = this.arms(experiment);
     if (!arms) return { ok: false, reason: "disabled", tag };
     const assigned = assignArm({ salt: experiment.salt, subject: subjectValue, arms });
     const override = assigned.arm.overrides.find((entry) => entry.tag === tag);
     if (override) slot = override;
-    return { ok: true, slot, arm: assigned.arm.arm, bucket: assigned.bucket };
+    return { ok: true, slot, arm: assigned.arm.arm, bucket: assigned.bucket, ...cohort };
   }
 
   /** A slot's verified payload as text. */
@@ -170,12 +157,14 @@ export class ReleaseResolver {
    * loosened (the set is applied on top of the slot's own list). `text` is the slot's payload when the caller has
    * already read it (one decode per render, not two).
    */
-  render(resolved: ReleaseSlot, values: Record<string, string | number | boolean | null | undefined> = {}, options: { fenced?: ReadonlySet<string>; text?: string } = {}): Rendered {
+  render(resolved: ReleaseSlot & {audienceIds?: readonly string[];runMinute?: string}, values: Record<string, string | number | boolean | null | undefined> = {}, options: { fenced?: ReadonlySet<string>; text?: string } = {}): Rendered {
     const { slot, arm, bucket } = resolved;
     const generation = this.input.release.generation;
+    if (resolved.audienceIds && !resolved.runMinute) throw new Error("audience_cohort_invalid");
+    const cohort = resolved.audienceIds ? {audienceIds: resolved.audienceIds,runMinute: resolved.runMinute!} : {};
     const text = this.renderText({ tag: slot.tag, text: options.text ?? this.textOf(slot), variables: slot.variables, values, fenced: options.fenced });
-    const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, versionId: slot.versionId, arm, generation, bucket };
-    return { text, model: slot.model, ...(slot.inference ? { inference: frozenInference(slot.inference) } : {}), versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag };
+    const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, versionId: slot.versionId, arm, generation, bucket, ...cohort };
+    return { text, model: slot.model, ...(slot.inference ? { inference: snapshotInference(slot.inference) } : {}), versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag, ...cohort };
   }
 
   /**
@@ -188,10 +177,12 @@ export class ReleaseResolver {
   }
 
   /** A workflow slot's steps in ordinal order, each with its prompt text and run reference. */
-  workflow(resolved: ReleaseSlot): { model: string; arm: string; steps: Array<{ stepId: string; ordinal: number; versionId: string; text: string; runRef: string; model: string; inference?: SlotInference }>; variables: ManifestSlot["variables"] } {
+  workflow(resolved: ReleaseSlot & {audienceIds?: readonly string[];runMinute?: string}): { model: string; arm: string; steps: Array<{ stepId: string; ordinal: number; versionId: string; text: string; runRef: string; model: string; inference?: SlotInference; audienceIds?: readonly string[]; runMinute?: string }>; variables: ManifestSlot["variables"] } {
     const { slot, arm, bucket } = resolved;
     if (slot.kind !== "workflow" || !slot.steps) throw new Error(`${slot.tag} is not a workflow slot`);
     const generation = this.input.release.generation;
+    if (resolved.audienceIds && !resolved.runMinute) throw new Error("audience_cohort_invalid");
+    const cohort = resolved.audienceIds ? {audienceIds: resolved.audienceIds,runMinute: resolved.runMinute!} : {};
     const steps = orderedSteps(slot.tag, slot.steps).map((step) => ({
       stepId: step.stepId,
       ordinal: step.ordinal,
@@ -200,10 +191,11 @@ export class ReleaseResolver {
         const bytes = this.input.release.payloads.get(step.contentHash);
         return bytes ? Buffer.from(bytes).toString("utf8") : "";
       })(),
-      runRef: mintRunRef({ agentId: this.input.agentId, target: this.input.target, tag: step.stepId, versionId: step.promptVersionId, arm, generation, bucket }, Buffer.from(this.input.runRefKey)),
+      runRef: mintRunRef({ agentId: this.input.agentId, target: this.input.target, tag: step.stepId, versionId: step.promptVersionId, arm, generation, bucket, ...cohort }, Buffer.from(this.input.runRefKey)),
+      ...cohort,
       // The workflow's pinned model (every step runs on it), and — 0.3.2 — the step's own settings for it.
       model: slot.model,
-      ...(step.inference ? { inference: frozenInference(step.inference) } : {}),
+      ...(step.inference ? { inference: snapshotInference(step.inference) } : {}),
     }));
     return { model: slot.model, arm, steps, variables: slot.variables };
   }

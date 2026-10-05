@@ -64,7 +64,7 @@ from .telemetry.feedback import NormalizedFeedback, normalize_feedback
 from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
-PROTOCOL_VERSION = "0.3.4"
+PROTOCOL_VERSION = "1.0.0"
 
 
 def protocol_at_least(version: str, floor: str) -> bool:
@@ -76,7 +76,7 @@ def protocol_at_least(version: str, floor: str) -> bool:
     if not isinstance(version, str) or not isinstance(floor, str) or not _re.fullmatch(r"\d+\.\d+\.\d+", version) or not _re.fullmatch(r"\d+\.\d+\.\d+", floor):
         return False
     return [int(part) for part in version.split(".")] >= [int(part) for part in floor.split(".")]
-SDK_VERSION = "0.3.0"
+SDK_VERSION = "0.4.0"
 
 __all__ = [
     "APBUNDLE_INFO",
@@ -196,3 +196,6 @@ __all__ = [
     "x25519_public_key_from_raw",
     "xml_delimiters",
 ]
+
+from .protocol.assignment import matches_audience, captured_audience_ids, valid_audience_selector, valid_audience_manifest, copy_audience_tags
+__all__ += ["matches_audience", "captured_audience_ids", "valid_audience_selector", "valid_audience_manifest", "copy_audience_tags"]

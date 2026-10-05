@@ -124,7 +124,7 @@
           "$ref": "manifest.schema.json#/$defs/sha256"
         },
         "pinnedReleaseDigest": {
-          "description": "0.3.5: the seal this instance is pinned to (pins.md) — the release it renders regardless of the pointer. Absent when following the pointer. Sent only once the release it serves was sealed at protocol ≥ 0.3.5 (`protocolAtLeast`), as `catalog.variables` is: a strict older service refuses the whole heartbeat over an unknown key.",
+          "description": "0.3.5: the seal this instance is pinned to (pins.md) \u2014 the release it renders regardless of the pointer. Absent when following the pointer. Sent only once the release it serves was sealed at protocol \u2265 0.3.5 (`protocolAtLeast`), as `catalog.variables` is: a strict older service refuses the whole heartbeat over an unknown key.",
           "$ref": "manifest.schema.json#/$defs/sha256"
         },
         "seal": {
@@ -236,7 +236,7 @@
               }
             },
             "variables": {
-              "description": "0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) — names only, never values. The seal warns when a pin declares a `source: runtime` variable no live instance can fill.",
+              "description": "0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) \u2014 names only, never values. The seal warns when a pin declares a `source: runtime` variable no live instance can fill.",
               "type": "array",
               "maxItems": 256,
               "uniqueItems": true,
@@ -354,11 +354,97 @@
               "$ref": "manifest.schema.json#/$defs/timestamp"
             }
           }
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "const": "audience_v1"
+          }
+        },
+        "registration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tagKeys",
+            "prompts"
+          ],
+          "properties": {
+            "tagKeys": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              }
+            },
+            "prompts": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tag",
+                  "displayName"
+                ],
+                "properties": {
+                  "tag": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+                    "maxLength": 128
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  }
+                }
+              }
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "capabilities"
+                ],
+                "type": "object"
+              },
+              {
+                "required": [
+                  "registration"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "capabilities",
+              "registration"
+            ],
+            "properties": {
+              "protocol": {
+                "const": "1.0.0"
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
     },
     "seal": {
-      "description": "0.3.5: what the customer's store holds against the seal it was written from (pins.md). observedDigest is the release digest recomputed from the customer's copy; intact ⇔ every text hashes to its pin and observedDigest equals the seal. Content-free: changedTags names slots and steps, never text. brokenAt is the instance's own first observation; the service stamps its own on first receipt.",
+      "description": "0.3.5: what the customer's store holds against the seal it was written from (pins.md). observedDigest is the release digest recomputed from the customer's copy; intact \u21d4 every text hashes to its pin and observedDigest equals the seal. Content-free: changedTags names slots and steps, never text. brokenAt is the instance's own first observation; the service stamps its own on first receipt.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -491,8 +577,46 @@
           "description": "The environment's current generation as the origin knows it (S3). A runtime whose edge pointer says less skips the pointer on its next pass and fetches the signed manifest directly: the pointer can be stale or pinned, and it never extends trust.",
           "type": "integer",
           "minimum": 0
+        },
+        "protocol": {
+          "const": "1.0.0"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "const": "audience_v1"
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "capabilities"
+                ],
+                "type": "object"
+              },
+              {
+                "required": [
+                  "protocol"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "protocol",
+              "capabilities"
+            ],
+            "type": "object"
+          }
+        }
+      ]
     }
   }
 }

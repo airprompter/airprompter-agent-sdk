@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, ordered_steps
+from airprompter_agent_core.protocol.assignment import matches_audience, captured_audience_ids
+from airprompter_agent_core.telemetry.rows import minute_of
 from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of
 from airprompter_agent_core.release.reader import LoadedRelease, ReleaseSlot
 from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref
@@ -50,6 +52,8 @@ class Rendered:
     #: 0.3.5 (pins.md): which release this text was rendered from — ``store`` (the slot store, the default), ``vendored_bundle``,
     #: ``daemon``, or ``customer_store`` (the customer's own mirror of a pinned release). The agent stamps it.
     resolution_source: str = "store"
+    audience_ids: Optional[tuple[str, ...]] = None
+    run_minute: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,8 @@ class WorkflowStep:
     inference: Optional[Mapping[str, Any]] = None
     #: The workflow's pinned model (every step runs on it); the settings above are for it.
     model: Optional[str] = None
+    audience_ids: Optional[tuple[str, ...]] = None
+    run_minute: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +130,12 @@ def disabled_from(directives: Sequence[Mapping[str, Any]]) -> Disabled:
     return Disabled(agent=agent, slots=slots, arms=arms, arms_by_experiment=arms_by_experiment)
 
 
+@dataclass(frozen=True)
+class AudienceReleaseSlot(ReleaseSlot):
+    audience_ids: Optional[tuple[str, ...]] = None
+    run_minute: Optional[str] = None
+
+
 class ReleaseResolver:
     def __init__(
         self,
@@ -136,7 +148,9 @@ class ReleaseResolver:
         now_ms: Callable[[], float],
         delimiters: Any = None,
         standing_directives: Optional[tuple[int, Sequence[Mapping[str, Any]]]] = None,
+        tags: Optional[Callable[[], Mapping[str,str]]] = None,
     ):
+        self._tags = tags or (lambda: {})
         self.release = release
         self._run_ref_key = run_ref_key
         self._agent_id = agent_id
@@ -185,9 +199,12 @@ class ReleaseResolver:
         disabled = self.disabled().arms_for(str(experiment.get("experimentId")))
         return effective_arms(arms=experiment["arms"], ramp=experiment.get("ramp"), disabled_arms=disabled, now_ms=self._now_ms())
 
-    def resolve(self, tag: str, subject: Optional[str] = None) -> ResolveOutcome:
+    def resolve(self, tag: str, subject: Optional[str] = None, tags: Optional[Mapping[str,str]] = None) -> ResolveOutcome:
         """The slot a subject gets for a tag, or why not. Refusals are data: the facade records them."""
         payload = self._payload
+        local_tags = self._tags() if tags is None else tags
+        now = self._now_ms()
+        cohort = {"audience_ids": captured_audience_ids(payload["observations"], tag, local_tags, now), "run_minute": minute_of(now)} if "observations" in payload else {}
         disabled = self.disabled()
         if disabled.agent:
             return ResolveOutcome(False, reason="disabled", tag=None)
@@ -198,15 +215,15 @@ class ReleaseResolver:
             return ResolveOutcome(False, reason="no_slot", tag=tag)
         # S16: the experiment for this slot — its own salt and arms, so two slots split independently.
         experiment = self.experiment_for(tag)
-        if not experiment:
-            return ResolveOutcome(True, ReleaseSlot(slot, "none", None))
+        if not experiment or (experiment.get("audience") and not matches_audience(experiment["audience"]["selector"],local_tags)):
+            return ResolveOutcome(True, AudienceReleaseSlot(slot, "none", None, **cohort))
         subject_value = self._instance_id if experiment.get("subjectKey") == "instance" or subject is None else subject
         arms = self.arms(experiment)
         if arms is None:
             return ResolveOutcome(False, reason="disabled", tag=tag)
         assigned = assign_arm(salt=experiment["salt"], subject=subject_value, arms=arms)
         override = next((entry for entry in assigned.arm.get("overrides", []) if entry["tag"] == tag), None)
-        return ResolveOutcome(True, ReleaseSlot(override or slot, str(assigned.arm["arm"]), assigned.bucket))
+        return ResolveOutcome(True, AudienceReleaseSlot(override or slot, str(assigned.arm["arm"]), assigned.bucket, **cohort))
 
     def text_of(self, slot: Mapping[str, Any]) -> str:
         """A slot's verified payload as text."""
@@ -222,8 +239,8 @@ class ReleaseResolver:
         slot = resolved.slot
         generation = self.release.generation
         rendered_text = self.render_text(tag=slot["tag"], text=self.text_of(slot) if text is None else text, variables=slot.get("variables", []), values=values or {}, fenced=fenced)
-        facts = RunRefFacts(self._agent_id, self._target, slot["tag"], slot["versionId"], resolved.arm, generation, resolved.bucket)
-        return Rendered(text=rendered_text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")))
+        facts = RunRefFacts(self._agent_id, self._target, slot["tag"], slot["versionId"], resolved.arm, generation, resolved.bucket, getattr(resolved,"audience_ids",None), getattr(resolved,"run_minute",None))
+        return Rendered(text=rendered_text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")), audience_ids=facts.audience_ids, run_minute=facts.run_minute)
 
     def render_text(self, *, tag: str, text: str, variables: Sequence[Mapping[str, Any]], values: Mapping[str, Any], fenced: Optional[Iterable[str]] = None) -> str:
         """The one render path: a prompt's text or a workflow step's, with the slot's declarations and this
@@ -245,7 +262,8 @@ class ReleaseResolver:
                 ordinal=step["ordinal"],
                 version_id=step["promptVersionId"],
                 text=(self.release.payloads.get(step["contentHash"]) or b"").decode("utf-8"),
-                run_ref=mint_run_ref(RunRefFacts(self._agent_id, self._target, step["stepId"], step["promptVersionId"], resolved.arm, generation, resolved.bucket), self._run_ref_key),
+                run_ref=mint_run_ref(RunRefFacts(self._agent_id, self._target, step["stepId"], step["promptVersionId"], resolved.arm, generation, resolved.bucket, getattr(resolved,"audience_ids",None), getattr(resolved,"run_minute",None)), self._run_ref_key),
+                audience_ids=getattr(resolved,"audience_ids",None), run_minute=getattr(resolved,"run_minute",None),
                 inference=copy_inference(step.get("inference")),
                 model=slot["model"],
             )

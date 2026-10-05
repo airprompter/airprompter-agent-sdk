@@ -472,3 +472,62 @@ test("a FIRST release staged under unlock_required starts the host: nothing serv
   await again.stop();
   rmSync(stateDir, { recursive: true, force: true });
 });
+
+import { signBytes } from "../packages/core/src/protocol/trust.js";
+import { canonicalBytes } from "../packages/core/src/protocol/canonicalJson.js";
+
+test("broadcast targeting: one device, mutable local tags, names-only heartbeat and late frozen feedback", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const base = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
+  const candidate = plane.slot({tag:"support.reply",text:"Candidate",versionId:"ver_candidate"});
+  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"tags" as const,match:"all" as const,conditions:[{key:"device_id",value:"private-device-042"}]}};
+  const manifest = plane.promote([base],{protocol:"1.0.0",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
+  manifest.payload.requiredCapabilities=["audience_v1"];
+  manifest.payload.observations=[{...audience,tag:base.tag,observeFrom:"2026-09-12T14:00:00Z"}];
+  manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
+  (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));
+  let clock=Date.parse("2026-09-12T14:03:10Z");
+  const ap=await start(plane,stateDir,{now:()=>clock,tags:{device_id:"private-device-042",region:"secret-west"}});
+  try {
+    const handle=ap.prompt(base.tag,{displayName:"Support reply"});
+    const rendered=handle.render();
+    assert.equal(rendered.text,"Candidate");
+    assert.deepEqual(rendered.audienceIds,[audience.audienceId]);
+    const heartbeat=JSON.stringify(ap.heartbeatBody());
+    assert.equal(heartbeat.includes("private-device-042"),false);
+    assert.equal(heartbeat.includes("secret-west"),false);
+    assert.deepEqual((ap.heartbeatBody().registration as any).tagKeys,["device_id","region"]);
+    ap.setTags({device_id:"private-device-043"});
+    assert.equal(handle.render().text,"Published");
+    assert.deepEqual(handle.render().audienceIds,[]);
+    assert.equal(ap.prompt(base.tag,{tags:{device_id:"private-device-042"}}).render().text,"Candidate");
+    clock+=120_000;
+    assert.equal(ap.feedback(rendered.runRef,{thumbs:"up"}),true);
+  } finally {await ap.stop();}
+  const spoolDir=join(stateDir,"airprompter","agt_1","prod","spool","telemetry");
+  const rows=readdirSync(spoolDir).filter(n=>n.endsWith(".ndjson")).flatMap(n=>readFileSync(join(spoolDir,n),"utf8").trim().split("\n").map(line=>JSON.parse(line)));
+  const feedback=rows.find(r=>r.type==="window" && r.outcomes?.thumbs);
+  assert.equal(feedback.v,2);
+  assert.deepEqual(feedback.outcomes.thumbs,{n:1,sum:1});
+  assert.equal(feedback.count,0);
+  assert.equal(feedback.versionId,"ver_candidate");
+  assert.equal(feedback.arm,"candidate");
+  assert.equal(feedback.outcomeRunMinute,"2026-09-12T14:03:00Z");
+  assert.deepEqual(feedback.audienceIds,[audience.audienceId]);
+  rmSync(stateDir,{recursive:true,force:true});
+});
+
+import { RenderRegistry, withAttribution, currentAttribution } from "../packages/runtime/src/wrap/attribution.js";
+import { validAudienceInstant } from "../packages/core/src/protocol/assignment.js";
+test("identical text never guesses different captured cohorts; explicit attribution remains available", () => {
+  const registry=new RenderRegistry(2);
+  const a={tag:"support.reply",versionId:"ver_a",arm:"control",model:"gpt-5",audienceIds:["aud_AAAAAAAAAAAAAAAAAAAAAA"],runMinute:"2026-09-12T14:03:00Z"};
+  const b={...a,audienceIds:[]};
+  registry.register("identical",a);assert.deepEqual(registry.match(["identical"]),a);
+  registry.register("identical",b);assert.equal(registry.match(["identical"]),undefined);
+  registry.register("identical",a);assert.equal(registry.match(["identical"]),undefined);
+  withAttribution(a,()=>assert.deepEqual(currentAttribution(),a));
+  assert.equal(validAudienceInstant("2026-02-30T12:00:00Z"),false);
+  assert.equal(validAudienceInstant("2026-09-12T24:00:00Z"),false);
+});

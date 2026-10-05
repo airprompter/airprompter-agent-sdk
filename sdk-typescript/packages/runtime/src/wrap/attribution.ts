@@ -23,10 +23,12 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { SlotInference } from "@airprompter/agent-core";
+import { ambiguousAudienceAttribution, type SlotInference } from "@airprompter/agent-core";
 import { createHash } from "node:crypto";
 
 export interface Attribution {
+  audienceIds?: readonly string[];
+  runMinute?: string;
   tag: string;
   versionId: string;
   arm: string;
@@ -49,16 +51,19 @@ export function withAttribution<T>(attribution: Attribution, fn: () => T): T {
 
 export const hashText = (text: string): string => createHash("sha256").update(text, "utf8").digest("base64url");
 
-/** The last `capacity` renders by text hash; the newest wins a collision. */
+/** Ambiguous cohorts require explicit attribution. */
 export class RenderRegistry {
-  private readonly entries = new Map<string, Attribution>();
+  private readonly entries = new Map<string, Attribution | null>();
 
   constructor(private readonly capacity = 256) {}
 
   register(text: string, attribution: Attribution): void {
     const key = hashText(text);
+    const previous = this.entries.get(key);
+    // Ambiguous text requires an explicit scope.
+    const ambiguous = ambiguousAudienceAttribution(previous,attribution);
     this.entries.delete(key);
-    this.entries.set(key, attribution);
+    this.entries.set(key, ambiguous ? null : attribution);
     if (this.entries.size > this.capacity) this.entries.delete(this.entries.keys().next().value as string);
   }
 

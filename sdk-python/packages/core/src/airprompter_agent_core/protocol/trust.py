@@ -15,6 +15,8 @@ Example::
 
 from __future__ import annotations
 
+from .assignment import valid_audience_manifest
+
 import hashlib
 import re
 from dataclasses import dataclass
@@ -29,7 +31,7 @@ from .._util import b64url_decode, b64url_encode, instant
 from .assignment import AssignmentError, validate_ramp
 from .canonical_json import canonical_bytes, canonical_json, sha256_prefixed
 
-SUPPORTED_PROTOCOL_MAJORS = frozenset({0})
+SUPPORTED_PROTOCOL_MAJORS = frozenset({0, 1})
 #: S4: the directive kinds a runtime honours. `disable` acts without a local act; `request_unlock` and `request_resync`
 #: (0.3.5, reserved — pins.md) only ask.
 DIRECTIVE_KINDS = frozenset({"request_unlock", "request_resync", "disable"})
@@ -250,6 +252,8 @@ def verify_manifest(
     root_signed = root["signed"]
     if not instant(root_signed["expires"]) > instant(now):
         return Verdict(False, "root_expired")
+    if not valid_audience_manifest(payload):
+        return Verdict(False, "protocol_unsupported")
     try:
         major = int(str(payload["protocol"]).split(".")[0])
     except (ValueError, KeyError):

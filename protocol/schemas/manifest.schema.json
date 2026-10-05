@@ -5,21 +5,30 @@
   "description": "What a target is allowed to run, as a signed envelope. The platform signature covers the whole payload; countersignatures cover the releaseDigest of every release the manifest can activate (D58). No prompt text is ever in a manifest: slots name payloads by content hash and the runtime fetches them separately.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["payload", "signatures"],
+  "required": [
+    "payload",
+    "signatures"
+  ],
   "properties": {
-    "payload": { "$ref": "#/$defs/payload" },
+    "payload": {
+      "$ref": "#/$defs/payload"
+    },
     "signatures": {
       "description": "Platform signatures over the canonical JSON of `payload` (see canonical-json.md). At least `threshold` of them (from the key-set's `targets` role) must verify.",
       "type": "array",
       "minItems": 1,
       "maxItems": 8,
-      "items": { "$ref": "#/$defs/signature" }
+      "items": {
+        "$ref": "#/$defs/signature"
+      }
     },
     "countersignatures": {
-      "description": "Customer countersignatures (§6.3). Each signs one releaseDigest with a customer-held key. Present but empty when the target does not require countersign; on a countersign target every arm's releaseDigest must have one or the manifest is refused.",
+      "description": "Customer countersignatures (\u00a76.3). Each signs one releaseDigest with a customer-held key. Present but empty when the target does not require countersign; on a countersign target every arm's releaseDigest must have one or the manifest is refused.",
       "type": "array",
       "maxItems": 8,
-      "items": { "$ref": "#/$defs/countersignature" }
+      "items": {
+        "$ref": "#/$defs/countersignature"
+      }
     }
   },
   "$defs": {
@@ -34,10 +43,26 @@
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
     },
-    "target": { "type": "string", "enum": ["dev", "staging", "prod"] },
-    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-    "timestamp": { "type": "string", "format": "date-time" },
-    "base64url": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "target": {
+      "type": "string",
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "base64url": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
     "keyId": {
       "description": "The RFC 7638 JWK thumbprint of the public key, lowercase hex (trust-chain.md). Root metadata listing a key under any other id is refused.",
       "type": "string",
@@ -61,38 +86,319 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
     },
     "outputCheck": {
-      "description": "One declared output check (checks.md, 5-E): deterministic, evaluated on the host on the output the SDK already sees, counted on the window as `checks.passed` / `checks.failed`. The projection a pin carries: enabled checks only, the kind's own members, sorted by `name` — part of the release digest input when the list is non-empty.",
+      "description": "One declared output check (checks.md, 5-E): deterministic, evaluated on the host on the output the SDK already sees, counted on the window as `checks.passed` / `checks.failed`. The projection a pin carries: enabled checks only, the kind's own members, sorted by `name` \u2014 part of the release digest input when the list is non-empty.",
       "type": "object",
-      "required": ["kind", "name"],
+      "required": [
+        "kind",
+        "name"
+      ],
       "properties": {
-        "kind": { "type": "string", "enum": ["json_schema", "enum", "length", "must_match", "must_not_match"] },
-        "name": { "type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$", "maxLength": 64 },
-        "schema": { "description": "json_schema: the JSON Schema subset checks.md names; at most 16 KiB.", "type": "object" },
-        "path": { "description": "enum: a dotted path into the parsed JSON output (`category`, `items.0.kind`); empty for the whole trimmed output.", "type": "string", "maxLength": 128 },
-        "values": { "description": "enum: the allowed strings.", "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
-        "minTokens": { "description": "length: output tokens, from the provider's usage when reported, else ceil(UTF-8 bytes / 4).", "type": "integer", "minimum": 0, "maximum": 1000000 },
-        "maxTokens": { "type": "integer", "minimum": 0, "maximum": 1000000 },
-        "pattern": { "description": "must_match / must_not_match: RE2-class syntax only (no backreferences, lookaround, atomic or possessive groups, or nested quantifiers), at most 256 characters; an output over 64 KiB fails the check closed.", "type": "string", "minLength": 1, "maxLength": 256 },
-        "flags": { "type": "string", "enum": ["i"] }
+        "kind": {
+          "type": "string",
+          "enum": [
+            "json_schema",
+            "enum",
+            "length",
+            "must_match",
+            "must_not_match"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+          "maxLength": 64
+        },
+        "schema": {
+          "description": "json_schema: the JSON Schema subset checks.md names; at most 16 KiB.",
+          "type": "object"
+        },
+        "path": {
+          "description": "enum: a dotted path into the parsed JSON output (`category`, `items.0.kind`); empty for the whole trimmed output.",
+          "type": "string",
+          "maxLength": 128
+        },
+        "values": {
+          "description": "enum: the allowed strings.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "minTokens": {
+          "description": "length: output tokens, from the provider's usage when reported, else ceil(UTF-8 bytes / 4).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "pattern": {
+          "description": "must_match / must_not_match: RE2-class syntax only (no backreferences, lookaround, atomic or possessive groups, or nested quantifiers), at most 256 characters; an output over 64 KiB fails the check closed.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "flags": {
+          "type": "string",
+          "enum": [
+            "i"
+          ]
+        }
       },
       "allOf": [
-        { "if": { "properties": { "kind": { "const": "json_schema" } } }, "then": { "required": ["schema"], "not": { "anyOf": [{ "required": ["path"] }, { "required": ["values"] }, { "required": ["minTokens"] }, { "required": ["maxTokens"] }, { "required": ["pattern"] }, { "required": ["flags"] }] } } },
-        { "if": { "properties": { "kind": { "const": "enum" } } }, "then": { "required": ["path", "values"], "not": { "anyOf": [{ "required": ["schema"] }, { "required": ["minTokens"] }, { "required": ["maxTokens"] }, { "required": ["pattern"] }, { "required": ["flags"] }] } } },
-        { "if": { "properties": { "kind": { "const": "length" } } }, "then": { "anyOf": [{ "required": ["minTokens"] }, { "required": ["maxTokens"] }], "not": { "anyOf": [{ "required": ["schema"] }, { "required": ["path"] }, { "required": ["values"] }, { "required": ["pattern"] }, { "required": ["flags"] }] } } },
-        { "if": { "properties": { "kind": { "enum": ["must_match", "must_not_match"] } } }, "then": { "required": ["pattern"], "not": { "anyOf": [{ "required": ["schema"] }, { "required": ["path"] }, { "required": ["values"] }, { "required": ["minTokens"] }, { "required": ["maxTokens"] }] } } }
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "json_schema"
+              }
+            },
+            "type": "object"
+          },
+          "then": {
+            "required": [
+              "schema"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "values"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "minTokens"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "maxTokens"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "flags"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "object"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "enum"
+              }
+            },
+            "type": "object"
+          },
+          "then": {
+            "required": [
+              "path",
+              "values"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "schema"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "minTokens"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "maxTokens"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "flags"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "object"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "length"
+              }
+            },
+            "type": "object"
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "minTokens"
+                ],
+                "type": "object"
+              },
+              {
+                "required": [
+                  "maxTokens"
+                ],
+                "type": "object"
+              }
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "schema"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "values"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "pattern"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "flags"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "must_match",
+                  "must_not_match"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "then": {
+            "required": [
+              "pattern"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "schema"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "values"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "minTokens"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "maxTokens"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "object"
+          }
+        }
       ]
     },
     "variable": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "required", "trust"],
+      "required": [
+        "name",
+        "required",
+        "trust"
+      ],
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-zA-Z0-9_.-]{1,64}$" },
-        "required": { "type": "boolean" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]{1,64}$"
+        },
+        "required": {
+          "type": "boolean"
+        },
         "trust": {
           "description": "D55: `end_user` values are rendered only inside the delimiters the author declared and never in an instruction-role position without an explicit acknowledgement at seal time.",
           "type": "string",
-          "enum": ["operator", "end_user"]
+          "enum": [
+            "operator",
+            "end_user"
+          ]
         },
         "default": {
           "description": "0.3.4: the text rendered when neither the call site nor a source supplies a value. Only on an optional `operator` variable (the schema and the control plane refuse a default on a required or an end-user one; a runtime ignores it there), and never empty. In the digest input when present; a runtime treats a JSON null as unset, the schema refuses one.",
@@ -101,25 +407,68 @@
           "maxLength": 4096
         },
         "source": {
-          "description": "0.3.4: who the author expects to fill the variable — `caller` (the code that renders passes it) or `runtime` (the application registers a source for it; `docs/variables.md`). A hint reviewers and the seal read; a runtime does not act on it. In the digest input when present.",
+          "description": "0.3.4: who the author expects to fill the variable \u2014 `caller` (the code that renders passes it) or `runtime` (the application registers a source for it; `docs/variables.md`). A hint reviewers and the seal read; a runtime does not act on it. In the digest input when present.",
           "type": "string",
-          "enum": ["caller", "runtime"]
+          "enum": [
+            "caller",
+            "runtime"
+          ]
         }
       },
-      "if": { "required": ["default"] },
-      "then": { "properties": { "required": { "const": false }, "trust": { "const": "operator" } } }
+      "if": {
+        "required": [
+          "default"
+        ],
+        "type": "object"
+      },
+      "then": {
+        "properties": {
+          "required": {
+            "const": false
+          },
+          "trust": {
+            "const": "operator"
+          }
+        },
+        "type": "object"
+      }
     },
     "goldenSetRef": {
-      "description": "T34: what a slot carries for its golden set (golden-sets.md) — the cases themselves are the payload under `contentHash`, encrypted at rest like a prompt.",
+      "description": "T34: what a slot carries for its golden set (golden-sets.md) \u2014 the cases themselves are the payload under `contentHash`, encrypted at rest like a prompt.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["setId", "cases", "contentHash", "byteLength", "minPassBps"],
+      "required": [
+        "setId",
+        "cases",
+        "contentHash",
+        "byteLength",
+        "minPassBps"
+      ],
       "properties": {
-        "setId": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "cases": { "type": "integer", "minimum": 1, "maximum": 50 },
-        "contentHash": { "$ref": "#/$defs/sha256" },
-        "byteLength": { "type": "integer", "minimum": 1, "maximum": 65536 },
-        "minPassBps": { "description": "Pass-rate floor in basis points; a run below it leaves the release staged.", "type": "integer", "minimum": 0, "maximum": 10000 }
+        "setId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "cases": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "contentHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "minPassBps": {
+          "description": "Pass-rate floor in basis points; a run below it leaves the release staged.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
       }
     },
     "inference": {
@@ -128,56 +477,155 @@
       "additionalProperties": false,
       "minProperties": 1,
       "properties": {
-        "temperatureMilli": { "type": "integer", "minimum": 0, "maximum": 2000 },
-        "topPBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
-        "maxOutputTokens": { "type": "integer", "minimum": 1, "maximum": 1000000 },
-        "stopSequences": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
-        "reasoningEffort": { "type": "string", "enum": ["low", "medium", "high"] }
+        "temperatureMilli": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000
+        },
+        "topPBps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "stopSequences": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     "step": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["stepId", "ordinal", "promptArtifactId", "promptVersionId", "contentHash", "byteLength"],
+      "required": [
+        "stepId",
+        "ordinal",
+        "promptArtifactId",
+        "promptVersionId",
+        "contentHash",
+        "byteLength"
+      ],
       "properties": {
-        "stepId": { "$ref": "#/$defs/stepTag" },
-        "ordinal": { "type": "integer", "minimum": 1, "maximum": 64 },
-        "promptArtifactId": { "$ref": "#/$defs/identifier" },
-        "promptVersionId": { "$ref": "#/$defs/identifier" },
-        "contentHash": { "$ref": "#/$defs/sha256" },
-        "byteLength": { "type": "integer", "minimum": 0, "maximum": 65536 },
-        "inference": { "$ref": "#/$defs/inference" }
+        "stepId": {
+          "$ref": "#/$defs/stepTag"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "promptArtifactId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "promptVersionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "contentHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "inference": {
+          "$ref": "#/$defs/inference"
+        }
       }
     },
     "slot": {
       "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true, `outputChecks`, `goldenSet` and `inference` only when present.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model", "variables"],
+      "required": [
+        "tag",
+        "kind",
+        "artifactId",
+        "versionId",
+        "versionOrdinal",
+        "contentHash",
+        "byteLength",
+        "model",
+        "variables"
+      ],
       "properties": {
-        "tag": { "$ref": "#/$defs/slotTag" },
-        "kind": { "type": "string", "enum": ["prompt", "workflow"] },
-        "artifactId": { "$ref": "#/$defs/identifier" },
-        "versionId": { "$ref": "#/$defs/identifier" },
-        "versionOrdinal": { "type": ["integer", "null"], "minimum": 1 },
-        "contentHash": { "$ref": "#/$defs/sha256" },
-        "byteLength": { "type": "integer", "minimum": 0, "maximum": 65536 },
-        "model": { "$ref": "#/$defs/modelId" },
+        "tag": {
+          "$ref": "#/$defs/slotTag"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "workflow"
+          ]
+        },
+        "artifactId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "versionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "versionOrdinal": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "contentHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "model": {
+          "$ref": "#/$defs/modelId"
+        },
         "modelRequired": {
           "description": "The model is required: a runtime whose declared catalog lacks it refuses to activate the release (heartbeat refusal `model_unavailable`) instead of rendering the slot on another model. Omitted when false; in the digest input only when true.",
           "type": "boolean"
         },
-        "variables": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/variable" } },
-        "inference": { "$ref": "#/$defs/inference" },
+        "variables": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/variable"
+          }
+        },
+        "inference": {
+          "$ref": "#/$defs/inference"
+        },
         "outputChecks": {
           "description": "The slot's enabled output checks, sorted by name (checks.md). Omitted when none; in the digest input only when present.",
           "type": "array",
           "minItems": 1,
           "maxItems": 8,
-          "items": { "$ref": "#/$defs/outputCheck" }
+          "items": {
+            "$ref": "#/$defs/outputCheck"
+          }
         },
         "goldenSet": {
-          "description": "T34: the slot's golden set — 1–50 known inputs with the properties a right answer has, run by the runtime against the pinned model before a staged release activates (golden-sets.md). Omitted when none; in the digest input only when present.",
+          "description": "T34: the slot's golden set \u2014 1\u201350 known inputs with the properties a right answer has, run by the runtime against the pinned model before a staged release activates (golden-sets.md). Omitted when none; in the digest input only when present.",
           "$ref": "#/$defs/goldenSetRef"
         },
         "steps": {
@@ -185,20 +633,55 @@
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
-          "items": { "$ref": "#/$defs/step" }
+          "items": {
+            "$ref": "#/$defs/step"
+          }
         }
       },
-      "if": { "properties": { "kind": { "const": "workflow" } } },
-      "then": { "required": ["steps"] },
-      "else": { "not": { "required": ["steps"] } }
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "workflow"
+          }
+        },
+        "type": "object"
+      },
+      "then": {
+        "required": [
+          "steps"
+        ],
+        "type": "object"
+      },
+      "else": {
+        "not": {
+          "required": [
+            "steps"
+          ],
+          "type": "object"
+        }
+      }
     },
     "arm": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["arm", "weightBps", "releaseDigest", "overrides"],
+      "required": [
+        "arm",
+        "weightBps",
+        "releaseDigest",
+        "overrides"
+      ],
       "properties": {
-        "arm": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$" },
-        "weightBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "arm": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+        },
+        "weightBps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
         "releaseDigest": {
           "description": "The release this arm activates. The control arm carries the manifest's own releaseDigest; on a countersign target every arm's digest must be countersigned.",
           "$ref": "#/$defs/sha256"
@@ -207,17 +690,26 @@
           "description": "Slots that differ from the top-level `slots` under this arm, by tag. The control arm has none.",
           "type": "array",
           "maxItems": 200,
-          "items": { "$ref": "#/$defs/slot" }
+          "items": {
+            "$ref": "#/$defs/slot"
+          }
         }
       }
     },
     "experiment": {
-      "description": "A/B split or staged rollout (§8). Arms are evaluated in order against the sticky assignment bucket (assignment-hash.md); weights sum to exactly 10000.",
+      "description": "A/B split or staged rollout (\u00a78). Arms are evaluated in order against the sticky assignment bucket (assignment-hash.md); weights sum to exactly 10000.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["experimentId", "salt", "subjectKey", "arms"],
+      "required": [
+        "experimentId",
+        "salt",
+        "subjectKey",
+        "arms"
+      ],
       "properties": {
-        "experimentId": { "$ref": "#/$defs/identifier" },
+        "experimentId": {
+          "$ref": "#/$defs/identifier"
+        },
         "tag": {
           "description": "S16: the one slot this experiment splits. Required on every entry of experiments[]; absent on the legacy top-level experiment, which applies to every slot its arms override. An arm's overrides under a tagged experiment name that tag only.",
           "$ref": "#/$defs/slotTag"
@@ -227,74 +719,195 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{22,86}$"
         },
-        "subjectKey": { "type": "string", "enum": ["request", "instance"] },
-        "arms": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/$defs/arm" } },
+        "subjectKey": {
+          "type": "string",
+          "enum": [
+            "request",
+            "instance"
+          ]
+        },
+        "arms": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/arm"
+          }
+        },
         "ramp": {
-          "description": "S9: the signed ramp plan. The runtime walks it on its own clock: the weights in force are the last step whose notBefore has passed (inclusive), else arms[].weightBps. Steps are strictly increasing, at least an hour apart, one weight per arm each summing to 10000 (assignment-hash.md › The ramp plan; refused as ramp_invalid). A customer on unlock_required unlocks the plan once; the cloud can only retreat (disable scope arm).",
+          "description": "S9: the signed ramp plan. The runtime walks it on its own clock: the weights in force are the last step whose notBefore has passed (inclusive), else arms[].weightBps. Steps are strictly increasing, at least an hour apart, one weight per arm each summing to 10000 (assignment-hash.md \u203a The ramp plan; refused as ramp_invalid). A customer on unlock_required unlocks the plan once; the cloud can only retreat (disable scope arm).",
           "type": "array",
           "minItems": 1,
           "maxItems": 8,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["notBefore", "weightBps"],
+            "required": [
+              "notBefore",
+              "weightBps"
+            ],
             "properties": {
-              "notBefore": { "$ref": "#/$defs/timestamp" },
-              "weightBps": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "type": "integer", "minimum": 0, "maximum": 10000 } }
+              "notBefore": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "weightBps": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 8,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10000
+                }
+              }
             }
           }
+        },
+        "audience": {
+          "$ref": "#/$defs/audienceSnapshot"
         }
       }
     },
     "directive": {
-      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act — a reduction, it only ever stops serving (scope agent / slot) or hands an arm's share back to the control (scope arm, S9: the retreat from a ramp); `request_unlock` and `request_resync` are requests the runtime surfaces and never grants on its own. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
+      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act \u2014 a reduction, it only ever stops serving (scope agent / slot) or hands an arm's share back to the control (scope arm, S9: the retreat from a ramp); `request_unlock` and `request_resync` are requests the runtime surfaces and never grants on its own. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
       "oneOf": [
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "releaseDigest", "requestedBy", "requestedAt", "expiresAt"],
+          "required": [
+            "kind",
+            "releaseDigest",
+            "requestedBy",
+            "requestedAt",
+            "expiresAt"
+          ],
           "properties": {
-            "kind": { "const": "request_unlock" },
-            "releaseDigest": { "$ref": "#/$defs/sha256" },
-            "requestedBy": { "$ref": "#/$defs/identifier" },
-            "requestedAt": { "$ref": "#/$defs/timestamp" },
-            "expiresAt": { "$ref": "#/$defs/timestamp" },
-            "note": { "type": "string", "maxLength": 500 }
-          }
-        },
-        {
-          "description": "0.3.5, reserved: asks the runtime to re-materialise the customer's store from the sealed release through the application's re-sync hook (pins.md); the runtime never overwrites the copy by itself. A runtime that does not know the kind refuses the whole manifest (`directive_unknown`), so the control plane emits it only to an environment whose live instances all report protocol ≥ 0.3.5 — not yet emitted.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "releaseDigest", "requestedBy", "requestedAt", "expiresAt"],
-          "properties": {
-            "kind": { "const": "request_resync" },
-            "releaseDigest": { "$ref": "#/$defs/sha256" },
-            "requestedBy": { "$ref": "#/$defs/identifier" },
-            "requestedAt": { "$ref": "#/$defs/timestamp" },
-            "expiresAt": { "$ref": "#/$defs/timestamp" },
-            "note": { "type": "string", "maxLength": 500 }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "scope", "issuedAt"],
-          "properties": {
-            "kind": { "const": "disable" },
-            "scope": { "type": "string", "enum": ["agent", "slot", "arm"] },
-            "tag": { "$ref": "#/$defs/slotTag" },
-            "arm": { "type": "string", "pattern": "^[a-z0-9_-]{1,32}$" },
-            "experimentId": {
-              "description": "S16: with scope arm, the experiment the arm belongs to — required once a manifest carries experiments[] (arm names are per experiment); a legacy manifest may omit it.",
+            "kind": {
+              "const": "request_unlock"
+            },
+            "releaseDigest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "requestedBy": {
               "$ref": "#/$defs/identifier"
             },
-            "issuedAt": { "$ref": "#/$defs/timestamp" },
-            "reason": { "type": "string", "maxLength": 500 }
+            "requestedAt": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        },
+        {
+          "description": "0.3.5, reserved: asks the runtime to re-materialise the customer's store from the sealed release through the application's re-sync hook (pins.md); the runtime never overwrites the copy by itself. A runtime that does not know the kind refuses the whole manifest (`directive_unknown`), so the control plane emits it only to an environment whose live instances all report protocol \u2265 0.3.5 \u2014 not yet emitted.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "releaseDigest",
+            "requestedBy",
+            "requestedAt",
+            "expiresAt"
+          ],
+          "properties": {
+            "kind": {
+              "const": "request_resync"
+            },
+            "releaseDigest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "requestedBy": {
+              "$ref": "#/$defs/identifier"
+            },
+            "requestedAt": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "scope",
+            "issuedAt"
+          ],
+          "properties": {
+            "kind": {
+              "const": "disable"
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "slot",
+                "arm"
+              ]
+            },
+            "tag": {
+              "$ref": "#/$defs/slotTag"
+            },
+            "arm": {
+              "type": "string",
+              "pattern": "^[a-z0-9_-]{1,32}$"
+            },
+            "experimentId": {
+              "description": "S16: with scope arm, the experiment the arm belongs to \u2014 required once a manifest carries experiments[] (arm names are per experiment); a legacy manifest may omit it.",
+              "$ref": "#/$defs/identifier"
+            },
+            "issuedAt": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 500
+            }
           },
           "allOf": [
-            { "if": { "properties": { "scope": { "const": "slot" } } }, "then": { "required": ["tag"] } },
-            { "if": { "properties": { "scope": { "const": "arm" } } }, "then": { "required": ["arm"] } }
+            {
+              "if": {
+                "properties": {
+                  "scope": {
+                    "const": "slot"
+                  }
+                },
+                "type": "object"
+              },
+              "then": {
+                "required": [
+                  "tag"
+                ],
+                "type": "object"
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "scope": {
+                    "const": "arm"
+                  }
+                },
+                "type": "object"
+              },
+              "then": {
+                "required": [
+                  "arm"
+                ],
+                "type": "object"
+              }
+            }
           ]
         }
       ]
@@ -318,10 +931,18 @@
         "directives"
       ],
       "properties": {
-        "protocol": { "$ref": "#/$defs/protocolVersion" },
-        "organizationId": { "$ref": "#/$defs/identifier" },
-        "agentId": { "$ref": "#/$defs/identifier" },
-        "target": { "$ref": "#/$defs/target" },
+        "protocol": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "organizationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "agentId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
         "generation": {
           "description": "Strictly monotonic per target, including on server-side rollback. A runtime refuses a manifest whose generation is lower than the one it stores.",
           "type": "integer",
@@ -332,10 +953,14 @@
           "description": "sha256 over the canonical JSON of the digest input built from `slots` (canonical-json.md). Together with `target` it identifies the release.",
           "$ref": "#/$defs/sha256"
         },
-        "previousReleaseDigest": { "$ref": "#/$defs/sha256" },
-        "issuedAt": { "$ref": "#/$defs/timestamp" },
+        "previousReleaseDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
         "leaseSeconds": {
-          "description": "Staleness accounting, not a kill switch (§6.4). Advisory on countersign targets.",
+          "description": "Staleness accounting, not a kill switch (\u00a76.4). Advisory on countersign targets.",
           "type": "integer",
           "minimum": 60,
           "maximum": 2592000
@@ -343,53 +968,276 @@
         "onLeaseExpiry": {
           "description": "`degrade` keeps serving the last verified release and reports it; `halt` stops rendering. Advisory on countersign targets, where local configuration decides.",
           "type": "string",
-          "enum": ["degrade", "halt"]
+          "enum": [
+            "degrade",
+            "halt"
+          ]
         },
-        "applyPolicy": { "type": "string", "enum": ["auto", "unlock_required"] },
+        "applyPolicy": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "unlock_required"
+          ]
+        },
         "unlockWindow": {
-          "description": "The console's update window (D33): a release staged under unlock_required activates on its own inside it. Advisory — a runtime's local apply.window wins, and the local side is never looser. Present only with unlock_required.",
+          "description": "The console's update window (D33): a release staged under unlock_required activates on its own inside it. Advisory \u2014 a runtime's local apply.window wins, and the local side is never looser. Present only with unlock_required.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["timezone", "start", "end"],
+          "required": [
+            "timezone",
+            "start",
+            "end"
+          ],
           "properties": {
-            "timezone": { "description": "An IANA zone name (Europe/Berlin).", "type": "string", "minLength": 1, "maxLength": 64 },
-            "start": { "description": "Local wall-clock HH:MM, 24-hour; a window whose end precedes its start runs past midnight and belongs to the day it starts on.", "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
-            "end": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
-            "days": { "description": "Days the window opens on, in the zone; absent = every day.", "type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": { "type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] } }
+            "timezone": {
+              "description": "An IANA zone name (Europe/Berlin).",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "start": {
+              "description": "Local wall-clock HH:MM, 24-hour; a window whose end precedes its start runs past midnight and belongs to the day it starts on.",
+              "type": "string",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+            },
+            "end": {
+              "type": "string",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+            },
+            "days": {
+              "description": "Days the window opens on, in the zone; absent = every day.",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 7,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri",
+                  "sat",
+                  "sun"
+                ]
+              }
+            }
           }
         },
-        "requireCountersign": { "type": "boolean" },
+        "requireCountersign": {
+          "type": "boolean"
+        },
         "slots": {
           "description": "Every live slot of the release. Sorted by tag; tags are unique.",
           "type": "array",
           "minItems": 1,
           "maxItems": 200,
-          "items": { "$ref": "#/$defs/slot" }
+          "items": {
+            "$ref": "#/$defs/slot"
+          }
         },
         "experiment": {
           "description": "The legacy single split (protocol 0.2): applies to every slot its arms override. Written only while a fleet has not reported protocol 0.3; never beside experiments[] (refused as experiment_conflict).",
           "$ref": "#/$defs/experiment"
         },
         "experiments": {
-          "description": "S16: one split per slot, each independent — its own salt, arms, ramp and share (assignment-hash.md › Per-prompt experiments). Tags are unique across the array; each arm's overrides name that experiment's tag only. Never beside experiment (experiment_conflict).",
+          "description": "S16: one split per slot, each independent \u2014 its own salt, arms, ramp and share (assignment-hash.md \u203a Per-prompt experiments). Tags are unique across the array; each arm's overrides name that experiment's tag only. Never beside experiment (experiment_conflict).",
           "type": "array",
           "minItems": 1,
           "maxItems": 32,
-          "items": { "allOf": [{ "$ref": "#/$defs/experiment" }, { "type": "object", "required": ["tag"] }] }
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/experiment"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "tag"
+                ]
+              }
+            ]
+          }
         },
-        "directives": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/directive" } }
+        "directives": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/directive"
+          }
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "const": "audience_v1"
+          }
+        },
+        "observations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "audienceId",
+              "selector",
+              "tag",
+              "observeFrom"
+            ],
+            "properties": {
+              "audienceId": {
+                "type": "string",
+                "pattern": "^aud_[A-Za-z0-9_-]{22}$"
+              },
+              "selector": {
+                "$ref": "#/$defs/audienceSelector"
+              },
+              "tag": {
+                "$ref": "#/$defs/slotTag"
+              },
+              "observeFrom": {
+                "$ref": "#/$defs/timestamp"
+              }
+            }
+          }
+        }
       },
-      "not": { "type": "object", "required": ["experiment", "experiments"] }
+      "not": {
+        "type": "object",
+        "required": [
+          "experiment",
+          "experiments"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "requiredCapabilities"
+                ],
+                "type": "object"
+              },
+              {
+                "required": [
+                  "observations"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "experiments": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": [
+                        "audience"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "experiments"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "requiredCapabilities",
+              "observations"
+            ],
+            "not": {
+              "required": [
+                "experiment"
+              ],
+              "type": "object"
+            },
+            "properties": {
+              "protocol": {
+                "const": "1.0.0"
+              },
+              "experiments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "tag",
+                    "audience"
+                  ]
+                }
+              }
+            },
+            "type": "object"
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "requiredCapabilities"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "required": [
+                    "observations"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "properties": {
+              "experiment": {
+                "not": {
+                  "required": [
+                    "audience"
+                  ],
+                  "type": "object"
+                }
+              },
+              "experiments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "not": {
+                    "required": [
+                      "audience"
+                    ],
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
     },
     "signature": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["keyId", "alg", "sig"],
+      "required": [
+        "keyId",
+        "alg",
+        "sig"
+      ],
       "properties": {
-        "keyId": { "$ref": "#/$defs/keyId" },
-        "alg": { "const": "ES256" },
+        "keyId": {
+          "$ref": "#/$defs/keyId"
+        },
+        "alg": {
+          "const": "ES256"
+        },
         "sig": {
-          "description": "ECDSA P-256 over SHA-256 of the canonical payload bytes, IEEE P1363 (r ‖ s, 64 bytes), base64url without padding.",
+          "description": "ECDSA P-256 over SHA-256 of the canonical payload bytes, IEEE P1363 (r \u2016 s, 64 bytes), base64url without padding.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{86}$"
         }
@@ -398,17 +1246,171 @@
     "countersignature": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["keyId", "alg", "releaseDigest", "sig", "signedAt"],
+      "required": [
+        "keyId",
+        "alg",
+        "releaseDigest",
+        "sig",
+        "signedAt"
+      ],
       "properties": {
-        "keyId": { "$ref": "#/$defs/keyId" },
-        "alg": { "const": "ES256" },
-        "releaseDigest": { "$ref": "#/$defs/sha256" },
+        "keyId": {
+          "$ref": "#/$defs/keyId"
+        },
+        "alg": {
+          "const": "ES256"
+        },
+        "releaseDigest": {
+          "$ref": "#/$defs/sha256"
+        },
         "sig": {
-          "description": "ECDSA P-256 over SHA-256 of the UTF-8 bytes of `releaseDigest` (the `sha256:…` string), P1363, base64url without padding.",
+          "description": "ECDSA P-256 over SHA-256 of the UTF-8 bytes of `releaseDigest` (the `sha256:\u2026` string), P1363, base64url without padding.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{86}$"
         },
-        "signedAt": { "$ref": "#/$defs/timestamp" }
+        "signedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "audienceSelector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "const": "all"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "match",
+            "conditions"
+          ],
+          "properties": {
+            "mode": {
+              "const": "tags"
+            },
+            "match": {
+              "enum": [
+                "all",
+                "any"
+              ]
+            },
+            "conditions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "value"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "audienceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audienceId",
+        "selector"
+      ],
+      "properties": {
+        "audienceId": {
+          "type": "string",
+          "pattern": "^aud_[A-Za-z0-9_-]{22}$"
+        },
+        "selector": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "all"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "match",
+                "conditions"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "tags"
+                },
+                "match": {
+                  "enum": [
+                    "all",
+                    "any"
+                  ]
+                },
+                "conditions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "key",
+                      "value"
+                    ],
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                      },
+                      "value": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
       }
     }
   }

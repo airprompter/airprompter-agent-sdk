@@ -324,3 +324,24 @@ export function effectiveArms({ arms, ramp, disabledArms, nowMs }) {
   effective[firstLive] = { ...effective[firstLive], weightBps: effective[firstLive].weightBps + reassigned };
   return effective;
 }
+
+/** Audience vectors use an independent reference predicate: exact strings, bounded closed selectors. */
+export function audiencePredicate({selector,tags}) {
+  const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
+  const only = (v,keys) => Object.keys(v).every(k=>keys.includes(k));
+  const str = (v,n) => typeof v === "string" && v.length <= n && !/[\u0000-\u001f\u007f]/u.test(v);
+  let valid = object(selector);
+  if (valid && selector.mode === "all") valid = only(selector,["mode"]);
+  else if (valid) {
+    valid = selector.mode === "tags" && only(selector,["mode","match","conditions"]) && ["all","any"].includes(selector.match) && Array.isArray(selector.conditions) && selector.conditions.length > 0 && selector.conditions.length <= 16;
+    const seenPairs = new Set(), seenKeys = new Set();
+    if (valid) for (const c of selector.conditions) {
+      if (!object(c) || !only(c,["key","value"]) || !str(c.key,64) || !c.key.trim() || !str(c.value,256)) {valid=false;break;}
+      const pair=JSON.stringify([c.key,c.value]);
+      if (seenPairs.has(pair) || (selector.match === "all" && seenKeys.has(c.key))) {valid=false;break;}
+      seenPairs.add(pair);seenKeys.add(c.key);
+    }
+  }
+  const exact = c => Object.hasOwn(tags,c.key) && typeof tags[c.key] === "string" && tags[c.key] === c.value;
+  return {valid, matches:valid && (selector.mode === "all" || (selector.match === "all" ? selector.conditions.every(exact) : selector.conditions.some(exact)))};
+}

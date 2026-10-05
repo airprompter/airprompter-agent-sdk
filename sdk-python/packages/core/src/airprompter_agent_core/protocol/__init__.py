@@ -66,3 +66,6 @@ __all__ = [
     "verify_manifest",
     "verify_root_metadata",
 ]
+
+from .assignment import matches_audience, captured_audience_ids, valid_audience_selector, valid_audience_manifest, copy_audience_tags
+__all__ += ["matches_audience", "captured_audience_ids", "valid_audience_selector", "valid_audience_manifest", "copy_audience_tags"]

@@ -334,17 +334,19 @@ export class SpoolWriter {
     private readonly identity: { instanceId: string; instanceClass: "resident" | "ephemeral"; sdk: string },
   ) {}
 
-  private window(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model" | "status"> & { errorClass?: ErrorClass | null; usageSource?: Observation["usageSource"] }, nowMs: number): WindowRow {
-    const minute = minuteOf(nowMs);
+  private window(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model" | "status"> & { errorClass?: ErrorClass | null; usageSource?: Observation["usageSource"]; audienceIds?: readonly string[]; runMinute?: string; outcomeRunMinute?: string }, nowMs: number): WindowRow {
+    const minute = dimensions.outcomeRunMinute ? minuteOf(nowMs) : dimensions.runMinute ?? minuteOf(nowMs);
     if (this.openMinute !== null && this.openMinute !== minute) this.closeWindows(nowMs);
     this.openMinute = minute;
     const errorClass = dimensions.errorClass ?? null;
-    const key = [dimensions.tag, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass ?? ""].join("\u0000");
+    const key = [dimensions.tag, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass ?? "", JSON.stringify(dimensions.audienceIds ?? null), dimensions.outcomeRunMinute ?? ""].join("\u0000");
     let row = this.open.get(key);
     if (!row) {
       row = {
         type: "window",
-        v: 1,
+        v: dimensions.audienceIds ? 2 : 1,
+        ...(dimensions.audienceIds ? {audienceIds: [...dimensions.audienceIds]} : {}),
+        ...(dimensions.outcomeRunMinute ? {outcomeRunMinute: dimensions.outcomeRunMinute} : {}),
         minute,
         instanceId: this.identity.instanceId,
         instanceClass: this.identity.instanceClass,
@@ -381,13 +383,13 @@ export class SpoolWriter {
   }
 
   /** T29: output-check counts against a run already counted (an app that evaluated after the fact): the run's window, no extra count. */
-  checks(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model">, counts: { passed: number; failed: number }, nowMs: number): void {
+  checks(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute">, counts: { passed: number; failed: number }, nowMs: number): void {
     const row = this.window({ ...dimensions, status: "ok" }, nowMs);
     row.checks = { passed: (row.checks?.passed ?? 0) + counts.passed, failed: (row.checks?.failed ?? 0) + counts.failed };
   }
 
   /** Quality signals against a run already counted: they ride on the run's window (status ok) and never add to `count`. */
-  outcomes(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model">, outcomes: Record<string, number | boolean>, nowMs: number): void {
+  outcomes(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute">, outcomes: Record<string, number | boolean>, nowMs: number): void {
     mergeOutcomes(this.window({ ...dimensions, status: "ok" }, nowMs), outcomes);
   }
 

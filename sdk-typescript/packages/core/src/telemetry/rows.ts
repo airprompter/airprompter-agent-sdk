@@ -27,6 +27,10 @@ export type ErrorClass =
   | "provider_rate_limited";
 
 export interface Observation {
+  /** Internal original run minute; becomes minute on a v2 run row, never raw tags. */
+  runMinute?: string;
+  audienceIds?: readonly string[];
+  outcomeRunMinute?: string;
   tag: string;
   versionId: string;
   arm: string;
@@ -42,7 +46,9 @@ export interface Observation {
 
 export interface WindowRow {
   type: "window";
-  v: 1;
+  v: 1 | 2;
+  audienceIds?: readonly string[];
+  outcomeRunMinute?: string;
   minute: string;
   instanceId: string;
   instanceClass: "resident" | "ephemeral";

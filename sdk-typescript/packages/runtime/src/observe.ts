@@ -82,6 +82,8 @@ export function classifyError(error: unknown): ErrorClass {
 }
 
 export interface ObserveTarget {
+  runMinute?: string;
+  audienceIds?: readonly string[];
   tag: string;
   versionId: string;
   arm: string;
@@ -123,7 +125,7 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
       }
     }
     record({
-      tag: target.tag,
+      ...(target.audienceIds ? {audienceIds: target.audienceIds,runMinute: target.runMinute} : {}), tag: target.tag,
       versionId: target.versionId,
       arm: target.arm,
       model,
@@ -137,7 +139,7 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
     return result;
   } catch (error) {
     record({
-      tag: target.tag,
+      ...(target.audienceIds ? {audienceIds: target.audienceIds,runMinute: target.runMinute} : {}), tag: target.tag,
       versionId: target.versionId,
       arm: target.arm,
       model,

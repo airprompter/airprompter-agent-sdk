@@ -12,9 +12,9 @@
  */
 // 0.3.5: pins.md — `?release=` pinned reads and the heartbeat's `pinnedReleaseDigest` / `seal` members are gated with
 // `protocolAtLeast(manifest.payload.protocol, "0.3.5")`, the same way `catalog.variables` is gated at 0.3.4 above.
-export const PROTOCOL_VERSION = "0.3.5";
+export const PROTOCOL_VERSION = "1.0.0";
 /** This package's own version, as the heartbeat and store.json (S8: the writer) record it. */
-export const SDK_VERSION = "0.2.15";
+export const SDK_VERSION = "0.3.0";
 
 /**
  * Whether a protocol version string is at least another (`major.minor.patch`, numerically). The manifest a control

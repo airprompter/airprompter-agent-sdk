@@ -113,3 +113,20 @@ test("0.3.4: a variable's default and source are in the release digest only when
   assert.notEqual(digestOf([{ ...slot, variables: [{ ...slot.variables[0]!, default: "warm" }] }]), plain, "a default changes the digest");
   assert.notEqual(digestOf([{ ...slot, variables: [{ ...slot.variables[0]!, source: "runtime" }] }]), plain, "a source changes the digest");
 });
+
+// One shared input corpus proves exact matching and refusal parity across languages.
+import { matchesAudience, validAudienceSelector } from "../packages/core/src/protocol/assignment.js";
+test("audiences.json: exact local audience predicates", () => {
+  for (const c of vector("audiences.json").cases) {
+    assert.equal(validAudienceSelector(c.selector), c.valid, c.name);
+    assert.equal(matchesAudience(c.selector,c.tags), c.matches, c.name);
+  }
+});
+
+test("audiences.json: signed major version, capability refusal and selector tampering", () => {
+  for (const c of vector("audiences.json").manifests) {
+    const verdict=verifyManifest(c);
+    assert.equal(verdict.ok,c.expected.ok,c.name);
+    if (!verdict.ok) assert.equal(verdict.reason,c.expected.reason,c.name);
+  }
+});

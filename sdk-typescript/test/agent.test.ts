@@ -529,6 +529,91 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   rmSync(stateDir,{recursive:true,force:true});
 });
 
+test("audience registration stays bounded without limiting legacy prompt serving", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const slots = Array.from({ length: 33 }, (_, index) => {
+    const tag = index === 0 ? "support.reply" : `prompt.slot${String(index).padStart(2, "0")}`;
+    return plane.slot({ tag, text: `Text ${index}` });
+  });
+  plane.promote(slots);
+  const ap = await start(plane, stateDir);
+  try {
+    for (let index = 0; index < slots.length; index++) {
+      const tag = index === 0 ? "support.reply" : `prompt.slot${String(index).padStart(2, "0")}`;
+      assert.equal(ap.prompt(tag, { displayName: `Prompt ${index}` }).render().text, `Text ${index}`);
+    }
+    (ap as any).audienceServerSupported = true; // exercise names-only registration on a legacy manifest after server negotiation
+    const registration = ap.heartbeatBody().registration as any;
+    assert.equal(registration.prompts.length, 32);
+    assert.ok(registration.prompts.some((entry: any) => entry.tag === "prompt.slot32"));
+    assert.deepEqual(registration.tagKeys, []);
+    assert.equal(ap.status().generation, 1);
+  } finally {
+    await ap.stop();
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("audience registration evicts stale names, keeps active names, and serves offline", async () => {
+  const stateDir = tempDir();
+  const plane = new FakeControlPlane(scope);
+  const tags = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`old_key_${String(index).padStart(2, "0")}`, `private_value_${index}`]));
+  const base = plane.slot({ tag: "support.reply", text: "Published" });
+  const slots = [base, ...Array.from({ length: 32 }, (_, index) => plane.slot({ tag: `prompt.slot${String(index).padStart(2, "0")}`, text: `Prompt ${index}` }))];
+  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, match: "any" as const, conditions: [{ key: "new_key", value: "new_value" }, { key: "override_key", value: "override_value" }] } };
+  const manifest = plane.promote(slots, { protocol: "1.0.0" });
+  manifest.payload.requiredCapabilities = ["audience_v1"];
+  manifest.payload.observations = [{ ...audience, tag: base.tag, observeFrom: "2026-09-12T14:00:00Z" }];
+  manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
+  (plane as any).current.bytes = Buffer.from(JSON.stringify(manifest));
+
+  let ap = await start(plane, stateDir, { tags });
+  try {
+    for (let index = 0; index < slots.length; index++) {
+      const tag = index === 0 ? "support.reply" : `prompt.slot${String(index - 1).padStart(2, "0")}`;
+      assert.ok(ap.prompt(tag, { displayName: `Registered ${index}` }).render());
+    }
+    const firstRegistration = (ap.heartbeatBody().registration as any);
+    assert.equal(firstRegistration.prompts.length, 32);
+    assert.ok(firstRegistration.prompts.some((entry: any) => entry.tag === "prompt.slot31"));
+    assert.deepEqual(firstRegistration.tagKeys, [...firstRegistration.tagKeys].sort());
+    assert.deepEqual(ap.heartbeatBody().registration, firstRegistration);
+
+    ap.setTags({ new_key: "new_value" });
+    assert.deepEqual(ap.prompt(base.tag).render().audienceIds, [audience.audienceId]);
+    const registration = ap.heartbeatBody().registration as any;
+    assert.ok(registration.tagKeys.includes("new_key"));
+    assert.ok(registration.tagKeys.length <= 64 && registration.prompts.length <= 32);
+    const heartbeat = JSON.stringify(ap.heartbeatBody());
+    assert.equal(heartbeat.includes("private_value_"), false);
+    assert.equal(heartbeat.includes("new_value"), false);
+    assert.equal(heartbeat.includes("override_value"), false);
+
+    ap.setTags({ new_key: "no_match" });
+    assert.deepEqual(ap.prompt(base.tag, { tags: { override_key: "override_value" } }).render().audienceIds, [audience.audienceId]);
+    const active64 = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`active_key_${String(index).padStart(2, "0")}`, "value"]));
+    ap.setTags(active64);
+    assert.throws(() => ap.setTags({ ...active64, extra_key: "value" }), /audience_tags_invalid/);
+    assert.throws(() => ap.prompt(base.tag, { tags: { overflow_key: "value" } }).render(), /audience_tags_invalid/);
+  } finally {
+    await ap.stop();
+  }
+
+  ap = await AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "offline" }, tags: { new_key: "new_value" } });
+  try {
+    assert.deepEqual(ap.prompt("support.reply").render().audienceIds, [audience.audienceId]);
+    const offlineHeartbeat = ap.heartbeatBody();
+    const registration = offlineHeartbeat.registration as any;
+    assert.deepEqual(registration.tagKeys, ["new_key"]);
+    assert.ok(registration.prompts.length <= 32);
+    assert.equal(JSON.stringify(offlineHeartbeat).includes("new_value"), false);
+  } finally {
+    await ap.stop();
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 import { RenderRegistry, withAttribution, currentAttribution } from "../packages/runtime/src/wrap/attribution.js";
 import { validAudienceInstant } from "../packages/core/src/protocol/assignment.js";
 test("identical text never guesses different captured cohorts; explicit attribution remains available", () => {

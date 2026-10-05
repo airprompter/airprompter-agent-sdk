@@ -521,6 +521,7 @@ export class AirPrompterAgent {
   private readonly runRefKey: Buffer;
   private audienceServerSupported = false;
   private audienceTags: Readonly<Record<string,string>> = {};
+  /** Bounded, names-only registration; active keys are kept ahead of recent stale names. */
   private readonly audienceTagKeys = new Set<string>();
   private readonly audiencePromptLabels = new Map<string,string>();
   /** T33: the last renders by text hash, so a wrapped client can tell which slot a call is. */
@@ -1456,7 +1457,7 @@ export class AirPrompterAgent {
       protocol: PROTOCOL_VERSION,
       ...((this.audienceServerSupported || (this.active?.manifest.payload.protocol === AUDIENCE_PROTOCOL_VERSION && this.active.manifest.payload.requiredCapabilities?.includes(AUDIENCE_CAPABILITY))) ? {
         capabilities: [AUDIENCE_CAPABILITY],
-        registration: {tagKeys: [...this.audienceTagKeys].sort(), prompts: [...this.audiencePromptLabels].sort(([a],[b])=>a.localeCompare(b)).map(([tag,displayName])=>({tag,displayName}))},
+        registration: {tagKeys: [...this.audienceTagKeys].sort(), prompts: [...this.audiencePromptLabels].sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0).map(([tag,displayName])=>({tag,displayName}))},
       } : {}),
       instanceId: this.ownInstanceId,
       instanceClass: this.options.telemetry?.instanceClass ?? ((this.options.sync?.mode ?? "resident") === "on_invoke" ? "ephemeral" : "resident"),
@@ -1747,15 +1748,24 @@ export class AirPrompterAgent {
   /** Replace process tags locally. Registration remembers key names, never their values. */
   setTags(tags: Readonly<Record<string,string>>): void {
     const copied = copyAudienceTags(tags);
-    const keys = new Set([...this.audienceTagKeys,...Object.keys(copied)]);
-    if (keys.size > 64) throw new Error("audience_tag_names_limit");
-    keys.forEach(key=>this.audienceTagKeys.add(key));
     this.audienceTags = copied;
+    this.rememberAudienceTagKeys(Object.keys(copied));
+  }
+
+  private rememberAudienceTagKeys(activeKeys: Iterable<string>): void {
+    const active = [...new Set(activeKeys)];
+    const activeSet = new Set(active);
+    const stale = [...this.audienceTagKeys].filter((key) => !activeSet.has(key));
+    this.audienceTagKeys.clear();
+    for (const key of [...active, ...stale].slice(0, 64)) this.audienceTagKeys.add(key);
   }
 
   private registerPromptLabel(tag: string, label: string): void {
     if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(tag) || tag.length > 128 || !validAudienceLabel(label)) throw new Error("prompt_label_invalid");
-    if (!this.audiencePromptLabels.has(tag) && this.audiencePromptLabels.size >= 32) throw new Error("prompt_labels_limit");
+    if (!this.audiencePromptLabels.has(tag) && this.audiencePromptLabels.size >= 32) {
+      const oldest = this.audiencePromptLabels.keys().next().value;
+      if (oldest !== undefined) this.audiencePromptLabels.delete(oldest);
+    }
     this.audiencePromptLabels.set(tag,label);
   }
 
@@ -1770,9 +1780,7 @@ export class AirPrompterAgent {
     const prepare = (values: RenderValues) => {
       const resolver = this.resolver();
       const localTags = tagOverride ? copyAudienceTags({...this.audienceTags,...tagOverride}) : this.audienceTags;
-      const keys = new Set([...this.audienceTagKeys,...Object.keys(localTags)]);
-      if (keys.size > 64) throw new Error("audience_tag_names_limit");
-      keys.forEach(key=>this.audienceTagKeys.add(key));
+      this.rememberAudienceTagKeys(Object.keys(localTags));
       const resolved = this.resolveSlot(tag, options.subject, localTags);
       const text = resolver.textOf(resolved.slot);
       const plan = planFill({ tag, variables: resolved.slot.variables, text, values, registry: this.variables });

@@ -1,4 +1,3 @@
-import { validAudienceMinute } from "@airprompter/agent-core";
 /**
  * The spool uploader (T26 P4, D52/D66): closed segments from ANY writer in
  * `<store>/spool/telemetry/` are validated line by line against the spool
@@ -41,6 +40,7 @@ import { validAudienceMinute } from "@airprompter/agent-core";
  * ```
  */
 
+import { validAudienceMinute } from "@airprompter/agent-core";
 import { nodeFs } from "@airprompter/agent-core";
 import { fsFailureCode, type FsPort } from "@airprompter/agent-core";
 import { join } from "node:path";

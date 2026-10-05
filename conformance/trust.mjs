@@ -1,4 +1,3 @@
-import { audiencePredicate } from "./reference.mjs";
 // Reference implementation of protocol/trust-chain.md: thumbprints, ES256
 // over canonical bytes (P1363, base64url), root-metadata acceptance (R1–R5)
 // and manifest verification (M1–M12). Written from the prose; checked
@@ -8,6 +7,7 @@ import { audiencePredicate } from "./reference.mjs";
 //   const accepted = verifyRootMetadata({ candidate: rootJson, trusted, now });            // { ok, reason? } per R1–R5
 //   const verdict = verifyManifest({ manifest, root: rootJson, now, scope, storedGeneration, payloads });   // { ok, reason? } or { ok: true, signingKeyId, generation } per M1–M12
 
+import { audiencePredicate } from "./reference.mjs";
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
 
 import { canonicalJson, sha256Prefixed } from "./reference.mjs";

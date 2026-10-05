@@ -1,4 +1,8 @@
-/** Deterministic review-owned audience vectors; explicit expectations are not computed by the implementation under test. */
+/** Deterministic review-owned audience vectors; explicit expectations are not computed by the implementation under test.
+ *
+ * Usage:
+ *   $ node protocol/tools/gen_audience_vectors.mjs
+ */
 import { readFileSync, writeFileSync } from "node:fs";
 import { canonicalJson } from "../../conformance/reference.mjs";
 import { jwkThumbprint, publicJwkOf, signBytes } from "../../conformance/trust.mjs";

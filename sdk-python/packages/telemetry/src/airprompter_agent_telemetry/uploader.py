@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import inspect
 from airprompter_agent_core.protocol.assignment import valid_audience_ids
-from airprompter_agent_core._util import instant
 
 import json
 import math

@@ -509,7 +509,7 @@ class AirPrompterAgent:
         # worker parses in another.
         self._audience_server_supported = False
         self._audience_tags = copy_audience_tags(options.get("tags") or {})
-        self._audience_tag_keys = set(self._audience_tags)
+        self._audience_tag_keys = dict.fromkeys(self._audience_tags)
         self._audience_prompt_labels = {}
         for tag,label in (options.get("prompt_labels") or {}).items(): self._register_prompt_label(tag,label)
         self._run_ref_key = hmac.new((run_ref_seed or own_instance_id).encode("utf-8"), b"runRef", hashlib.sha256).digest()
@@ -1767,14 +1767,20 @@ class AirPrompterAgent:
         """Replace local process tags; remember only key names for registration."""
         copied = copy_audience_tags(tags)
         with self._lock:
-            keys = self._audience_tag_keys | set(copied)
-            if len(keys) > 64: raise ValueError("audience_tag_names_limit")
-            self._audience_tag_keys = keys
             self._audience_tags = copied
+            self._remember_audience_tag_keys(copied.keys())
+
+    def _remember_audience_tag_keys(self, active_keys: Any) -> None:
+        active = list(dict.fromkeys(active_keys))
+        active_set = set(active)
+        stale = [key for key in self._audience_tag_keys if key not in active_set]
+        self._audience_tag_keys = dict.fromkeys((active + stale)[:64])
 
     def _register_prompt_label(self, tag: str, label: str) -> None:
         if not isinstance(tag,str) or not re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*",tag) or len(tag) > 128 or not valid_audience_label(label): raise ValueError("prompt_label_invalid")
-        if tag not in self._audience_prompt_labels and len(self._audience_prompt_labels) >= 32: raise ValueError("prompt_labels_limit")
+        if tag not in self._audience_prompt_labels and len(self._audience_prompt_labels) >= 32:
+            oldest = next(iter(self._audience_prompt_labels), None)
+            if oldest is not None: del self._audience_prompt_labels[oldest]
         self._audience_prompt_labels[tag] = label
 
     def prompt(self, tag: str, *, subject: Optional[str] = None, tags: Optional[Mapping[str,str]] = None, display_name: Optional[str] = None) -> PromptHandle:
@@ -1800,9 +1806,7 @@ class AirPrompterAgent:
         with self._lock:
             resolver = self._resolver()
             local_tags = copy_audience_tags({**self._audience_tags, **tags}) if tags is not None else self._audience_tags
-            keys = self._audience_tag_keys | set(local_tags)
-            if len(keys) > 64: raise ValueError("audience_tag_names_limit")
-            self._audience_tag_keys = keys
+            self._remember_audience_tag_keys(local_tags.keys())
             resolved = self._resolve_slot(tag, subject, True, local_tags)
             slot = resolved.slot
             text = resolver.text_of(slot)

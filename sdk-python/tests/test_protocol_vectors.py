@@ -11,6 +11,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -160,6 +163,32 @@ def test_audience_vectors():
     for case in vector("audiences.json")["validators"]:
         actual = {"key":valid_audience_key, "label":valid_audience_label, "instant":valid_audience_instant}[case["kind"]](case["value"])
         assert actual == case["valid"], case["name"]
+
+
+def test_python_conformance_adapter_audience_validator_json_lines():
+    repo_root = Path(__file__).resolve().parents[2]
+    adapter = repo_root / "examples" / "conformance-adapter" / "python" / "adapter.py"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(str(path) for path in (repo_root / "sdk-python" / "packages").glob("*/src"))
+    messages = [
+        {"id": "capabilities", "fn": "capabilities"},
+        {"id": "unknown", "fn": "audienceValidator", "args": {"kind": "unknown", "value": "2026-08-01T00:00:00Z"}},
+        {"id": "instant", "fn": "audienceValidator", "args": {"kind": "instant", "value": "2026-08-01T00:00:00Z"}},
+    ]
+    result = subprocess.run(
+        [sys.executable, str(adapter)],
+        input="\n".join(json.dumps(message) for message in messages) + "\n",
+        text=True,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+    responses = [json.loads(line) for line in result.stdout.splitlines()]
+    assert len(responses) == 3
+    assert "audiencePredicate" in responses[0]["result"]["ops"]
+    assert "audienceValidator" in responses[0]["result"]["ops"]
+    assert responses[1] == {"id": "unknown", "result": {"valid": False}}
+    assert responses[2] == {"id": "instant", "result": {"valid": True}}
 
 
 def test_signed_audience_vectors():

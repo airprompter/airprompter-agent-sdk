@@ -62,7 +62,10 @@ def op_audience_predicate(a: dict) -> dict:
 
 
 def op_audience_validator(a: dict) -> dict:
-    validator = valid_audience_key if a["kind"] == "key" else valid_audience_label if a["kind"] == "label" else valid_audience_instant
+    validators = {"key": valid_audience_key, "label": valid_audience_label, "instant": valid_audience_instant}
+    validator = validators.get(a["kind"])
+    if validator is None:
+        return {"valid": False}
     return {"valid": validator(a["value"])}
 
 

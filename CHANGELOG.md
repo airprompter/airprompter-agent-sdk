@@ -10,6 +10,15 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.4.1 — 2026-10-06 (protocol 1.1.1)
+
+### Added
+- Hosted `ManagedAgent` clients accept process and per-run arbitrary tags, match signed audience selectors locally, and transmit only opaque audience ids.
+
+### Fixed
+- Workflow step telemetry such as `onboarding.flow#1` now passes the shared protocol, TypeScript, and Python validators.
+- SDK 0.4.1 continues to accept protocol 1.1.0 audience manifests while emitting protocol 1.1.1.
+
 ## 0.4.0 — 2026-10-06 (protocol 1.1.0)
 
 ### Added

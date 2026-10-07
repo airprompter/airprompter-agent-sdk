@@ -1,6 +1,12 @@
 # Protocol changelog
 
-## 1.1.0 · Tag operators and artifact-aware telemetry (unpublished)
+## 1.1.1 · Hosted audience matching and workflow telemetry
+
+- Hosted SDKs receive signed audience selectors, evaluate arbitrary tag values locally, and send only matching opaque audience ids with a run.
+- Telemetry window tags accept canonical workflow step ids such as `onboarding.flow#1`, so per-step observations are not rejected by upload validation.
+- Protocol 1.1.0 audience manifests remain valid under the same `audience_v2` selector semantics.
+
+## 1.1.0 · Tag operators and artifact-aware telemetry
 
 - Audience conditions add a case-sensitive `operator`: `is` or `contains`. Multiple conditions remain an implicit conjunction in AirPrompter; an empty condition list is represented by the existing All devices selector.
 - The new signed envelope requires `protocol: "1.1.0"` with `requiredCapabilities: ["audience_v2"]`. SDKs retain `1.0.0` / `audience_v1` reading, but refuse v2 operators inside a v1 envelope so one release can never have two meanings.

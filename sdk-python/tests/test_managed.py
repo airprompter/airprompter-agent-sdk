@@ -105,6 +105,29 @@ def test_start_reads_catalogue_and_run_sends_salted_hash_never_subject():
     agent.close()
 
 
+def test_managed_audience_selectors_match_arbitrary_tags_locally_and_send_only_opaque_ids():
+    device_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
+    region_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "region", "operator": "contains", "value": "west"}]}}
+    catalogue = {**CATALOGUE, "observations": [device_audience, region_audience]}
+    transport, calls = scripted([
+        {"status": 200, "body": json.dumps(catalogue)},
+        {"status": 200, "body": RUN_SSE, "stream": True},
+        {"status": 200, "body": RUN_SSE, "stream": True},
+    ])
+    agent = ManagedAgent.start(agent_id="agent-1", target="prod", api_key="apr_run_key", base_url="https://run.example", transport=transport, tags={"device_id": "device-007", "region": "east"})
+    agent.run("support.triage", {"team": "Billing", "ticket": "x"})
+    first = json.loads(calls[1].content)
+    assert first["audienceIds"] == [device_audience["audienceId"]]
+    assert b"device-007" not in calls[1].content and b"device_id" not in calls[1].content
+
+    agent.set_tags({"device_id": "other", "region": "east"})
+    agent.run("support.triage", {"team": "Billing", "ticket": "x"}, tags={"region": "north-west"})
+    second = json.loads(calls[2].content)
+    assert second["audienceIds"] == [region_audience["audienceId"]]
+    assert b"north-west" not in calls[2].content
+    agent.close()
+
+
 def test_stream_yields_deltas_and_error_frame_raises_from_result():
     agent, _calls = start_with([{"status": 200, "body": RUN_SSE, "stream": True}, {"status": 200, "body": sse([("delta", {"delta": "Prio"}), ("error", {"error": "the model is unavailable right now; retry", "code": "model_unavailable", "retryAfterSeconds": 5})]), "stream": True}])
     stream = agent.stream("support.triage", {"team": "Billing", "ticket": "x"})

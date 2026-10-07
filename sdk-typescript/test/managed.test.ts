@@ -104,6 +104,28 @@ test("start reads the catalogue with the run key; run() sends the salted subject
   assert.equal(run.init.body!.includes("user-42"), false, "the subject never leaves the process");
 });
 
+test("managed audience selectors match arbitrary tags locally and send only opaque audience ids", async () => {
+  const deviceAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
+  const regionAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "region", operator: "contains", value: "west" }] } } as const;
+  const { fetch, calls } = fakeFetch([
+    () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, observations: [deviceAudience, regionAudience] }) }),
+    () => ({ status: 200, body: RUN_SSE, stream: true }),
+    () => ({ status: 200, body: RUN_SSE, stream: true }),
+  ]);
+  const agent = await ManagedAgent.start({ agentId: "agent-1", target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example", fetch, tags: { device_id: "device-007", region: "east" } });
+  await agent.run("support.triage", { team: "Billing", ticket: "x" });
+  const first = JSON.parse(calls[1]!.init.body!);
+  assert.deepEqual(first.audienceIds, [deviceAudience.audienceId]);
+  assert.equal(calls[1]!.init.body!.includes("device-007"), false);
+  assert.equal(calls[1]!.init.body!.includes("device_id"), false);
+
+  agent.setTags({ device_id: "other", region: "east" });
+  await agent.run("support.triage", { team: "Billing", ticket: "x" }, { tags: { region: "north-west" } });
+  const second = JSON.parse(calls[2]!.init.body!);
+  assert.deepEqual(second.audienceIds, [regionAudience.audienceId]);
+  assert.equal(calls[2]!.init.body!.includes("north-west"), false);
+});
+
 test("stream() yields deltas in order and resolves result; an error frame after the head rejects result with the route's code", async () => {
   const { agent } = await startWith([() => ({ status: 200, body: RUN_SSE, stream: true }), () => ({ status: 200, body: sse([["delta", { delta: "Prio" }], ["error", { error: "the model is unavailable right now; retry", code: "model_unavailable", retryAfterSeconds: 5 }]]), stream: true })]);
   const stream = await agent.stream("support.triage", { team: "Billing", ticket: "x" });

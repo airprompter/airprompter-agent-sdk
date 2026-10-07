@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/datastore-postgres",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "The AirPrompter release datastore over one PostgreSQL table: a KvStore with INSERT … ON CONFLICT and versioned UPDATEs, for kvReleaseDatastore. Bring your own driver (pg, Neon, anything with query(text, values)).",
   "keywords": [
     "airprompter",
@@ -48,7 +48,7 @@
     "sizeBudgetBytes": 30000
   },
   "dependencies": {
-    "@airprompter/agent-sync": "0.4.0"
+    "@airprompter/agent-sync": "0.4.1"
   },
   "publishConfig": {
     "access": "public",

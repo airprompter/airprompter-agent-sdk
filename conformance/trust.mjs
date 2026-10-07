@@ -236,7 +236,7 @@ function validAudiencePayload(p) {
   const targeted=p.requiredCapabilities!==undefined || p.observations!==undefined || experiments.some(e=>e.audience!==undefined) || (object(p.experiment) && p.experiment.audience!==undefined);
   // Major 0 remains legacy-compatible. Major 1 always requires its frozen audience negotiation envelope.
   if (!targeted) return Number(String(p.protocol).split(".")[0]) !== 1;
-  const v2=p.protocol==="1.1.0" && JSON.stringify(p.requiredCapabilities)==='["audience_v2"]';
+  const v2=["1.1.0","1.1.1"].includes(p.protocol) && JSON.stringify(p.requiredCapabilities)==='["audience_v2"]';
   const v1=p.protocol==="1.0.0" && JSON.stringify(p.requiredCapabilities)==='["audience_v1"]';
   if ((!v2 && !v1) || p.experiment!==undefined || !Array.isArray(p.slots) || !Array.isArray(p.observations) || p.observations.length<1 || p.observations.length>8 || experiments.length>32) return false;
   const selectors=[...p.observations,...experiments.map(e=>e.audience)].map(entry=>object(entry)?entry.selector:null);

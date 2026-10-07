@@ -3,7 +3,7 @@
   "reason": "Empty targeting cannot mean fleet-wide",
   "document": {
     "payload": {
-      "protocol": "1.1.0",
+      "protocol": "1.1.1",
       "organizationId": "org_1",
       "agentId": "agt_1",
       "target": "prod",

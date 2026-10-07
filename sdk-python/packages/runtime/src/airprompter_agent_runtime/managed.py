@@ -35,7 +35,7 @@ from urllib.parse import quote
 
 import httpx
 
-from airprompter_agent_core.protocol.assignment import subject_hash as salted_subject_hash
+from airprompter_agent_core.protocol.assignment import copy_audience_tags, matches_audience, subject_hash as salted_subject_hash
 
 from .variables.fill import fill_sync, plan_fill, stricter_sources, supplied, unsourced
 from .variables.sources import VariableSourceContext, VariableSourceError, VariableSourceInput, VariableSourceRegistry, VariableSourceRequiredError
@@ -232,11 +232,12 @@ class ManagedWorkflow:
 
 
 class ManagedAgent:
-    def __init__(self, *, agent_id: str, target: str, api_key: str, base_url: str, catalogue: dict[str, Any], transport: Optional[httpx.BaseTransport], max_rate_limit_retries: int, sleep: Callable[[float], None], instance_id: Optional[str], user_agent: str, timeout: float, variables: Optional[Mapping[str, VariableSourceInput]] = None):
+    def __init__(self, *, agent_id: str, target: str, api_key: str, base_url: str, catalogue: dict[str, Any], transport: Optional[httpx.BaseTransport], max_rate_limit_retries: int, sleep: Callable[[float], None], instance_id: Optional[str], user_agent: str, timeout: float, variables: Optional[Mapping[str, VariableSourceInput]] = None, tags: Optional[Mapping[str, str]] = None):
         #: The application's variable sources (``start(variables=...)``, ``agent.variables.provide()``): consulted for
         #: every required declared variable a call site did not pass, before the run is posted — the hosted route has
         #: no way into the application's systems. See ``variables/sources.py``.
         self.variables = VariableSourceRegistry(variables)
+        self._audience_tags = copy_audience_tags(tags or {})
         self._agent_id = agent_id
         self._target = target
         self._api_key = api_key
@@ -249,12 +250,12 @@ class ManagedAgent:
         self._user_agent = user_agent
 
     @classmethod
-    def start(cls, *, agent_id: str, target: str, api_key: str, base_url: str, transport: Optional[httpx.BaseTransport] = None, max_rate_limit_retries: int = 2, sleep: Optional[Callable[[float], None]] = None, instance_id: Optional[str] = None, user_agent: str = MANAGED_SDK_USER_AGENT, timeout: float = 120.0, variables: Optional[Mapping[str, VariableSourceInput]] = None) -> "ManagedAgent":
+    def start(cls, *, agent_id: str, target: str, api_key: str, base_url: str, transport: Optional[httpx.BaseTransport] = None, max_rate_limit_retries: int = 2, sleep: Optional[Callable[[float], None]] = None, instance_id: Optional[str] = None, user_agent: str = MANAGED_SDK_USER_AGENT, timeout: float = 120.0, variables: Optional[Mapping[str, VariableSourceInput]] = None, tags: Optional[Mapping[str, str]] = None) -> "ManagedAgent":
         """Reads the catalogue once; refuses (typed) when the key, the target or the promotion is not there.
         ``api_key`` is a run key (``agent_run`` kind, ``agent.run`` scope); ``base_url`` the run route's origin (the AgentRunUrl output of the execution stack).
         ``variables`` registers how this process fills declared variables from its own system (a literal, or a source with its
         trust). This client is synchronous, so a source must be a plain callable: a coroutine function is refused at run time."""
-        agent = cls(agent_id=agent_id, target=target, api_key=api_key, base_url=base_url, catalogue={}, transport=transport, max_rate_limit_retries=max_rate_limit_retries, sleep=sleep or time.sleep, instance_id=instance_id, user_agent=user_agent, timeout=timeout, variables=variables)
+        agent = cls(agent_id=agent_id, target=target, api_key=api_key, base_url=base_url, catalogue={}, transport=transport, max_rate_limit_retries=max_rate_limit_retries, sleep=sleep or time.sleep, instance_id=instance_id, user_agent=user_agent, timeout=timeout, variables=variables, tags=tags)
         agent._catalogue = agent._read_catalogue()
         return agent
 
@@ -276,6 +277,18 @@ class ManagedAgent:
         """Re-reads the catalogue (a run answered with a newer generation, or on a schedule of your own)."""
         self._catalogue = self._read_catalogue()
         return self._catalogue
+
+    def set_tags(self, tags: Mapping[str, str]) -> "ManagedAgent":
+        """Replace process-local audience tags. Values are matched here and never sent to AirPrompter."""
+        self._audience_tags = copy_audience_tags(tags)
+        return self
+
+    def _audience_ids_for(self, tag: str, override: Optional[Mapping[str, str]] = None) -> Optional[list[str]]:
+        observations = [entry for entry in self._catalogue.get("observations", []) if entry.get("tag") == tag]
+        if not observations:
+            return None
+        local_tags = copy_audience_tags({**self._audience_tags, **(override or {})}) if override else self._audience_tags
+        return sorted(entry["audienceId"] for entry in observations if matches_audience(entry.get("selector"), local_tags))
 
     def experiment_for(self, tag: str) -> Optional[dict]:
         """S17: the experiment that splits a slot — the per-prompt one by tag, else the legacy single one (it covers every slot), else None."""
@@ -351,10 +364,13 @@ class ManagedAgent:
             raise VariableSourceRequiredError(tag, error.names, hint=_MANAGED_SYNC_HINT) from None
         return {name: str(value) for name, value in filled.values.items() if supplied(filled.values, name)}
 
-    def stream(self, tag: str, variables: Mapping[str, str], *, subject: Optional[str] = None, step_id: Optional[str] = None, idempotency_key: Optional[str] = None, max_output_tokens: Optional[int] = None, metadata: Optional[Mapping[str, str]] = None) -> ManagedRunStream:
+    def stream(self, tag: str, variables: Mapping[str, str], *, subject: Optional[str] = None, step_id: Optional[str] = None, idempotency_key: Optional[str] = None, max_output_tokens: Optional[int] = None, metadata: Optional[Mapping[str, str]] = None, tags: Optional[Mapping[str, str]] = None) -> ManagedRunStream:
         """The run as SSE: iterate the deltas, read ``result``. Declared variables the call site left unfilled are
         filled from the application's sources first (``_fill_for_run``)."""
         body: dict[str, Any] = {"tag": tag, "variables": self._fill_for_run(tag, variables, subject), "stream": True}
+        audience_ids = self._audience_ids_for(tag, tags)
+        if audience_ids is not None:
+            body["audienceIds"] = audience_ids
         subject_digest = self.subject_hash_for(subject, tag)
         if subject_digest:
             body["subjectHash"] = subject_digest

@@ -1,4 +1,4 @@
-# Audience targeting · protocol 1.1.0
+# Audience targeting · protocol 1.1.1
 
 An audience is either **All devices**, or a list of tag conditions. Each condition is `key is value` or `key contains value`; all conditions must match. `device_id is device-042` targets one device through the same editor used for regions and other arbitrary SDK tags. Matching is case sensitive and does not trim or normalize Unicode. Schema length limits count Unicode scalar values (64 for keys, 256 for values); unpaired UTF-16 surrogates are refused before matching so every SDK reaches the same decision. Missing keys never match. An empty list is represented by the All devices selector.
 
@@ -8,7 +8,7 @@ The operator supplies selector values in AirPrompter. These authored values are 
 
 ## Compatibility
 
-New releases require protocol **1.1.0**, `requiredCapabilities: ["audience_v2"]`, and bounded observations, even when the selector covers all devices. Each per-prompt experiment names its observed audience explicitly. A v2-capable SDK may still read protocol 1.0.0 / `audience_v1`; a v1 envelope containing an operator is refused, preventing old and new SDKs from applying different semantics to the same signature. SDKs that do not support the required envelope refuse the update and retain the last verified release. Unknown major-1 versions, mismatched capability negotiation and malformed audience rules are refused before payload application.
+New releases require protocol **1.1.1**, `requiredCapabilities: ["audience_v2"]`, and bounded observations, even when the selector covers all devices. Each per-prompt experiment names its observed audience explicitly. A v2-capable SDK may still read protocol 1.0.0 / `audience_v1`; a v1 envelope containing an operator is refused, preventing old and new SDKs from applying different semantics to the same signature. SDKs that do not support the required envelope refuse the update and retain the last verified release. Unknown major-1 versions, mismatched capability negotiation and malformed audience rules are refused before payload application.
 
 SDK packages advance together to 0.4.0. This source change does not publish packages, deploy a service, create a live experiment or activate a ramp. The hosted service must advertise support before registration, mint immutable audience IDs, and publish compatible signed releases.
 

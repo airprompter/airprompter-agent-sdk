@@ -292,10 +292,11 @@ Feedback works the same way hosted: keep `result.run_ref` beside your own
 record and later call `agent.feedback(run_ref, accepted=True, rating=4)` from
 any process holding the run key.
 
-No store, no models, no keys of your own: `ManagedAgent.start(agent_id=…, target=…, api_key=<run key>, base_url=<run route>)`,
+No store, no models, no keys of your own: `ManagedAgent.start(agent_id=…, target=…, api_key=<run key>, base_url=<run route>, tags={"device_id": device_id})`,
 then `agent.run("support.triage", {"team": "Billing", "ticket": text}, subject="user-42")`
 or `for delta in agent.stream(...)`. The subject is hashed with the
-experiment's salt here and never sent.
+experiment's salt here and never sent. Audience tag values are also matched
+locally; only the signed opaque ids for matching audiences are posted.
 
 ## Provider wrappers
 

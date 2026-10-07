@@ -24,12 +24,12 @@
  * ```
  */
 
-import type { SlotInference, SlotVariable } from "@airprompter/agent-core";
+import type { AudienceSelector, SlotInference, SlotVariable } from "@airprompter/agent-core";
 import { createHash } from "node:crypto";
 import { VariableSourceRegistry, type VariableSourceInput } from "../variables/sources.js";
 import { fillAsync, planFill, stricterSources, supplied, unsourced, type RenderValues } from "../variables/fill.js";
 import { VariableSourceError } from "../variables/sources.js";
-import { errorNamed } from "@airprompter/agent-core";
+import { copyAudienceTags, errorNamed, matchesAudience } from "@airprompter/agent-core";
 
 import { subjectHash as saltedSubjectHash } from "@airprompter/agent-core";
 
@@ -63,6 +63,8 @@ export interface ManagedStartOptions {
    * cannot be known here).
    */
   variables?: Record<string, VariableSourceInput>;
+  /** Arbitrary local audience tags. Values are matched in this process and are never sent to AirPrompter. */
+  tags?: Readonly<Record<string, string>>;
   /** Retries on 429 only; each waits `Retry-After` (or a second). Default 2. */
   maxRateLimitRetries?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -93,6 +95,8 @@ export interface ManagedCatalogue {
   experiment: { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null;
   /** S17: one entry per experiment, each naming the slot it splits (`tag` null on the legacy single one). */
   experiments?: readonly { experimentId: string; tag: string | null; salt: string; subjectKey: "request" | "instance"; arms: readonly string[] }[];
+  /** Signed audience rules. Only matching opaque ids are returned on a run; tag values remain local. */
+  observations?: readonly { audienceId: string; tag: string; selector: AudienceSelector }[];
 }
 
 export interface ManagedRunOptions {
@@ -105,6 +109,8 @@ export interface ManagedRunOptions {
   /** Content-free correlation the customer keeps; echoed on the response. */
   metadata?: Record<string, string>;
   signal?: AbortSignal;
+  /** Per-run local audience tags merged over `start({ tags })`; values never leave this process. */
+  tags?: Readonly<Record<string, string>>;
 }
 
 export interface ManagedRunResult {
@@ -231,6 +237,7 @@ export class ManagedAgent {
   private readonly instanceId: string;
   /** The application's variable sources (`start({ variables })`, `agent.variables.provide()`). */
   readonly variables: VariableSourceRegistry;
+  private audienceTags: Readonly<Record<string, string>>;
 
   private constructor(
     private readonly options: ManagedStartOptions,
@@ -240,6 +247,7 @@ export class ManagedAgent {
     this.fetchImpl = options.fetch ?? (globalThis.fetch as unknown as ManagedFetchLike);
     this.instanceId = options.instanceId ?? createHash("sha256").update(`${process.pid}:${Date.now()}:${Math.random()}`).digest("hex");
     this.variables = new VariableSourceRegistry(options.variables);
+    this.audienceTags = copyAudienceTags(options.tags ?? {});
   }
 
   /** Reads the catalogue once; refuses (typed) when the key, the target or the promotion is not there. */
@@ -269,6 +277,18 @@ export class ManagedAgent {
   async refresh(): Promise<ManagedCatalogue> {
     this.catalogue = await ManagedAgent.readCatalogue(this.fetchImpl, this.options);
     return this.catalogue;
+  }
+
+  setTags(tags: Readonly<Record<string, string>>): this {
+    this.audienceTags = copyAudienceTags(tags);
+    return this;
+  }
+
+  private audienceIdsFor(tag: string, override?: Readonly<Record<string, string>>): string[] | undefined {
+    const rules = this.catalogue.observations?.filter((entry) => entry.tag === tag);
+    if (!rules?.length) return;
+    const local = override ? copyAudienceTags({ ...this.audienceTags, ...override }) : this.audienceTags;
+    return rules.flatMap((entry) => matchesAudience(entry.selector, local) ? [entry.audienceId] : []).sort();
   }
 
   /** S17: the experiment that splits a slot — the per-prompt one by tag, else the legacy single one (it covers every slot), else null. */
@@ -353,12 +373,14 @@ export class ManagedAgent {
   /** The run as SSE: iterate the deltas, await `result`. */
   async stream(tag: string, variables: Record<string, string>, options: ManagedRunOptions = {}): Promise<ManagedRunStream> {
     const subjectHash = this.subjectHashFor(options.subject, tag);
+    const audienceIds = this.audienceIdsFor(tag, options.tags);
     const filledVariables = await this.fillForRun(tag, variables, options.subject, options.signal);
     const body = JSON.stringify({
       tag,
       variables: filledVariables,
       stream: true,
       ...(subjectHash ? { subjectHash } : {}),
+      ...(audienceIds ? { audienceIds } : {}),
       ...(options.stepId ? { stepId: options.stepId } : {}),
       ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
       ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),

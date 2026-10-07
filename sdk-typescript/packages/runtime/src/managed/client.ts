@@ -91,7 +91,7 @@ export interface ManagedCatalogue {
   target: string;
   generation: number;
   releaseDigest: string;
-  capabilities?: readonly "catalogue_generation"[];
+  capabilities?: readonly string[];
   slots: readonly ManagedSlot[];
   /** The legacy single experiment (it covers every slot); S17: the first of `experiments` when the catalogue lists them. */
   experiment: { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null;

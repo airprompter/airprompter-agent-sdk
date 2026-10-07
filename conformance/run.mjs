@@ -108,6 +108,8 @@ section("OpenAPI hosted compatibility instances");
   const oldCatalogue = { agentId: "agent-1", target: "prod", generation: 1, releaseDigest: `sha256:${"a".repeat(64)}`, slots: [], experiment: null };
   if (validateOldCatalogue(oldCatalogue)) ok("an older catalogue without capabilities remains valid");
   else fail("older catalogue without capabilities", ajv.errorsText(validateOldCatalogue.errors));
+  if (validateOldCatalogue({ ...oldCatalogue, capabilities: ["future_feature"] })) ok("unknown hosted capabilities remain valid and ignorable");
+  else fail("unknown hosted capability", ajv.errorsText(validateOldCatalogue.errors));
 }
 
 // ---------------------------------------------------------------------------

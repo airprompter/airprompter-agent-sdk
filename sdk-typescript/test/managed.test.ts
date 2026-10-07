@@ -157,6 +157,16 @@ test("an older catalogue does not advertise the generation handshake, so 0.4.1 r
   assert.equal("catalogueGeneration" in JSON.parse(calls[1]!.init.body!), false);
 });
 
+test("unknown hosted capabilities are ignored while catalogue_generation alone gates the request field", async () => {
+  const { fetch, calls } = fakeFetch([
+    () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, capabilities: ["future_feature"] }) }),
+    () => ({ status: 200, body: RUN_SSE, stream: true }),
+  ]);
+  const agent = await ManagedAgent.start({ agentId: "agent-1", target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example", fetch });
+  await agent.run("support.triage", { team: "Billing", ticket: "x" });
+  assert.equal("catalogueGeneration" in JSON.parse(calls[1]!.init.body!), false);
+});
+
 test("stream() yields deltas in order and resolves result; an error frame after the head rejects result with the route's code", async () => {
   const { agent } = await startWith([() => ({ status: 200, body: RUN_SSE, stream: true }), () => ({ status: 200, body: sse([["delta", { delta: "Prio" }], ["error", { error: "the model is unavailable right now; retry", code: "model_unavailable", retryAfterSeconds: 5 }]]), stream: true })]);
   const stream = await agent.stream("support.triage", { team: "Billing", ticket: "x" });

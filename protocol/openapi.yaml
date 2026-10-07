@@ -786,12 +786,12 @@ components:
           type: string
           pattern: "^sha256:[0-9a-f]{64}$"
         capabilities:
-          description: Hosted-run request features this route accepts. Older catalogues omit the field, so SDKs omit the corresponding request members.
+          description: Hosted-run request features this route accepts. SDKs ignore unknown names; older catalogues omit the field, so SDKs omit the corresponding request members. `catalogue_generation` gates `catalogueGeneration`.
           type: array
           uniqueItems: true
           items:
             type: string
-            enum: [catalogue_generation]
+            pattern: "^[a-z][a-z0-9_]{0,63}$"
         slots:
           type: array
           items:

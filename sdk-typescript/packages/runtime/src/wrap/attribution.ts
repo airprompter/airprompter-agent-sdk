@@ -1,25 +1,11 @@
 /**
- * Which rendered prompt a provider call belongs to (T33, D65). A wrapped
- * client sees only the call's parameters; three things can name the slot:
+ * Which rendered prompt a provider call belongs to. A caller can supply an explicit async scope with
+ * `ap.attribute(rendered, fn)`, or a wrapped provider can match request text against the bounded registry of recent
+ * render hashes. A miss passes through without telemetry; ambiguous artifact/version/arm/audience identities require
+ * explicit scope. Content is read only to hash it and is never retained. Repeated renders of the same durable identity
+ * remain matchable when their minute changes.
  *
- *   1. an explicit scope — `ap.attribute(rendered, () => openai.chat.completions.create(...))`
- *      (`AsyncLocalStorage`, so it follows the call through awaits);
- *   2. the rendered text itself — every `render()` registers the SHA-256 of
- *      its text; a request whose system / instructions / message text is
- *      exactly one of the last renders is that render's call;
- *   3. nothing — the call is passed through untouched and never guessed at.
- *
- * Content is read here only to be hashed: the registry keeps hashes and
- * dimension names, never a prompt.
- *
- * @example
- * ```ts
- * const registry = new RenderRegistry(); // the last 256 renders, by text hash
- * registry.register(r.text, { tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model });
- * // What a wrapped client asks on every call: the enclosing scope first, then the request's own text.
- * const attribution = currentAttribution() ?? registry.match(requestTexts(params)); // undefined: pass the call through
- * withAttribution({ tag, versionId, arm, model }, () => openai.chat.completions.create(params)); // follows the call through awaits
- * ```
+ * @example `registry.register(rendered.text, attribution); registry.match(requestTexts(params));`
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -29,6 +15,7 @@ import { createHash } from "node:crypto";
 export interface Attribution {
   audienceIds?: readonly string[];
   runMinute?: string;
+  artifactId?: string;
   tag: string;
   versionId: string;
   arm: string;
@@ -83,12 +70,7 @@ export class RenderRegistry {
 
 const REQUEST_TEXT_FIELDS = ["system", "instructions", "messages", "input", "prompt"] as const;
 
-/**
- * Every string a request carries where a rendered prompt could be, most
- * likely first: `system` / `instructions` (Anthropic, Responses), then the
- * messages (`messages`, Responses `input`, AI SDK `prompt`) in order — a
- * string, or the `text` of content parts. Never throws on an odd shape.
- */
+/** Finds candidate prompt strings in common provider request shapes. */
 export function requestTexts(params: unknown): string[] {
   const out: string[] = [];
   if (typeof params !== "object" || params === null) return out;

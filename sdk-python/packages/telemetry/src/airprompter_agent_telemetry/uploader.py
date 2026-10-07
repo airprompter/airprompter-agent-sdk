@@ -102,14 +102,14 @@ def validate_spool_row(value: Any) -> RowVerdict:
     """One parsed line against the contract. The reason names the first field that does not fit — never the value."""
     if not isinstance(value, Mapping):
         return RowVerdict(False, "not_an_object")
-    if value.get("v") != 1 and not (value.get("v") == 2 and value.get("type") == "window"):
+    if value.get("v") != 1 and not (value.get("v") in (2,3) and value.get("type") == "window"):
         return RowVerdict(False, "v")
     instance_id = value.get("instanceId")
     if not _is_str(instance_id, 64) or not _INSTANCE_ID.match(instance_id):
         return RowVerdict(False, "instanceId")
     kind = value.get("type")
     if kind == "window":
-        extra = _extra_key(value, (("audienceIds", "outcomeRunMinute") if value.get("v") == 2 else ()) + ("type", "v", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "latencyMs", "tokens", "checks", "outcomes", "sdk"))
+        extra = _extra_key(value, (("audienceIds", "outcomeRunMinute") if value.get("v") in (2,3) else ()) + (("artifactId",) if value.get("v") == 3 else ()) + ("type", "v", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "latencyMs", "tokens", "checks", "outcomes", "sdk"))
         if extra:
             return RowVerdict(False, f"unknown_field:{extra}")
         if not _is_str(value.get("minute"), 64) or not _DATE_TIME.match(value["minute"]):
@@ -120,7 +120,7 @@ def validate_spool_row(value: Any) -> RowVerdict:
             return RowVerdict(False, "tag")
         if not _is_str(value.get("versionId"), 128):
             return RowVerdict(False, "versionId")
-        if not _is_str(value.get("arm"), 32) or not (re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*",value["arm"]) if value.get("v") == 2 else _ARM.match(value["arm"])):
+        if not _is_str(value.get("arm"), 32) or not (re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*",value["arm"]) if value.get("v") in (2,3) else _ARM.match(value["arm"])):
             return RowVerdict(False, "arm")
         if not _is_str(value.get("model"), 128):
             return RowVerdict(False, "model")
@@ -150,8 +150,11 @@ def validate_spool_row(value: Any) -> RowVerdict:
             for name, entry in outcomes.items():
                 if not _OUTCOME_NAME.match(name) or not isinstance(entry, Mapping) or _extra_key(entry, ("n", "sum")) or not _is_int(entry.get("n")) or not isinstance(entry.get("sum"), (int, float)) or isinstance(entry.get("sum"), bool) or not math.isfinite(entry["sum"]):
                     return RowVerdict(False, f"outcomes:{name}")
-        if value.get("v") == 2:
-            if not valid_audience_ids(value.get("audienceIds")): return RowVerdict(False,"audienceIds")
+        if value.get("v") in (2,3):
+            if value.get("v") == 3 and (not _is_str(value.get("artifactId"),128) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",value["artifactId"])): return RowVerdict(False,"artifactId")
+            ids = value.get("audienceIds")
+            if value.get("v") == 2 and ids is None: return RowVerdict(False,"audienceIds")
+            if ids is not None and not valid_audience_ids(ids): return RowVerdict(False,"audienceIds")
             def minute(v):
                 if not isinstance(v,str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z",v): return False
                 try: instant(v); return True
@@ -853,4 +856,3 @@ class SpoolUploader:
             "reclaimedSegments": self._reclaimed_segments,
             "capEvictedFiles": self._cap_evicted_files,
         }
-

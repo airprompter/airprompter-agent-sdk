@@ -100,15 +100,17 @@ export type RowVerdict = { ok: true; row: SpoolRow } | { ok: false; reason: stri
 /** One parsed line against the contract. The reason names the first field that does not fit — never the value. */
 export function validateSpoolRow(value: unknown): RowVerdict {
   if (!isObject(value)) return { ok: false, reason: "not_an_object" };
-  if (value.v !== 1 && !(value.v === 2 && value.type === "window")) return { ok: false, reason: "v" };
+  if (value.v !== 1 && !((value.v === 2 || value.v === 3) && value.type === "window")) return { ok: false, reason: "v" };
   if (!isString(value.instanceId, 64) || !INSTANCE_ID.test(value.instanceId)) return { ok: false, reason: "instanceId" };
   switch (value.type) {
     case "window": {
-      const extra = onlyKeys(value, [...(value.v === 2 ? ["audienceIds", "outcomeRunMinute"] : []), "type", "v", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "latencyMs", "tokens", "checks", "outcomes", "sdk"]);
+      const extra = onlyKeys(value, [...(value.v === 2 || value.v === 3 ? ["audienceIds", "outcomeRunMinute"] : []), ...(value.v === 3 ? ["artifactId"] : []), "type", "v", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "latencyMs", "tokens", "checks", "outcomes", "sdk"]);
       if (extra) return { ok: false, reason: `unknown_field:${extra}` };
-      if (value.v === 2) {
+      if (value.v === 2 || value.v === 3) {
+        if (value.v === 3 && (!isString(value.artifactId, 128) || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.artifactId))) return {ok:false,reason:"artifactId"};
         const ids = value.audienceIds;
-        if (!Array.isArray(ids) || ids.length > 8 || !ids.every((id,i) => typeof id === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(id) && (i === 0 || ids[i-1] < id))) return {ok:false,reason:"audienceIds"};
+        if (value.v === 2 && !Array.isArray(ids)) return {ok:false,reason:"audienceIds"};
+        if (ids !== undefined && (!Array.isArray(ids) || ids.length > 8 || !ids.every((id,i) => typeof id === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(id) && (i === 0 || ids[i-1] < id)))) return {ok:false,reason:"audienceIds"};
         const minute = validAudienceMinute;
         if (!minute(value.minute) || (value.outcomeRunMinute !== undefined && (!minute(value.outcomeRunMinute) || Date.parse(value.outcomeRunMinute) > Date.parse(value.minute)))) return {ok:false,reason:"outcomeRunMinute"};
         if (value.count === 0 && (value.outcomeRunMinute === undefined || !isObject(value.outcomes) || Object.keys(value.outcomes).length === 0)) return {ok:false,reason:"outcomeRunMinute"};
@@ -121,7 +123,7 @@ export function validateSpoolRow(value: unknown): RowVerdict {
       if (value.instanceClass !== "resident" && value.instanceClass !== "ephemeral") return { ok: false, reason: "instanceClass" };
       if (!isString(value.tag, 128) || !TAG.test(value.tag)) return { ok: false, reason: "tag" };
       if (!isString(value.versionId, 128)) return { ok: false, reason: "versionId" };
-      if (!isString(value.arm, 32) || !(value.v === 2 ? /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/ : ARM).test(value.arm)) return { ok: false, reason: "arm" };
+      if (!isString(value.arm, 32) || !(value.v === 2 || value.v === 3 ? /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/ : ARM).test(value.arm)) return { ok: false, reason: "arm" };
       if (!isString(value.model, 128)) return { ok: false, reason: "model" };
       if (value.status !== "ok" && value.status !== "error" && value.status !== "refused") return { ok: false, reason: "status" };
       if (value.errorClass !== undefined && value.errorClass !== null && !(typeof value.errorClass === "string" && ERROR_CLASSES.has(value.errorClass))) return { ok: false, reason: "errorClass" };
@@ -142,7 +144,7 @@ export function validateSpoolRow(value: unknown): RowVerdict {
           if (!OUTCOME_NAME.test(name) || !isObject(entry) || onlyKeys(entry, ["n", "sum"]) || !isNonNegativeInt(entry.n) || typeof entry.sum !== "number" || !Number.isFinite(entry.sum)) return { ok: false, reason: `outcomes:${name}` };
         }
       }
-      if (value.v === 2 && (value.latencyMs as {buckets:number[]}).buckets.reduce((sum,n)=>sum+n,0) !== value.count) return {ok:false,reason:"histogram"};
+      if ((value.v === 2 || value.v === 3) && (value.latencyMs as {buckets:number[]}).buckets.reduce((sum,n)=>sum+n,0) !== value.count) return {ok:false,reason:"histogram"};
       if (value.sdk !== undefined && !isString(value.sdk, 64)) return { ok: false, reason: "sdk" };
       return { ok: true, row: value as unknown as SpoolRow };
     }

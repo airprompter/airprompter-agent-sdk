@@ -67,6 +67,52 @@ test("feedback.json: the catalogue normaliser", () => {
 const T0 = Date.parse("2026-09-12T14:03:10Z");
 const observation: Observation = { tag: "a.b", versionId: "v1", arm: "none", model: "m", status: "ok", latencyMs: 10 };
 
+test("artifact-aware windows reject non-canonical artifact identities from the shared vectors", () => {
+  const writer = new SpoolWriter(new MemorySink(), { instanceId: "i-testinstance", instanceClass: "resident", sdk: "t/0" });
+  for (const c of vector("spool.json").invalidArtifactIds) {
+    assert.throws(() => writer.observe({ ...observation, artifactId: c.artifactId }, T0), new RegExp(c.reason), c.name);
+  }
+});
+
+test("v2 and v3 outcomes without a run minute require an open measured run", () => {
+  const sink = new MemorySink();
+  const writer = new SpoolWriter(sink, { instanceId: "i-testinstance", instanceClass: "resident", sdk: "t/0" });
+  const audienceIds = ["aud_AAAAAAAAAAAAAAAAAAAAAA"];
+  const dimensions = { tag: observation.tag, versionId: observation.versionId, arm: observation.arm, model: observation.model };
+
+  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha" }, { thumbs: true }, T0);
+  writer.outcomes({ ...dimensions, audienceIds }, { thumbs: false }, T0);
+  writer.closeWindows(T0);
+  assert.deepEqual(sink.drain(), [], "unattributed outcomes cannot create zero-run v2/v3 rows");
+
+  writer.observe({ ...observation, artifactId: "prm_support_alpha" }, T0);
+  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha" }, { thumbs: true }, T0);
+  writer.observe({ ...observation, audienceIds }, T0);
+  writer.outcomes({ ...dimensions, audienceIds }, { thumbs: false }, T0);
+  writer.closeWindows(T0);
+  const rows = sink.drain().filter((row): row is WindowRow => row.type === "window");
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => [row.v, row.count, row.outcomes?.thumbs]), [
+    [3, 1, { n: 1, sum: 1 }],
+    [2, 1, { n: 1, sum: 0 }],
+  ]);
+});
+
+test("outcome attribution rejects invalid minutes, legacy minutes, and malformed audience ids", () => {
+  const sink = new MemorySink();
+  const writer = new SpoolWriter(sink, { instanceId: "i-testinstance", instanceClass: "resident", sdk: "t/0" });
+  const dimensions = { tag: observation.tag, versionId: observation.versionId, arm: observation.arm, model: observation.model };
+  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha", outcomeRunMinute: "not-a-minute" }, { thumbs: true }, T0);
+  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha", outcomeRunMinute: "2026-02-30T14:03:00Z" }, { thumbs: true }, T0);
+  writer.outcomes({ ...dimensions, outcomeRunMinute: minuteOf(T0) }, { thumbs: true }, T0);
+  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha", audienceIds: ["raw-device-value"], outcomeRunMinute: minuteOf(T0) }, { thumbs: true }, T0);
+  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha", outcomeRunMinute: minuteOf(T0 + 60_000) }, { thumbs: true }, T0);
+  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha", outcomeRunMinute: minuteOf(T0) }, { "Bad-Name": 1 }, T0);
+  writer.closeWindows(T0);
+  assert.deepEqual(sink.drain(), []);
+  assert.throws(() => writer.observe({ ...observation, audienceIds: ["raw-device-value"] }, T0), /telemetry_audience_ids_invalid/);
+});
+
 test("on disk: 0600 files, .open until closed, quarantine/ and exported/ present, a segment per minute, no plaintext-bearing field", () => {
   const dir = mkdtempSync(join(tmpdir(), "ap-spool-"));
   const sink = new DirectorySink(dir, "i-testinstance");

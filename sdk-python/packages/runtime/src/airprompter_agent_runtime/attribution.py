@@ -43,6 +43,7 @@ class Attribution:
     inference: Optional[Mapping[str, Any]] = None
     audience_ids: Optional[tuple[str,...]] = None
     run_minute: Optional[str] = None
+    artifact_id: Optional[str] = None
 
 
 _scope: contextvars.ContextVar[Optional[Attribution]] = contextvars.ContextVar("airprompter_attribution", default=None)
@@ -79,7 +80,26 @@ class RenderRegistry:
         key = hash_text(text)
         with self._lock:
             previous = self._entries.get(key)
-            ambiguous = key in self._entries and (previous is None or ((getattr(previous,"audience_ids",None) is not None or getattr(attribution,"audience_ids",None) is not None) and (previous.tag, previous.version_id, previous.arm, previous.audience_ids, previous.run_minute) != (attribution.tag, attribution.version_id, attribution.arm, attribution.audience_ids, attribution.run_minute)))
+            previous_artifact = getattr(previous, "artifact_id", None)
+            artifact = getattr(attribution, "artifact_id", None)
+            previous_audience = getattr(previous, "audience_ids", None)
+            audience = getattr(attribution, "audience_ids", None)
+            previous_cohort = (
+                getattr(previous, "tag", None),
+                previous_artifact,
+                getattr(previous, "version_id", None),
+                getattr(previous, "arm", None),
+                previous_audience,
+            )
+            cohort = (
+                getattr(attribution, "tag", None),
+                artifact,
+                getattr(attribution, "version_id", None),
+                getattr(attribution, "arm", None),
+                audience,
+            )
+            tracked = previous_artifact is not None or artifact is not None or previous_audience is not None or audience is not None
+            ambiguous = key in self._entries and (previous is None or (tracked and previous_cohort != cohort))
             self._entries.pop(key, None)
             self._entries[key] = None if ambiguous else attribution
             while len(self._entries) > self._capacity:

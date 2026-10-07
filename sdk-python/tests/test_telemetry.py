@@ -22,6 +22,7 @@ from airprompter_agent.integrations.anthropic import messages_create, messages_c
 from airprompter_agent.integrations.litellm import AirPrompterLiteLLMCallback, litellm_metadata
 from airprompter_agent.integrations.openai import chat_completion, chat_completion_async, responses_create
 from airprompter_agent_core.protocol.trust import public_jwk_of
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref
 from airprompter_agent_runtime.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
 
 from .control_plane import FakeControlPlane
@@ -202,10 +203,12 @@ def test_openai_wrappers(agent):
     async_client = FakeAsyncOpenAI()
     asyncio.run(chat_completion_async(agent, rendered, async_client, messages=[], system_from_rendered=False))
     assert async_client.calls[0][1]["messages"] == []
+    assert agent.feedback(rendered.run_ref, rating=5, model="gpt-5-mini")
     windows = _windows(agent)
     by_model = {w["model"]: w for w in windows}
     assert by_model["gpt-5"]["count"] == 2 and by_model["gpt-5"]["tokens"] == {"input": 60, "cachedInput": 40, "output": 10}
     assert by_model["gpt-5-mini"]["count"] == 1 and by_model["gpt-5-mini"]["tokens"]["input"] == 30
+    assert by_model["gpt-5-mini"]["outcomes"] == {"rating": {"n": 1, "sum": 5}}
     assert "Billing" not in str(windows) and "refund" not in str(windows)
 
 
@@ -243,3 +246,35 @@ def test_litellm_callback(agent):
     failed = next(w for w in windows if w["status"] == "error")
     assert ok["count"] == 2 and ok["tokens"] == {"input": 200, "output": 40} and ok["latencyMs"]["sum"] == 1624
     assert failed["errorClass"] == "provider_rate_limited" and failed["count"] == 1
+    assert all(w["v"] == 3 and w["artifactId"] == rendered.artifact_id for w in windows)
+
+
+def test_litellm_callback_preserves_authenticated_audience_dimensions(agent):
+    run_ref = mint_run_ref(RunRefFacts("agt_1", "prod", "support.triage", "ver_targeted", "candidate", 7, 42, ("aud_AAAAAAAAAAAAAAAAAAAAAA",), "2026-09-12T14:03:00Z", "prm_targeted", "gpt-5"), agent._run_ref_key)
+    metadata = {"airprompter": {"tag": "untrusted", "versionId": "untrusted", "runRef": run_ref}}
+    start = dt.datetime(2026, 9, 12, 14, 3, 10)
+    AirPrompterLiteLLMCallback(agent).log_success_event({"model": "gpt-5-mini", "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
+    assert agent.feedback(run_ref, rating=5, model="gpt-5-mini")
+    windows = _windows(agent)
+    assert all((window["artifactId"], window["tag"], window["versionId"], window["arm"], window["model"]) == ("prm_targeted", "support.triage", "ver_targeted", "candidate", "gpt-5-mini") for window in windows)
+    assert all(window["audienceIds"] == ["aud_AAAAAAAAAAAAAAAAAAAAAA"] for window in windows)
+    measured = next(window for window in windows if window["count"] == 1)
+    feedback = next(window for window in windows if window.get("outcomes"))
+    assert measured["tokens"] == {"input": 3, "output": 2}
+    assert feedback["count"] == 0 and feedback["outcomes"] == {"rating": {"n": 1, "sum": 5}}
+
+
+def test_litellm_callback_rejects_forged_cohort_attribution(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    start = dt.datetime(2026, 9, 12, 14, 3, 10)
+    response = {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}
+    forged = {"airprompter": {"tag": "forged", "versionId": "forged", "runRef": "forged.token", "artifactId": "prm_forged", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "runMinute": "2026-09-12T14:03:00Z"}}
+    callback.log_success_event({"model": "gpt-5", "litellm_params": {"metadata": forged}}, response, start, start + dt.timedelta(milliseconds=5))
+    assert _windows(agent) == []
+
+    unsigned = {"airprompter": {"tag": "support.legacy", "versionId": "ver_legacy", "arm": "none", "model": "gpt-5", "artifactId": "prm_forged", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "runMinute": "2026-09-12T14:03:00Z"}}
+    callback.log_success_event({"model": "gpt-5-mini", "litellm_params": {"metadata": unsigned}}, response, start, start + dt.timedelta(milliseconds=5))
+    windows = _windows(agent)
+    assert len(windows) == 1
+    assert (windows[0]["tag"], windows[0]["versionId"], windows[0]["model"]) == ("support.legacy", "ver_legacy", "gpt-5-mini")
+    assert "artifactId" not in windows[0] and "audienceIds" not in windows[0] and "runMinute" not in windows[0]

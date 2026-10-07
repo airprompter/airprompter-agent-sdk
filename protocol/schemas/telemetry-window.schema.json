@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://airprompter.com/protocol/telemetry-window/1",
   "title": "Telemetry window row (draft 1)",
-  "description": "One minute of one dimension set. Content-free by schema: additionalProperties is false everywhere, and no field can carry prompt text, model output or end-user identifiers. v2 requires opaque audience memberships; delayed feedback is a zero-run row naming its authenticated original run minute. Cross-field sums, sort order and timestamps are semantic conformance checks.",
+  "description": "One minute of one dimension set. Content-free by schema: additionalProperties is false everywhere, and no field can carry prompt text, model output or end-user identifiers. v2 preserves legacy audience membership; v3 requires stable prompt artifact identity and may also carry audience membership. Delayed feedback is a zero-run row naming its authenticated original run minute. Cross-field sums, sort order and timestamps are semantic conformance checks.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -28,7 +28,8 @@
     "v": {
       "enum": [
         1,
-        2
+        2,
+        3
       ]
     },
     "minute": {
@@ -214,6 +215,13 @@
       "type": "string",
       "format": "date-time",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:00(?:\\.000)?Z$"
+    },
+    "artifactId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "Stable Team prompt artifact identity. Required for v3 so version ordinals cannot merge across prompts that occupied the same slot."
     }
   },
   "allOf": [
@@ -221,7 +229,10 @@
       "if": {
         "properties": {
           "v": {
-            "const": 2
+            "enum": [
+              2,
+              3
+            ]
           }
         },
         "required": [
@@ -230,9 +241,7 @@
         "type": "object"
       },
       "then": {
-        "required": [
-          "audienceIds"
-        ],
+        "required": [],
         "properties": {
           "minute": {
             "type": "string",
@@ -246,6 +255,47 @@
           }
         },
         "allOf": [
+          {
+            "if": {
+              "properties": {
+                "v": {
+                  "const": 2
+                }
+              },
+              "required": [
+                "v"
+              ],
+              "type": "object"
+            },
+            "then": {
+              "required": [
+                "audienceIds"
+              ],
+              "not": {
+                "required": [
+                  "artifactId"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "v": {
+                  "const": 3
+                }
+              },
+              "required": [
+                "v"
+              ],
+              "type": "object"
+            },
+            "then": {
+              "required": [
+                "artifactId"
+              ]
+            }
+          },
           {
             "if": {
               "properties": {
@@ -326,6 +376,12 @@
             {
               "required": [
                 "outcomeRunMinute"
+              ],
+              "type": "object"
+            },
+            {
+              "required": [
+                "artifactId"
               ],
               "type": "object"
             }

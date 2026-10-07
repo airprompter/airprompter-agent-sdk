@@ -41,6 +41,7 @@ class Observation:
     run_minute: Optional[str] = None
     audience_ids: Optional[tuple[str, ...]] = None
     outcome_run_minute: Optional[str] = None
+    artifact_id: Optional[str] = None
 
     @classmethod
     def from_wire(cls, row: Mapping[str, Any]) -> "Observation":
@@ -59,6 +60,7 @@ class Observation:
             outcomes=row.get("outcomes"),
             audience_ids=tuple(row["audienceIds"]) if "audienceIds" in row else None,
             outcome_run_minute=row.get("outcomeRunMinute"),
+            artifact_id=row.get("artifactId"),
         )
 
 

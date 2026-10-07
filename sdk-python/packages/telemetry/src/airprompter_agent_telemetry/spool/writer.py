@@ -1,7 +1,8 @@
 """The spool writer (``protocol/spool-format.md``, D52/D66).
 
 Minute windows accumulate in memory per dimension set
-``(tag, versionId, arm, model, status, errorClass)`` and are written as
+``(tag, artifactId, versionId, arm, model, status, errorClass, audienceIds,
+outcomeRunMinute)`` and are written as
 ``window`` rows when the minute closes. Segments are append-only NDJSON
 under ``<store>/spool/telemetry/``, open as
 ``seg-<inst>-<epochMinute>-<n>.ndjson.open``, closed by fsync + rename;
@@ -31,6 +32,7 @@ from typing import Any, Callable, Mapping, Optional, Union
 
 from airprompter_agent_core._util import fsync_dir, iso_seconds, now_ms
 from airprompter_agent_core.ports import FsPort, fs_failure_code, fs_or_default
+from airprompter_agent_core.protocol.assignment import valid_audience_ids, valid_audience_instant
 from .manifest import manifest_name_of, write_segment_manifest
 from airprompter_agent_core.telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
 
@@ -42,6 +44,15 @@ HOST_SPOOL_BUDGET_BYTES = 100 * 1024 * 1024
 #: A serverless invocation keeps this much in memory; beyond it the oldest rows go and a ``dropped`` row says so.
 SERVERLESS_BUFFER_BYTES = 256 * 1024
 _OUTCOME_NAME = re.compile(r"^[a-z][a-zA-Z0-9]{0,31}$")
+_OUTCOME_MINUTE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z$")
+
+
+def _valid_outcome_run_minute(value: Any) -> bool:
+    return isinstance(value, str) and bool(_OUTCOME_MINUTE.fullmatch(value)) and valid_audience_instant(value)
+
+
+def _has_valid_outcome(outcomes: Mapping[str, Union[int, float, bool]]) -> bool:
+    return any(_OUTCOME_NAME.fullmatch(name) and (isinstance(value, bool) or isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)) for name, value in outcomes.items())
 
 
 def _row_bytes(row: Mapping[str, Any]) -> bytes:
@@ -394,17 +405,27 @@ class SpoolWriter:
         self._open_minute: Optional[str] = None
         self._lock = threading.RLock()
 
-    def _window(self, *, tag: str, version_id: str, arm: str, model: str, status: str, error_class: Optional[str], usage_source: Optional[str], at_ms: float, audience_ids: Optional[tuple[str,...]] = None, outcome_run_minute: Optional[str] = None, run_minute: Optional[str] = None) -> SpoolRow:
-        minute = minute_of(at_ms) if outcome_run_minute else run_minute or minute_of(at_ms)
+    def _window(self, *, tag: str, version_id: str, artifact_id: Optional[str] = None, arm: str, model: str, status: str, error_class: Optional[str], usage_source: Optional[str], at_ms: float, audience_ids: Optional[tuple[str,...]] = None, outcome_run_minute: Optional[str] = None, run_minute: Optional[str] = None) -> SpoolRow:
+        minute = minute_of(at_ms)
+        if artifact_id is not None and (not isinstance(artifact_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", artifact_id)):
+            raise ValueError("telemetry_artifact_id_invalid")
+        if audience_ids is not None and not valid_audience_ids(audience_ids):
+            raise ValueError("telemetry_audience_ids_invalid")
+        if outcome_run_minute is not None and ((artifact_id is None and audience_ids is None) or not _valid_outcome_run_minute(outcome_run_minute) or outcome_run_minute > minute):
+            raise ValueError("telemetry_outcome_run_minute_invalid")
+        # Measurements belong to the minute they complete. Reopening a sealed render minute would emit the same
+        # ingest SET key twice and lose the earlier aggregate. Feedback carries its original run minute separately.
         if self._open_minute is not None and self._open_minute != minute:
             self.close_windows(at_ms)
         self._open_minute = minute
-        key = json.dumps([tag,version_id,arm,model,status,error_class,audience_ids,outcome_run_minute],separators=(",", ":"))
+        outcome_key = None if outcome_run_minute == minute else outcome_run_minute
+        key = json.dumps([tag,artifact_id,version_id,arm,model,status,error_class,audience_ids,outcome_key],separators=(",", ":"))
         row = self._open.get(key)
         if row is None:
             row = {
                 "type": "window",
-                "v": 2 if audience_ids is not None else 1,
+                "v": 3 if artifact_id is not None else 2 if audience_ids is not None else 1,
+                **({"artifactId": artifact_id} if artifact_id is not None else {}),
                 **({"audienceIds": list(audience_ids)} if audience_ids is not None else {}),
                 **({"outcomeRunMinute": outcome_run_minute} if outcome_run_minute else {}),
                 "minute": minute,
@@ -427,7 +448,9 @@ class SpoolWriter:
 
     def observe(self, observation: Observation, at_ms: float) -> None:
         with self._lock:
-            row = self._window(tag=observation.tag, version_id=observation.version_id, arm=observation.arm, model=observation.model, status=observation.status, error_class=observation.error_class, usage_source=observation.usage_source, at_ms=at_ms, audience_ids=observation.audience_ids,run_minute=observation.run_minute)
+            row = self._window(tag=observation.tag, version_id=observation.version_id, artifact_id=observation.artifact_id, arm=observation.arm, model=observation.model, status=observation.status, error_class=observation.error_class, usage_source=observation.usage_source, at_ms=at_ms, audience_ids=observation.audience_ids,run_minute=observation.run_minute)
+            if row.get("outcomeRunMinute") == row["minute"]:
+                row.pop("outcomeRunMinute")
             row["count"] += 1
             bucket = latency_bucket_index(observation.latency_ms)
             row["latencyMs"]["buckets"][bucket] += 1
@@ -444,27 +467,45 @@ class SpoolWriter:
             if observation.outcomes:
                 _merge_outcomes(row, observation.outcomes)
 
-    def checks(self, *, tag: str, version_id: str, arm: str, model: str, passed: int, failed: int, at_ms: float, audience_ids: Optional[tuple[str,...]] = None, run_minute: Optional[str] = None) -> None:
+    def checks(self, *, tag: str, version_id: str, artifact_id: Optional[str] = None, arm: str, model: str, passed: int, failed: int, at_ms: float, audience_ids: Optional[tuple[str,...]] = None, run_minute: Optional[str] = None) -> None:
         """T29: output-check counts against a run already counted (an app that evaluated after the fact): the run's window, no extra count."""
         with self._lock:
-            if audience_ids is not None:
-                # Audience v2 rejects checks-only zero-run rows. Update only the still-open measured cohort row.
-                minute = run_minute or minute_of(at_ms)
+            if audience_ids is not None or artifact_id is not None:
+                # Audience v2 and artifact-aware v3 reject checks-only zero-run rows. Update only the open measured row.
+                minute = minute_of(at_ms)
                 if self._open_minute != minute: return
-                key = json.dumps([tag,version_id,arm,model,"ok",None,audience_ids,None],separators=(",", ":"))
+                key = json.dumps([tag,artifact_id,version_id,arm,model,"ok",None,audience_ids,None],separators=(",", ":"))
                 row = self._open.get(key)
                 if row is None or row["count"] == 0: return
                 current = row.get("checks") or {"passed": 0, "failed": 0}
                 row["checks"] = {"passed": current["passed"] + passed, "failed": current["failed"] + failed}
                 return
-            row = self._window(tag=tag, version_id=version_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms)
+            row = self._window(tag=tag, version_id=version_id, artifact_id=artifact_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms)
             current = row.get("checks") or {"passed": 0, "failed": 0}
             row["checks"] = {"passed": current["passed"] + passed, "failed": current["failed"] + failed}
 
-    def outcomes(self, *, tag: str, version_id: str, arm: str, model: str, outcomes: Mapping[str, Union[int, float, bool]], at_ms: float, audience_ids: Optional[tuple[str,...]] = None, outcome_run_minute: Optional[str] = None) -> None:
+    def outcomes(self, *, tag: str, version_id: str, artifact_id: Optional[str] = None, arm: str, model: str, outcomes: Mapping[str, Union[int, float, bool]], at_ms: float, audience_ids: Optional[tuple[str,...]] = None, outcome_run_minute: Optional[str] = None) -> None:
         """Quality signals against a run already counted: they ride on the run's window (status ok) and never add to ``count``."""
         with self._lock:
-            _merge_outcomes(self._window(tag=tag, version_id=version_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms, audience_ids=audience_ids,outcome_run_minute=outcome_run_minute), outcomes)
+            if not _has_valid_outcome(outcomes):
+                return
+            if audience_ids is not None and not valid_audience_ids(audience_ids):
+                return
+            if outcome_run_minute is not None and ((artifact_id is None and audience_ids is None) or not _valid_outcome_run_minute(outcome_run_minute) or outcome_run_minute > minute_of(at_ms)):
+                return
+            if (audience_ids is not None or artifact_id is not None) and outcome_run_minute is None:
+                # Audience v2 and artifact-aware v3 forbid feedback-only zero-run rows without an authenticated run
+                # minute. Same-minute feedback may attach to an open measured row when the caller did not retain it.
+                minute = minute_of(at_ms)
+                if self._open_minute != minute:
+                    return
+                key = json.dumps([tag,artifact_id,version_id,arm,model,"ok",None,audience_ids,None],separators=(",", ":"))
+                row = self._open.get(key)
+                if row is None or row["count"] == 0:
+                    return
+                _merge_outcomes(row, outcomes)
+                return
+            _merge_outcomes(self._window(tag=tag, version_id=version_id, artifact_id=artifact_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms, audience_ids=audience_ids,outcome_run_minute=outcome_run_minute), outcomes)
 
     def refusal(self, *, at: str, reason: str, generation: int, tag: Optional[str], at_ms: float) -> None:
         self._sink.append({"type": "refusal", "v": 1, "instanceId": self._identity.instance_id, "at": at, "reason": reason, "generation": generation, "tag": tag}, at_ms)

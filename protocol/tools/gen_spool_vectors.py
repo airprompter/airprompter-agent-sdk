@@ -20,6 +20,23 @@ PROTOCOL = open(os.path.join(HERE, "..", "VERSION"), encoding="utf-8").read().st
 EDGES = json.load(open(os.path.join(HERE, "..", "schemas", "latency-buckets.json"), encoding="utf-8"))["edges"]
 SEGMENT_MAX_BYTES = 1024 * 1024
 OUTCOME_NAME = re.compile(r"^[a-z][a-zA-Z0-9]{0,31}$")
+OUTCOME_MINUTE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z$")
+ARTIFACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+def valid_outcome_run_minute(value):
+    if not isinstance(value, str) or not OUTCOME_MINUTE.fullmatch(value) or value.startswith("0000-"):
+        return False
+    try:
+        dt.datetime(int(value[0:4]), int(value[5:7]), int(value[8:10]), int(value[11:13]), int(value[14:16]), tzinfo=dt.timezone.utc)
+        return True
+    except (ValueError, OverflowError):
+        return False
+
+def valid_audience_ids(value):
+    return isinstance(value, (list, tuple)) and len(value) <= 8 and all(isinstance(item, str) and re.fullmatch(r"aud_[A-Za-z0-9_-]{22}", item) and (index == 0 or value[index - 1] < item) for index, item in enumerate(value))
+
+def has_valid_outcome(outcomes):
+    return any(OUTCOME_NAME.fullmatch(name) and (isinstance(value, bool) or isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)) for name, value in outcomes.items())
 
 # ----------------------------------------------------------------------------- pure functions
 
@@ -71,27 +88,39 @@ class Aggregator:
         self.open_minute = None
         self.emitted = []
 
-    def _window(self, at: int, tag, version_id, arm, model, status, error_class, usage_source):
+    def _window(self, at: int, tag, version_id, arm, model, status, error_class, usage_source, *, artifact_id=None, audience_ids=None, outcome_run_minute=None, run_minute=None):
         minute = minute_of(at)
+        if artifact_id is not None and (not isinstance(artifact_id, str) or not ARTIFACT_ID.fullmatch(artifact_id)):
+            raise ValueError("telemetry_artifact_id_invalid")
+        if audience_ids is not None and not valid_audience_ids(audience_ids):
+            raise ValueError("telemetry_audience_ids_invalid")
+        if outcome_run_minute is not None and ((artifact_id is None and audience_ids is None) or not valid_outcome_run_minute(outcome_run_minute) or outcome_run_minute > minute):
+            raise ValueError("telemetry_outcome_run_minute_invalid")
         if self.open_minute is not None and self.open_minute != minute:
             self.close(at)
         self.open_minute = minute
-        key = (tag, version_id, arm, model, status, error_class)
+        outcome_key = None if outcome_run_minute == minute else outcome_run_minute
+        key = (tag, artifact_id, version_id, arm, model, status, error_class, tuple(audience_ids) if audience_ids is not None else None, outcome_key)
         row = self.open.get(key)
         if row is None:
             row = {
-                "type": "window", "v": 1, "minute": minute,
+                "type": "window", "v": 3 if artifact_id is not None else 2 if audience_ids is not None else 1, "minute": minute,
                 "instanceId": self.identity[0], "instanceClass": self.identity[1],
                 "tag": tag, "versionId": version_id, "arm": arm, "model": model, "status": status,
                 "errorClass": error_class, "usageSource": usage_source or "reported", "count": 0,
                 "latencyMs": {"buckets": [0] * len(EDGES), "sum": 0}, "tokens": {"input": 0, "output": 0},
                 "sdk": self.identity[2],
             }
+            if artifact_id is not None: row["artifactId"] = artifact_id
+            if audience_ids is not None: row["audienceIds"] = list(audience_ids)
+            if outcome_run_minute is not None: row["outcomeRunMinute"] = outcome_run_minute
             self.open[key] = row
         return row
 
     def observe(self, at: int, o: dict):
-        row = self._window(at, o["tag"], o["versionId"], o["arm"], o["model"], o["status"], o.get("errorClass"), o.get("usageSource"))
+        row = self._window(at, o["tag"], o["versionId"], o["arm"], o["model"], o["status"], o.get("errorClass"), o.get("usageSource"), artifact_id=o.get("artifactId"), audience_ids=o.get("audienceIds"), run_minute=o.get("runMinute"))
+        if row.get("outcomeRunMinute") == row["minute"]:
+            row.pop("outcomeRunMinute")
         row["count"] += 1
         row["latencyMs"]["buckets"][bucket_index(o["latencyMs"])] += 1
         row["latencyMs"]["sum"] += max(0, int(math.floor(o["latencyMs"] + 0.5)))  # half up, as the format says
@@ -108,7 +137,23 @@ class Aggregator:
             merge_outcomes(row, o["outcomes"])
 
     def outcomes(self, at: int, f: dict):
-        merge_outcomes(self._window(at, f["tag"], f["versionId"], f["arm"], f["model"], "ok", None, None), f["outcomes"])
+        if not has_valid_outcome(f["outcomes"]):
+            return
+        if "audienceIds" in f and not valid_audience_ids(f["audienceIds"]):
+            return
+        if "outcomeRunMinute" in f and (("artifactId" not in f and "audienceIds" not in f) or not valid_outcome_run_minute(f["outcomeRunMinute"]) or f["outcomeRunMinute"] > minute_of(at)):
+            return
+        if ("audienceIds" in f or "artifactId" in f) and "outcomeRunMinute" not in f:
+            minute = minute_of(at)
+            if self.open_minute != minute:
+                return
+            key = (f["tag"], f.get("artifactId"), f["versionId"], f["arm"], f["model"], "ok", None, tuple(f["audienceIds"]) if "audienceIds" in f else None, None)
+            row = self.open.get(key)
+            if row is None or row["count"] == 0:
+                return
+            merge_outcomes(row, f["outcomes"])
+            return
+        merge_outcomes(self._window(at, f["tag"], f["versionId"], f["arm"], f["model"], "ok", None, None, artifact_id=f.get("artifactId"), audience_ids=f.get("audienceIds"), outcome_run_minute=f.get("outcomeRunMinute")), f["outcomes"])
 
     def close(self, at: int):
         self.emitted.extend(self.open.values())
@@ -267,6 +312,47 @@ def spool_vectors():
             {"kind": "observe", "at": T0 + 6, "observation": ok(latencyMs=9, usageSource="estimated")},
             {"kind": "close", "at": T0 + 10},
         ]),
+        windows("prompt artifacts split otherwise equal versions", "artifactId is a v3 dimension: two Team prompts that both have version 1 never merge after a slot changes prompts", [
+            {"kind": "observe", "at": T0, "observation": ok(artifactId="prm_support_alpha", versionId="ver_1", latencyMs=10)},
+            {"kind": "observe", "at": T0 + 1, "observation": ok(artifactId="prm_support_beta", versionId="ver_1", latencyMs=20)},
+            {"kind": "close", "at": T0 + 2},
+        ]),
+        windows("artifact-aware delayed feedback", "v3 delayed feedback keeps the stable prompt identity and original run minute without requiring an observed audience", [
+            {"kind": "feedback", "at": T0 + 60000, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
+            {"kind": "close", "at": T0 + 60001},
+        ]),
+        windows("artifact feedback in its run minute merges", "an authenticated run minute equal to the filing minute is normalized onto the observed v3 window, including when feedback arrives first", [
+            {"kind": "feedback", "at": T0, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
+            {"kind": "observe", "at": T0 + 1, "observation": ok(artifactId="prm_support_alpha", latencyMs=10)},
+            {"kind": "close", "at": T0 + 2},
+        ]),
+        windows("unattributed v2 and v3 feedback is ignored", "audience- or artifact-aware feedback cannot create a zero-run row without an authenticated outcomeRunMinute", [
+            {"kind": "feedback", "at": T0, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomes": {"thumbs": True}}},
+            {"kind": "feedback", "at": T0 + 1, "feedback": {**triage, "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "outcomes": {"thumbs": False}}},
+            {"kind": "close", "at": T0 + 2},
+        ]),
+        windows("invalid outcome attribution is ignored", "writers refuse malformed or impossible run minutes, a run minute on legacy v1, and non-opaque audience ids before a row is created", [
+            {"kind": "feedback", "at": T0, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": "not-a-minute", "outcomes": {"thumbs": True}}},
+            {"kind": "feedback", "at": T0 + 1, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": "2026-02-30T14:03:00Z", "outcomes": {"thumbs": True}}},
+            {"kind": "feedback", "at": T0 + 2, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
+            {"kind": "feedback", "at": T0 + 3, "feedback": {**triage, "artifactId": "prm_support_alpha", "audienceIds": ["raw-device-value"], "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
+            {"kind": "feedback", "at": T0 + 4, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": minute_of(T0 + 60000), "outcomes": {"thumbs": True}}},
+            {"kind": "feedback", "at": T0 + 5, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": minute_of(T0), "outcomes": {"Bad-Name": 1}}},
+            {"kind": "close", "at": T0 + 6},
+        ]),
+        windows("same-minute v2 and v3 feedback finds measured runs", "without outcomeRunMinute, audience- or artifact-aware feedback may attach only to an already measured matching run in the open minute", [
+            {"kind": "observe", "at": T0, "observation": ok(artifactId="prm_support_alpha", latencyMs=10)},
+            {"kind": "feedback", "at": T0 + 1, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomes": {"thumbs": True}}},
+            {"kind": "observe", "at": T0 + 2, "observation": ok(audienceIds=["aud_AAAAAAAAAAAAAAAAAAAAAA"], latencyMs=20)},
+            {"kind": "feedback", "at": T0 + 3, "feedback": {**triage, "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "outcomes": {"thumbs": False}}},
+            {"kind": "close", "at": T0 + 4},
+        ]),
+        windows("late completion never reopens a sealed minute", "runMinute is feedback attribution only; observations aggregate by completion minute so a sealed SET key is never replaced", [
+            {"kind": "observe", "at": T0, "observation": ok(artifactId="prm_support_alpha", runMinute=minute_of(T0), latencyMs=10)},
+            {"kind": "close", "at": T0 + 1},
+            {"kind": "observe", "at": T0 + 60000, "observation": ok(artifactId="prm_support_alpha", runMinute=minute_of(T0), latencyMs=20)},
+            {"kind": "close", "at": T0 + 60001},
+        ]),
         windows("the minute turns", "an observation in a new minute closes every open window first; the new minute's windows close at the explicit close", [
             {"kind": "observe", "at": T0, "observation": ok(latencyMs=100)},
             {"kind": "observe", "at": T0 + 49999, "observation": ok(latencyMs=200)},
@@ -312,6 +398,12 @@ def spool_vectors():
         "minutes": minutes,
         "segmentNames": names,
         "rotation": rotations,
+        "invalidArtifactIds": [
+            {"name": "empty", "artifactId": "", "reason": "telemetry_artifact_id_invalid"},
+            {"name": "unicode", "artifactId": "prm_😀", "reason": "telemetry_artifact_id_invalid"},
+            {"name": "slash", "artifactId": "prm/support", "reason": "telemetry_artifact_id_invalid"},
+            {"name": "leading punctuation", "artifactId": "_prm_support", "reason": "telemetry_artifact_id_invalid"},
+        ],
         "windows": window_cases,
     }
 

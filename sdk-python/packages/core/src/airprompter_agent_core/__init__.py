@@ -64,7 +64,7 @@ from .telemetry.feedback import NormalizedFeedback, normalize_feedback
 from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
-PROTOCOL_VERSION = "1.0.0"
+PROTOCOL_VERSION = "1.1.0"
 
 
 def protocol_at_least(version: str, floor: str) -> bool:

@@ -1,5 +1,5 @@
 {
-  "protocol": "1.0.0",
+  "protocol": "1.1.0",
   "cases": [
     {
       "name": "all devices without tags",
@@ -36,7 +36,8 @@
         "conditions": [
           {
             "key": "device_id",
-            "value": "device-042"
+            "value": "device-042",
+            "operator": "is"
           }
         ]
       },
@@ -54,7 +55,8 @@
         "conditions": [
           {
             "key": "device_id",
-            "value": ""
+            "value": "",
+            "operator": "is"
           }
         ]
       },
@@ -70,7 +72,8 @@
         "conditions": [
           {
             "key": "device_id",
-            "value": ""
+            "value": "",
+            "operator": "is"
           }
         ]
       },
@@ -88,7 +91,8 @@
         "conditions": [
           {
             "key": "region",
-            "value": "West"
+            "value": "West",
+            "operator": "is"
           }
         ]
       },
@@ -106,7 +110,8 @@
         "conditions": [
           {
             "key": "device_id",
-            "value": " d42 "
+            "value": " d42 ",
+            "operator": "is"
           }
         ]
       },
@@ -124,11 +129,13 @@
         "conditions": [
           {
             "key": "region",
-            "value": "west"
+            "value": "west",
+            "operator": "is"
           },
           {
             "key": "device_id",
-            "value": "d42"
+            "value": "d42",
+            "operator": "is"
           }
         ]
       },
@@ -147,11 +154,13 @@
         "conditions": [
           {
             "key": "region",
-            "value": "west"
+            "value": "west",
+            "operator": "is"
           },
           {
             "key": "device_id",
-            "value": "d42"
+            "value": "d42",
+            "operator": "is"
           }
         ]
       },
@@ -169,11 +178,13 @@
         "conditions": [
           {
             "key": "region",
-            "value": "west"
+            "value": "west",
+            "operator": "is"
           },
           {
             "key": "region",
-            "value": "east"
+            "value": "east",
+            "operator": "is"
           }
         ]
       },
@@ -191,11 +202,13 @@
         "conditions": [
           {
             "key": "region",
-            "value": "west"
+            "value": "west",
+            "operator": "is"
           },
           {
             "key": "device_id",
-            "value": "d42"
+            "value": "d42",
+            "operator": "is"
           }
         ]
       },
@@ -213,7 +226,8 @@
         "conditions": [
           {
             "key": "機器",
-            "value": "café"
+            "value": "café",
+            "operator": "is"
           }
         ]
       },
@@ -231,7 +245,8 @@
         "conditions": [
           {
             "key": "name",
-            "value": "café"
+            "value": "café",
+            "operator": "is"
           }
         ]
       },
@@ -249,7 +264,8 @@
         "conditions": [
           {
             "key": "__proto__",
-            "value": "field"
+            "value": "field",
+            "operator": "is"
           }
         ]
       },
@@ -278,11 +294,13 @@
         "conditions": [
           {
             "key": "region",
-            "value": "west"
+            "value": "west",
+            "operator": "is"
           },
           {
             "key": "region",
-            "value": "west"
+            "value": "west",
+            "operator": "is"
           }
         ]
       },
@@ -291,23 +309,25 @@
       "matches": false
     },
     {
-      "name": "contradictory all refused",
+      "name": "same tag exact contradiction is valid but does not match",
       "selector": {
         "mode": "tags",
         "match": "all",
         "conditions": [
           {
             "key": "region",
-            "value": "west"
+            "value": "west",
+            "operator": "is"
           },
           {
             "key": "region",
-            "value": "east"
+            "value": "east",
+            "operator": "is"
           }
         ]
       },
       "tags": {},
-      "valid": false,
+      "valid": true,
       "matches": false
     },
     {
@@ -328,7 +348,8 @@
         "conditions": [
           {
             "key": "id",
-            "value": 42
+            "value": 42,
+            "operator": "is"
           }
         ]
       },
@@ -344,71 +365,88 @@
         "conditions": [
           {
             "key": "k0",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k1",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k2",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k3",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k4",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k5",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k6",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k7",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k8",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k9",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k10",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k11",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k12",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k13",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k14",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k15",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           },
           {
             "key": "k16",
-            "value": "v"
+            "value": "v",
+            "operator": "is"
           }
         ]
       },
@@ -417,14 +455,261 @@
       "matches": false
     },
     {
-      "name": "UTF16 key bound",
+      "name": "same tag contains both values",
       "selector": {
         "mode": "tags",
         "match": "all",
         "conditions": [
           {
-            "key": "🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀",
-            "value": "x"
+            "key": "roles",
+            "value": "admin",
+            "operator": "contains"
+          },
+          {
+            "key": "roles",
+            "value": "billing",
+            "operator": "contains"
+          }
+        ]
+      },
+      "tags": {
+        "roles": "billing-admin"
+      },
+      "valid": true,
+      "matches": true
+    },
+    {
+      "name": "device prefix contains",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "device_id",
+            "operator": "contains",
+            "value": "device-"
+          }
+        ]
+      },
+      "tags": {
+        "device_id": "device-042"
+      },
+      "valid": true,
+      "matches": true
+    },
+    {
+      "name": "contains remains case sensitive",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "region",
+            "operator": "contains",
+            "value": "West"
+          }
+        ]
+      },
+      "tags": {
+        "region": "northwest"
+      },
+      "valid": true,
+      "matches": false
+    },
+    {
+      "name": "contains missing key",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "device_id",
+            "operator": "contains",
+            "value": "042"
+          }
+        ]
+      },
+      "tags": {},
+      "valid": true,
+      "matches": false
+    },
+    {
+      "name": "condition missing key refused",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "operator": "is",
+            "value": "west"
+          }
+        ]
+      },
+      "tags": {
+        "region": "west"
+      },
+      "valid": false,
+      "matches": false
+    },
+    {
+      "name": "condition missing value refused",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "region",
+            "operator": "is"
+          }
+        ]
+      },
+      "tags": {
+        "region": "west"
+      },
+      "valid": false,
+      "matches": false
+    },
+    {
+      "name": "unknown operator refused",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "device_id",
+            "operator": "starts_with",
+            "value": "device-"
+          }
+        ]
+      },
+      "tags": {
+        "device_id": "device-042"
+      },
+      "valid": false,
+      "matches": false
+    },
+    {
+      "name": "empty contains refused",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "device_id",
+            "operator": "contains",
+            "value": ""
+          }
+        ]
+      },
+      "tags": {
+        "device_id": "device-042"
+      },
+      "valid": false,
+      "matches": false
+    },
+    {
+      "name": "unpaired surrogate selector refused",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "device_id",
+            "operator": "is",
+            "value": "\ud800"
+          }
+        ]
+      },
+      "tags": {
+        "device_id": "unit-7"
+      },
+      "valid": false,
+      "matches": false
+    },
+    {
+      "name": "unpaired surrogate local tag refused",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "device_id",
+            "operator": "is",
+            "value": "unit-7"
+          }
+        ]
+      },
+      "tags": {
+        "device_id": "\ud800"
+      },
+      "valid": true,
+      "matches": false
+    },
+    {
+      "name": "astral key at scalar limit",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "operator": "is",
+            "value": "unit-7"
+          }
+        ]
+      },
+      "tags": {
+        "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀": "unit-7"
+      },
+      "valid": true,
+      "matches": true
+    },
+    {
+      "name": "astral key over scalar limit refused",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "operator": "is",
+            "value": "unit-7"
+          }
+        ]
+      },
+      "tags": {},
+      "valid": false,
+      "matches": false
+    },
+    {
+      "name": "astral value at scalar limit",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "device.id",
+            "operator": "is",
+            "value": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+          }
+        ]
+      },
+      "tags": {
+        "device.id": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "valid": true,
+      "matches": true
+    },
+    {
+      "name": "astral value over scalar limit refused",
+      "selector": {
+        "mode": "tags",
+        "match": "all",
+        "conditions": [
+          {
+            "key": "device.id",
+            "operator": "is",
+            "value": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
           }
         ]
       },
@@ -481,6 +766,18 @@
       "kind": "instant",
       "value": "2026-02-30T12:00:00Z",
       "valid": false
+    },
+    {
+      "name": "key rejects unpaired surrogate",
+      "kind": "key",
+      "value": "\ud800",
+      "valid": false
+    },
+    {
+      "name": "label rejects unpaired surrogate",
+      "kind": "label",
+      "value": "\ud800",
+      "valid": false
     }
   ],
   "manifests": [
@@ -488,7 +785,7 @@
       "name": "signed major-1 audience accepted",
       "manifest": {
         "payload": {
-          "protocol": "1.0.0",
+          "protocol": "1.1.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -527,7 +824,8 @@
                   "conditions": [
                     {
                       "key": "device_id",
-                      "value": "device-042"
+                      "value": "device-042",
+                      "operator": "is"
                     }
                   ]
                 }
@@ -561,7 +859,7 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v1"
+            "audience_v2"
           ],
           "observations": [
             {
@@ -572,7 +870,8 @@
                 "conditions": [
                   {
                     "key": "device_id",
-                    "value": "device-042"
+                    "value": "device-042",
+                    "operator": "is"
                   }
                 ]
               },
@@ -583,9 +882,9 @@
         },
         "signatures": [
           {
-            "keyId": "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9",
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "slIaAz--io_UkIUMAbwVkDZhX-WQJ4DUuw01WBcFHBQDd1vGHjHtwvLs1PWMP7MwkrE37UupFX-Ld6m7G7oZLg"
+            "sig": "KEcnp6hFHmIrPOcbW_Gk7Umx1Gd3Y0pED2z5tU79--MGRmUhZfr1YHyUP5zO6oqFHNh6-or8ruNq3lmbzyv-RQ"
           }
         ],
         "countersignatures": []
@@ -599,37 +898,37 @@
           "version": 1,
           "expires": "2027-12-11T00:00:00Z",
           "keys": {
-            "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
               "keyType": "ecdsa-p256",
               "scheme": "ES256",
               "publicKey": {
                 "kty": "EC",
                 "crv": "P-256",
-                "x": "Mp5rRJkvVUlnliv-AhBpvJC6V6AYavyJ2DLZLjLqie0",
-                "y": "IMgoDso2yTVS1QsCjfZSUO0L1Wjvvk8OpwsKd1DiCmo"
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
               }
             },
-            "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9": {
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
               "keyType": "ecdsa-p256",
               "scheme": "ES256",
               "publicKey": {
                 "kty": "EC",
                 "crv": "P-256",
-                "x": "nYE65Vw3EI5zmZprJeXRhsTmn9cI-qFniHiYZvtfieY",
-                "y": "fCj66ndYqsxvZCykdm1hbiEnI7OrKt0FhVi5b6JgA_4"
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
               }
             }
           },
           "roles": {
             "root": {
               "keyIds": [
-                "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2"
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
               ],
               "threshold": 1
             },
             "targets": {
               "keyIds": [
-                "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9"
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
               ],
               "threshold": 1
             }
@@ -637,9 +936,9 @@
         },
         "signatures": [
           {
-            "keyId": "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2",
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "tGFTXvVC6We2TuFMsSTm_KFDltJUD9mNbr3oJrP2WvI0mCjPTL8lV-7VHc5F7TPjtuKRz4dW_8spXS4a3QZZkA"
+            "sig": "qNEzM45JUYmTUnkX-j0vKFnZq3EevF-nDOZWMJjhar6LsG9QPcm7sofV08Vbs8ccCP1QLnfc16-awKLInpWwng"
           }
         ]
       },
@@ -652,13 +951,14 @@
       "storedGeneration": 0,
       "expected": {
         "ok": true
-      }
+      },
+      "schemaOk": true
     },
     {
       "name": "unsafe minor audience refused",
       "manifest": {
         "payload": {
-          "protocol": "0.4.0",
+          "protocol": "1.2.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -697,7 +997,8 @@
                   "conditions": [
                     {
                       "key": "device_id",
-                      "value": "device-042"
+                      "value": "device-042",
+                      "operator": "is"
                     }
                   ]
                 }
@@ -731,7 +1032,7 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v1"
+            "audience_v2"
           ],
           "observations": [
             {
@@ -742,7 +1043,8 @@
                 "conditions": [
                   {
                     "key": "device_id",
-                    "value": "device-042"
+                    "value": "device-042",
+                    "operator": "is"
                   }
                 ]
               },
@@ -753,9 +1055,9 @@
         },
         "signatures": [
           {
-            "keyId": "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9",
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "slIaAz--io_UkIUMAbwVkDZhX-WQJ4DUuw01WBcFHBQDd1vGHjHtwvLs1PWMP7MwkrE37UupFX-Ld6m7G7oZLg"
+            "sig": "ztU9IFevMRxJpcya8f09pXhGUEGqoT0UpcqPyoCf2w95yO-BjOt31ZnfdDiTp8s_wIuYnyi48YYVFhSFZ5hcgw"
           }
         ],
         "countersignatures": []
@@ -769,37 +1071,37 @@
           "version": 1,
           "expires": "2027-12-11T00:00:00Z",
           "keys": {
-            "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
               "keyType": "ecdsa-p256",
               "scheme": "ES256",
               "publicKey": {
                 "kty": "EC",
                 "crv": "P-256",
-                "x": "Mp5rRJkvVUlnliv-AhBpvJC6V6AYavyJ2DLZLjLqie0",
-                "y": "IMgoDso2yTVS1QsCjfZSUO0L1Wjvvk8OpwsKd1DiCmo"
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
               }
             },
-            "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9": {
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
               "keyType": "ecdsa-p256",
               "scheme": "ES256",
               "publicKey": {
                 "kty": "EC",
                 "crv": "P-256",
-                "x": "nYE65Vw3EI5zmZprJeXRhsTmn9cI-qFniHiYZvtfieY",
-                "y": "fCj66ndYqsxvZCykdm1hbiEnI7OrKt0FhVi5b6JgA_4"
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
               }
             }
           },
           "roles": {
             "root": {
               "keyIds": [
-                "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2"
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
               ],
               "threshold": 1
             },
             "targets": {
               "keyIds": [
-                "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9"
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
               ],
               "threshold": 1
             }
@@ -807,9 +1109,9 @@
         },
         "signatures": [
           {
-            "keyId": "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2",
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "tGFTXvVC6We2TuFMsSTm_KFDltJUD9mNbr3oJrP2WvI0mCjPTL8lV-7VHc5F7TPjtuKRz4dW_8spXS4a3QZZkA"
+            "sig": "tkqzOx21lRHF4E5rf9TPiu6c_tXHKs9vZyqWeX_joBYU3W8eTvC2LckoqbZVEBcp_-ZUyG9IDzvy-bM117L2tg"
           }
         ]
       },
@@ -829,6 +1131,1076 @@
       "name": "unnegotiated audience refused",
       "manifest": {
         "payload": {
+          "protocol": "1.1.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "match": "all",
+                  "conditions": [
+                    {
+                      "key": "device_id",
+                      "value": "device-042",
+                      "operator": "is"
+                    }
+                  ]
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+              "selector": {
+                "mode": "tags",
+                "match": "all",
+                "conditions": [
+                  {
+                    "key": "device_id",
+                    "value": "device-042",
+                    "operator": "is"
+                  }
+                ]
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-09-12T14:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "Z8mMP5Y2vLsucs5qHSJrUwKAbZIp0O5h-8a5DUQML13B5hnaxbBP5kl8OwS1xIC3dYNXTqy-jST8Ml7gP55MXQ"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "EvJLH9x2LY2387BrGvainUyTdzB_jyAwC8FQY-3BveCeR1_6qIYomSpBg8H0VWrbs-IYZAMBSgrMJtuxcM3xQg"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      }
+    },
+    {
+      "name": "unknown capability refused",
+      "manifest": {
+        "payload": {
+          "protocol": "1.1.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "match": "all",
+                  "conditions": [
+                    {
+                      "key": "device_id",
+                      "value": "device-042",
+                      "operator": "is"
+                    }
+                  ]
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "requiredCapabilities": [
+            "audience_v3"
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+              "selector": {
+                "mode": "tags",
+                "match": "all",
+                "conditions": [
+                  {
+                    "key": "device_id",
+                    "value": "device-042",
+                    "operator": "is"
+                  }
+                ]
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-09-12T14:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "XgJE0VVicBkj5qyUEDEOp95rtta6K4PaWP68kD4T902F2yZnu-eTcpaMn-4IwVjMt2DTY4_iC0v5PmXwVLOYUQ"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "JNJPs0al4YlfvJvNK1ndPJvDEM7DCjp0srMpChaMAx9kKVR6jsrli4xAQnjgwB0EcdpVxSR5TnyLEUNOlj5aqw"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      }
+    },
+    {
+      "name": "unknown observation id refused",
+      "manifest": {
+        "payload": {
+          "protocol": "1.1.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "match": "all",
+                  "conditions": [
+                    {
+                      "key": "device_id",
+                      "value": "device-042",
+                      "operator": "is"
+                    }
+                  ]
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "requiredCapabilities": [
+            "audience_v2"
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB",
+              "selector": {
+                "mode": "tags",
+                "match": "all",
+                "conditions": [
+                  {
+                    "key": "device_id",
+                    "value": "device-042",
+                    "operator": "is"
+                  }
+                ]
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-09-12T14:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "OVqYndvzumqqCHKEbnKU52AZVy1mBmBrR-dDgLsTJbYr7xnzQl-UpO5mQ5d3RJQTIupObqlxHZ6iXqs1QIVzuw"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "BJEJswYITK8t1ffVFufZ0HIOITAc77IahU4jQ2KrPICsMlI3JOU22OuN4z_P7qL3KlTIrWo_syaXrfhbrkKDMQ"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      }
+    },
+    {
+      "name": "impossible calendar observation refused",
+      "manifest": {
+        "payload": {
+          "protocol": "1.1.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "match": "all",
+                  "conditions": [
+                    {
+                      "key": "device_id",
+                      "value": "device-042",
+                      "operator": "is"
+                    }
+                  ]
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "requiredCapabilities": [
+            "audience_v2"
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+              "selector": {
+                "mode": "tags",
+                "match": "all",
+                "conditions": [
+                  {
+                    "key": "device_id",
+                    "value": "device-042",
+                    "operator": "is"
+                  }
+                ]
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-02-30T12:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "6N-M3a9MryNOHgzr4-K9rhy1on8UktzWFb6Rvd2TpnIyb60kM9lMMbT4KV8cdR_D99pql8pyK52lg9w_DtqkrA"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "uJVfPbrSaZptvZVz3l13nSU93wWY14PvKgafEwsjnq401I8_zj-wK2IkCiZAUx_2QEHlENd1tLUplJOrBR2-DA"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      }
+    },
+    {
+      "name": "selector tampering fails signature",
+      "manifest": {
+        "payload": {
+          "protocol": "1.1.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "match": "all",
+                  "conditions": [
+                    {
+                      "key": "device_id",
+                      "value": "different-device",
+                      "operator": "is"
+                    }
+                  ]
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "requiredCapabilities": [
+            "audience_v2"
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+              "selector": {
+                "mode": "tags",
+                "match": "all",
+                "conditions": [
+                  {
+                    "key": "device_id",
+                    "value": "different-device",
+                    "operator": "is"
+                  }
+                ]
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-09-12T14:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "KEcnp6hFHmIrPOcbW_Gk7Umx1Gd3Y0pED2z5tU79--MGRmUhZfr1YHyUP5zO6oqFHNh6-or8ruNq3lmbzyv-RQ"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "xVmPmtP8wRpprLVVPyO-U9k6-8G9TZpJm5keUtjfxvid3nT8xX419OJs0KjOxcmTr_Ze92Rj7yT6WkBKz0slhg"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "signature_invalid"
+      }
+    },
+    {
+      "name": "protocol 1.1 without audience capability refused",
+      "manifest": {
+        "payload": {
+          "protocol": "1.1.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": []
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "GKynddmK_w5vHiRg2im3UeuP2i2S4qa85_jcIqt00STyhDsDKCkxRXHi-WVx422oDkt_DDJF2fm7cKK69sGvFA"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "okTGJ7Uo0swSttdLNu53faFaVWfvFTrAodD122D-P6Z7MrO77cwdbUVlpKF9MLLWHqQuuZmwjZTHrvTtXW_cLQ"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      }
+    },
+    {
+      "name": "unknown protocol 1.2 without fields refused",
+      "manifest": {
+        "payload": {
+          "protocol": "1.2.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": []
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "Zcfhd3ZG6jAoUCVw0TxTd-Iyk-DMLGHeAAJFV33QClXIDmHPgVBMLYVQ6skdoukidLncnPUaFXLT2kkw7lPsVw"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "Eq37DvbBRO4_X7i4-YYvWil-qy-xwRAuP7AtsGZKbf_7Vl7nr8wZEvCvayIWn-tRxLsCkznc-YDAznOScD0NsA"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      }
+    },
+    {
+      "name": "legacy protocol 1.0 audience accepted",
+      "manifest": {
+        "payload": {
           "protocol": "1.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
@@ -901,6 +2273,9 @@
               ]
             }
           ],
+          "requiredCapabilities": [
+            "audience_v1"
+          ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
@@ -921,9 +2296,9 @@
         },
         "signatures": [
           {
-            "keyId": "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9",
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "slIaAz--io_UkIUMAbwVkDZhX-WQJ4DUuw01WBcFHBQDd1vGHjHtwvLs1PWMP7MwkrE37UupFX-Ld6m7G7oZLg"
+            "sig": "QR_aO2p8tBcGWd38gk2mOLpBDSdp2Lpn4N7_Nb6gLk4UxNs2RQ86jdt_iHkjWgXXvTlrWImdlZFUsx2edTDNpw"
           }
         ],
         "countersignatures": []
@@ -937,37 +2312,37 @@
           "version": 1,
           "expires": "2027-12-11T00:00:00Z",
           "keys": {
-            "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
               "keyType": "ecdsa-p256",
               "scheme": "ES256",
               "publicKey": {
                 "kty": "EC",
                 "crv": "P-256",
-                "x": "Mp5rRJkvVUlnliv-AhBpvJC6V6AYavyJ2DLZLjLqie0",
-                "y": "IMgoDso2yTVS1QsCjfZSUO0L1Wjvvk8OpwsKd1DiCmo"
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
               }
             },
-            "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9": {
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
               "keyType": "ecdsa-p256",
               "scheme": "ES256",
               "publicKey": {
                 "kty": "EC",
                 "crv": "P-256",
-                "x": "nYE65Vw3EI5zmZprJeXRhsTmn9cI-qFniHiYZvtfieY",
-                "y": "fCj66ndYqsxvZCykdm1hbiEnI7OrKt0FhVi5b6JgA_4"
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
               }
             }
           },
           "roles": {
             "root": {
               "keyIds": [
-                "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2"
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
               ],
               "threshold": 1
             },
             "targets": {
               "keyIds": [
-                "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9"
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
               ],
               "threshold": 1
             }
@@ -975,9 +2350,182 @@
         },
         "signatures": [
           {
-            "keyId": "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2",
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "tGFTXvVC6We2TuFMsSTm_KFDltJUD9mNbr3oJrP2WvI0mCjPTL8lV-7VHc5F7TPjtuKRz4dW_8spXS4a3QZZkA"
+            "sig": "hHts6wZv_hrOG-XuebNLBn8itYghkIMu7nfkRvQArW1EHdCMs49bpL-tUKGkoO6l1DtbhQdDNuDjJvWCK8JtKg"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": true
+      },
+      "schemaOk": true
+    },
+    {
+      "name": "legacy protocol 1.0 with operator refused",
+      "manifest": {
+        "payload": {
+          "protocol": "1.0.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "match": "all",
+                  "conditions": [
+                    {
+                      "key": "device_id",
+                      "value": "device-042",
+                      "operator": "is"
+                    }
+                  ]
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "requiredCapabilities": [
+            "audience_v1"
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+              "selector": {
+                "mode": "tags",
+                "match": "all",
+                "conditions": [
+                  {
+                    "key": "device_id",
+                    "value": "device-042",
+                    "operator": "is"
+                  }
+                ]
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-09-12T14:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "TmJOt0dVXZFOmvMp6pkJwhxGB_z6EYHSyyHZMnS_oCli2kY_Wm6Diu_6YebfPE1vn-lJhaB9aKZ9GtrrrZZ7KA"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "dNZwr1QOGn6RYqyF9BNHjytTnjU4z0PrjQvRcTYOibO4NjmT9KUCPyqHdmoOFkornldsOjVKeV-nVfke0iRwww"
           }
         ]
       },
@@ -991,13 +2539,350 @@
       "expected": {
         "ok": false,
         "reason": "protocol_unsupported"
-      }
+      },
+      "schemaOk": false
     },
     {
-      "name": "unknown capability refused",
+      "name": "legacy protocol 1.0 non-list conditions refused",
       "manifest": {
         "payload": {
           "protocol": "1.0.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "match": "all",
+                  "conditions": {}
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "requiredCapabilities": [
+            "audience_v1"
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+              "selector": {
+                "mode": "tags",
+                "match": "all",
+                "conditions": {}
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-09-12T14:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "GHyLA1h-DDG56oHqySVBQBfr2A5O1RRjqVZSTCR1YsQ302Q8taaBhKhqweETqPNuHEegz-xWLz0lch-Ca9pZZg"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "bZTtuH2CP8Jj5HrAR7PhSf_z-uATfI4Yxpbftq1uKvBTxJ5-_oNDl7cDZ8mU3dVjHKlCZ31sjHvBgwjVDMGNLQ"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      },
+      "schemaOk": false
+    },
+    {
+      "name": "protocol 1.1 match any refused",
+      "manifest": {
+        "payload": {
+          "protocol": "1.1.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "match": "any",
+                  "conditions": [
+                    {
+                      "key": "device_id",
+                      "value": "device-042",
+                      "operator": "is"
+                    }
+                  ]
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "requiredCapabilities": [
+            "audience_v2"
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+              "selector": {
+                "mode": "tags",
+                "match": "any",
+                "conditions": [
+                  {
+                    "key": "device_id",
+                    "value": "device-042",
+                    "operator": "is"
+                  }
+                ]
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-09-12T14:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "VEEsS1pI4c7ztznT7bXcSW3qqVBUdnOLkOJ2CHh7sYLZFLx_lFkJv0-0TGVbGBiRIPRzAMuEcX5RN89YKAu0gw"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "5KCdl1guf8nOnySKWtTOKOnkkYL7L8hFfWDuDP_qMqYrqonBK8XViJ9X7Ch0Dn1gT1zA4h6YbJW1k4V-Qn7DKA"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      },
+      "schemaOk": false
+    },
+    {
+      "name": "protocol 1.1 missing operator refused",
+      "manifest": {
+        "payload": {
+          "protocol": "1.1.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -1092,626 +2977,9 @@
         },
         "signatures": [
           {
-            "keyId": "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9",
-            "alg": "ES256",
-            "sig": "slIaAz--io_UkIUMAbwVkDZhX-WQJ4DUuw01WBcFHBQDd1vGHjHtwvLs1PWMP7MwkrE37UupFX-Ld6m7G7oZLg"
-          }
-        ],
-        "countersignatures": []
-      },
-      "root": {
-        "signed": {
-          "type": "root",
-          "protocol": "1.0.0",
-          "purpose": "platform",
-          "environment": "prod",
-          "version": 1,
-          "expires": "2027-12-11T00:00:00Z",
-          "keys": {
-            "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "Mp5rRJkvVUlnliv-AhBpvJC6V6AYavyJ2DLZLjLqie0",
-                "y": "IMgoDso2yTVS1QsCjfZSUO0L1Wjvvk8OpwsKd1DiCmo"
-              }
-            },
-            "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "nYE65Vw3EI5zmZprJeXRhsTmn9cI-qFniHiYZvtfieY",
-                "y": "fCj66ndYqsxvZCykdm1hbiEnI7OrKt0FhVi5b6JgA_4"
-              }
-            }
-          },
-          "roles": {
-            "root": {
-              "keyIds": [
-                "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2"
-              ],
-              "threshold": 1
-            },
-            "targets": {
-              "keyIds": [
-                "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9"
-              ],
-              "threshold": 1
-            }
-          }
-        },
-        "signatures": [
-          {
-            "keyId": "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2",
-            "alg": "ES256",
-            "sig": "tGFTXvVC6We2TuFMsSTm_KFDltJUD9mNbr3oJrP2WvI0mCjPTL8lV-7VHc5F7TPjtuKRz4dW_8spXS4a3QZZkA"
-          }
-        ]
-      },
-      "now": "2026-09-12T14:03:10Z",
-      "scope": {
-        "organizationId": "org_1",
-        "agentId": "agt_1",
-        "target": "prod"
-      },
-      "storedGeneration": 0,
-      "expected": {
-        "ok": false,
-        "reason": "protocol_unsupported"
-      }
-    },
-    {
-      "name": "unknown observation id refused",
-      "manifest": {
-        "payload": {
-          "protocol": "1.0.0",
-          "organizationId": "org_1",
-          "agentId": "agt_1",
-          "target": "prod",
-          "generation": 1,
-          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-          "issuedAt": "2026-10-05T02:23:52.295Z",
-          "leaseSeconds": 3600,
-          "onLeaseExpiry": "degrade",
-          "applyPolicy": "auto",
-          "requireCountersign": false,
-          "slots": [
-            {
-              "tag": "support.reply",
-              "kind": "prompt",
-              "artifactId": "art_support.reply",
-              "versionId": "ver_base",
-              "versionOrdinal": 1,
-              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
-              "byteLength": 9,
-              "model": "claude-sonnet-5",
-              "variables": []
-            }
-          ],
-          "directives": [],
-          "experiments": [
-            {
-              "tag": "support.reply",
-              "experimentId": "exp_1",
-              "salt": "AAECAwQFBgcICQoLDA0ODw",
-              "subjectKey": "instance",
-              "audience": {
-                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
-                "selector": {
-                  "mode": "tags",
-                  "match": "all",
-                  "conditions": [
-                    {
-                      "key": "device_id",
-                      "value": "device-042"
-                    }
-                  ]
-                }
-              },
-              "arms": [
-                {
-                  "arm": "control",
-                  "weightBps": 0,
-                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-                  "overrides": []
-                },
-                {
-                  "arm": "candidate",
-                  "weightBps": 10000,
-                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
-                  "overrides": [
-                    {
-                      "tag": "support.reply",
-                      "kind": "prompt",
-                      "artifactId": "art_support.reply",
-                      "versionId": "ver_candidate",
-                      "versionOrdinal": 1,
-                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
-                      "byteLength": 9,
-                      "model": "claude-sonnet-5",
-                      "variables": []
-                    }
-                  ]
-                }
-              ]
-            }
-          ],
-          "requiredCapabilities": [
-            "audience_v1"
-          ],
-          "observations": [
-            {
-              "audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB",
-              "selector": {
-                "mode": "tags",
-                "match": "all",
-                "conditions": [
-                  {
-                    "key": "device_id",
-                    "value": "device-042"
-                  }
-                ]
-              },
-              "tag": "support.reply",
-              "observeFrom": "2026-09-12T14:00:00Z"
-            }
-          ]
-        },
-        "signatures": [
-          {
-            "keyId": "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9",
-            "alg": "ES256",
-            "sig": "slIaAz--io_UkIUMAbwVkDZhX-WQJ4DUuw01WBcFHBQDd1vGHjHtwvLs1PWMP7MwkrE37UupFX-Ld6m7G7oZLg"
-          }
-        ],
-        "countersignatures": []
-      },
-      "root": {
-        "signed": {
-          "type": "root",
-          "protocol": "1.0.0",
-          "purpose": "platform",
-          "environment": "prod",
-          "version": 1,
-          "expires": "2027-12-11T00:00:00Z",
-          "keys": {
-            "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "Mp5rRJkvVUlnliv-AhBpvJC6V6AYavyJ2DLZLjLqie0",
-                "y": "IMgoDso2yTVS1QsCjfZSUO0L1Wjvvk8OpwsKd1DiCmo"
-              }
-            },
-            "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "nYE65Vw3EI5zmZprJeXRhsTmn9cI-qFniHiYZvtfieY",
-                "y": "fCj66ndYqsxvZCykdm1hbiEnI7OrKt0FhVi5b6JgA_4"
-              }
-            }
-          },
-          "roles": {
-            "root": {
-              "keyIds": [
-                "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2"
-              ],
-              "threshold": 1
-            },
-            "targets": {
-              "keyIds": [
-                "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9"
-              ],
-              "threshold": 1
-            }
-          }
-        },
-        "signatures": [
-          {
-            "keyId": "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2",
-            "alg": "ES256",
-            "sig": "tGFTXvVC6We2TuFMsSTm_KFDltJUD9mNbr3oJrP2WvI0mCjPTL8lV-7VHc5F7TPjtuKRz4dW_8spXS4a3QZZkA"
-          }
-        ]
-      },
-      "now": "2026-09-12T14:03:10Z",
-      "scope": {
-        "organizationId": "org_1",
-        "agentId": "agt_1",
-        "target": "prod"
-      },
-      "storedGeneration": 0,
-      "expected": {
-        "ok": false,
-        "reason": "protocol_unsupported"
-      }
-    },
-    {
-      "name": "impossible calendar observation refused",
-      "manifest": {
-        "payload": {
-          "protocol": "1.0.0",
-          "organizationId": "org_1",
-          "agentId": "agt_1",
-          "target": "prod",
-          "generation": 1,
-          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-          "issuedAt": "2026-10-05T02:23:52.295Z",
-          "leaseSeconds": 3600,
-          "onLeaseExpiry": "degrade",
-          "applyPolicy": "auto",
-          "requireCountersign": false,
-          "slots": [
-            {
-              "tag": "support.reply",
-              "kind": "prompt",
-              "artifactId": "art_support.reply",
-              "versionId": "ver_base",
-              "versionOrdinal": 1,
-              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
-              "byteLength": 9,
-              "model": "claude-sonnet-5",
-              "variables": []
-            }
-          ],
-          "directives": [],
-          "experiments": [
-            {
-              "tag": "support.reply",
-              "experimentId": "exp_1",
-              "salt": "AAECAwQFBgcICQoLDA0ODw",
-              "subjectKey": "instance",
-              "audience": {
-                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
-                "selector": {
-                  "mode": "tags",
-                  "match": "all",
-                  "conditions": [
-                    {
-                      "key": "device_id",
-                      "value": "device-042"
-                    }
-                  ]
-                }
-              },
-              "arms": [
-                {
-                  "arm": "control",
-                  "weightBps": 0,
-                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-                  "overrides": []
-                },
-                {
-                  "arm": "candidate",
-                  "weightBps": 10000,
-                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
-                  "overrides": [
-                    {
-                      "tag": "support.reply",
-                      "kind": "prompt",
-                      "artifactId": "art_support.reply",
-                      "versionId": "ver_candidate",
-                      "versionOrdinal": 1,
-                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
-                      "byteLength": 9,
-                      "model": "claude-sonnet-5",
-                      "variables": []
-                    }
-                  ]
-                }
-              ]
-            }
-          ],
-          "requiredCapabilities": [
-            "audience_v1"
-          ],
-          "observations": [
-            {
-              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
-              "selector": {
-                "mode": "tags",
-                "match": "all",
-                "conditions": [
-                  {
-                    "key": "device_id",
-                    "value": "device-042"
-                  }
-                ]
-              },
-              "tag": "support.reply",
-              "observeFrom": "2026-02-30T12:00:00Z"
-            }
-          ]
-        },
-        "signatures": [
-          {
-            "keyId": "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9",
-            "alg": "ES256",
-            "sig": "slIaAz--io_UkIUMAbwVkDZhX-WQJ4DUuw01WBcFHBQDd1vGHjHtwvLs1PWMP7MwkrE37UupFX-Ld6m7G7oZLg"
-          }
-        ],
-        "countersignatures": []
-      },
-      "root": {
-        "signed": {
-          "type": "root",
-          "protocol": "1.0.0",
-          "purpose": "platform",
-          "environment": "prod",
-          "version": 1,
-          "expires": "2027-12-11T00:00:00Z",
-          "keys": {
-            "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "Mp5rRJkvVUlnliv-AhBpvJC6V6AYavyJ2DLZLjLqie0",
-                "y": "IMgoDso2yTVS1QsCjfZSUO0L1Wjvvk8OpwsKd1DiCmo"
-              }
-            },
-            "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "nYE65Vw3EI5zmZprJeXRhsTmn9cI-qFniHiYZvtfieY",
-                "y": "fCj66ndYqsxvZCykdm1hbiEnI7OrKt0FhVi5b6JgA_4"
-              }
-            }
-          },
-          "roles": {
-            "root": {
-              "keyIds": [
-                "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2"
-              ],
-              "threshold": 1
-            },
-            "targets": {
-              "keyIds": [
-                "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9"
-              ],
-              "threshold": 1
-            }
-          }
-        },
-        "signatures": [
-          {
-            "keyId": "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2",
-            "alg": "ES256",
-            "sig": "tGFTXvVC6We2TuFMsSTm_KFDltJUD9mNbr3oJrP2WvI0mCjPTL8lV-7VHc5F7TPjtuKRz4dW_8spXS4a3QZZkA"
-          }
-        ]
-      },
-      "now": "2026-09-12T14:03:10Z",
-      "scope": {
-        "organizationId": "org_1",
-        "agentId": "agt_1",
-        "target": "prod"
-      },
-      "storedGeneration": 0,
-      "expected": {
-        "ok": false,
-        "reason": "protocol_unsupported"
-      }
-    },
-    {
-      "name": "selector tampering fails signature",
-      "manifest": {
-        "payload": {
-          "protocol": "1.0.0",
-          "organizationId": "org_1",
-          "agentId": "agt_1",
-          "target": "prod",
-          "generation": 1,
-          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-          "issuedAt": "2026-10-05T02:23:52.295Z",
-          "leaseSeconds": 3600,
-          "onLeaseExpiry": "degrade",
-          "applyPolicy": "auto",
-          "requireCountersign": false,
-          "slots": [
-            {
-              "tag": "support.reply",
-              "kind": "prompt",
-              "artifactId": "art_support.reply",
-              "versionId": "ver_base",
-              "versionOrdinal": 1,
-              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
-              "byteLength": 9,
-              "model": "claude-sonnet-5",
-              "variables": []
-            }
-          ],
-          "directives": [],
-          "experiments": [
-            {
-              "tag": "support.reply",
-              "experimentId": "exp_1",
-              "salt": "AAECAwQFBgcICQoLDA0ODw",
-              "subjectKey": "instance",
-              "audience": {
-                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
-                "selector": {
-                  "mode": "tags",
-                  "match": "all",
-                  "conditions": [
-                    {
-                      "key": "device_id",
-                      "value": "different-device"
-                    }
-                  ]
-                }
-              },
-              "arms": [
-                {
-                  "arm": "control",
-                  "weightBps": 0,
-                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-                  "overrides": []
-                },
-                {
-                  "arm": "candidate",
-                  "weightBps": 10000,
-                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
-                  "overrides": [
-                    {
-                      "tag": "support.reply",
-                      "kind": "prompt",
-                      "artifactId": "art_support.reply",
-                      "versionId": "ver_candidate",
-                      "versionOrdinal": 1,
-                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
-                      "byteLength": 9,
-                      "model": "claude-sonnet-5",
-                      "variables": []
-                    }
-                  ]
-                }
-              ]
-            }
-          ],
-          "requiredCapabilities": [
-            "audience_v1"
-          ],
-          "observations": [
-            {
-              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
-              "selector": {
-                "mode": "tags",
-                "match": "all",
-                "conditions": [
-                  {
-                    "key": "device_id",
-                    "value": "different-device"
-                  }
-                ]
-              },
-              "tag": "support.reply",
-              "observeFrom": "2026-09-12T14:00:00Z"
-            }
-          ]
-        },
-        "signatures": [
-          {
-            "keyId": "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9",
-            "alg": "ES256",
-            "sig": "slIaAz--io_UkIUMAbwVkDZhX-WQJ4DUuw01WBcFHBQDd1vGHjHtwvLs1PWMP7MwkrE37UupFX-Ld6m7G7oZLg"
-          }
-        ],
-        "countersignatures": []
-      },
-      "root": {
-        "signed": {
-          "type": "root",
-          "protocol": "1.0.0",
-          "purpose": "platform",
-          "environment": "prod",
-          "version": 1,
-          "expires": "2027-12-11T00:00:00Z",
-          "keys": {
-            "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "Mp5rRJkvVUlnliv-AhBpvJC6V6AYavyJ2DLZLjLqie0",
-                "y": "IMgoDso2yTVS1QsCjfZSUO0L1Wjvvk8OpwsKd1DiCmo"
-              }
-            },
-            "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "nYE65Vw3EI5zmZprJeXRhsTmn9cI-qFniHiYZvtfieY",
-                "y": "fCj66ndYqsxvZCykdm1hbiEnI7OrKt0FhVi5b6JgA_4"
-              }
-            }
-          },
-          "roles": {
-            "root": {
-              "keyIds": [
-                "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2"
-              ],
-              "threshold": 1
-            },
-            "targets": {
-              "keyIds": [
-                "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9"
-              ],
-              "threshold": 1
-            }
-          }
-        },
-        "signatures": [
-          {
-            "keyId": "2928dc14f837bca5f43ed3c308bfcaa6b9f8a1ca808630d5693f0d36ba5db6b2",
-            "alg": "ES256",
-            "sig": "tGFTXvVC6We2TuFMsSTm_KFDltJUD9mNbr3oJrP2WvI0mCjPTL8lV-7VHc5F7TPjtuKRz4dW_8spXS4a3QZZkA"
-          }
-        ]
-      },
-      "now": "2026-09-12T14:03:10Z",
-      "scope": {
-        "organizationId": "org_1",
-        "agentId": "agt_1",
-        "target": "prod"
-      },
-      "storedGeneration": 0,
-      "expected": {
-        "ok": false,
-        "reason": "signature_invalid"
-      }
-    },
-    {
-      "name": "protocol 1.0 without audience capability refused",
-      "manifest": {
-        "payload": {
-          "protocol": "1.0.0",
-          "organizationId": "org_1",
-          "agentId": "agt_1",
-          "target": "prod",
-          "generation": 1,
-          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-          "issuedAt": "2026-10-05T02:23:52.295Z",
-          "leaseSeconds": 3600,
-          "onLeaseExpiry": "degrade",
-          "applyPolicy": "auto",
-          "requireCountersign": false,
-          "slots": [
-            {
-              "tag": "support.reply",
-              "kind": "prompt",
-              "artifactId": "art_support.reply",
-              "versionId": "ver_base",
-              "versionOrdinal": 1,
-              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
-              "byteLength": 9,
-              "model": "claude-sonnet-5",
-              "variables": []
-            }
-          ],
-          "directives": []
-        },
-        "signatures": [
-          {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "EP0ZlfXVKApW7Cn8nK8C6yUwVD3wt2PxBi9bDKW1N5uwQJvlO9ET3zNGeJd5FSNggylRVpkxLUXDOZdaPOa-Ew"
+            "sig": "QAaNoNpx5UebCcyOdkyI8KwPQOqKpwncTu2RWD_0tQ4Wc-dKPyl7lt7fbcD67cmHEKsOFSTne_WnShuj6mAWyw"
           }
         ],
         "countersignatures": []
@@ -1765,7 +3033,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "V2_TYVzZ2gCvsym6fdCoJOmBM4EVqq8r2LyKDay8-GKn2wGh9lj7vjMDOnLxaYf0kux1OaXICY8LUgHWmDLjFA"
+            "sig": "DYSZ0Z1e_k4t5wqge4--MVnUbZpIY1bkQyGZVapWpvxTQiIXVLsoSJQEfGXequ3iEwVBt10UqzQbYA-9ph6A9g"
           }
         ]
       },
@@ -1779,111 +3047,8 @@
       "expected": {
         "ok": false,
         "reason": "protocol_unsupported"
-      }
-    },
-    {
-      "name": "unknown protocol 1.1 without fields refused",
-      "manifest": {
-        "payload": {
-          "protocol": "1.1.0",
-          "organizationId": "org_1",
-          "agentId": "agt_1",
-          "target": "prod",
-          "generation": 1,
-          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-          "issuedAt": "2026-10-05T02:23:52.295Z",
-          "leaseSeconds": 3600,
-          "onLeaseExpiry": "degrade",
-          "applyPolicy": "auto",
-          "requireCountersign": false,
-          "slots": [
-            {
-              "tag": "support.reply",
-              "kind": "prompt",
-              "artifactId": "art_support.reply",
-              "versionId": "ver_base",
-              "versionOrdinal": 1,
-              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
-              "byteLength": 9,
-              "model": "claude-sonnet-5",
-              "variables": []
-            }
-          ],
-          "directives": []
-        },
-        "signatures": [
-          {
-            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
-            "alg": "ES256",
-            "sig": "c2FBWz9u8WrmqG0brQ0rOX0umYWfBCu3L6FkRy3I_q1FeowMFCZHsmxzcZKWAy5EkY1G3GNNyqXaaNLybuoh5g"
-          }
-        ],
-        "countersignatures": []
       },
-      "root": {
-        "signed": {
-          "type": "root",
-          "protocol": "1.0.0",
-          "purpose": "platform",
-          "environment": "prod",
-          "version": 1,
-          "expires": "2027-12-11T00:00:00Z",
-          "keys": {
-            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
-                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
-              }
-            },
-            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
-              "keyType": "ecdsa-p256",
-              "scheme": "ES256",
-              "publicKey": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
-                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
-              }
-            }
-          },
-          "roles": {
-            "root": {
-              "keyIds": [
-                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
-              ],
-              "threshold": 1
-            },
-            "targets": {
-              "keyIds": [
-                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
-              ],
-              "threshold": 1
-            }
-          }
-        },
-        "signatures": [
-          {
-            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
-            "alg": "ES256",
-            "sig": "7wPXjrgfhmeXihmmL0FHwxZuqIldjYaKqT5fn2-SSqbwXoE6ELkECwpiWCVQRRMepq--o_iWSihAEV3mmj_3HA"
-          }
-        ]
-      },
-      "now": "2026-09-12T14:03:10Z",
-      "scope": {
-        "organizationId": "org_1",
-        "agentId": "agt_1",
-        "target": "prod"
-      },
-      "storedGeneration": 0,
-      "expected": {
-        "ok": false,
-        "reason": "protocol_unsupported"
-      }
+      "schemaOk": false
     }
   ]
 }

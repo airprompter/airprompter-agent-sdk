@@ -13,6 +13,8 @@ import json
 import os
 import sys
 
+import pytest
+
 from airprompter_agent_core._util import instant, iso_ms
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
 from airprompter_agent_telemetry.spool.writer import (
@@ -29,6 +31,7 @@ from airprompter_agent_telemetry.spool.writer import (
     minute_of,
     segment_name,
 )
+from airprompter_agent_telemetry.uploader import validate_spool_row
 
 from .test_protocol_vectors import vector
 
@@ -71,7 +74,7 @@ def test_spool_vectors_window_aggregation():
                 writer.observe(Observation.from_wire(event["observation"]), event["at"])
             elif event["kind"] == "feedback":
                 fb = event["feedback"]
-                writer.outcomes(tag=fb["tag"], version_id=fb["versionId"], arm=fb["arm"], model=fb["model"], outcomes=fb["outcomes"], at_ms=event["at"])
+                writer.outcomes(tag=fb["tag"], artifact_id=fb.get("artifactId"), version_id=fb["versionId"], arm=fb["arm"], model=fb["model"], outcomes=fb["outcomes"], at_ms=event["at"], audience_ids=tuple(fb["audienceIds"]) if "audienceIds" in fb else None, outcome_run_minute=fb.get("outcomeRunMinute"))
             elif event["kind"] == "refusal":
                 writer.refusal(at=iso_ms(event["at"]), reason=event["reason"], generation=event["generation"], tag=event.get("tag"), at_ms=event["at"])
             elif event["kind"] == "close":
@@ -103,6 +106,63 @@ def test_audience_manual_checks_only_attach_to_a_measured_open_run():
     rows=[r for r in sink.drain() if r.get("type")=="window"]
     assert len(rows)==1 and rows[0]["v"]==2 and rows[0]["count"]==1
     assert rows[0]["audienceIds"]==list(audience_ids) and rows[0]["checks"]=={"passed":1,"failed":0}
+
+
+def test_artifact_aware_windows_reject_noncanonical_artifact_identities_from_shared_vectors():
+    writer = SpoolWriter(MemorySink(), IDENTITY)
+    for case in vector("spool.json")["invalidArtifactIds"]:
+        with pytest.raises(ValueError, match=case["reason"]):
+            writer.observe(Observation(tag="a.b", artifact_id=case["artifactId"], version_id="v1", arm="none", model="m", status="ok", latency_ms=10), T0)
+
+
+def test_uploader_rejects_noncanonical_artifact_identities_from_shared_vectors():
+    base = {
+        "type": "window", "v": 3, "minute": "2026-09-12T14:03:00Z", "instanceId": "i-testinstance", "instanceClass": "resident",
+        "tag": "a.b", "versionId": "v1", "arm": "none", "model": "m", "status": "ok", "errorClass": None, "usageSource": "reported",
+        "count": 1, "latencyMs": {"buckets": [1] + [0] * 15, "sum": 1}, "tokens": {"input": 0, "output": 0}, "sdk": "t/0",
+    }
+    for case in vector("spool.json")["invalidArtifactIds"]:
+        verdict = validate_spool_row({**base, "artifactId": case["artifactId"]})
+        assert not verdict.ok and verdict.reason == "artifactId", case["name"]
+
+
+def test_v2_and_v3_outcomes_without_a_run_minute_require_an_open_measured_run():
+    sink = MemorySink()
+    writer = SpoolWriter(sink, IDENTITY)
+    audience_ids = ("aud_AAAAAAAAAAAAAAAAAAAAAA",)
+    base = {"tag": "a.b", "version_id": "v1", "arm": "none", "model": "m", "at_ms": T0}
+
+    writer.outcomes(**base, artifact_id="prm_support_alpha", outcomes={"thumbs": True})
+    writer.outcomes(**base, audience_ids=audience_ids, outcomes={"thumbs": False})
+    writer.close_windows(T0)
+    assert sink.drain() == [], "unattributed outcomes cannot create zero-run v2/v3 rows"
+
+    writer.observe(Observation(tag="a.b", artifact_id="prm_support_alpha", version_id="v1", arm="none", model="m", status="ok", latency_ms=10), T0)
+    writer.outcomes(**base, artifact_id="prm_support_alpha", outcomes={"thumbs": True})
+    writer.observe(Observation(tag="a.b", version_id="v1", arm="none", model="m", status="ok", latency_ms=10, audience_ids=audience_ids), T0)
+    writer.outcomes(**base, audience_ids=audience_ids, outcomes={"thumbs": False})
+    writer.close_windows(T0)
+    rows = [row for row in sink.drain() if row["type"] == "window"]
+    assert [(row["v"], row["count"], row["outcomes"]["thumbs"]) for row in rows] == [
+        (3, 1, {"n": 1, "sum": 1}),
+        (2, 1, {"n": 1, "sum": 0}),
+    ]
+
+
+def test_outcome_attribution_rejects_invalid_minutes_legacy_minutes_and_malformed_audience_ids():
+    sink = MemorySink()
+    writer = SpoolWriter(sink, IDENTITY)
+    base = {"tag": "a.b", "version_id": "v1", "arm": "none", "model": "m", "at_ms": T0}
+    writer.outcomes(**base, artifact_id="prm_support_alpha", outcome_run_minute="not-a-minute", outcomes={"thumbs": True})
+    writer.outcomes(**base, artifact_id="prm_support_alpha", outcome_run_minute="2026-02-30T14:03:00Z", outcomes={"thumbs": True})
+    writer.outcomes(**base, outcome_run_minute=minute_of(T0), outcomes={"thumbs": True})
+    writer.outcomes(**base, artifact_id="prm_support_alpha", audience_ids=("raw-device-value",), outcome_run_minute=minute_of(T0), outcomes={"thumbs": True})
+    writer.outcomes(**base, artifact_id="prm_support_alpha", outcome_run_minute=minute_of(T0 + 60_000), outcomes={"thumbs": True})
+    writer.outcomes(**base, artifact_id="prm_support_alpha", outcome_run_minute=minute_of(T0), outcomes={"Bad-Name": 1})
+    writer.close_windows(T0)
+    assert sink.drain() == []
+    with pytest.raises(ValueError, match="telemetry_audience_ids_invalid"):
+        writer.observe(Observation(tag="a.b", version_id="v1", arm="none", model="m", status="ok", latency_ms=10, audience_ids=("raw-device-value",)), T0)
 
 
 def _segments(directory):

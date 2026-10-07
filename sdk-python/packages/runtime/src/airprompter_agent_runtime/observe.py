@@ -2,8 +2,9 @@
 D52/D66): time the model call, read ``usage`` off whatever the provider
 answered — OpenAI, Anthropic Messages, Bedrock Converse / InvokeModel, as a
 dict or as an SDK object — and classify a failure into the protocol's closed
-``errorClass`` set. The observation is a content-free window increment: no
-text, no ids, no error message.
+``errorClass`` set. The observation is a content-free window increment:
+opaque artifact/audience IDs may be dimensions, but no subject, end-user ID,
+tag value, prompt/output text, or error message is recorded.
 
 Usage shapes recognised (all optional, first match wins per field)::
 
@@ -153,12 +154,13 @@ class ObserveTarget:
     model: str
     audience_ids: Optional[tuple[str, ...]] = None
     run_minute: Optional[str] = None
+    artifact_id: Optional[str] = None
 
 
 def _observation(target: ObserveTarget, model: str, started: float, now: Callable[[], float], result: Any, error: Any, checks: Optional[Mapping[str, int]], evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> Observation:
     latency = max(0.0, now() - started)
     if error is not None:
-        return Observation(audience_ids=target.audience_ids, run_minute=target.run_minute, tag=target.tag, version_id=target.version_id, arm=target.arm, model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable", checks=checks)
+        return Observation(audience_ids=target.audience_ids, run_minute=target.run_minute, artifact_id=target.artifact_id, tag=target.tag, version_id=target.version_id, arm=target.arm, model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable", checks=checks)
     usage = normalize_usage(result)
     error_class = classify_result(result)
     if checks is None and evaluate is not None:
@@ -170,6 +172,7 @@ def _observation(target: ObserveTarget, model: str, started: float, now: Callabl
     return Observation(
         audience_ids=target.audience_ids,
         run_minute=target.run_minute,
+        artifact_id=target.artifact_id,
         tag=target.tag,
         version_id=target.version_id,
         arm=target.arm,

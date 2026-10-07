@@ -1,7 +1,8 @@
 # airprompter-agent-telemetry
 
 The content-free telemetry spool and its uploader: minute windows per
-`(tag, versionId, arm, model, status, errorClass)` written as append-only
+`(tag, artifactId, versionId, arm, model, status, errorClass, audienceIds,
+outcomeRunMinute)` written as append-only
 NDJSON segments (`DirectorySink`) or held in memory on a serverless host
 (`MemorySink`), the host budget, and `SpoolUploader` — direct to your
 prefix in object storage under a short-lived grant. The row shape
@@ -13,10 +14,13 @@ distribution.
 from airprompter_agent_telemetry import SpoolWriter, DirectorySink, Observation, WriterIdentity
 ```
 
-One of five distributions released in lockstep — `airprompter-agent-core`,
-`-sync`, `-runtime`, `-telemetry` and the facade `airprompter-agent` — one
-version, exact-pinned siblings, mirroring the TypeScript packages one for
-one. The full README and the parity matrix are in
+For audience- or artifact-aware feedback, pass the authenticated
+`outcome_run_minute`. Without it, `outcomes()` updates only an already
+measured matching run in the writer's current open minute.
+
+One of eight distributions released in lockstep — the five core SDK
+distributions and three datastore adapters — one version, exact-pinned
+siblings. The full README and the parity matrix are in
 [`sdk-python/README.md`](https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-python);
 the protocol is in [`protocol/`](https://github.com/airprompter/airprompter-agent-sdk/tree/main/protocol).
 BSD-3-Clause.

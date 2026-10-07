@@ -63,9 +63,9 @@ jobs:
         run: |
           node /tmp/legacy-check/protocol/tools/gen_trust_vectors.mjs /tmp/manifest-verify.json
           TRUST_VECTORS=/tmp/manifest-verify.json npm test --prefix conformance
-      - name: Audience fixtures and vectors use protocol 1.0.0
+      - name: Audience fixtures and vectors use their intentional protocol versions
         run: |
-          node --input-type=module -e 'import fs from "node:fs"; const paths=["protocol/examples/manifest.audiences.json","protocol/examples/heartbeat.request.audiences.json","protocol/examples/heartbeat.response.audiences.json","protocol/examples/refused/manifest.audience-without-capability.json","protocol/examples/refused/manifest.audience-empty-conditions.json","protocol/examples/refused/heartbeat.request.audience-values.json"]; for (const path of paths) { const x=JSON.parse(fs.readFileSync(path,"utf8")); const version=x.payload?.protocol ?? x.protocol ?? x.document?.payload?.protocol ?? x.document?.protocol; if (version!=="1.0.0") throw new Error(`${path}: ${version}`); } const v=JSON.parse(fs.readFileSync("protocol/vectors/audiences.json","utf8")); if(v.protocol!=="1.0.0") throw new Error(`audiences.json: ${v.protocol}`);'
+          node --input-type=module -e 'import fs from "node:fs"; const current=["protocol/examples/manifest.audiences.json","protocol/examples/heartbeat.request.audiences.json","protocol/examples/heartbeat.response.audiences.json","protocol/examples/refused/manifest.audience-empty-conditions.json","protocol/examples/refused/heartbeat.request.audience-values.json"]; for (const path of current) { const x=JSON.parse(fs.readFileSync(path,"utf8")); const version=x.payload?.protocol ?? x.protocol ?? x.document?.payload?.protocol ?? x.document?.protocol; if (version!=="1.1.0") throw new Error(`${path}: ${version}`); } const legacy="protocol/examples/refused/manifest.audience-without-capability.json"; const x=JSON.parse(fs.readFileSync(legacy,"utf8")); if(x.document?.payload?.protocol!=="1.0.0") throw new Error(`${legacy}: ${x.document?.payload?.protocol}`); const v=JSON.parse(fs.readFileSync("protocol/vectors/audiences.json","utf8")); if(v.protocol!=="1.1.0") throw new Error(`audiences.json: ${v.protocol}`);'
       - name: A protocol tag names the version in protocol/VERSION
         if: startsWith(github.ref, 'refs/tags/protocol/v')
         run: test "protocol/v$(cat protocol/VERSION)" = "$GITHUB_REF_NAME"
@@ -124,7 +124,7 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
-      # S10: five packages in lockstep. Build in dependency order first — the
+      # S10: nine packages in lockstep. Build in dependency order first — the
       # two-copies vector loads the built dist beside the source — then the
       # whole tree as one program, the import direction, the suites, the size
       # budgets, and the compatibility table's freshness.
@@ -168,7 +168,7 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
-      # S10: five distributions in lockstep, installed editable in dependency order; the import direction is linted.
+      # S10: eight distributions in lockstep, installed editable in dependency order; the import direction is linted.
       - run: python tools/install_dev.py pyflakes build
         working-directory: sdk-python
       - run: python -m pyflakes packages/*/src tests tools

@@ -236,30 +236,30 @@ export function effectiveArms({ arms, ramp, disabledArms, nowMs }) {
   return effective;
 }
 
-/** Audience vectors use an independent reference predicate: exact strings, bounded closed selectors. */
+/** Audience vectors use an independent reference predicate: case-sensitive is/contains, bounded closed selectors. */
 export function audiencePredicate({selector,tags}) {
   const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
   const only = (v,keys) => Object.keys(v).every(k=>keys.includes(k));
-  const str = (v,n) => typeof v === "string" && v.length <= n && !/[\u0000-\u001f\u007f]/u.test(v);
+  const str = (v,n) => typeof v === "string" && [...v].length <= n && !/[\u0000-\u001f\u007f]/u.test(v) && !/[\uD800-\uDFFF]/u.test(v);
   let valid = object(selector);
   if (valid && selector.mode === "all") valid = only(selector,["mode"]);
   else if (valid) {
     valid = selector.mode === "tags" && only(selector,["mode","match","conditions"]) && ["all","any"].includes(selector.match) && Array.isArray(selector.conditions) && selector.conditions.length > 0 && selector.conditions.length <= 16;
-    const seenPairs = new Set(), seenKeys = new Set();
+    const seenPairs = new Set();
     if (valid) for (const c of selector.conditions) {
-      if (!object(c) || !only(c,["key","value"]) || !str(c.key,64) || !c.key.trim() || !str(c.value,256)) {valid=false;break;}
-      const pair=JSON.stringify([c.key,c.value]);
-      if (seenPairs.has(pair) || (selector.match === "all" && seenKeys.has(c.key))) {valid=false;break;}
-      seenPairs.add(pair);seenKeys.add(c.key);
+      if (!object(c) || !only(c,["key","operator","value"]) || !str(c.key,64) || !c.key.trim() || !str(c.value,256) || (c.operator !== undefined && !["is","contains"].includes(c.operator)) || (c.operator === "contains" && c.value.length === 0)) {valid=false;break;}
+      const pair=JSON.stringify([c.key,c.operator ?? "is",c.value]);
+      if (seenPairs.has(pair)) {valid=false;break;}
+      seenPairs.add(pair);
     }
   }
-  const exact = c => Object.hasOwn(tags,c.key) && typeof tags[c.key] === "string" && tags[c.key] === c.value;
-  return {valid, matches:valid && (selector.mode === "all" || (selector.match === "all" ? selector.conditions.every(exact) : selector.conditions.some(exact)))};
+  const matches = c => Object.hasOwn(tags,c.key) && str(tags[c.key],256) && (c.operator === "contains" ? tags[c.key].includes(c.value) : tags[c.key] === c.value);
+  return {valid, matches:valid && (selector.mode === "all" || (selector.match === "all" ? selector.conditions.every(matches) : selector.conditions.some(matches)))};
 }
 
 /** Independent future-audience scalar validators; expectations share vectors with both SDKs. */
 export function audienceValidator({kind,value}) {
-  const str = (v,n) => typeof v === "string" && v.length <= n && !/[\u0000-\u001f\u007f]/u.test(v);
+  const str = (v,n) => typeof v === "string" && [...v].length <= n && !/[\u0000-\u001f\u007f]/u.test(v) && !/[\uD800-\uDFFF]/u.test(v);
   if (kind === "key" || kind === "label") return {valid:str(value,kind === "key" ? 64 : 128) && value.trim().length > 0};
   if (kind !== "instant" || typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || value.startsWith("0000-") || !Number.isFinite(Date.parse(value))) return {valid:false};
   const offset=/[+-](\d{2}):(\d{2})$/.exec(value);

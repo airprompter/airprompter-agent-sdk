@@ -149,15 +149,18 @@ export function orderedSteps<S extends { stepId: string; ordinal: number }>(slot
   return sorted;
 }
 
-/** 1.0.0: exact local predicates. device_id=device-042 and region=west share one model. */
-export type AudienceSelector = { mode: "all" } | { mode: "tags"; match: "all" | "any"; conditions: Array<{ key: string; value: string }> };
+/** 1.1.0: local predicates. Missing operator is legacy `is`; new manifests write it explicitly. */
+export type AudienceCondition = { key: string; operator?: "is" | "contains"; value: string };
+export type AudienceSelector = { mode: "all" } | { mode: "tags"; match: "all" | "any"; conditions: AudienceCondition[] };
 export interface AudienceSnapshot { audienceId: string; selector: AudienceSelector }
 export interface AudienceObservation extends AudienceSnapshot { tag: string; observeFrom: string }
-export const AUDIENCE_CAPABILITY = "audience_v1";
-export const AUDIENCE_PROTOCOL_VERSION = "1.0.0";
+export const AUDIENCE_CAPABILITY = "audience_v2";
+export const AUDIENCE_PROTOCOL_VERSION = "1.1.0";
+export const LEGACY_AUDIENCE_CAPABILITY = "audience_v1";
+export const LEGACY_AUDIENCE_PROTOCOL_VERSION = "1.0.0";
 const audienceObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const audienceKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every(k => keys.includes(k));
-const audienceString = (v: unknown, max: number) => typeof v === "string" && v.length <= max && !/[\u0000-\u001f\u007f]/u.test(v);
+const audienceString = (v: unknown, max: number) => typeof v === "string" && [...v].length <= max && !/[\u0000-\u001f\u007f]/u.test(v) && !/[\uD800-\uDFFF]/u.test(v);
 /** RFC 3339 calendar validity: Date.parse alone normalizes impossible dates. */
 export function validAudienceInstant(v: unknown): v is string {
   if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(v) || v.startsWith("0000-") || !Number.isFinite(Date.parse(v))) return false;
@@ -174,20 +177,23 @@ export function validAudienceSelector(v: unknown): v is AudienceSelector {
   if (!audienceObject(v)) return false;
   if (v.mode === "all") return audienceKeys(v,["mode"]);
   if (v.mode !== "tags" || !audienceKeys(v,["mode","match","conditions"]) || !["all","any"].includes(String(v.match)) || !Array.isArray(v.conditions) || v.conditions.length < 1 || v.conditions.length > 16) return false;
-  const pairs = new Set<string>(), keys = new Set<string>();
+  const pairs = new Set<string>();
   return v.conditions.every(c => {
-    if (!audienceObject(c) || !audienceKeys(c,["key","value"]) || !validAudienceKey(c.key) || !audienceString(c.value,256)) return false;
-    const pair = JSON.stringify([c.key,c.value]);
-    if (pairs.has(pair) || (v.match === "all" && keys.has(c.key))) return false;
-    pairs.add(pair); keys.add(c.key); return true;
+    if (!audienceObject(c) || !audienceKeys(c,["key","operator","value"]) || !validAudienceKey(c.key) || (c.operator !== undefined && c.operator !== "is" && c.operator !== "contains") || !audienceString(c.value,256) || (c.operator === "contains" && (c.value as string).length === 0)) return false;
+    const pair = JSON.stringify([c.key,c.operator ?? "is",c.value]);
+    if (pairs.has(pair)) return false;
+    pairs.add(pair); return true;
   });
 }
 /** Invalid/missing values never broaden targeting. Values never leave this local operation. */
 export function matchesAudience(selector: AudienceSelector, tags: Readonly<Record<string,string>>): boolean {
   if (!validAudienceSelector(selector)) return false;
   if (selector.mode === "all") return true;
-  const exact = (c: {key:string;value:string}) => Object.prototype.hasOwnProperty.call(tags,c.key) && typeof tags[c.key] === "string" && tags[c.key] === c.value;
-  return selector.match === "all" ? selector.conditions.every(exact) : selector.conditions.some(exact);
+  const matches = (c: AudienceCondition) => {
+    if (!Object.prototype.hasOwnProperty.call(tags,c.key) || !audienceString(tags[c.key],256)) return false;
+    return c.operator === "contains" ? tags[c.key]!.includes(c.value) : tags[c.key] === c.value;
+  };
+  return selector.match === "all" ? selector.conditions.every(matches) : selector.conditions.some(matches);
 }
 export function copyAudienceTags(tags: Readonly<Record<string,string>>): Readonly<Record<string,string>> {
   if (!audienceObject(tags) || Object.keys(tags).length > 64 || Object.entries(tags).some(([k,v]) => !validAudienceKey(k) || !audienceString(v,256))) throw new Error("audience_tags_invalid");
@@ -201,13 +207,21 @@ export function validAudienceManifest(p: import("./types.js").ManifestPayload): 
   const targeted = p.requiredCapabilities !== undefined || p.observations !== undefined || experiments.some(e => e.audience !== undefined) || (audienceObject(p.experiment) && p.experiment.audience !== undefined);
   // Major 0 remains legacy-compatible. Major 1 always requires its frozen audience negotiation envelope.
   if (!targeted) return Number(String(p.protocol).split(".")[0]) !== 1;
-  if (p.protocol !== AUDIENCE_PROTOCOL_VERSION || JSON.stringify(p.requiredCapabilities) !== JSON.stringify([AUDIENCE_CAPABILITY]) || p.experiment !== undefined || !Array.isArray(p.observations) || p.observations.length < 1 || p.observations.length > 8 || !Array.isArray(p.slots) || experiments.length > 32) return false;
+  const supportedEnvelope = (p.protocol === AUDIENCE_PROTOCOL_VERSION && JSON.stringify(p.requiredCapabilities) === JSON.stringify([AUDIENCE_CAPABILITY])) || (p.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && JSON.stringify(p.requiredCapabilities) === JSON.stringify([LEGACY_AUDIENCE_CAPABILITY]));
+  if (!supportedEnvelope || p.experiment !== undefined || !Array.isArray(p.observations) || p.observations.length < 1 || p.observations.length > 8 || !Array.isArray(p.slots) || experiments.length > 32) return false;
+  const selectors = [...p.observations, ...experiments.map((entry) => entry.audience)].map((entry) => audienceObject(entry) ? entry.selector : null);
+  // v1 has no operator. v2 is the approved minimal model: implicit AND, with every condition explicit.
+  if (p.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && selectors.some((selector) => {
+    const candidate = selector as unknown;
+    return audienceObject(candidate) && Array.isArray(candidate.conditions) && candidate.conditions.some((condition: unknown) => audienceObject(condition) && condition.operator !== undefined);
+  })) return false;
+  if (p.protocol === AUDIENCE_PROTOCOL_VERSION && selectors.some((selector) => audienceObject(selector) && selector.mode === "tags" && (selector.match !== "all" || !Array.isArray(selector.conditions) || selector.conditions.some((condition: unknown) => !audienceObject(condition) || condition.operator === undefined)))) return false;
   const ids = new Set<string>();
   for (const o of p.observations) {
     if (!audienceObject(o) || !audienceKeys(o,["audienceId","selector","tag","observeFrom"]) || !validAudienceIds([o.audienceId]) || !validAudienceSelector(o.selector) || ids.has(o.audienceId) || !p.slots.some(s => audienceObject(s) && s.tag === o.tag) || !validAudienceInstant(o.observeFrom)) return false;
     ids.add(o.audienceId);
   }
-  const fingerprint = (s: AudienceSelector) => s.mode === "all" ? "all" : JSON.stringify([s.mode,s.match,s.conditions.map(c => [c.key,c.value])]);
+  const fingerprint = (s: AudienceSelector) => JSON.stringify(s);
   return experiments.every(e => {
     if (!Array.isArray(e.arms) || e.arms.some(arm => !audienceObject(arm) || !Number.isInteger(arm.weightBps) || arm.weightBps < 0 || arm.weightBps > 10000 || typeof arm.arm !== "string" || !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(arm.arm) || arm.arm.length > 32 || !Array.isArray(arm.overrides))) return false;
     const a = e.audience;
@@ -222,10 +236,11 @@ export function capturedAudienceIds(observations: readonly AudienceObservation[]
 }
 
 /** Text-only attribution is unsafe when identical text names distinct original cohorts. */
-export function ambiguousAudienceAttribution(previous: {tag:string;versionId:string;arm:string;audienceIds?:readonly string[];runMinute?:string} | null | undefined, next: {tag:string;versionId:string;arm:string;audienceIds?:readonly string[];runMinute?:string}): boolean {
+export function ambiguousAudienceAttribution(previous: {tag:string;artifactId?:string;versionId:string;arm:string;audienceIds?:readonly string[];runMinute?:string} | null | undefined, next: {tag:string;artifactId?:string;versionId:string;arm:string;audienceIds?:readonly string[];runMinute?:string}): boolean {
   if (previous === null) return true;
-  if (previous === undefined || (previous.audienceIds === undefined && next.audienceIds === undefined)) return false;
-  return JSON.stringify([previous.tag,previous.versionId,previous.arm,previous.audienceIds,previous.runMinute]) !== JSON.stringify([next.tag,next.versionId,next.arm,next.audienceIds,next.runMinute]);
+  if (previous === undefined) return false;
+  if (previous.artifactId === undefined && next.artifactId === undefined && previous.audienceIds === undefined && next.audienceIds === undefined) return false;
+  return JSON.stringify([previous.tag,previous.artifactId,previous.versionId,previous.arm,previous.audienceIds]) !== JSON.stringify([next.tag,next.artifactId,next.versionId,next.arm,next.audienceIds]);
 }
 
 /** What `disable` directives say, as data. */

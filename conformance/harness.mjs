@@ -289,7 +289,7 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
     },
     "spool-windows": async () => {
       const sp = readJson("spool.json");
-      const key = (row) => JSON.stringify([row.minute, row.tag, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null]);
+      const key = (row) => JSON.stringify([row.minute, row.tag, row.artifactId ?? null, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null, row.audienceIds ?? null, row.outcomeRunMinute ?? null]);
       const sortRows = (rows) => [...rows].sort((a, b) => (key(a) < key(b) ? -1 : 1));
       for (const c of sp.windows) await expectOk(`windows: ${c.name}`, "aggregateWindows", { instanceId: c.instanceId, instanceClass: c.instanceClass, sdk: c.sdk, events: c.events.filter((e) => e.kind !== "refusal") }, (r) => {
         const got = sortRows(r.windows ?? []);

@@ -108,6 +108,15 @@ for (const file of readdirSync(refusedDir).filter((f) => f.endsWith(".json")).so
   else ok(`${file} — ${entry.reason}`);
 }
 
+section("audience selector schemas match negotiated semantics");
+const audienceVectors = readJson(join(protocolDir, "vectors", "audiences.json"));
+const validateManifest = validatorFor("manifest");
+for (const vector of audienceVectors.manifests.filter((entry) => typeof entry.schemaOk === "boolean")) {
+  const accepted = validateManifest(vector.manifest);
+  if (accepted === vector.schemaOk) ok(vector.name);
+  else fail(vector.name, `schema ${accepted ? "accepted" : "refused"}; expected ${vector.schemaOk ? "accepted" : "refused"}`);
+}
+
 // ---------------------------------------------------------------------------
 section("manifest rules the schema cannot express");
 const manifestRules = (label, manifest) => {
@@ -367,7 +376,7 @@ for (const c of sp.rotation) {
 }
 const windowValidate = validatorFor("telemetry-window");
 const spoolRowValidate = validatorFor("spool-rows");
-const windowKey = (row) => JSON.stringify([row.minute, row.tag, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null]);
+const windowKey = (row) => JSON.stringify([row.minute, row.tag, row.artifactId ?? null, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null, row.audienceIds ?? null, row.outcomeRunMinute ?? null]);
 const sortRows = (rows) => [...rows].sort((a, b) => (windowKey(a) < windowKey(b) ? -1 : 1));
 // Key-order-insensitive equality (rows carry non-integer sums, so not the protocol's canonical form).
 const stable = (value) => (Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value);
@@ -391,6 +400,15 @@ for (const c of sp.windows) {
   }
   for (const row of c.expectedRefusals) {
     if (!spoolRowValidate(row)) fail(`windows: ${c.name} refusal validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
+  }
+}
+for (const c of sp.invalidArtifactIds) {
+  try {
+    new WindowAggregator({ instanceId: "i-invalid", instanceClass: "resident", sdk: "conformance/1" }).observe(Date.parse("2026-09-12T14:03:10Z"), { tag: "a.b", artifactId: c.artifactId, versionId: "v1", arm: "none", model: "m", status: "ok", latencyMs: 1 });
+    fail(`windows: ${c.name} artifact identity refused`, "accepted");
+  } catch (error) {
+    if (String(error).includes(c.reason)) ok(`windows: ${c.name} artifact identity refused`);
+    else fail(`windows: ${c.name} artifact identity refused`, String(error));
   }
 }
 {
@@ -497,6 +515,15 @@ section("examples/spool-writer: the reference writers without the SDK (D66) pass
     if (got.length === expected.length && got.every((row, i) => sameJson(row, expected[i]))) ok(`spool-writer.mjs windows: ${c.name}`);
     else fail(`spool-writer.mjs windows: ${c.name}`, `got ${JSON.stringify(got)}\n       expected ${JSON.stringify(expected)}`);
     for (const row of writer.emitted) if (!spoolRowValidate(row)) fail(`spool-writer.mjs windows: ${c.name} row validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
+  }
+  for (const c of sp.invalidArtifactIds) {
+    try {
+      new example.SpoolWriter({ instanceId: "i-invalid" }).observe({ tag: "a.b", artifactId: c.artifactId, versionId: "v1", model: "m", latencyMs: 1 }, 0);
+      fail(`spool-writer.mjs: ${c.name} artifact identity refused`, "accepted");
+    } catch (error) {
+      if (String(error).includes(c.reason)) ok(`spool-writer.mjs: ${c.name} artifact identity refused`);
+      else fail(`spool-writer.mjs: ${c.name} artifact identity refused`, String(error));
+    }
   }
   const { mkdtempSync, readdirSync: listDir, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");

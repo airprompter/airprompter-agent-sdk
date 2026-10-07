@@ -3,7 +3,8 @@
  * model call, read `usage` off whatever the provider answered — OpenAI,
  * Anthropic Messages, Bedrock Converse / InvokeModel — and classify a
  * failure into the protocol's closed `errorClass` set. The observation is a
- * content-free window increment: no text, no ids, no error message.
+ * content-free window increment: opaque artifact/audience IDs may be dimensions, but no subject, end-user ID, tag
+ * value, prompt/output text, or error message is recorded.
  *
  * Usage shapes recognised (all optional, first match wins per field):
  *   OpenAI       usage.prompt_tokens / completion_tokens / prompt_tokens_details.cached_tokens
@@ -84,6 +85,7 @@ export function classifyError(error: unknown): ErrorClass {
 export interface ObserveTarget {
   runMinute?: string;
   audienceIds?: readonly string[];
+  artifactId?: string;
   tag: string;
   versionId: string;
   arm: string;
@@ -125,7 +127,7 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
       }
     }
     record({
-      ...(target.audienceIds ? {audienceIds: target.audienceIds,runMinute: target.runMinute} : {}), tag: target.tag,
+      ...(target.audienceIds ? {audienceIds: target.audienceIds} : {}), ...(target.runMinute ? {runMinute: target.runMinute} : {}), ...(target.artifactId ? {artifactId: target.artifactId} : {}), tag: target.tag,
       versionId: target.versionId,
       arm: target.arm,
       model,
@@ -139,7 +141,7 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
     return result;
   } catch (error) {
     record({
-      ...(target.audienceIds ? {audienceIds: target.audienceIds,runMinute: target.runMinute} : {}), tag: target.tag,
+      ...(target.audienceIds ? {audienceIds: target.audienceIds} : {}), ...(target.runMinute ? {runMinute: target.runMinute} : {}), ...(target.artifactId ? {artifactId: target.artifactId} : {}), tag: target.tag,
       versionId: target.versionId,
       arm: target.arm,
       model,

@@ -9,6 +9,8 @@ directives, the lease, a staged release surviving a restart.
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import os
 import shutil
 import tempfile
@@ -21,7 +23,7 @@ from airprompter_agent.agent import AgentStartError, AirPrompterAgent, RenderRef
 from airprompter_agent_core.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle
 from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
 from airprompter_agent_core.protocol.trust import key_thumbprint, public_jwk_of, release_digest
-from airprompter_agent_core.render.run_ref import parse_run_ref
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
 from airprompter_agent_core.render.template import MissingVariableError, UnknownVariableError
 from airprompter_agent_sync.sync.loop import required_models_missing
 from airprompter_agent_core._util import b64url_encode
@@ -64,6 +66,43 @@ def state_dir():
     shutil.rmtree(path, ignore_errors=True)
 
 
+def test_artifact_aware_run_ref_facts_are_an_atomic_pair():
+    key = bytes(32)
+    facts = RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id="prm_1", model="gpt-5")
+    assert parse_run_ref(mint_run_ref(facts, key), key) == facts
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id="prm_1"), key)
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id=123, model="gpt-5"), key)
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id="prm_😀", model="gpt-5"), key)
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id="prm_1", model="gpt·5"), key)
+    for field in ("agent_id", "target", "tag", "version_id", "arm"):
+        values = facts.__dict__ | {field: f"{getattr(facts, field)}·extra"}
+        with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+            mint_run_ref(RunRefFacts(**values), key)
+    boundary = RunRefFacts(**(facts.__dict__ | {"generation": 9007199254740991, "bucket": 9999}))
+    assert parse_run_ref(mint_run_ref(boundary, key), key) == boundary
+    for generation in (float("nan"), float("inf"), 1.5, 0, -1, 9007199254740992, True):
+        with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+            mint_run_ref(RunRefFacts(**(facts.__dict__ | {"generation": generation})), key)
+    for bucket in (float("nan"), float("inf"), 1.5, -1, 10000, True):
+        with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+            mint_run_ref(RunRefFacts(**(facts.__dict__ | {"bucket": bucket})), key)
+    def signed(body):
+        mac = b64url_encode(hmac.new(key, body.encode(), hashlib.sha256).digest())[:22]
+        return f"{b64url_encode(body.encode())}.{mac}"
+    for generation in ("0", "01", "+1", "1.5", "nan", "inf", "9007199254740992"):
+        assert parse_run_ref(signed(f"agt_1·prod·support.reply·ver_1·none·{generation}·-"), key) is None
+    for bucket in ("-1", "00", "+1", "1.5", "nan", "inf", "10000"):
+        assert parse_run_ref(signed(f"agt_1·prod·support.reply·ver_1·none·1·{bucket}"), key) is None
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",), artifact_id="prm_1", model="gpt-5"), key)
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, run_minute="2026-09-12T14:03:00Z"), key)
+
+
 def test_first_start_pulls_verifies_serves(state_dir):
     plane = FakeControlPlane(SCOPE)
     plane.promote(triage_slots(plane))
@@ -83,6 +122,7 @@ def test_first_start_pulls_verifies_serves(state_dir):
     with pytest.raises(UnknownVariableError):
         ap.prompt("support.triage").render({"team": "Billing", "ticket": "x", "extra": "y"})
     assert ap.prompt("support.reply").render().text == "Reply politely to ."
+    assert ap.feedback(rendered.run_ref, {"rating": 5}, model=123) is False
     with pytest.raises(KeyError, match="no slot"):
         ap.prompt("no.such").render()
     ap.stop()
@@ -148,18 +188,27 @@ def test_unknown_key_refused_keeps_serving(state_dir):
 
 
 def test_workflows_telemetry_feedback_spool(state_dir):
+    from airprompter_agent_core.protocol import canonical_bytes, sign_bytes
     plane = FakeControlPlane(SCOPE)
     wf = plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Summarise {{doc}}"}, {"text": "Translate to {{lang}}"}], variables=[{"name": "doc", "required": True, "trust": "end_user"}, {"name": "lang", "required": True, "trust": "operator"}])
-    plane.promote([wf, *triage_slots(plane)])
+    audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "all"}}
+    manifest = plane.promote([wf, *triage_slots(plane)], protocol="1.1.0")
+    manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
+    manifest["payload"]["observations"] = [{**audience, "tag": wf["tag"], "observeFrom": "2026-09-12T14:00:00Z"}]
+    manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
+    plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
     clock = {"ms": instant("2026-09-12T14:03:10Z")}
     ap = start(plane, state_dir, now=lambda: clock["ms"])
     flow = ap.workflow("docs.flow")
     assert [(s.step_id, s.text) for s in flow.steps] == [("docs.flow#1", "Summarise {{doc}}"), ("docs.flow#2", "Translate to {{lang}}")]
     assert flow.model == "claude-sonnet-5"
+    with pytest.raises(MissingVariableError):
+        flow.render_step("docs.flow#1", {})
     rendered = ap.prompt("support.triage").render(team="Billing", ticket="my printer is on fire")
-    ap.report(tag="support.triage", version_id=rendered.version_id, arm=rendered.arm, model=rendered.model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90, "cachedInput": 100}, checks={"passed": 1})
-    ap.report(tag="support.triage", version_id=rendered.version_id, arm=rendered.arm, model=rendered.model, status="ok", latency_ms=1201, tokens={"input": 380, "output": 70})
-    ap.report(tag="support.triage", version_id=rendered.version_id, arm=rendered.arm, model=rendered.model, status="error", error_class="provider_timeout", latency_ms=30000)
+    assert rendered.run_minute == "2026-09-12T14:03:00Z", "fleet-wide renders retain their original minute for delayed feedback"
+    ap.report(tag="support.triage", artifact_id=rendered.artifact_id, version_id=rendered.version_id, arm=rendered.arm, model=rendered.model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90, "cachedInput": 100}, checks={"passed": 1}, audience_ids=rendered.audience_ids, run_minute=rendered.run_minute)
+    ap.report(tag="support.triage", artifact_id=rendered.artifact_id, version_id=rendered.version_id, arm=rendered.arm, model=rendered.model, status="ok", latency_ms=1201, tokens={"input": 380, "output": 70}, audience_ids=rendered.audience_ids, run_minute=rendered.run_minute)
+    ap.report(tag="support.triage", artifact_id=rendered.artifact_id, version_id=rendered.version_id, arm=rendered.arm, model=rendered.model, status="error", error_class="provider_timeout", latency_ms=30000, audience_ids=rendered.audience_ids, run_minute=rendered.run_minute)
     assert ap.feedback(rendered.run_ref, thumbs="up", rating=4, freeText="should be dropped", accepted=True) is True
     assert ap.feedback("forged.token", rating=5) is False
     clock["ms"] += 60_000
@@ -178,8 +227,11 @@ def test_workflows_telemetry_feedback_spool(state_dir):
     assert triage_ok["latencyMs"]["buckets"][10] == 1 and triage_ok["latencyMs"]["buckets"][11] == 1
     assert triage_ok["checks"] == {"passed": 1, "failed": 0}
     assert triage_ok["outcomes"] == {"thumbs": {"n": 1, "sum": 1}, "rating": {"n": 1, "sum": 4}, "accepted": {"n": 1, "sum": 1}}
+    assert "outcomeRunMinute" not in triage_ok, "same-minute feedback merges into the observed row"
     timeout = next(r for r in rows if r["type"] == "window" and r.get("errorClass") == "provider_timeout")
     assert timeout["count"] == 1 and timeout["latencyMs"]["buckets"][15] == 1
+    workflow_failure = next(r for r in rows if r["type"] == "window" and r["tag"] == "docs.flow" and r.get("errorClass") == "render_missing_variable")
+    assert workflow_failure["artifactId"] == wf["artifactId"] and workflow_failure["audienceIds"] == [audience["audienceId"]]
     text = json.dumps(rows)
     for forbidden in ("Billing", "printer", "should be dropped", "freeText", "triage assistant"):
         assert forbidden not in text, f"{forbidden} must never reach the spool"
@@ -393,11 +445,13 @@ def test_feedback_on_candidate_arm_lands_on_that_model(state_dir):
         i += 1
         rendered = ap.prompt("support.reply", subject=f"user-{i}").render()
     assert rendered.model == "gpt-5"
-    ap.report(tag=rendered.tag, version_id=rendered.version_id, arm=rendered.arm, model=rendered.model, status="ok", latency_ms=1)
-    assert ap.feedback(rendered.run_ref, {"rating": 5}) is True
+    ap.observe(rendered, lambda: {"usage": {"prompt_tokens": 1, "completion_tokens": 1}}, model="gpt-5-mini")
+    plane.promote([plane.slot(tag="support.reply", text="replacement", version_id=rendered.version_id, model="claude-sonnet-5")])
+    ap.sync_now()
+    assert ap.feedback(rendered.run_ref, {"rating": 5}, model="gpt-5-mini") is True
     ap.stop()
     windows = [r for r in ap.drain_memory_sink() if r["type"] == "window"]
-    assert len(windows) == 1 and windows[0]["model"] == "gpt-5" and windows[0]["count"] == 1
+    assert len(windows) == 1 and windows[0]["model"] == "gpt-5-mini" and windows[0]["count"] == 1
     assert windows[0]["outcomes"] == {"rating": {"n": 1, "sum": 5}}
 
 
@@ -511,9 +565,9 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
     base = plane.slot(tag="support.reply", text="Published", version_id="ver_base")
     candidate = plane.slot(tag="support.reply", text="Candidate {{candidate_value}}", version_id="ver_candidate", variables=[{"name":"candidate_value","required":True,"trust":"operator"}])
     candidate["outputChecks"] = [{"kind":"enum","name":"category","path":"category","values":["ok"]}]
-    audience = {"audienceId":"aud_AAAAAAAAAAAAAAAAAAAAAA", "selector":{"mode":"tags","match":"all","conditions":[{"key":"device_id","value":"private-device-042"}]}}
-    manifest = plane.promote([base], protocol="1.0.0", experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
-    manifest["payload"]["requiredCapabilities"] = ["audience_v1"]
+    audience = {"audienceId":"aud_AAAAAAAAAAAAAAAAAAAAAA", "selector":{"mode":"tags","match":"all","conditions":[{"key":"device_id","operator":"is","value":"private-device-042"}]}}
+    manifest = plane.promote([base], protocol="1.1.0", experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
+    manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
     manifest["payload"]["observations"] = [{**audience,"tag":base["tag"],"observeFrom":"2026-09-12T14:00:00Z"}]
     manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
     plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
@@ -528,15 +582,16 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
         assert ap.checks(rendered, "{\"category\":\"ok\"}")["passed"] == 1
         from airprompter_agent_runtime.release.resolver import WorkflowStep
         from airprompter_agent_runtime.attribution import current_attribution
-        step = WorkflowStep("support.flow#1",1,rendered.version_id,"step",rendered.run_ref,audience_ids=rendered.audience_ids,run_minute=rendered.run_minute)
+        step = WorkflowStep("support.flow#1",1,rendered.version_id,rendered.artifact_id,"step",rendered.run_ref,audience_ids=rendered.audience_ids,run_minute=rendered.run_minute)
         captured=[]; original_observe=ap.spool.observe
         ap.spool.observe=lambda observation, at_ms: captured.append(observation)
         try: ap.observe(step,lambda:{"usage":{"input_tokens":1,"output_tokens":1}})
         finally: ap.spool.observe=original_observe
-        assert captured[0].audience_ids == rendered.audience_ids and captured[0].run_minute == rendered.run_minute
+        assert captured[0].artifact_id == rendered.artifact_id and captured[0].audience_ids == rendered.audience_ids and captured[0].run_minute == rendered.run_minute
         with ap.attribute(step):
-            assert current_attribution().audience_ids == rendered.audience_ids and current_attribution().run_minute == rendered.run_minute
+            assert current_attribution().artifact_id == rendered.artifact_id and current_attribution().audience_ids == rendered.audience_ids and current_attribution().run_minute == rendered.run_minute
         heartbeat = ap.heartbeat_body()
+        assert heartbeat["protocol"] == "1.1.0" and heartbeat["capabilities"] == ["audience_v2"]
         assert heartbeat["registration"]["tagKeys"] == ["device_id","region"]
         assert "private-device-042" not in json.dumps(heartbeat) and "secret-west" not in json.dumps(heartbeat)
         ap.set_tags({"device_id":"private-device-043"})
@@ -556,10 +611,10 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
         if name.endswith(".ndjson"):
             with open(os.path.join(path,name)) as f: rows.extend(json.loads(line) for line in f if line.strip())
     feedback = next(r for r in rows if r.get("outcomes",{}).get("thumbs"))
-    assert feedback["v"] == 2 and feedback["count"] == 0 and feedback["versionId"] == "ver_candidate"
+    assert feedback["v"] == 3 and feedback["artifactId"] == candidate["artifactId"] and feedback["count"] == 0 and feedback["versionId"] == "ver_candidate"
     assert feedback["outcomeRunMinute"] == "2026-09-12T14:03:00Z" and feedback["audienceIds"] == [audience["audienceId"]]
     measured = next(r for r in rows if r.get("checks"))
-    assert measured["v"] == 2 and measured["count"] == 1 and measured["audienceIds"] == [audience["audienceId"]]
+    assert measured["v"] == 3 and measured["artifactId"] == candidate["artifactId"] and measured["count"] == 1 and measured["audienceIds"] == [audience["audienceId"]]
     assert measured["checks"] == {"passed":2,"failed":0}
 
 
@@ -573,7 +628,9 @@ def test_audience_registration_stays_bounded_without_limiting_legacy_prompt_serv
         for index in range(len(slots)):
             tag = "support.reply" if index == 0 else f"prompt.slot{index:02d}"
             assert ap.prompt(tag, display_name=f"Prompt {index}").render().text == f"Text {index}"
-        ap._audience_server_supported = True  # exercise names-only registration on a legacy manifest after server negotiation
+        ap._audience_server_capability = "audience_v1"
+        assert ap.heartbeat_body()["protocol"] == "1.0.0" and ap.heartbeat_body()["capabilities"] == ["audience_v1"]
+        ap._audience_server_capability = "audience_v2"  # exercise names-only registration after current negotiation
         registration = ap.heartbeat_body()["registration"]
         assert len(registration["prompts"]) == 32
         assert any(entry["tag"] == "prompt.slot32" for entry in registration["prompts"])
@@ -590,9 +647,9 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
     old_tags = {f"old_key_{index:02d}": f"private_value_{index}" for index in range(64)}
     base = plane.slot(tag="support.reply", text="Published")
     slots = [base] + [plane.slot(tag=f"prompt.slot{index:02d}", text=f"Prompt {index}") for index in range(32)]
-    audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "tags", "match": "any", "conditions": [{"key": "new_key", "value": "new_value"}, {"key": "override_key", "value": "override_value"}]}}
-    manifest = plane.promote(slots, protocol="1.0.0")
-    manifest["payload"]["requiredCapabilities"] = ["audience_v1"]
+    audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "new_key", "operator": "is", "value": "new_value"}]}}
+    manifest = plane.promote(slots, protocol="1.1.0")
+    manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
     manifest["payload"]["observations"] = [{**audience, "tag": base["tag"], "observeFrom": "2026-09-12T14:00:00Z"}]
     manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
     plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
@@ -617,7 +674,7 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
         assert "private_value_" not in heartbeat and "new_value" not in heartbeat and "override_value" not in heartbeat
 
         ap.set_tags({"new_key": "no_match"})
-        assert ap.prompt(base["tag"], tags={"override_key": "override_value"}).render().audience_ids == (audience["audienceId"],)
+        assert ap.prompt(base["tag"], tags={"new_key": "new_value"}).render().audience_ids == (audience["audienceId"],)
         active64 = {f"active_key_{index:02d}": "value" for index in range(64)}
         ap.set_tags(active64)
         with pytest.raises(ValueError, match="audience_tags_invalid"):
@@ -653,3 +710,17 @@ def test_ambiguous_cohort_text_requires_scope():
     registry.register("identical",a)
     assert registry.match(["identical"]) is None
     with attribution_scope(a): assert current_attribution() == a
+    registry=RenderRegistry(2)
+    registry.register("same prompt text",Attribution("support.reply","ver_1","none","gpt-5",artifact_id="prm_alpha"))
+    registry.register("same prompt text",Attribution("support.reply","ver_1","none","gpt-5",artifact_id="prm_beta"))
+    assert registry.match(["same prompt text"]) is None
+    registry=RenderRegistry(2)
+    registry.register("same artifact text",Attribution("support.reply","ver_1","control","gpt-5",artifact_id="prm_alpha"))
+    registry.register("same artifact text",Attribution("support.reply","ver_2","candidate","gpt-5",artifact_id="prm_alpha"))
+    assert registry.match(["same artifact text"]) is None
+    registry=RenderRegistry(2)
+    first=Attribution("support.reply","ver_1","candidate","gpt-5",audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",),run_minute="2026-09-12T14:03:00Z",artifact_id="prm_alpha")
+    second=Attribution("support.reply","ver_1","candidate","gpt-5",audience_ids=first.audience_ids,run_minute="2026-09-12T14:04:00Z",artifact_id="prm_alpha")
+    registry.register("repeated prompt text",first)
+    registry.register("repeated prompt text",second)
+    assert registry.match(["repeated prompt text"]) == second

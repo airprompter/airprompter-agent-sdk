@@ -23,7 +23,7 @@
       }
     },
     "countersignatures": {
-      "description": "Customer countersignatures (\u00a76.3). Each signs one releaseDigest with a customer-held key. Present but empty when the target does not require countersign; on a countersign target every arm's releaseDigest must have one or the manifest is refused.",
+      "description": "Customer countersignatures (§6.3). Each signs one releaseDigest with a customer-held key. Present but empty when the target does not require countersign; on a countersign target every arm's releaseDigest must have one or the manifest is refused.",
       "type": "array",
       "maxItems": 8,
       "items": {
@@ -86,7 +86,7 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
     },
     "outputCheck": {
-      "description": "One declared output check (checks.md, 5-E): deterministic, evaluated on the host on the output the SDK already sees, counted on the window as `checks.passed` / `checks.failed`. The projection a pin carries: enabled checks only, the kind's own members, sorted by `name` \u2014 part of the release digest input when the list is non-empty.",
+      "description": "One declared output check (checks.md, 5-E): deterministic, evaluated on the host on the output the SDK already sees, counted on the window as `checks.passed` / `checks.failed`. The projection a pin carries: enabled checks only, the kind's own members, sorted by `name` — part of the release digest input when the list is non-empty.",
       "type": "object",
       "required": [
         "kind",
@@ -407,7 +407,7 @@
           "maxLength": 4096
         },
         "source": {
-          "description": "0.3.4: who the author expects to fill the variable \u2014 `caller` (the code that renders passes it) or `runtime` (the application registers a source for it; `docs/variables.md`). A hint reviewers and the seal read; a runtime does not act on it. In the digest input when present.",
+          "description": "0.3.4: who the author expects to fill the variable — `caller` (the code that renders passes it) or `runtime` (the application registers a source for it; `docs/variables.md`). A hint reviewers and the seal read; a runtime does not act on it. In the digest input when present.",
           "type": "string",
           "enum": [
             "caller",
@@ -434,7 +434,7 @@
       }
     },
     "goldenSetRef": {
-      "description": "T34: what a slot carries for its golden set (golden-sets.md) \u2014 the cases themselves are the payload under `contentHash`, encrypted at rest like a prompt.",
+      "description": "T34: what a slot carries for its golden set (golden-sets.md) — the cases themselves are the payload under `contentHash`, encrypted at rest like a prompt.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -625,7 +625,7 @@
           }
         },
         "goldenSet": {
-          "description": "T34: the slot's golden set \u2014 1\u201350 known inputs with the properties a right answer has, run by the runtime against the pinned model before a staged release activates (golden-sets.md). Omitted when none; in the digest input only when present.",
+          "description": "T34: the slot's golden set — 1–50 known inputs with the properties a right answer has, run by the runtime against the pinned model before a staged release activates (golden-sets.md). Omitted when none; in the digest input only when present.",
           "$ref": "#/$defs/goldenSetRef"
         },
         "steps": {
@@ -697,7 +697,7 @@
       }
     },
     "experiment": {
-      "description": "A/B split or staged rollout (\u00a78). Arms are evaluated in order against the sticky assignment bucket (assignment-hash.md); weights sum to exactly 10000.",
+      "description": "A/B split or staged rollout (§8). Arms are evaluated in order against the sticky assignment bucket (assignment-hash.md); weights sum to exactly 10000.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -735,7 +735,7 @@
           }
         },
         "ramp": {
-          "description": "S9: the signed ramp plan. The runtime walks it on its own clock: the weights in force are the last step whose notBefore has passed (inclusive), else arms[].weightBps. Steps are strictly increasing, at least an hour apart, one weight per arm each summing to 10000 (assignment-hash.md \u203a The ramp plan; refused as ramp_invalid). A customer on unlock_required unlocks the plan once; the cloud can only retreat (disable scope arm).",
+          "description": "S9: the signed ramp plan. The runtime walks it on its own clock: the weights in force are the last step whose notBefore has passed (inclusive), else arms[].weightBps. Steps are strictly increasing, at least an hour apart, one weight per arm each summing to 10000 (assignment-hash.md › The ramp plan; refused as ramp_invalid). A customer on unlock_required unlocks the plan once; the cloud can only retreat (disable scope arm).",
           "type": "array",
           "minItems": 1,
           "maxItems": 8,
@@ -831,7 +831,7 @@
               "pattern": "^[a-z0-9_-]{1,32}$"
             },
             "experimentId": {
-              "description": "S16: with scope arm, the experiment the arm belongs to \u2014 required once a manifest carries experiments[] (arm names are per experiment); a legacy manifest may omit it.",
+              "description": "S16: with scope arm, the experiment the arm belongs to — required once a manifest carries experiments[] (arm names are per experiment); a legacy manifest may omit it.",
               "$ref": "#/$defs/identifier"
             },
             "issuedAt": {
@@ -927,7 +927,7 @@
           "$ref": "#/$defs/timestamp"
         },
         "leaseSeconds": {
-          "description": "Staleness accounting, not a kill switch (\u00a76.4). Advisory on countersign targets.",
+          "description": "Staleness accounting, not a kill switch (§6.4). Advisory on countersign targets.",
           "type": "integer",
           "minimum": 60,
           "maximum": 2592000
@@ -948,7 +948,7 @@
           ]
         },
         "unlockWindow": {
-          "description": "The console's update window (D33): a release staged under unlock_required activates on its own inside it. Advisory \u2014 a runtime's local apply.window wins, and the local side is never looser. Present only with unlock_required.",
+          "description": "The console's update window (D33): a release staged under unlock_required activates on its own inside it. Advisory — a runtime's local apply.window wins, and the local side is never looser. Present only with unlock_required.",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -1010,7 +1010,7 @@
           "$ref": "#/$defs/experiment"
         },
         "experiments": {
-          "description": "S16: one split per slot, each independent \u2014 its own salt, arms, ramp and share (assignment-hash.md \u203a Per-prompt experiments). Tags are unique across the array; each arm's overrides name that experiment's tag only. Never beside experiment (experiment_conflict).",
+          "description": "S16: one split per slot, each independent — its own salt, arms, ramp and share (assignment-hash.md › Per-prompt experiments). Tags are unique across the array; each arm's overrides name that experiment's tag only. Never beside experiment (experiment_conflict).",
           "type": "array",
           "minItems": 1,
           "maxItems": 32,
@@ -1040,7 +1040,10 @@
           "minItems": 1,
           "maxItems": 1,
           "items": {
-            "const": "audience_v1"
+            "enum": [
+              "audience_v1",
+              "audience_v2"
+            ]
           }
         },
         "observations": {
@@ -1129,7 +1132,10 @@
             },
             "properties": {
               "protocol": {
-                "const": "1.0.0"
+                "enum": [
+                  "1.0.0",
+                  "1.1.0"
+                ]
               },
               "experiments": {
                 "type": "array",
@@ -1142,7 +1148,115 @@
                 }
               }
             },
-            "type": "object"
+            "type": "object",
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "protocol": {
+                      "const": "1.0.0"
+                    }
+                  },
+                  "required": [
+                    "protocol"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "requiredCapabilities": {
+                      "prefixItems": [
+                        {
+                          "const": "audience_v1"
+                        }
+                      ],
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 1
+                    },
+                    "observations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "selector": {
+                            "$ref": "#/$defs/audienceSelectorV1"
+                          }
+                        }
+                      }
+                    },
+                    "experiments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "audience": {
+                            "type": "object",
+                            "properties": {
+                              "selector": {
+                                "$ref": "#/$defs/audienceSelectorV1"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "protocol": {
+                      "const": "1.1.0"
+                    }
+                  },
+                  "required": [
+                    "protocol"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "requiredCapabilities": {
+                      "prefixItems": [
+                        {
+                          "const": "audience_v2"
+                        }
+                      ],
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 1
+                    },
+                    "observations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "selector": {
+                            "$ref": "#/$defs/audienceSelectorV2"
+                          }
+                        }
+                      }
+                    },
+                    "experiments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "audience": {
+                            "type": "object",
+                            "properties": {
+                              "selector": {
+                                "$ref": "#/$defs/audienceSelectorV2"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
           },
           "else": {
             "not": {
@@ -1204,7 +1318,7 @@
           "const": "ES256"
         },
         "sig": {
-          "description": "ECDSA P-256 over SHA-256 of the canonical payload bytes, IEEE P1363 (r \u2016 s, 64 bytes), base64url without padding.",
+          "description": "ECDSA P-256 over SHA-256 of the canonical payload bytes, IEEE P1363 (r ‖ s, 64 bytes), base64url without padding.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{86}$"
         }
@@ -1231,7 +1345,7 @@
           "$ref": "#/$defs/sha256"
         },
         "sig": {
-          "description": "ECDSA P-256 over SHA-256 of the UTF-8 bytes of `releaseDigest` (the `sha256:\u2026` string), P1363, base64url without padding.",
+          "description": "ECDSA P-256 over SHA-256 of the UTF-8 bytes of `releaseDigest` (the `sha256:…` string), P1363, base64url without padding.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{86}$"
         },
@@ -1241,6 +1355,33 @@
       }
     },
     "audienceSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/audienceSelectorV1"
+        },
+        {
+          "$ref": "#/$defs/audienceSelectorV2"
+        }
+      ]
+    },
+    "audienceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audienceId",
+        "selector"
+      ],
+      "properties": {
+        "audienceId": {
+          "type": "string",
+          "pattern": "^aud_[A-Za-z0-9_-]{22}$"
+        },
+        "selector": {
+          "$ref": "#/$defs/audienceSelector"
+        }
+      }
+    },
+    "audienceSelectorV1": {
       "oneOf": [
         {
           "type": "object",
@@ -1289,12 +1430,12 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 64,
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])+$"
                   },
                   "value": {
                     "type": "string",
                     "maxLength": 256,
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])*$"
                   }
                 }
               }
@@ -1303,82 +1444,97 @@
         }
       ]
     },
-    "audienceSnapshot": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "audienceId",
-        "selector"
-      ],
-      "properties": {
-        "audienceId": {
-          "type": "string",
-          "pattern": "^aud_[A-Za-z0-9_-]{22}$"
+    "audienceSelectorV2": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "const": "all"
+            }
+          }
         },
-        "selector": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "mode"
-              ],
-              "properties": {
-                "mode": {
-                  "const": "all"
-                }
-              }
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "match",
+            "conditions"
+          ],
+          "properties": {
+            "mode": {
+              "const": "tags"
             },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "mode",
-                "match",
-                "conditions"
-              ],
-              "properties": {
-                "mode": {
-                  "const": "tags"
+            "match": {
+              "const": "all"
+            },
+            "conditions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "operator",
+                  "value"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])+$"
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])*$"
+                  },
+                  "operator": {
+                    "type": "string",
+                    "enum": [
+                      "is",
+                      "contains"
+                    ]
+                  }
                 },
-                "match": {
-                  "enum": [
-                    "all",
-                    "any"
-                  ]
-                },
-                "conditions": {
-                  "type": "array",
-                  "minItems": 1,
-                  "maxItems": 16,
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "key",
-                      "value"
-                    ],
-                    "properties": {
-                      "key": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64,
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "operator": {
+                          "const": "contains"
+                        }
                       },
-                      "value": {
-                        "type": "string",
-                        "maxLength": 256,
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
-                      }
+                      "required": [
+                        "operator"
+                      ],
+                      "type": "object"
+                    },
+                    "then": {
+                      "properties": {
+                    "value": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                      },
+                      "type": "object"
                     }
                   }
-                }
+                ]
               }
             }
-          ]
+          }
         }
-      }
+      ]
     }
   }
 }

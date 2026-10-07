@@ -52,6 +52,7 @@ test("the validator accepts every row the vectors expect and refuses the shapes 
   assert.ok(accepted >= 10, `vector rows accepted: ${accepted}`);
   assert.ok(validateSpoolRow({ type: "dropped", v: 1, at: "2026-09-12T14:03:00Z", instanceId: WRITER_A, segments: 3, bytes: 900 }).ok);
   const base = windowRow(WRITER_A, "2026-09-12T14:03:00Z");
+  for (const c of sp.invalidArtifactIds) assert.deepEqual(validateSpoolRow({ ...base, v: 3, artifactId: c.artifactId }), { ok: false, reason: "artifactId" }, c.name);
   assert.deepEqual(validateSpoolRow({ ...base, type: "trace" }), { ok: false, reason: "unknown_type" });
   assert.deepEqual(validateSpoolRow({ ...base, prompt: "the secret text" }), { ok: false, reason: "unknown_field:prompt" });
   assert.deepEqual(validateSpoolRow({ ...base, tokens: { input: 1, output: 2, text: "leak" } }), { ok: false, reason: "tokens" });

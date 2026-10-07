@@ -132,17 +132,36 @@ dropped at ingest; unknown row types are quarantined.
   rounded half up and floored at 0.
 - `count` is the number of runs observed in the minute. Feedback
   (`outcomes`) filed against a run rides on that run's `status: ok` window
-  for the minute it arrives in and **never** adds to `count` or
-  `latencyMs`; a window can therefore have `count: 0` when the feedback
-  arrives in a later minute than the run.
+  when it is filed in the run minute and **never** adds to `count` or
+  `latencyMs`. The writer omits `outcomeRunMinute` when it equals the row's
+  `minute`, so feedback filed before the observation still merges with that
+  observation. Delayed feedback keeps the original `outcomeRunMinute` and
+  can therefore produce a `count: 0` row in its later filing minute.
+  Version 2 and 3 writers must not create a feedback-only row without that
+  authenticated run minute; without it, feedback may attach only to an
+  already measured matching run in the writer's open minute. Writers refuse
+  malformed calendar minutes, a run minute on a legacy v1 row, and audience
+  identifiers outside the opaque `aud_…` grammar before creating a row.
+  Measurements use the minute in which they complete; `runMinute` on an
+  SDK observation is attribution for feedback and never reopens a sealed
+  measurement minute under the same ingest key.
+- Row version 1 is the legacy dimension set. Version 2 adds
+  `audienceIds` and optional `outcomeRunMinute`. Version 3 requires the
+  immutable Team prompt `artifactId` and may also carry those audience
+  fields. `artifactId` keeps two prompts that use the same per-prompt
+  `versionId` in separate series and uses the manifest's canonical ASCII
+  identifier grammar (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`). These identifiers are control-plane
+  identities; local tag values and user or device identifiers never enter
+  a row.
 - `errorClass` is the closed enum in `schemas/telemetry-window.schema.json`:
   `render_missing_variable, context_length_exceeded, output_schema_invalid,
   truncated, content_filter, provider_error, provider_timeout,
   provider_rate_limited`. Nothing after the model returns is an error class.
 - `outcomes` carries only declared signal names from the feedback catalogue
   (`schemas/feedback-signals.schema.json`), each as `{n, sum}`.
-- Rows for the same key `(instanceId, minute, tag, versionId, arm, model,
-  status, errorClass)` **replace** each other at ingest (SET semantics), so
+- Rows for the same key `(instanceId, minute, tag, artifactId, versionId,
+  arm, model, status, errorClass, audienceIds, outcomeRunMinute)`
+  **replace** each other at ingest (SET semantics), so
   a replayed segment is a no-op.
 
 ### `refusal` — a control-plane refusal (rare, content-free)
@@ -245,9 +264,11 @@ reported with the platform's `retryAfterSeconds` and nothing is uploaded.
 1. After each model call, take `usage` and elapsed time from the provider
    response.
 2. Accumulate into the open minute's `window` row for
-   `(tag, versionId, arm, model, status, errorClass)` — the `tag`,
-   `versionId` and `arm` come from the release you rendered (or from the
-   `runRef` the compatible endpoint returned).
+   `(tag, artifactId, versionId, arm, model, status, errorClass,
+   audienceIds, outcomeRunMinute)` — the `tag`, `artifactId`, `versionId`
+   and `arm` come from the release you rendered (or from the authenticated
+   `runRef` the compatible endpoint returned). Legacy rows omit dimensions
+   introduced by later row versions.
 3. At minute end write the row to the open segment, `fsync`, close per the
    rules above.
 

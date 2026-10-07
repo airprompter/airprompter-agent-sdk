@@ -12,6 +12,7 @@ import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { parseYaml } from "@redocly/openapi-core";
 
 import {
   AssignmentError,
@@ -72,6 +73,42 @@ const validatorFor = (name) => {
   if (!validate) throw new Error(`no schema ${id}`);
   return validate;
 };
+
+// ---------------------------------------------------------------------------
+section("OpenAPI hosted compatibility instances");
+{
+  const openapi = parseYaml(readFileSync(join(protocolDir, "openapi.yaml"), "utf8"));
+  const schemas = openapi.components.schemas;
+  const response409 = openapi.paths["/v1/agents/{agentId}/targets/{target}/run"].post.responses["409"].content["application/json"].schema;
+  const dereferenced409 = {
+    oneOf: response409.oneOf.map((entry) => schemas[entry.$ref.split("/").at(-1)]),
+  };
+  const validate409 = ajv.compile(dereferenced409);
+  const stale = { error: "refresh", code: "catalogue_stale", detail: "2" };
+  const executed = { error: "already executed", code: "already_executed" };
+  if (validate409(stale) && validate409(executed)) ok("run 409 instances select exactly one typed refusal schema");
+  else fail("run 409 instances", ajv.errorsText(validate409.errors));
+
+  const slots = schemas.RunSlots;
+  const oldCatalogueSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: slots.required,
+    properties: {
+      agentId: { type: "string" },
+      target: slots.properties.target,
+      generation: slots.properties.generation,
+      releaseDigest: { type: "string" },
+      capabilities: slots.properties.capabilities,
+      slots: { type: "array", maxItems: 0 },
+      experiment: { type: "null" },
+    },
+  };
+  const validateOldCatalogue = ajv.compile(oldCatalogueSchema);
+  const oldCatalogue = { agentId: "agent-1", target: "prod", generation: 1, releaseDigest: `sha256:${"a".repeat(64)}`, slots: [], experiment: null };
+  if (validateOldCatalogue(oldCatalogue)) ok("an older catalogue without capabilities remains valid");
+  else fail("older catalogue without capabilities", ajv.errorsText(validateOldCatalogue.errors));
+}
 
 // ---------------------------------------------------------------------------
 section("examples validate");

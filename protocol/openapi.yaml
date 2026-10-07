@@ -772,7 +772,7 @@ components:
     RunSlots:
       type: object
       additionalProperties: false
-      required: [agentId, target, generation, releaseDigest, capabilities, slots, experiment]
+      required: [agentId, target, generation, releaseDigest, slots, experiment]
       properties:
         agentId:
           $ref: "schemas/manifest.schema.json#/$defs/identifier"

@@ -149,13 +149,14 @@ export function orderedSteps<S extends { stepId: string; ordinal: number }>(slot
   return sorted;
 }
 
-/** 1.1.0: local predicates. Missing operator is legacy `is`; new manifests write it explicitly. */
+/** 1.1.x: local predicates. Missing operator is legacy `is`; new manifests write it explicitly. */
 export type AudienceCondition = { key: string; operator?: "is" | "contains"; value: string };
 export type AudienceSelector = { mode: "all" } | { mode: "tags"; match: "all" | "any"; conditions: AudienceCondition[] };
 export interface AudienceSnapshot { audienceId: string; selector: AudienceSelector }
 export interface AudienceObservation extends AudienceSnapshot { tag: string; observeFrom: string }
 export const AUDIENCE_CAPABILITY = "audience_v2";
-export const AUDIENCE_PROTOCOL_VERSION = "1.1.0";
+export const AUDIENCE_PROTOCOL_VERSION = "1.1.1";
+export const PREVIOUS_AUDIENCE_PROTOCOL_VERSION = "1.1.0";
 export const LEGACY_AUDIENCE_CAPABILITY = "audience_v1";
 export const LEGACY_AUDIENCE_PROTOCOL_VERSION = "1.0.0";
 const audienceObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -207,7 +208,7 @@ export function validAudienceManifest(p: import("./types.js").ManifestPayload): 
   const targeted = p.requiredCapabilities !== undefined || p.observations !== undefined || experiments.some(e => e.audience !== undefined) || (audienceObject(p.experiment) && p.experiment.audience !== undefined);
   // Major 0 remains legacy-compatible. Major 1 always requires its frozen audience negotiation envelope.
   if (!targeted) return Number(String(p.protocol).split(".")[0]) !== 1;
-  const supportedEnvelope = (p.protocol === AUDIENCE_PROTOCOL_VERSION && JSON.stringify(p.requiredCapabilities) === JSON.stringify([AUDIENCE_CAPABILITY])) || (p.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && JSON.stringify(p.requiredCapabilities) === JSON.stringify([LEGACY_AUDIENCE_CAPABILITY]));
+  const supportedEnvelope = ((p.protocol === AUDIENCE_PROTOCOL_VERSION || p.protocol === PREVIOUS_AUDIENCE_PROTOCOL_VERSION) && JSON.stringify(p.requiredCapabilities) === JSON.stringify([AUDIENCE_CAPABILITY])) || (p.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && JSON.stringify(p.requiredCapabilities) === JSON.stringify([LEGACY_AUDIENCE_CAPABILITY]));
   if (!supportedEnvelope || p.experiment !== undefined || !Array.isArray(p.observations) || p.observations.length < 1 || p.observations.length > 8 || !Array.isArray(p.slots) || experiments.length > 32) return false;
   const selectors = [...p.observations, ...experiments.map((entry) => entry.audience)].map((entry) => audienceObject(entry) ? entry.selector : null);
   // v1 has no operator. v2 is the approved minimal model: implicit AND, with every condition explicit.
@@ -215,7 +216,7 @@ export function validAudienceManifest(p: import("./types.js").ManifestPayload): 
     const candidate = selector as unknown;
     return audienceObject(candidate) && Array.isArray(candidate.conditions) && candidate.conditions.some((condition: unknown) => audienceObject(condition) && condition.operator !== undefined);
   })) return false;
-  if (p.protocol === AUDIENCE_PROTOCOL_VERSION && selectors.some((selector) => audienceObject(selector) && selector.mode === "tags" && (selector.match !== "all" || !Array.isArray(selector.conditions) || selector.conditions.some((condition: unknown) => !audienceObject(condition) || condition.operator === undefined)))) return false;
+  if ((p.protocol === AUDIENCE_PROTOCOL_VERSION || p.protocol === PREVIOUS_AUDIENCE_PROTOCOL_VERSION) && selectors.some((selector) => audienceObject(selector) && selector.mode === "tags" && (selector.match !== "all" || !Array.isArray(selector.conditions) || selector.conditions.some((condition: unknown) => !audienceObject(condition) || condition.operator === undefined)))) return false;
   const ids = new Set<string>();
   for (const o of p.observations) {
     if (!audienceObject(o) || !audienceKeys(o,["audienceId","selector","tag","observeFrom"]) || !validAudienceIds([o.audienceId]) || !validAudienceSelector(o.selector) || ids.has(o.audienceId) || !p.slots.some(s => audienceObject(s) && s.tag === o.tag) || !validAudienceInstant(o.observeFrom)) return false;

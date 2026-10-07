@@ -4,8 +4,9 @@ declared variables, workflow step ids, the experiment's salt and arms)
 with a run key, and ``run()`` / ``stream()`` POST to the run route. The
 subject never leaves the process: ``subjectHash`` is
 ``hex(SHA-256(salt ‖ subject))`` computed here, exactly as client mode
-computes it, so an A/B across modes is one A/B. Refusals are typed; the
-only retry is a 429 honouring ``Retry-After``. Every run streams under the
+computes it, so an A/B across modes is one A/B. Refusals are typed; 429s
+honour ``Retry-After``, while one ``catalogue_stale`` refusal refreshes the
+signed catalogue and recomputes the request. Every run streams under the
 hood — the run route sits behind an edge that closes a silent connection
 at 60 s, and a JSON run is silent until the model finishes — and ``run()``
 assembles the ``done`` frame for callers who did not ask to stream.
@@ -35,7 +36,7 @@ from urllib.parse import quote
 
 import httpx
 
-from airprompter_agent_core.protocol.assignment import subject_hash as salted_subject_hash
+from airprompter_agent_core.protocol.assignment import copy_audience_tags, matches_audience, subject_hash as salted_subject_hash
 
 from .variables.fill import fill_sync, plan_fill, stricter_sources, supplied, unsourced
 from .variables.sources import VariableSourceContext, VariableSourceError, VariableSourceInput, VariableSourceRegistry, VariableSourceRequiredError
@@ -57,9 +58,11 @@ MANAGED_REFUSAL_CODES = (
     "nothing_promoted",
     "step_not_found",
     "already_executed",
+    "catalogue_stale",
     "rate_limited",
     "agent_rate_limited",
     "model_unavailable",
+    "invalid_run_ref",
     "internal",
 )
 
@@ -232,11 +235,12 @@ class ManagedWorkflow:
 
 
 class ManagedAgent:
-    def __init__(self, *, agent_id: str, target: str, api_key: str, base_url: str, catalogue: dict[str, Any], transport: Optional[httpx.BaseTransport], max_rate_limit_retries: int, sleep: Callable[[float], None], instance_id: Optional[str], user_agent: str, timeout: float, variables: Optional[Mapping[str, VariableSourceInput]] = None):
+    def __init__(self, *, agent_id: str, target: str, api_key: str, base_url: str, catalogue: dict[str, Any], transport: Optional[httpx.BaseTransport], max_rate_limit_retries: int, sleep: Callable[[float], None], instance_id: Optional[str], user_agent: str, timeout: float, variables: Optional[Mapping[str, VariableSourceInput]] = None, tags: Optional[Mapping[str, str]] = None):
         #: The application's variable sources (``start(variables=...)``, ``agent.variables.provide()``): consulted for
         #: every required declared variable a call site did not pass, before the run is posted — the hosted route has
         #: no way into the application's systems. See ``variables/sources.py``.
         self.variables = VariableSourceRegistry(variables)
+        self._audience_tags = copy_audience_tags(tags or {})
         self._agent_id = agent_id
         self._target = target
         self._api_key = api_key
@@ -249,12 +253,12 @@ class ManagedAgent:
         self._user_agent = user_agent
 
     @classmethod
-    def start(cls, *, agent_id: str, target: str, api_key: str, base_url: str, transport: Optional[httpx.BaseTransport] = None, max_rate_limit_retries: int = 2, sleep: Optional[Callable[[float], None]] = None, instance_id: Optional[str] = None, user_agent: str = MANAGED_SDK_USER_AGENT, timeout: float = 120.0, variables: Optional[Mapping[str, VariableSourceInput]] = None) -> "ManagedAgent":
+    def start(cls, *, agent_id: str, target: str, api_key: str, base_url: str, transport: Optional[httpx.BaseTransport] = None, max_rate_limit_retries: int = 2, sleep: Optional[Callable[[float], None]] = None, instance_id: Optional[str] = None, user_agent: str = MANAGED_SDK_USER_AGENT, timeout: float = 120.0, variables: Optional[Mapping[str, VariableSourceInput]] = None, tags: Optional[Mapping[str, str]] = None) -> "ManagedAgent":
         """Reads the catalogue once; refuses (typed) when the key, the target or the promotion is not there.
         ``api_key`` is a run key (``agent_run`` kind, ``agent.run`` scope); ``base_url`` the run route's origin (the AgentRunUrl output of the execution stack).
         ``variables`` registers how this process fills declared variables from its own system (a literal, or a source with its
         trust). This client is synchronous, so a source must be a plain callable: a coroutine function is refused at run time."""
-        agent = cls(agent_id=agent_id, target=target, api_key=api_key, base_url=base_url, catalogue={}, transport=transport, max_rate_limit_retries=max_rate_limit_retries, sleep=sleep or time.sleep, instance_id=instance_id, user_agent=user_agent, timeout=timeout, variables=variables)
+        agent = cls(agent_id=agent_id, target=target, api_key=api_key, base_url=base_url, catalogue={}, transport=transport, max_rate_limit_retries=max_rate_limit_retries, sleep=sleep or time.sleep, instance_id=instance_id, user_agent=user_agent, timeout=timeout, variables=variables, tags=tags)
         agent._catalogue = agent._read_catalogue()
         return agent
 
@@ -276,6 +280,18 @@ class ManagedAgent:
         """Re-reads the catalogue (a run answered with a newer generation, or on a schedule of your own)."""
         self._catalogue = self._read_catalogue()
         return self._catalogue
+
+    def set_tags(self, tags: Mapping[str, str]) -> "ManagedAgent":
+        """Replace process-local audience tags. Values are matched here and never sent to AirPrompter."""
+        self._audience_tags = copy_audience_tags(tags)
+        return self
+
+    def _audience_ids_for(self, tag: str, override: Optional[Mapping[str, str]] = None) -> Optional[list[str]]:
+        observations = [entry for entry in self._catalogue.get("observations", []) if entry.get("tag") == tag and entry.get("selector", {}).get("mode") == "tags"]
+        if not observations:
+            return None
+        local_tags = copy_audience_tags({**self._audience_tags, **(override or {})}) if override else self._audience_tags
+        return sorted(entry["audienceId"] for entry in observations if matches_audience(entry.get("selector"), local_tags))
 
     def experiment_for(self, tag: str) -> Optional[dict]:
         """S17: the experiment that splits a slot — the per-prompt one by tag, else the legacy single one (it covers every slot), else None."""
@@ -351,39 +367,40 @@ class ManagedAgent:
             raise VariableSourceRequiredError(tag, error.names, hint=_MANAGED_SYNC_HINT) from None
         return {name: str(value) for name, value in filled.values.items() if supplied(filled.values, name)}
 
-    def stream(self, tag: str, variables: Mapping[str, str], *, subject: Optional[str] = None, step_id: Optional[str] = None, idempotency_key: Optional[str] = None, max_output_tokens: Optional[int] = None, metadata: Optional[Mapping[str, str]] = None) -> ManagedRunStream:
+    def stream(self, tag: str, variables: Mapping[str, str], *, subject: Optional[str] = None, step_id: Optional[str] = None, idempotency_key: Optional[str] = None, max_output_tokens: Optional[int] = None, metadata: Optional[Mapping[str, str]] = None, tags: Optional[Mapping[str, str]] = None) -> ManagedRunStream:
         """The run as SSE: iterate the deltas, read ``result``. Declared variables the call site left unfilled are
         filled from the application's sources first (``_fill_for_run``)."""
-        body: dict[str, Any] = {"tag": tag, "variables": self._fill_for_run(tag, variables, subject), "stream": True}
-        subject_digest = self.subject_hash_for(subject, tag)
-        if subject_digest:
-            body["subjectHash"] = subject_digest
-        if step_id:
-            body["stepId"] = step_id
-        if idempotency_key:
-            body["idempotencyKey"] = idempotency_key
-        if max_output_tokens:
-            body["maxOutputTokens"] = max_output_tokens
-        if metadata:
-            body["metadata"] = dict(metadata)
         url = f"{self._base_url}/v1/agents/{quote(self._agent_id, safe='')}/targets/{self._target}/run"
         headers = {"authorization": f"Bearer {self._api_key}", "content-type": "application/json", "accept": "text/event-stream", "user-agent": self._user_agent}
-        attempt = 0
+        refreshes = 0
         while True:
-            request = self._client.build_request("POST", url, headers=headers, content=json.dumps(body).encode("utf-8"))
-            response = self._client.send(request, stream=True)
-            if response.status_code == 200:
-                return ManagedRunStream(response, self._on_done)
-            response.read()
-            refusal = _refusal_from(response.status_code, _safe_json(response.text), response.headers.get("retry-after"))
-            response.close()
-            if response.status_code == 429 and attempt < self._retries:
-                attempt += 1
-                self._sleep(max(1.0, refusal.retry_after_seconds or 1.0))
-                continue
-            raise refusal
+            body: dict[str, Any] = {"tag": tag, "variables": self._fill_for_run(tag, variables, subject), "stream": True}
+            if "catalogue_generation" in self._catalogue.get("capabilities", []): body["catalogueGeneration"] = self._catalogue["generation"]
+            audience_ids = self._audience_ids_for(tag, tags)
+            if audience_ids is not None: body["audienceIds"] = audience_ids
+            subject_digest = self.subject_hash_for(subject, tag)
+            if subject_digest: body["subjectHash"] = subject_digest
+            if step_id: body["stepId"] = step_id
+            if idempotency_key: body["idempotencyKey"] = idempotency_key
+            if max_output_tokens: body["maxOutputTokens"] = max_output_tokens
+            if metadata: body["metadata"] = dict(metadata)
+            attempt = 0
+            while True:
+                request = self._client.build_request("POST", url, headers=headers, content=json.dumps(body).encode("utf-8"))
+                response = self._client.send(request, stream=True)
+                if response.status_code == 200: return ManagedRunStream(response, self._on_done)
+                response.read()
+                refusal = _refusal_from(response.status_code, _safe_json(response.text), response.headers.get("retry-after"))
+                response.close()
+                if refusal.code == "catalogue_stale" and refreshes == 0:
+                    refreshes += 1
+                    self.refresh()
+                    break
+                if response.status_code == 429 and attempt < self._retries:
+                    attempt += 1
+                    self._sleep(max(1.0, refusal.retry_after_seconds or 1.0))
+                    continue
+                raise refusal
 
     def _on_done(self, done: ManagedRunResult) -> None:
-        if done.generation != self._catalogue.get("generation"):
-            # A newer promotion answered: the catalogue may have new tags; read it lazily on the next call.
-            self._catalogue = {**self._catalogue, "generation": done.generation}
+        return None

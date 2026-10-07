@@ -192,7 +192,7 @@ def test_workflows_telemetry_feedback_spool(state_dir):
     plane = FakeControlPlane(SCOPE)
     wf = plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Summarise {{doc}}"}, {"text": "Translate to {{lang}}"}], variables=[{"name": "doc", "required": True, "trust": "end_user"}, {"name": "lang", "required": True, "trust": "operator"}])
     audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "all"}}
-    manifest = plane.promote([wf, *triage_slots(plane)], protocol="1.1.0")
+    manifest = plane.promote([wf, *triage_slots(plane)], protocol="1.1.1")
     manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
     manifest["payload"]["observations"] = [{**audience, "tag": wf["tag"], "observeFrom": "2026-09-12T14:00:00Z"}]
     manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
@@ -566,7 +566,7 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
     candidate = plane.slot(tag="support.reply", text="Candidate {{candidate_value}}", version_id="ver_candidate", variables=[{"name":"candidate_value","required":True,"trust":"operator"}])
     candidate["outputChecks"] = [{"kind":"enum","name":"category","path":"category","values":["ok"]}]
     audience = {"audienceId":"aud_AAAAAAAAAAAAAAAAAAAAAA", "selector":{"mode":"tags","match":"all","conditions":[{"key":"device_id","operator":"is","value":"private-device-042"}]}}
-    manifest = plane.promote([base], protocol="1.1.0", experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
+    manifest = plane.promote([base], protocol="1.1.1", experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
     manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
     manifest["payload"]["observations"] = [{**audience,"tag":base["tag"],"observeFrom":"2026-09-12T14:00:00Z"}]
     manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
@@ -591,7 +591,7 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
         with ap.attribute(step):
             assert current_attribution().artifact_id == rendered.artifact_id and current_attribution().audience_ids == rendered.audience_ids and current_attribution().run_minute == rendered.run_minute
         heartbeat = ap.heartbeat_body()
-        assert heartbeat["protocol"] == "1.1.0" and heartbeat["capabilities"] == ["audience_v2"]
+        assert heartbeat["protocol"] == "1.1.1" and heartbeat["capabilities"] == ["audience_v2"]
         assert heartbeat["registration"]["tagKeys"] == ["device_id","region"]
         assert "private-device-042" not in json.dumps(heartbeat) and "secret-west" not in json.dumps(heartbeat)
         ap.set_tags({"device_id":"private-device-043"})
@@ -648,7 +648,7 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
     base = plane.slot(tag="support.reply", text="Published")
     slots = [base] + [plane.slot(tag=f"prompt.slot{index:02d}", text=f"Prompt {index}") for index in range(32)]
     audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "new_key", "operator": "is", "value": "new_value"}]}}
-    manifest = plane.promote(slots, protocol="1.1.0")
+    manifest = plane.promote(slots, protocol="1.1.1")
     manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
     manifest["payload"]["observations"] = [{**audience, "tag": base["tag"], "observeFrom": "2026-09-12T14:00:00Z"}]
     manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)

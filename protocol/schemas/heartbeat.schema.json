@@ -453,7 +453,10 @@
               {
                 "properties": {
                   "protocol": {
-                    "const": "1.1.0"
+                    "enum": [
+                      "1.1.0",
+                      "1.1.1"
+                    ]
                   },
                   "capabilities": {
                     "prefixItems": [
@@ -631,7 +634,10 @@
               {
                 "properties": {
                   "protocol": {
-                    "const": "1.1.0"
+                    "enum": [
+                      "1.1.0",
+                      "1.1.1"
+                    ]
                   },
                   "capabilities": {
                     "prefixItems": [

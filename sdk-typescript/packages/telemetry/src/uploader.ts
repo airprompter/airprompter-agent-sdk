@@ -82,7 +82,7 @@ export type GrantDecision = { kind: "grant"; grant: UploadGrant; uploadIntervalS
 // ---------------------------------------------------------------------------
 
 const INSTANCE_ID = /^[A-Za-z0-9._~-]{8,64}$/;
-const TAG = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+const TAG = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:#[1-9][0-9]{0,2})?$/;
 const ARM = /^[a-z0-9_-]{1,32}$/;
 const OUTCOME_NAME = /^[a-z][a-zA-Z0-9]{0,31}$/;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -121,7 +121,7 @@ export function validateSpoolRow(value: unknown): RowVerdict {
       }
       if (!isString(value.minute, 64) || !DATE_TIME.test(value.minute)) return { ok: false, reason: "minute" };
       if (value.instanceClass !== "resident" && value.instanceClass !== "ephemeral") return { ok: false, reason: "instanceClass" };
-      if (!isString(value.tag, 128) || !TAG.test(value.tag)) return { ok: false, reason: "tag" };
+      if (!isString(value.tag, 132) || !TAG.test(value.tag)) return { ok: false, reason: "tag" };
       if (!isString(value.versionId, 128)) return { ok: false, reason: "versionId" };
       if (!isString(value.arm, 32) || !(value.v === 2 || value.v === 3 ? /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/ : ARM).test(value.arm)) return { ok: false, reason: "arm" };
       if (!isString(value.model, 128)) return { ok: false, reason: "model" };

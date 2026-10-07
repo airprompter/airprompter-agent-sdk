@@ -5,8 +5,9 @@
  * with a run key, and `run()` / `stream()` POST to the run route. The
  * subject never leaves the process: `subjectHash` is `hex(SHA-256(salt ‖
  * subject))` computed here, exactly as client mode computes it, so an A/B
- * across modes is one A/B. Refusals are typed; the only retry is a 429
- * honouring `Retry-After`. Every run streams under the hood — the run route
+ * across modes is one A/B. Refusals are typed; 429s honour `Retry-After`,
+ * while one `catalogue_stale` refusal refreshes the signed catalogue and
+ * recomputes the request. Every run streams under the hood — the run route
  * sits behind an edge that closes a silent connection at 60 s, and a JSON
  * run is silent until the model finishes — and `run()` assembles the `done`
  * frame for callers who did not ask to stream. Variable sources the
@@ -24,12 +25,12 @@
  * ```
  */
 
-import type { SlotInference, SlotVariable } from "@airprompter/agent-core";
+import type { AudienceSelector, SlotInference, SlotVariable } from "@airprompter/agent-core";
 import { createHash } from "node:crypto";
 import { VariableSourceRegistry, type VariableSourceInput } from "../variables/sources.js";
 import { fillAsync, planFill, stricterSources, supplied, unsourced, type RenderValues } from "../variables/fill.js";
 import { VariableSourceError } from "../variables/sources.js";
-import { errorNamed } from "@airprompter/agent-core";
+import { copyAudienceTags, errorNamed, matchesAudience } from "@airprompter/agent-core";
 
 import { subjectHash as saltedSubjectHash } from "@airprompter/agent-core";
 
@@ -63,7 +64,9 @@ export interface ManagedStartOptions {
    * cannot be known here).
    */
   variables?: Record<string, VariableSourceInput>;
-  /** Retries on 429 only; each waits `Retry-After` (or a second). Default 2. */
+  /** Arbitrary local audience tags. Values are matched in this process and are never sent to AirPrompter. */
+  tags?: Readonly<Record<string, string>>;
+  /** Rate-limit retries; each waits `Retry-After` (or a second). Default 2. */
   maxRateLimitRetries?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -88,11 +91,14 @@ export interface ManagedCatalogue {
   target: string;
   generation: number;
   releaseDigest: string;
+  capabilities?: readonly string[];
   slots: readonly ManagedSlot[];
   /** The legacy single experiment (it covers every slot); S17: the first of `experiments` when the catalogue lists them. */
   experiment: { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null;
   /** S17: one entry per experiment, each naming the slot it splits (`tag` null on the legacy single one). */
   experiments?: readonly { experimentId: string; tag: string | null; salt: string; subjectKey: "request" | "instance"; arms: readonly string[] }[];
+  /** Signed audience rules. Only matching opaque ids are returned on a run; tag values remain local. */
+  observations?: readonly { audienceId: string; tag: string; selector: AudienceSelector }[];
 }
 
 export interface ManagedRunOptions {
@@ -105,6 +111,8 @@ export interface ManagedRunOptions {
   /** Content-free correlation the customer keeps; echoed on the response. */
   metadata?: Record<string, string>;
   signal?: AbortSignal;
+  /** Per-run local audience tags merged over `start({ tags })`; values never leave this process. */
+  tags?: Readonly<Record<string, string>>;
 }
 
 export interface ManagedRunResult {
@@ -124,6 +132,22 @@ export interface ManagedRunResult {
   metadata?: Record<string, string>;
 }
 
+export interface ManagedRunFeedbackAttribution {
+  tag: string;
+  versionId: string;
+  arm: string;
+  minute: string;
+  artifactId?: string;
+  audienceIds?: readonly string[];
+  runMinute?: string;
+}
+
+export interface ManagedRunFeedbackResponse {
+  accepted: boolean;
+  attributedTo: ManagedRunFeedbackAttribution | null;
+  rejected: Record<string, string>;
+}
+
 export type ManagedRefusalCode =
   | "unauthorized"
   | "forbidden"
@@ -139,6 +163,7 @@ export type ManagedRefusalCode =
   | "nothing_promoted"
   | "step_not_found"
   | "already_executed"
+  | "catalogue_stale"
   | "rate_limited"
   | "agent_rate_limited"
   | "model_unavailable"
@@ -231,6 +256,7 @@ export class ManagedAgent {
   private readonly instanceId: string;
   /** The application's variable sources (`start({ variables })`, `agent.variables.provide()`). */
   readonly variables: VariableSourceRegistry;
+  private audienceTags: Readonly<Record<string, string>>;
 
   private constructor(
     private readonly options: ManagedStartOptions,
@@ -240,6 +266,7 @@ export class ManagedAgent {
     this.fetchImpl = options.fetch ?? (globalThis.fetch as unknown as ManagedFetchLike);
     this.instanceId = options.instanceId ?? createHash("sha256").update(`${process.pid}:${Date.now()}:${Math.random()}`).digest("hex");
     this.variables = new VariableSourceRegistry(options.variables);
+    this.audienceTags = copyAudienceTags(options.tags ?? {});
   }
 
   /** Reads the catalogue once; refuses (typed) when the key, the target or the promotion is not there. */
@@ -271,6 +298,18 @@ export class ManagedAgent {
     return this.catalogue;
   }
 
+  setTags(tags: Readonly<Record<string, string>>): this {
+    this.audienceTags = copyAudienceTags(tags);
+    return this;
+  }
+
+  private audienceIdsFor(tag: string, override?: Readonly<Record<string, string>>): string[] | undefined {
+    const rules = this.catalogue.observations?.filter((entry) => entry.tag === tag && entry.selector.mode === "tags");
+    if (!rules?.length) return;
+    const local = override ? copyAudienceTags({ ...this.audienceTags, ...override }) : this.audienceTags;
+    return rules.flatMap((entry) => matchesAudience(entry.selector, local) ? [entry.audienceId] : []).sort();
+  }
+
   /** S17: the experiment that splits a slot — the per-prompt one by tag, else the legacy single one (it covers every slot), else null. */
   experimentFor(tag: string): { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null {
     const list = this.catalogue.experiments;
@@ -291,7 +330,7 @@ export class ManagedAgent {
    * ref. Numbers, booleans and the declared enums only; the answer says what landed and what was refused and why.
    * A ref that does not verify, or one for another agent or environment, is a `ManagedRunError` (`invalid_run_ref`).
    */
-  async feedback(runRef: string, signals: Record<string, unknown>): Promise<{ accepted: boolean; attributedTo: { tag: string; versionId: string; arm: string; minute: string } | null; rejected: Record<string, string> }> {
+  async feedback(runRef: string, signals: Record<string, unknown>): Promise<ManagedRunFeedbackResponse> {
     const url = `${this.options.baseUrl.replace(/\/$/, "")}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/feedback`;
     const response = await this.fetchImpl(url, {
       method: "POST",
@@ -300,7 +339,7 @@ export class ManagedAgent {
     });
     const text = await response.text();
     if (response.status !== 202) throw refusalFrom(response.status, safeJson(text), response.headers.get("retry-after"));
-    return JSON.parse(text) as { accepted: boolean; attributedTo: { tag: string; versionId: string; arm: string; minute: string } | null; rejected: Record<string, string> };
+    return JSON.parse(text) as ManagedRunFeedbackResponse;
   }
 
   /** One managed run: streams under the hood, returns the assembled result. */
@@ -352,33 +391,38 @@ export class ManagedAgent {
 
   /** The run as SSE: iterate the deltas, await `result`. */
   async stream(tag: string, variables: Record<string, string>, options: ManagedRunOptions = {}): Promise<ManagedRunStream> {
-    const subjectHash = this.subjectHashFor(options.subject, tag);
-    const filledVariables = await this.fillForRun(tag, variables, options.subject, options.signal);
-    const body = JSON.stringify({
-      tag,
-      variables: filledVariables,
-      stream: true,
-      ...(subjectHash ? { subjectHash } : {}),
-      ...(options.stepId ? { stepId: options.stepId } : {}),
-      ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
-      ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
-      ...(options.metadata ? { metadata: options.metadata } : {}),
-    });
     const url = `${this.options.baseUrl.replace(/\/$/, "")}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/run`;
     const headers = { authorization: `Bearer ${this.options.apiKey}`, "content-type": "application/json", accept: "text/event-stream", "user-agent": this.options.userAgent ?? MANAGED_SDK_USER_AGENT };
     const retries = this.options.maxRateLimitRetries ?? 2;
     const sleep = this.options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-    let attempt = 0;
+    let refreshes = 0;
     for (;;) {
-      const response = await this.fetchImpl(url, { method: "POST", headers, body, ...(options.signal ? { signal: options.signal } : {}) });
-      if (response.status === 200) return this.consume(response);
-      const refusal = refusalFrom(response.status, safeJson(await response.text()), response.headers.get("retry-after"));
-      if (response.status === 429 && attempt < retries) {
-        attempt += 1;
-        await sleep(Math.max(1, refusal.retryAfterSeconds ?? 1) * 1000);
-        continue;
+      const subjectHash = this.subjectHashFor(options.subject, tag);
+      const audienceIds = this.audienceIdsFor(tag, options.tags);
+      const body = JSON.stringify({
+        tag, variables: await this.fillForRun(tag, variables, options.subject, options.signal), stream: true,
+        ...(this.catalogue.capabilities?.includes("catalogue_generation") ? { catalogueGeneration: this.catalogue.generation } : {}),
+        ...(subjectHash ? { subjectHash } : {}), ...(audienceIds ? { audienceIds } : {}),
+        ...(options.stepId ? { stepId: options.stepId } : {}), ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+        ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}), ...(options.metadata ? { metadata: options.metadata } : {}),
+      });
+      let attempt = 0;
+      for (;;) {
+        const response = await this.fetchImpl(url, { method: "POST", headers, body, ...(options.signal ? { signal: options.signal } : {}) });
+        if (response.status === 200) return this.consume(response);
+        const refusal = refusalFrom(response.status, safeJson(await response.text()), response.headers.get("retry-after"));
+        if (refusal.code === "catalogue_stale" && refreshes === 0) {
+          refreshes += 1;
+          await this.refresh();
+          break;
+        }
+        if (response.status === 429 && attempt < retries) {
+          attempt += 1;
+          await sleep(Math.max(1, refusal.retryAfterSeconds ?? 1) * 1000);
+          continue;
+        }
+        throw refusal;
       }
-      throw refusal;
     }
   }
 
@@ -392,7 +436,6 @@ export class ManagedAgent {
     // A rejection nobody awaits yet must not surface as unhandled; `result` is re-awaited by the caller.
     result.catch(() => {});
     const frames = parseSse(textChunks(response));
-    const self = this;
     let settled = false;
     const iterable: ManagedRunStream = {
       result,
@@ -403,10 +446,6 @@ export class ManagedAgent {
               yield (JSON.parse(frame.data) as { delta: string }).delta;
             } else if (frame.event === "done") {
               const done = JSON.parse(frame.data) as ManagedRunResult;
-              if (done.generation !== self.catalogue.generation) {
-                // A newer promotion answered: the catalogue may have new tags; read it lazily on the next call.
-                self.catalogue = { ...self.catalogue, generation: done.generation };
-              }
               settled = true;
               resolveResult(done);
             } else if (frame.event === "error") {

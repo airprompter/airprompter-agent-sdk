@@ -67,7 +67,7 @@ OPEN_SEGMENT_NAME = re.compile(r"^seg-([A-Za-z0-9._~-]{8,64})-(\d+)-(\d+)\.ndjso
 # ---------------------------------------------------------------------------
 
 _INSTANCE_ID = re.compile(r"^[A-Za-z0-9._~-]{8,64}$")
-_TAG = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+_TAG = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:#[1-9][0-9]{0,2})?$")
 _ARM = re.compile(r"^[a-z0-9_-]{1,32}$")
 _OUTCOME_NAME = re.compile(r"^[a-z][a-zA-Z0-9]{0,31}$")
 _DATE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$")
@@ -116,7 +116,7 @@ def validate_spool_row(value: Any) -> RowVerdict:
             return RowVerdict(False, "minute")
         if value.get("instanceClass") not in ("resident", "ephemeral"):
             return RowVerdict(False, "instanceClass")
-        if not _is_str(value.get("tag"), 128) or not _TAG.match(value["tag"]):
+        if not _is_str(value.get("tag"), 132) or not _TAG.match(value["tag"]):
             return RowVerdict(False, "tag")
         if not _is_str(value.get("versionId"), 128):
             return RowVerdict(False, "versionId")

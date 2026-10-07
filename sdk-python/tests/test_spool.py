@@ -126,6 +126,17 @@ def test_uploader_rejects_noncanonical_artifact_identities_from_shared_vectors()
         assert not verdict.ok and verdict.reason == "artifactId", case["name"]
 
 
+def test_uploader_accepts_workflow_step_tags_as_telemetry_dimensions():
+    base = {
+        "type": "window", "v": 1, "minute": "2026-09-12T14:03:00Z", "instanceId": "i-testinstance", "instanceClass": "resident",
+        "tag": "onboarding.flow#1", "versionId": "v1", "arm": "none", "model": "m", "status": "ok", "errorClass": None, "usageSource": "reported",
+        "count": 1, "latencyMs": {"buckets": [1] + [0] * 15, "sum": 1}, "tokens": {"input": 0, "output": 0}, "sdk": "t/0",
+    }
+    assert validate_spool_row(base).ok
+    refused = validate_spool_row({**base, "tag": "onboarding.flow#0"})
+    assert not refused.ok and refused.reason == "tag"
+
+
 def test_v2_and_v3_outcomes_without_a_run_minute_require_an_open_measured_run():
     sink = MemorySink()
     writer = SpoolWriter(sink, IDENTITY)

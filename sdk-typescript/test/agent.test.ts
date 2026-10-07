@@ -191,7 +191,7 @@ test("workflows yield steps in order with their texts; telemetry and feedback la
   const plane = new FakeControlPlane(scope);
   const wf = plane.slot({ tag: "docs.flow", text: "flow", steps: [{ text: "Summarise {{doc}}" }, { text: "Translate to {{lang}}" }], variables: [{ name: "doc", required: true, trust: "end_user" }, { name: "lang", required: true, trust: "operator" }] });
   const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "all" as const } };
-  const manifest = plane.promote([wf, ...triageSlots(plane)], { protocol: "1.1.0" });
+  const manifest = plane.promote([wf, ...triageSlots(plane)], { protocol: "1.1.1" });
   manifest.payload.requiredCapabilities = ["audience_v2"];
   manifest.payload.observations = [{ ...audience, tag: wf.tag, observeFrom: "2026-09-12T14:00:00Z" }];
   manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
@@ -534,7 +534,7 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   const base = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
   const candidate = plane.slot({tag:"support.reply",text:"Candidate",versionId:"ver_candidate"});
   const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"tags" as const,match:"all" as const,conditions:[{key:"device_id",operator:"is" as const,value:"private-device-042"}]}};
-  const manifest = plane.promote([base],{protocol:"1.1.0",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
+  const manifest = plane.promote([base],{protocol:"1.1.1",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
   manifest.payload.requiredCapabilities=["audience_v2"];
   manifest.payload.observations=[{...audience,tag:base.tag,observeFrom:"2026-09-12T14:00:00Z"}];
   manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
@@ -547,7 +547,7 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
     assert.equal(rendered.text,"Candidate");
     assert.deepEqual(rendered.audienceIds,[audience.audienceId]);
     const heartbeatBody=ap.heartbeatBody();
-    assert.equal(heartbeatBody.protocol,"1.1.0");
+    assert.equal(heartbeatBody.protocol,"1.1.1");
     assert.deepEqual(heartbeatBody.capabilities,["audience_v2"]);
     const heartbeat=JSON.stringify(heartbeatBody);
     assert.equal(heartbeat.includes("private-device-042"),false);
@@ -614,7 +614,7 @@ test("audience registration evicts stale names, keeps active names, and serves o
   const base = plane.slot({ tag: "support.reply", text: "Published" });
   const slots = [base, ...Array.from({ length: 32 }, (_, index) => plane.slot({ tag: `prompt.slot${String(index).padStart(2, "0")}`, text: `Prompt ${index}` }))];
   const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, match: "all" as const, conditions: [{ key: "new_key", operator: "is" as const, value: "new_value" }] } };
-  const manifest = plane.promote(slots, { protocol: "1.1.0" });
+  const manifest = plane.promote(slots, { protocol: "1.1.1" });
   manifest.payload.requiredCapabilities = ["audience_v2"];
   manifest.payload.observations = [{ ...audience, tag: base.tag, observeFrom: "2026-09-12T14:00:00Z" }];
   manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
@@ -700,7 +700,7 @@ test("manual output checks retain audience attribution only on an open measured 
   const plain = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
   const checked = {...plain,outputChecks:[{name:"category",kind:"enum" as const,path:"category",values:["ok"]}]};
   const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"all" as const}};
-  const manifest=plane.promote([checked],{protocol:"1.1.0"});
+  const manifest=plane.promote([checked],{protocol:"1.1.1"});
   manifest.payload.requiredCapabilities=["audience_v2"];
   manifest.payload.observations=[{...audience,tag:checked.tag,observeFrom:"2026-09-12T14:00:00Z"}];
   manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);

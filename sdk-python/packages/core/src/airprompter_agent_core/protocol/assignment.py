@@ -171,9 +171,10 @@ def ordered_steps(slot_tag: str, steps: Sequence[A]) -> list[A]:
             raise StepError("step_tag_mismatch")
     return ordered
 
-# 1.1.0: local is/contains predicates; no matching function returns or logs values.
+# 1.1.x: local is/contains predicates; no matching function returns or logs values.
 AUDIENCE_CAPABILITY = "audience_v2"
-AUDIENCE_PROTOCOL_VERSION = "1.1.0"
+AUDIENCE_PROTOCOL_VERSION = "1.1.1"
+PREVIOUS_AUDIENCE_PROTOCOL_VERSION = "1.1.0"
 LEGACY_AUDIENCE_CAPABILITY = "audience_v1"
 LEGACY_AUDIENCE_PROTOCOL_VERSION = "1.0.0"
 ECMASCRIPT_TRIM = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
@@ -239,13 +240,13 @@ def valid_audience_manifest(p: Mapping[str, Any]) -> bool:
         try: return int(str(p.get("protocol", "")).split(".")[0]) != 1
         except ValueError: return True
     observations = p.get("observations")
-    supported_envelope = (p.get("protocol") == AUDIENCE_PROTOCOL_VERSION and p.get("requiredCapabilities") == [AUDIENCE_CAPABILITY]) or (p.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION and p.get("requiredCapabilities") == [LEGACY_AUDIENCE_CAPABILITY])
+    supported_envelope = (p.get("protocol") in (AUDIENCE_PROTOCOL_VERSION, PREVIOUS_AUDIENCE_PROTOCOL_VERSION) and p.get("requiredCapabilities") == [AUDIENCE_CAPABILITY]) or (p.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION and p.get("requiredCapabilities") == [LEGACY_AUDIENCE_CAPABILITY])
     if not supported_envelope or "experiment" in p or not isinstance(observations, list) or not 1 <= len(observations) <= 8 or not isinstance(p.get("slots"), list) or len(experiments) > 32: return False
     selectors = [o.get("selector") for o in observations if isinstance(o, Mapping)] + [e.get("audience", {}).get("selector") for e in experiments if isinstance(e.get("audience"), Mapping)]
     # v1 has no operator. v2 is the approved minimal model: implicit AND, with every condition explicit.
     if p.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION:
         if any(isinstance(selector, Mapping) and isinstance(selector.get("conditions"), list) and any(isinstance(condition, Mapping) and "operator" in condition for condition in selector["conditions"]) for selector in selectors): return False
-    if p.get("protocol") == AUDIENCE_PROTOCOL_VERSION:
+    if p.get("protocol") in (AUDIENCE_PROTOCOL_VERSION, PREVIOUS_AUDIENCE_PROTOCOL_VERSION):
         if any(isinstance(selector, Mapping) and selector.get("mode") == "tags" and (selector.get("match") != "all" or not isinstance(selector.get("conditions"), list) or any(not isinstance(condition, Mapping) or "operator" not in condition for condition in selector["conditions"])) for selector in selectors): return False
     ids = set()
     for o in observations:

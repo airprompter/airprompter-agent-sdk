@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airprompter-datastore-postgres"
-version = "0.4.0"
+version = "0.4.1"
 description = "The AirPrompter release datastore over one PostgreSQL table: a KvStore with INSERT … ON CONFLICT and versioned UPDATEs, for kv_release_datastore. Bring your own driver (psycopg 3, psycopg2, a psycopg_pool)."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 # The client library is the application's: the adapter imports none, and the extras below only name a known-good one.
 dependencies = [
-  "airprompter-agent-sync==0.4.0",
+  "airprompter-agent-sync==0.4.1",
 ]
 
 [project.optional-dependencies]

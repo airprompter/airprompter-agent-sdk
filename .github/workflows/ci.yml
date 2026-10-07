@@ -52,6 +52,7 @@ jobs:
           cp -R protocol/examples /tmp/examples-expected
           rm /tmp/examples-expected/manifest.audiences.json /tmp/examples-expected/heartbeat.request.audiences.json /tmp/examples-expected/heartbeat.response.audiences.json
           rm /tmp/examples-expected/refused/manifest.audience-without-capability.json /tmp/examples-expected/refused/manifest.audience-empty-conditions.json /tmp/examples-expected/refused/heartbeat.request.audience-values.json
+          rm /tmp/examples-expected/refused/heartbeat.request.protocol2-without-capability.json /tmp/examples-expected/refused/manifest.major0-top-level-audience.json /tmp/examples-expected/refused/manifest.protocol2-without-audience.json
           diff -ru /tmp/examples /tmp/examples-expected
           node /tmp/legacy-check/protocol/tools/gen_datastore_vectors.mjs /tmp/datastore.json >/dev/null
           diff -u protocol/vectors/datastore.json /tmp/datastore.json

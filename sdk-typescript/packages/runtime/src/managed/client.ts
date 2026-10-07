@@ -91,7 +91,6 @@ export interface ManagedCatalogue {
   target: string;
   generation: number;
   releaseDigest: string;
-  /** Optional hosted-run features advertised by newer control planes. */
   capabilities?: readonly "catalogue_generation"[];
   slots: readonly ManagedSlot[];
   /** The legacy single experiment (it covers every slot); S17: the first of `experiments` when the catalogue lists them. */
@@ -137,13 +136,9 @@ export interface ManagedRunFeedbackAttribution {
   tag: string;
   versionId: string;
   arm: string;
-  /** Filing time. */
   minute: string;
-  /** Present on artifact-aware run references. */
   artifactId?: string;
-  /** Opaque original run cohorts; raw local tags never appear here. */
   audienceIds?: readonly string[];
-  /** Original run minute, used for before/after and A/B comparison. */
   runMinute?: string;
 }
 

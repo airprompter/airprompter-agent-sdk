@@ -348,7 +348,7 @@ paths:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/CatalogueStaleError"
-                  - $ref: "#/components/schemas/Error"
+                  - $ref: "#/components/schemas/AlreadyExecutedError"
         "422":
           description: A declared output check failed and the slot is configured to refuse
           content:
@@ -761,6 +761,14 @@ components:
           description: The current signed catalogue generation, encoded as a decimal string.
           type: string
           pattern: "^[1-9][0-9]*$"
+    AlreadyExecutedError:
+      type: object
+      additionalProperties: false
+      required: [error, code]
+      properties:
+        error: { type: string }
+        code: { type: string, enum: [already_executed] }
+        detail: { type: string }
     RunSlots:
       type: object
       additionalProperties: false

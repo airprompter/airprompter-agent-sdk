@@ -22,7 +22,7 @@ import { experimentsOf } from "../protocol/types.js";
 import type { Manifest, ManifestPayload, ManifestSlot, P256PrivateJwk, RootMetadata, RootMetadataSigned, Target } from "../protocol/types.js";
 import type { FetchLike } from "../control/client.js";
 
-/** Legacy fixtures stay on the pre-audience wire unless a test opts into a future protocol explicitly. */
+/** Baseline fixtures stay on the established non-audience wire unless a test opts into protocol 2 explicitly. */
 export const PROTOCOL = "0.3.4";
 
 export function newKey(): P256PrivateJwk {
@@ -74,6 +74,8 @@ export class FakeControlPlane {
   generation = 0;
   edgeEtag = 0;
   requireCountersign = false;
+  /** Authenticated capability echo; tests may add unrelated future capabilities. */
+  heartbeatCapabilities: unknown = ["audience"];
 
   /**
    * Fresh keys by default (a test). `airprompter dev` (S12) hands in the keys it persisted, so the root a customer
@@ -295,10 +297,14 @@ export class FakeControlPlane {
           if (!(key in body)) return respond(400, JSON.stringify({ error: `heartbeat: missing ${key}` }));
         }
         for (const key of Object.keys(body)) {
-          if (!["protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
+          if (!["protocol", "capabilities", "registration", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
         }
         this.heartbeats.push(body);
         const answer: Record<string, unknown> = { pollSeconds: 30, uploadIntervalSeconds: this.uploadIntervalSeconds, heartbeatIntervalSeconds: this.heartbeatIntervalSeconds, expiresAt: new Date(Date.now() + this.heartbeatIntervalSeconds * 3000).toISOString() };
+        if (body.protocol === "2.0.0" && Array.isArray(body.capabilities) && body.capabilities.includes("audience")) {
+          answer.protocol = "2.0.0";
+          answer.capabilities = this.heartbeatCapabilities;
+        }
         // S3: the authenticated answer names the origin's generation; a runtime whose pointer says less goes to the manifest.
         if (this.heartbeatLatestGeneration) answer.latestGeneration = this.current?.manifest.payload.generation ?? 0;
         if (this.grantBaseUrl) {

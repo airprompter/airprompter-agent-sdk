@@ -191,8 +191,8 @@ test("workflows yield steps in order with their texts; telemetry and feedback la
   const plane = new FakeControlPlane(scope);
   const wf = plane.slot({ tag: "docs.flow", text: "flow", steps: [{ text: "Summarise {{doc}}" }, { text: "Translate to {{lang}}" }], variables: [{ name: "doc", required: true, trust: "end_user" }, { name: "lang", required: true, trust: "operator" }] });
   const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "all" as const } };
-  const manifest = plane.promote([wf, ...triageSlots(plane)], { protocol: "1.1.1" });
-  manifest.payload.requiredCapabilities = ["audience_v2"];
+  const manifest = plane.promote([wf, ...triageSlots(plane)], { protocol: "2.0.0" });
+  manifest.payload.requiredCapabilities = ["audience"];
   manifest.payload.observations = [{ ...audience, tag: wf.tag, observeFrom: "2026-09-12T14:00:00Z" }];
   manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
   (plane as any).current.bytes = Buffer.from(JSON.stringify(manifest));
@@ -533,9 +533,9 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   const plane = new FakeControlPlane(scope);
   const base = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
   const candidate = plane.slot({tag:"support.reply",text:"Candidate",versionId:"ver_candidate"});
-  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"tags" as const,match:"all" as const,conditions:[{key:"device_id",operator:"is" as const,value:"private-device-042"}]}};
-  const manifest = plane.promote([base],{protocol:"1.1.1",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
-  manifest.payload.requiredCapabilities=["audience_v2"];
+  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"tags" as const,conditions:[{key:"device_id",operator:"is" as const,value:"private-device-042"}]}};
+  const manifest = plane.promote([base],{protocol:"2.0.0",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
+  manifest.payload.requiredCapabilities=["audience"];
   manifest.payload.observations=[{...audience,tag:base.tag,observeFrom:"2026-09-12T14:00:00Z"}];
   manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
   (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));
@@ -547,8 +547,8 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
     assert.equal(rendered.text,"Candidate");
     assert.deepEqual(rendered.audienceIds,[audience.audienceId]);
     const heartbeatBody=ap.heartbeatBody();
-    assert.equal(heartbeatBody.protocol,"1.1.1");
-    assert.deepEqual(heartbeatBody.capabilities,["audience_v2"]);
+    assert.equal(heartbeatBody.protocol,"2.0.0");
+    assert.deepEqual(heartbeatBody.capabilities,["audience"]);
     const heartbeat=JSON.stringify(heartbeatBody);
     assert.equal(heartbeat.includes("private-device-042"),false);
     assert.equal(heartbeat.includes("secret-west"),false);
@@ -578,7 +578,7 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   rmSync(stateDir,{recursive:true,force:true});
 });
 
-test("audience registration stays bounded without limiting legacy prompt serving", async () => {
+test("audience registration stays bounded after capability negotiation without limiting prompt serving", async () => {
   const stateDir = tempDir();
   const plane = new FakeControlPlane(scope);
   const slots = Array.from({ length: 33 }, (_, index) => {
@@ -588,14 +588,15 @@ test("audience registration stays bounded without limiting legacy prompt serving
   plane.promote(slots);
   const ap = await start(plane, stateDir);
   try {
+    await ap.heartbeatNow();
     for (let index = 0; index < slots.length; index++) {
       const tag = index === 0 ? "support.reply" : `prompt.slot${String(index).padStart(2, "0")}`;
       assert.equal(ap.prompt(tag, { displayName: `Prompt ${index}` }).render().text, `Text ${index}`);
     }
-    (ap as any).audienceServerCapability = "audience_v1";
-    assert.equal(ap.heartbeatBody().protocol,"1.0.0");
-    assert.deepEqual(ap.heartbeatBody().capabilities,["audience_v1"]);
-    (ap as any).audienceServerCapability = "audience_v2"; // exercise names-only registration after current negotiation
+    const firstHeartbeat = plane.heartbeats[0] as any;
+    assert.equal(firstHeartbeat.protocol, "2.0.0");
+    assert.deepEqual(firstHeartbeat.capabilities, ["audience"]);
+    assert.equal(firstHeartbeat.registration, undefined, "registration follows the authenticated capability echo");
     const registration = ap.heartbeatBody().registration as any;
     assert.equal(registration.prompts.length, 32);
     assert.ok(registration.prompts.some((entry: any) => entry.tag === "prompt.slot32"));
@@ -607,15 +608,39 @@ test("audience registration stays bounded without limiting legacy prompt serving
   }
 });
 
+test("only a well-formed authenticated capability echo unlocks audience registration", async () => {
+  const cases: Array<{ capabilities: unknown; negotiated: boolean }> = [
+    { capabilities: "audience", negotiated: false },
+    { capabilities: ["audience", "audience"], negotiated: false },
+    { capabilities: ["audience", "Bad-Capability"], negotiated: false },
+    { capabilities: ["future_feature"], negotiated: false },
+    { capabilities: ["future_feature", "audience"], negotiated: true },
+  ];
+  for (const [index, entry] of cases.entries()) {
+    const stateDir = tempDir();
+    const plane = new FakeControlPlane(scope);
+    plane.heartbeatCapabilities = entry.capabilities;
+    plane.promote([plane.slot({ tag: "support.reply", text: "Published" })]);
+    const ap = await start(plane, stateDir, { tags: { device_id: "private-device" } });
+    try {
+      ap.prompt("support.reply", { displayName: "Support reply" });
+      assert.equal(ap.heartbeatBody().registration !== undefined, entry.negotiated, `case ${index}`);
+    } finally {
+      await ap.stop();
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("audience registration evicts stale names, keeps active names, and serves offline", async () => {
   const stateDir = tempDir();
   const plane = new FakeControlPlane(scope);
   const tags = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`old_key_${String(index).padStart(2, "0")}`, `private_value_${index}`]));
   const base = plane.slot({ tag: "support.reply", text: "Published" });
   const slots = [base, ...Array.from({ length: 32 }, (_, index) => plane.slot({ tag: `prompt.slot${String(index).padStart(2, "0")}`, text: `Prompt ${index}` }))];
-  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, match: "all" as const, conditions: [{ key: "new_key", operator: "is" as const, value: "new_value" }] } };
-  const manifest = plane.promote(slots, { protocol: "1.1.1" });
-  manifest.payload.requiredCapabilities = ["audience_v2"];
+  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, conditions: [{ key: "new_key", operator: "is" as const, value: "new_value" }] } };
+  const manifest = plane.promote(slots, { protocol: "2.0.0" });
+  manifest.payload.requiredCapabilities = ["audience"];
   manifest.payload.observations = [{ ...audience, tag: base.tag, observeFrom: "2026-09-12T14:00:00Z" }];
   manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
   (plane as any).current.bytes = Buffer.from(JSON.stringify(manifest));
@@ -656,9 +681,7 @@ test("audience registration evicts stale names, keeps active names, and serves o
   try {
     assert.deepEqual(ap.prompt("support.reply").render().audienceIds, [audience.audienceId]);
     const offlineHeartbeat = ap.heartbeatBody();
-    const registration = offlineHeartbeat.registration as any;
-    assert.deepEqual(registration.tagKeys, ["new_key"]);
-    assert.ok(registration.prompts.length <= 32);
+    assert.equal(offlineHeartbeat.registration, undefined, "an offline runtime has no authenticated capability echo");
     assert.equal(JSON.stringify(offlineHeartbeat).includes("new_value"), false);
   } finally {
     await ap.stop();
@@ -700,8 +723,8 @@ test("manual output checks retain audience attribution only on an open measured 
   const plain = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
   const checked = {...plain,outputChecks:[{name:"category",kind:"enum" as const,path:"category",values:["ok"]}]};
   const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"all" as const}};
-  const manifest=plane.promote([checked],{protocol:"1.1.1"});
-  manifest.payload.requiredCapabilities=["audience_v2"];
+  const manifest=plane.promote([checked],{protocol:"2.0.0"});
+  manifest.payload.requiredCapabilities=["audience"];
   manifest.payload.observations=[{...audience,tag:checked.tag,observeFrom:"2026-09-12T14:00:00Z"}];
   manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
   (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));

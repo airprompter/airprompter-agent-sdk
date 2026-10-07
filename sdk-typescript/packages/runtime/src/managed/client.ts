@@ -304,7 +304,7 @@ export class ManagedAgent {
   }
 
   private audienceIdsFor(tag: string, override?: Readonly<Record<string, string>>): string[] | undefined {
-    const rules = this.catalogue.observations?.filter((entry) => entry.tag === tag && entry.selector.mode === "tags");
+    const rules = this.catalogue.observations?.filter((entry) => entry.tag === tag);
     if (!rules?.length) return;
     const local = override ? copyAudienceTags({ ...this.audienceTags, ...override }) : this.audienceTags;
     return rules.flatMap((entry) => matchesAudience(entry.selector, local) ? [entry.audienceId] : []).sort();

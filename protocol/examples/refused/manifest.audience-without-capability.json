@@ -3,7 +3,7 @@
   "reason": "Targeting requires explicit capability",
   "document": {
     "payload": {
-      "protocol": "1.0.0",
+      "protocol": "2.0.0",
       "organizationId": "org_1",
       "agentId": "agt_1",
       "target": "prod",
@@ -38,11 +38,11 @@
             "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
             "selector": {
               "mode": "tags",
-              "match": "all",
               "conditions": [
                 {
                   "key": "device_id",
-                  "value": "device-042"
+                  "value": "device-042",
+                  "operator": "is"
                 }
               ]
             }
@@ -80,11 +80,11 @@
           "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
           "selector": {
             "mode": "tags",
-            "match": "all",
             "conditions": [
               {
                 "key": "device_id",
-                "value": "device-042"
+                "value": "device-042",
+                "operator": "is"
               }
             ]
           },

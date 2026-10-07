@@ -149,16 +149,13 @@ export function orderedSteps<S extends { stepId: string; ordinal: number }>(slot
   return sorted;
 }
 
-/** 1.1.x: local predicates. Missing operator is legacy `is`; new manifests write it explicitly. */
-export type AudienceCondition = { key: string; operator?: "is" | "contains"; value: string };
-export type AudienceSelector = { mode: "all" } | { mode: "tags"; match: "all" | "any"; conditions: AudienceCondition[] };
+/** Protocol 2: local predicates with required operators and implicit AND. */
+export type AudienceCondition = { key: string; operator: "is" | "contains"; value: string };
+export type AudienceSelector = { mode: "all" } | { mode: "tags"; conditions: AudienceCondition[] };
 export interface AudienceSnapshot { audienceId: string; selector: AudienceSelector }
 export interface AudienceObservation extends AudienceSnapshot { tag: string; observeFrom: string }
-export const AUDIENCE_CAPABILITY = "audience_v2";
-export const AUDIENCE_PROTOCOL_VERSION = "1.1.1";
-export const PREVIOUS_AUDIENCE_PROTOCOL_VERSION = "1.1.0";
-export const LEGACY_AUDIENCE_CAPABILITY = "audience_v1";
-export const LEGACY_AUDIENCE_PROTOCOL_VERSION = "1.0.0";
+export const AUDIENCE_CAPABILITY = "audience";
+export const AUDIENCE_PROTOCOL_VERSION = "2.0.0";
 const audienceObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const audienceKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every(k => keys.includes(k));
 const audienceString = (v: unknown, max: number) => typeof v === "string" && [...v].length <= max && !/[\u0000-\u001f\u007f]/u.test(v) && !/[\uD800-\uDFFF]/u.test(v);
@@ -177,11 +174,11 @@ export const validAudienceIds = (v: unknown): v is string[] => Array.isArray(v) 
 export function validAudienceSelector(v: unknown): v is AudienceSelector {
   if (!audienceObject(v)) return false;
   if (v.mode === "all") return audienceKeys(v,["mode"]);
-  if (v.mode !== "tags" || !audienceKeys(v,["mode","match","conditions"]) || !["all","any"].includes(String(v.match)) || !Array.isArray(v.conditions) || v.conditions.length < 1 || v.conditions.length > 16) return false;
+  if (v.mode !== "tags" || !audienceKeys(v,["mode","conditions"]) || !Array.isArray(v.conditions) || v.conditions.length < 1 || v.conditions.length > 16) return false;
   const pairs = new Set<string>();
   return v.conditions.every(c => {
-    if (!audienceObject(c) || !audienceKeys(c,["key","operator","value"]) || !validAudienceKey(c.key) || (c.operator !== undefined && c.operator !== "is" && c.operator !== "contains") || !audienceString(c.value,256) || (c.operator === "contains" && (c.value as string).length === 0)) return false;
-    const pair = JSON.stringify([c.key,c.operator ?? "is",c.value]);
+    if (!audienceObject(c) || !audienceKeys(c,["key","operator","value"]) || !validAudienceKey(c.key) || (c.operator !== "is" && c.operator !== "contains") || !audienceString(c.value,256) || (c.operator === "contains" && (c.value as string).length === 0)) return false;
+    const pair = JSON.stringify([c.key,c.operator,c.value]);
     if (pairs.has(pair)) return false;
     pairs.add(pair); return true;
   });
@@ -194,29 +191,24 @@ export function matchesAudience(selector: AudienceSelector, tags: Readonly<Recor
     if (!Object.prototype.hasOwnProperty.call(tags,c.key) || !audienceString(tags[c.key],256)) return false;
     return c.operator === "contains" ? tags[c.key]!.includes(c.value) : tags[c.key] === c.value;
   };
-  return selector.match === "all" ? selector.conditions.every(matches) : selector.conditions.some(matches);
+  return selector.conditions.every(matches);
 }
 export function copyAudienceTags(tags: Readonly<Record<string,string>>): Readonly<Record<string,string>> {
   if (!audienceObject(tags) || Object.keys(tags).length > 64 || Object.entries(tags).some(([k,v]) => !validAudienceKey(k) || !audienceString(v,256))) throw new Error("audience_tags_invalid");
   return Object.freeze(Object.fromEntries(Object.entries(tags)));
 }
-/** Refuse an unknown/malformed targeted wire before applying payloads; preserve legacy manifests. */
+/** Refuse any targeted wire other than the canonical protocol-2 audience envelope. */
 export function validAudienceManifest(p: import("./types.js").ManifestPayload): boolean {
   if (p.experiments !== undefined && !Array.isArray(p.experiments)) return false;
   const experiments = p.experiments ?? [];
   if (experiments.some(e => !audienceObject(e))) return false;
   const targeted = p.requiredCapabilities !== undefined || p.observations !== undefined || experiments.some(e => e.audience !== undefined) || (audienceObject(p.experiment) && p.experiment.audience !== undefined);
-  // Major 0 remains legacy-compatible. Major 1 always requires its frozen audience negotiation envelope.
-  if (!targeted) return Number(String(p.protocol).split(".")[0]) !== 1;
-  const supportedEnvelope = ((p.protocol === AUDIENCE_PROTOCOL_VERSION || p.protocol === PREVIOUS_AUDIENCE_PROTOCOL_VERSION) && JSON.stringify(p.requiredCapabilities) === JSON.stringify([AUDIENCE_CAPABILITY])) || (p.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && JSON.stringify(p.requiredCapabilities) === JSON.stringify([LEGACY_AUDIENCE_CAPABILITY]));
+  // Existing major-0 non-audience manifests remain readable; protocol 2 is audience-only.
+  if (!targeted) return /^0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(String(p.protocol));
+  const supportedEnvelope = p.protocol === AUDIENCE_PROTOCOL_VERSION && JSON.stringify(p.requiredCapabilities) === JSON.stringify([AUDIENCE_CAPABILITY]);
   if (!supportedEnvelope || p.experiment !== undefined || !Array.isArray(p.observations) || p.observations.length < 1 || p.observations.length > 8 || !Array.isArray(p.slots) || experiments.length > 32) return false;
   const selectors = [...p.observations, ...experiments.map((entry) => entry.audience)].map((entry) => audienceObject(entry) ? entry.selector : null);
-  // v1 has no operator. v2 is the approved minimal model: implicit AND, with every condition explicit.
-  if (p.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && selectors.some((selector) => {
-    const candidate = selector as unknown;
-    return audienceObject(candidate) && Array.isArray(candidate.conditions) && candidate.conditions.some((condition: unknown) => audienceObject(condition) && condition.operator !== undefined);
-  })) return false;
-  if ((p.protocol === AUDIENCE_PROTOCOL_VERSION || p.protocol === PREVIOUS_AUDIENCE_PROTOCOL_VERSION) && selectors.some((selector) => audienceObject(selector) && selector.mode === "tags" && (selector.match !== "all" || !Array.isArray(selector.conditions) || selector.conditions.some((condition: unknown) => !audienceObject(condition) || condition.operator === undefined)))) return false;
+  if (selectors.some((selector) => !validAudienceSelector(selector))) return false;
   const ids = new Set<string>();
   for (const o of p.observations) {
     if (!audienceObject(o) || !audienceKeys(o,["audienceId","selector","tag","observeFrom"]) || !validAudienceIds([o.audienceId]) || !validAudienceSelector(o.selector) || ids.has(o.audienceId) || !p.slots.some(s => audienceObject(s) && s.tag === o.tag) || !validAudienceInstant(o.observeFrom)) return false;

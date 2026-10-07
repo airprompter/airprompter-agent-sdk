@@ -107,8 +107,8 @@ def test_start_reads_catalogue_and_run_sends_salted_hash_never_subject():
 
 
 def test_managed_audience_selectors_match_arbitrary_tags_locally_and_send_only_opaque_ids():
-    device_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
-    region_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "region", "operator": "contains", "value": "west"}]}}
+    device_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
+    region_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "conditions": [{"key": "region", "operator": "contains", "value": "west"}]}}
     all_audience = {"audienceId": "aud_CCCCCCCCCCCCCCCCCCCCCC", "tag": "support.triage", "selector": {"mode": "all"}}
     catalogue = {**CATALOGUE, "observations": [device_audience, region_audience, all_audience]}
     transport, calls = scripted([
@@ -119,21 +119,21 @@ def test_managed_audience_selectors_match_arbitrary_tags_locally_and_send_only_o
     agent = ManagedAgent.start(agent_id="agent-1", target="prod", api_key="apr_run_key", base_url="https://run.example", transport=transport, tags={"device_id": "device-007", "region": "east"})
     agent.run("support.triage", {"team": "Billing", "ticket": "x"})
     first = json.loads(calls[1].content)
-    assert first["audienceIds"] == [device_audience["audienceId"]]
+    assert first["audienceIds"] == [device_audience["audienceId"], all_audience["audienceId"]]
     assert first["catalogueGeneration"] == CATALOGUE["generation"]
     assert b"device-007" not in calls[1].content and b"device_id" not in calls[1].content
 
     agent.set_tags({"device_id": "other", "region": "east"})
     agent.run("support.triage", {"team": "Billing", "ticket": "x"}, tags={"region": "north-west"})
     second = json.loads(calls[2].content)
-    assert second["audienceIds"] == [region_audience["audienceId"]]
+    assert second["audienceIds"] == [region_audience["audienceId"], all_audience["audienceId"]]
     assert b"north-west" not in calls[2].content
     agent.close()
 
 
 def test_managed_run_refreshes_and_rematches_once_when_catalogue_generation_changed():
-    old_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
-    new_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
+    old_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
+    new_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
     transport, calls = scripted([
         {"status": 200, "body": json.dumps({**CATALOGUE, "generation": 1, "observations": [old_audience]})},
         {"status": 409, "body": json.dumps({"error": "refresh", "code": "catalogue_stale", "detail": "2"})},

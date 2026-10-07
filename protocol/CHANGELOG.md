@@ -1,17 +1,23 @@
 # Protocol changelog
 
+## 2.0.0 · One audience contract
+
+- Audience targeting has one capability, `audience`, and one selector shape. Conditions require `is` or `contains` and combine with implicit AND semantics.
+- A first heartbeat may advertise protocol 2.0.0 and the audience capability without registration. The service echoes both after authentication; later heartbeats may register bounded tag-key and prompt-label names only.
+- Targeted envelopes from the unpublished draft protocol are refused. Non-targeted major-zero manifests remain readable.
+
 ## 1.1.1 · Hosted audience matching and workflow telemetry
 
 - Hosted SDKs receive signed audience selectors, evaluate arbitrary tag values locally, and send only matching opaque audience ids with a run.
 - Hosted catalogues advertise `catalogue_generation`; only then do run requests carry `catalogueGeneration`. A `catalogue_stale` refusal tells the SDK to refresh the signed catalogue, recompute local matches, and retry once, while SDK-first installs remain compatible with older strict routes.
 - The OpenAPI catalogue and run shapes now publish `experiments`, audience observations, opaque `audienceIds`, catalogue generation, and the expanded authenticated run-reference bound.
 - Telemetry window tags accept canonical workflow step ids such as `onboarding.flow#1`, so per-step observations are not rejected by upload validation.
-- Protocol 1.1.0 audience manifests remain valid under the same `audience_v2` selector semantics.
+- Protocol 2.0.0 supersedes this unpublished draft before production release.
 
 ## 1.1.0 · Tag operators and artifact-aware telemetry
 
 - Audience conditions add a case-sensitive `operator`: `is` or `contains`. Multiple conditions remain an implicit conjunction in AirPrompter; an empty condition list is represented by the existing All devices selector.
-- The new signed envelope requires `protocol: "1.1.0"` with `requiredCapabilities: ["audience_v2"]`. SDKs retain `1.0.0` / `audience_v1` reading, but refuse v2 operators inside a v1 envelope so one release can never have two meanings.
+- This unpublished draft introduced explicit tag operators. Protocol 2.0.0 replaces its capability and envelope before production release.
 - Authenticated run references carry the stable Team prompt `artifactId`. Version-3 telemetry windows require it, preventing version ordinals from different prompts from merging after a slot changes prompts; legacy rows remain readable without it.
 - Audience tag values remain local. Registration sends bounded key names and prompt labels only, and the authored selector is broadcast as part of the signed release for each SDK to evaluate locally.
 

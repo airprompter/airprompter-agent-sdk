@@ -106,8 +106,8 @@ test("start reads the catalogue with the run key; run() sends the salted subject
 });
 
 test("managed audience selectors match arbitrary tags locally and send only opaque audience ids", async () => {
-  const deviceAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
-  const regionAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "region", operator: "contains", value: "west" }] } } as const;
+  const deviceAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
+  const regionAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", conditions: [{ key: "region", operator: "contains", value: "west" }] } } as const;
   const allAudience = { audienceId: "aud_CCCCCCCCCCCCCCCCCCCCCC", tag: "support.triage", selector: { mode: "all" } } as const;
   const { fetch, calls } = fakeFetch([
     () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, observations: [deviceAudience, regionAudience, allAudience] }) }),
@@ -117,7 +117,7 @@ test("managed audience selectors match arbitrary tags locally and send only opaq
   const agent = await ManagedAgent.start({ agentId: "agent-1", target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example", fetch, tags: { device_id: "device-007", region: "east" } });
   await agent.run("support.triage", { team: "Billing", ticket: "x" });
   const first = JSON.parse(calls[1]!.init.body!);
-  assert.deepEqual(first.audienceIds, [deviceAudience.audienceId]);
+  assert.deepEqual(first.audienceIds, [deviceAudience.audienceId, allAudience.audienceId]);
   assert.equal(first.catalogueGeneration, CATALOGUE.generation);
   assert.equal(calls[1]!.init.body!.includes("device-007"), false);
   assert.equal(calls[1]!.init.body!.includes("device_id"), false);
@@ -125,13 +125,13 @@ test("managed audience selectors match arbitrary tags locally and send only opaq
   agent.setTags({ device_id: "other", region: "east" });
   await agent.run("support.triage", { team: "Billing", ticket: "x" }, { tags: { region: "north-west" } });
   const second = JSON.parse(calls[2]!.init.body!);
-  assert.deepEqual(second.audienceIds, [regionAudience.audienceId]);
+  assert.deepEqual(second.audienceIds, [regionAudience.audienceId, allAudience.audienceId]);
   assert.equal(calls[2]!.init.body!.includes("north-west"), false);
 });
 
 test("managed runs refresh and rematch once when the signed catalogue generation changed", async () => {
-  const oldAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
-  const newAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
+  const oldAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
+  const newAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
   const { fetch, calls } = fakeFetch([
     () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, generation: 1, observations: [oldAudience] }) }),
     () => ({ status: 409, body: JSON.stringify({ error: "refresh", code: "catalogue_stale", detail: "2" }) }),

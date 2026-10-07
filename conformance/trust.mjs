@@ -101,7 +101,7 @@ export function verifyRootMetadata({ candidate, trusted, now }) {
   return { ok: true };
 }
 
-const SUPPORTED_PROTOCOL_MAJORS = new Set([0,1]);
+const SUPPORTED_PROTOCOL_MAJORS = new Set([0,2]);
 /** M13 (S4): the directive kinds a runtime honours. */
 const DIRECTIVE_KINDS = new Set(["request_unlock", "disable"]);
 
@@ -234,14 +234,12 @@ function validAudiencePayload(p) {
   const experiments=p.experiments??[];
   if (experiments.some(e=>!object(e))) return false;
   const targeted=p.requiredCapabilities!==undefined || p.observations!==undefined || experiments.some(e=>e.audience!==undefined) || (object(p.experiment) && p.experiment.audience!==undefined);
-  // Major 0 remains legacy-compatible. Major 1 always requires its frozen audience negotiation envelope.
-  if (!targeted) return Number(String(p.protocol).split(".")[0]) !== 1;
-  const v2=["1.1.0","1.1.1"].includes(p.protocol) && JSON.stringify(p.requiredCapabilities)==='["audience_v2"]';
-  const v1=p.protocol==="1.0.0" && JSON.stringify(p.requiredCapabilities)==='["audience_v1"]';
-  if ((!v2 && !v1) || p.experiment!==undefined || !Array.isArray(p.slots) || !Array.isArray(p.observations) || p.observations.length<1 || p.observations.length>8 || experiments.length>32) return false;
+  // Existing major-0 non-audience manifests remain readable; protocol 2 is audience-only.
+  if (!targeted) return /^0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(String(p.protocol));
+  const supported=p.protocol==="2.0.0" && JSON.stringify(p.requiredCapabilities)==='["audience"]';
+  if (!supported || p.experiment!==undefined || !Array.isArray(p.slots) || !Array.isArray(p.observations) || p.observations.length<1 || p.observations.length>8 || experiments.length>32) return false;
   const selectors=[...p.observations,...experiments.map(e=>e.audience)].map(entry=>object(entry)?entry.selector:null);
-  if (v1 && selectors.some(selector=>object(selector)&&Array.isArray(selector.conditions)&&selector.conditions.some(condition=>object(condition)&&condition.operator!==undefined))) return false;
-  if (v2 && selectors.some(selector=>object(selector)&&selector.mode==="tags"&&(selector.match!=="all"||!Array.isArray(selector.conditions)||selector.conditions.some(condition=>!object(condition)||condition.operator===undefined)))) return false;
+  if (selectors.some(selector=>!audiencePredicate({selector,tags:{}}).valid)) return false;
   const seen=new Set();
   for (const o of p.observations) {
     if (!object(o) || !keys(o,["audienceId","selector","tag","observeFrom"]) || !id(o.audienceId) || seen.has(o.audienceId) || !audiencePredicate({selector:o.selector,tags:{}}).valid || !p.slots.some(slot=>object(slot)&&slot.tag===o.tag)) return false;

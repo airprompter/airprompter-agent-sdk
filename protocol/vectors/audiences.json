@@ -1,5 +1,5 @@
 {
-  "protocol": "1.1.1",
+  "protocol": "2.0.0",
   "cases": [
     {
       "name": "all devices without tags",
@@ -14,11 +14,11 @@
       "name": "one device exact",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
-            "value": "device-042"
+            "value": "device-042",
+            "operator": "is"
           }
         ]
       },
@@ -32,7 +32,6 @@
       "name": "different device",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -51,7 +50,6 @@
       "name": "missing is not empty",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -68,7 +66,6 @@
       "name": "empty is exact",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -87,7 +84,6 @@
       "name": "case sensitive",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "region",
@@ -106,7 +102,6 @@
       "name": "no whitespace normalization",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -125,7 +120,6 @@
       "name": "all of multiple tags",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "region",
@@ -150,7 +144,6 @@
       "name": "all partially matching",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "region",
@@ -171,7 +164,7 @@
       "matches": false
     },
     {
-      "name": "any repeated key alternatives",
+      "name": "match field refused",
       "selector": {
         "mode": "tags",
         "match": "any",
@@ -191,14 +184,13 @@
       "tags": {
         "region": "east"
       },
-      "valid": true,
-      "matches": true
+      "valid": false,
+      "matches": false
     },
     {
-      "name": "any unrelated tags",
+      "name": "implicit all requires every tag",
       "selector": {
         "mode": "tags",
-        "match": "any",
         "conditions": [
           {
             "key": "region",
@@ -216,13 +208,12 @@
         "device_id": "d42"
       },
       "valid": true,
-      "matches": true
+      "matches": false
     },
     {
       "name": "unicode exact",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "機器",
@@ -241,7 +232,6 @@
       "name": "unicode not normalized",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "name",
@@ -260,7 +250,6 @@
       "name": "literal reserved key",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "__proto__",
@@ -279,7 +268,6 @@
       "name": "empty conditions refused",
       "selector": {
         "mode": "tags",
-        "match": "any",
         "conditions": []
       },
       "tags": {},
@@ -290,7 +278,6 @@
       "name": "duplicate pair refused",
       "selector": {
         "mode": "tags",
-        "match": "any",
         "conditions": [
           {
             "key": "region",
@@ -312,7 +299,6 @@
       "name": "same tag exact contradiction is valid but does not match",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "region",
@@ -344,7 +330,6 @@
       "name": "non string value refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "id",
@@ -361,7 +346,6 @@
       "name": "too many conditions refused",
       "selector": {
         "mode": "tags",
-        "match": "any",
         "conditions": [
           {
             "key": "k0",
@@ -458,7 +442,6 @@
       "name": "same tag contains both values",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "roles",
@@ -482,7 +465,6 @@
       "name": "device prefix contains",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -501,7 +483,6 @@
       "name": "contains remains case sensitive",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "region",
@@ -520,7 +501,6 @@
       "name": "contains missing key",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -537,7 +517,6 @@
       "name": "condition missing key refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "operator": "is",
@@ -555,7 +534,6 @@
       "name": "condition missing value refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "region",
@@ -573,7 +551,6 @@
       "name": "unknown operator refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -592,7 +569,6 @@
       "name": "empty contains refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -611,7 +587,6 @@
       "name": "unpaired surrogate selector refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -630,7 +605,6 @@
       "name": "unpaired surrogate local tag refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device_id",
@@ -649,7 +623,6 @@
       "name": "astral key at scalar limit",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
@@ -668,7 +641,6 @@
       "name": "astral key over scalar limit refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
@@ -685,7 +657,6 @@
       "name": "astral value at scalar limit",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device.id",
@@ -704,7 +675,6 @@
       "name": "astral value over scalar limit refused",
       "selector": {
         "mode": "tags",
-        "match": "all",
         "conditions": [
           {
             "key": "device.id",
@@ -782,10 +752,10 @@
   ],
   "manifests": [
     {
-      "name": "signed major-1 audience accepted",
+      "name": "signed protocol 2 audience accepted",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -820,7 +790,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -859,14 +828,13 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v2"
+            "audience"
           ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -884,7 +852,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "uI3vj2Ug80jqqUdX8XBx3yAJa7FERWgoWx4E-IypBPsro-yUifFgkqUTdowu6ym6xNKziolgwqVI6FM_11i-Kg"
+            "sig": "YS5elW8---kxlD3zUz3D518CkxKHwY3fRT_H8IresuUz-CIdg3VEEO0F9-bEOt9Ni0g7yDQp13ooU6AEAJ4-zw"
           }
         ],
         "countersignatures": []
@@ -938,7 +906,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "8n2_wp-cK4OUW6KguB4qfbk0LWAZQC94VV9IORoL2NKSVKXOAHnG7FI0yfIiG1P47O01OQshdiWyt61K9rDBFQ"
+            "sig": "BsAumkoj3rTkY2IbxtImoe8Hgjfb5fDhm9zJI2hLOxSD7bl4NDdGklJTXIpm4jgm-U3Bmk47FzrG8DZrNAUSAA"
           }
         ]
       },
@@ -955,10 +923,10 @@
       "schemaOk": true
     },
     {
-      "name": "unsafe minor audience refused",
+      "name": "unknown protocol 2.1 audience refused",
       "manifest": {
         "payload": {
-          "protocol": "1.2.0",
+          "protocol": "2.1.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -993,7 +961,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -1032,14 +999,13 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v2"
+            "audience"
           ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -1057,7 +1023,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "XiinxoZykzM3rjtHDDlJRYUR_fTyn0HmhBEilpHDNEwlsETOz1MQvCdEVtWCxS-lQWeR3-oV6mmGiK8NCxT9Bw"
+            "sig": "SJ0u0YttUeaj9X6b3KRszRqHYU8XHB9PXUtGf074cjyTfgq7BBCSspxSl6UvRw5Ah_L9sEdC8Nai7zCmTiYR-g"
           }
         ],
         "countersignatures": []
@@ -1111,7 +1077,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "8le3xxPV6vBDHMuqMGma32IfpVO9B0RR2Z0eqm16Rv6ZZHQnr2EkAkYKQaQCQG61SBBPicUv6lDMdUhx_WPLYQ"
+            "sig": "tbrT-q4pvMmjKaQjLXaQ9BXQ7EOnv9Bcfh0Jf_xEFxoGdo2uk7Y2ErmyJdxfNglOm3FN0zj2ZlM9Gbwr_oPxMA"
           }
         ]
       },
@@ -1128,10 +1094,10 @@
       }
     },
     {
-      "name": "unnegotiated audience refused",
+      "name": "protocol 2 audience without capability refused",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -1166,7 +1132,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -1209,7 +1174,6 @@
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -1227,7 +1191,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "qVK9pFVUdA32bLJCVN-zX3oOyDRnChIvdGJphdWG0ko38VDTMVqVnwINkd8lCeXckq47_mGHmP_z3MouuO6j6Q"
+            "sig": "bWI00RpMAXD3jocIwdcEfLMTPAXimLOJgs4UGmWHj9LxD_r_sRlblQLHfTUMZBeKTVs_K4yYBiVJPMT_v0HliQ"
           }
         ],
         "countersignatures": []
@@ -1281,7 +1245,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "gHgrfXihCmduqReoM5PKVAk8x2CvKa-tW4QlNm6G74EGzbv5CWP4nyl-2dTGQbiymgvVr0V5_Ia4yHhGRRv3Eg"
+            "sig": "-BfSJoYnlqXN8tk6-Ydn5Wtmcpda2saJ0yMEo2pC-J6_larySgsuj8eiPtP5G5OwcjzUiQvK2NJ3qZ0D-fm4IQ"
           }
         ]
       },
@@ -1301,7 +1265,7 @@
       "name": "unknown capability refused",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -1336,7 +1300,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -1375,14 +1338,13 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v3"
+            "audience-next"
           ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -1400,7 +1362,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "iZOFk7nKxohlG1sp21kTwVVmpC5sa-BT06dOuH5qWxaKsmJqT24qs5_rkba1v12UeyhwUKqV6IHQaOsruWcfjw"
+            "sig": "tn-pxUYtZdjVPk5iT-dRjTXRnFNRfQroXkVrT7Oih5UuFnm715zYuUdeW3XE9PALcFAc0-Sj3ZphE14VFDewlQ"
           }
         ],
         "countersignatures": []
@@ -1454,7 +1416,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "mAuw-f6idFW0Z4-5J2GMhL3HeniuCMCvohKJtfpoU-ndOsDPdUBJB7R-crurujWJjiMZi_deX46WGDN7hZhpSg"
+            "sig": "OHtHR0YEavsWQwNm0y3syqJb0mAwCneXNXJMZZPyKMKGSN7u3JHsePewK5QR_s5MnHbvtHayTsp_fYHX8lBbhQ"
           }
         ]
       },
@@ -1474,7 +1436,7 @@
       "name": "unknown observation id refused",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -1509,7 +1471,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -1548,14 +1509,13 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v2"
+            "audience"
           ],
           "observations": [
             {
               "audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -1573,7 +1533,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "iYkf1-lCWX-qizfjkkIAFxPwskzz8zxRZgYlnTypfQ6F3wksa3lVvcpv4CCxYzjaLe0KlzZNQSpxcbFn7T1q8Q"
+            "sig": "FOBTrBa6h2OGdAN6XFIpg9KckLiqTb6fEuGdaz1VGnzpF_5vOCuwZlO5HIUP_qv73bZqoyWpmow6y-X6Hcvs5g"
           }
         ],
         "countersignatures": []
@@ -1627,7 +1587,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "GMJaEQnACSOTtopOgPtvpnUEnUM3W4ztwi2JGzEltdVt4C_NyC4Zu2ug3DUOhsgrR1wkb163p2zWZFeounEPFA"
+            "sig": "UCfYuM017fFCWz3HPdjXnS8wZXne-xb9UlpqHMheUzl0a0QYDjJGrmF1WUCg0lqVa2wNrCXBGH3uAEpB2QrXWg"
           }
         ]
       },
@@ -1647,7 +1607,7 @@
       "name": "impossible calendar observation refused",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -1682,7 +1642,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -1721,14 +1680,13 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v2"
+            "audience"
           ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -1746,7 +1704,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "j-df0Q6-OiGr7J9OqInmsuqHZZzXG6HB7BP1orw4fhJw8tpt-rHeKVbNfIvtZPdgPnzdFgSy-Jr5207OZqBTmQ"
+            "sig": "KdGX5u1Q3bq84Voh7Sn_frkDU6iFdXEUcwezUq_vd0QrpbC-X95QqClx1-8GydT1aE5vBJgRK19a8SlyE3A_pQ"
           }
         ],
         "countersignatures": []
@@ -1800,7 +1758,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "kzC8r-qIrRSRraANcd-nKJtEbwXMTjfeWqWFDZ9y1ISIcQG5687FHLo3_aVl7T9lmWiqFtqkQ1TGbumBJeST8g"
+            "sig": "5ciA2u8CyQsLWpC_y5UEFM9bkoQ-g_U3kUxN3amKV16wskjfWnlHhovD9F0TYNX3UT4atPIWwXE0TyVJZwj08g"
           }
         ]
       },
@@ -1820,7 +1778,7 @@
       "name": "selector tampering fails signature",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -1855,7 +1813,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -1894,14 +1851,13 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v2"
+            "audience"
           ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -1919,7 +1875,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "uI3vj2Ug80jqqUdX8XBx3yAJa7FERWgoWx4E-IypBPsro-yUifFgkqUTdowu6ym6xNKziolgwqVI6FM_11i-Kg"
+            "sig": "YS5elW8---kxlD3zUz3D518CkxKHwY3fRT_H8IresuUz-CIdg3VEEO0F9-bEOt9Ni0g7yDQp13ooU6AEAJ4-zw"
           }
         ],
         "countersignatures": []
@@ -1973,7 +1929,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "bkURzHuEs6MgQIpfaFJ-t1GFiWTT94nCd1AEkqda4N0XuxET5WsMCMlef-2QHVc8LpAHv9wj_VFgPg-VA83c5g"
+            "sig": "uF_MmNuokYcZj2baA0ySlSV5nFy-kY2zdXRZywTf750CCp_LeBDZU-6LVGTEmcS0NvvSXTRDgk4s_ydi2uixQg"
           }
         ]
       },
@@ -1990,10 +1946,10 @@
       }
     },
     {
-      "name": "protocol 1.1 without audience capability refused",
+      "name": "malformed major-zero protocol 0x0.2.0 refused",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "0x0.2.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -2023,7 +1979,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "o54GygqT1UgVYrAmlGsVlNQUP1wSvy0p-vxcUD4N8LcvXrKE8nSeb5ZWiDFwxADLYyCpxH0cG0wp5AGh3_MNlg"
+            "sig": "tMpH46uc23SkhKRSZmJGuU07NFMOS_Z0v-EY5bhCAnCIWN4BUvaAW6J48qIhxl1GHNSQkvLNXNinBVyIf_wEjA"
           }
         ],
         "countersignatures": []
@@ -2077,7 +2033,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "KMwkvpeC34cLWm_hLGw5G5hTz6fQezBx-M6hUjJyn5y1d1xm_fSurmsqQA9-q8F_9YqkF5Zp04euAc0CL7jmfQ"
+            "sig": "Hdbe84JFA_Ae-exNRSXv1vyY9Y_kSlmrNUuPdRSBEAK2dKh0Rzt9efsbBdyhPwAHCP1su9cUOurbaGdJ7QjkOQ"
           }
         ]
       },
@@ -2091,10 +2047,326 @@
       "expected": {
         "ok": false,
         "reason": "protocol_unsupported"
-      }
+      },
+      "schemaOk": false
     },
     {
-      "name": "unknown protocol 1.2 without fields refused",
+      "name": "malformed major-zero protocol +0.2.0 refused",
+      "manifest": {
+        "payload": {
+          "protocol": "+0.2.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": []
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "4JWlDfQOzROkqjobcAlnjjyWr7jD8ra2Bv_bm2JihTx5oHXZF0vObmP5_4UYAeRS6u6r_NcPEYSLF9Ij0Q2wSw"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "S9CK1HPPG6jpix_codPRxExgYuQhjLO4UXIXVDAT9wlu8_n2yoc5O1oVEm1qYip6L7cTbjW39LaRuQTiBoYblw"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      },
+      "schemaOk": false
+    },
+    {
+      "name": "malformed major-zero protocol .2.0 refused",
+      "manifest": {
+        "payload": {
+          "protocol": ".2.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": []
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "-Kf9Jb0bU6-sMQaEmcwfGre900DVak2E1kKu5LgDHK37lC9Zx2T7_uKjZAnjPz-TbU5uo_7PT3UsKomD7-oHbg"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "c-gVXra9ih8dJc3jJ0NFPgIRJ0Us1lAN0Vhj10-4fYY07pI5h8_aUesN2_mHDYLmWhTSm6RGIO8FWG4F-q-Muw"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      },
+      "schemaOk": false
+    },
+    {
+      "name": "malformed major-zero protocol 00.2.0 refused",
+      "manifest": {
+        "payload": {
+          "protocol": "00.2.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": []
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "3x7Dtle5spBPgcKxmc775JZv14PySS-yZQGwDFYqx2PyxIv28RUvRrYAs28QmPMOABxpptwcOpcdWZkOQTvATw"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "DE-c53UjG8liEl8ZeQmhKr9TxVbC8XdpqIIzXftEHixLq--DwZ__D4c4gmujlwDB8St9r_ebeL2dCGQmNtVZHQ"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      },
+      "schemaOk": false
+    },
+    {
+      "name": "protocol 1 non-targeted envelope refused",
       "manifest": {
         "payload": {
           "protocol": "1.2.0",
@@ -2127,7 +2399,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "vZgfpFwyI4r9Ua1LsWt3UNVFcaJ24pGYiOp9_prcU9Rlj0JX1ROV6eF2Pud98ORgoQyfKH3RQAAcBKQqzpoSmA"
+            "sig": "xkdVOOLqvG50vcBi4EymTMEKhj0a_IX1i5glUE-eD9vR_l0xi4GL7InNHbXKr_yfdg_gjZ2m1j-AF4Vp9P_e6Q"
           }
         ],
         "countersignatures": []
@@ -2181,7 +2453,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "hcTRF9oQhYCDvlt4LZ2g6NxSjj3l_GFiey9oGgNO3GAVXnXP28vCP5lfyKmxHZQe_jhpdYpwTVKymfPprAxI_g"
+            "sig": "0tnfk8TyWiHMR6ZluiAt-KOVISCHMbWYyAbjEezInZG6z58iKXBVS-g_QrS5xShlydPjLHGW8j0JeuOsrWmSRw"
           }
         ]
       },
@@ -2195,13 +2467,14 @@
       "expected": {
         "ok": false,
         "reason": "protocol_unsupported"
-      }
+      },
+      "schemaOk": false
     },
     {
-      "name": "legacy protocol 1.0 audience accepted",
+      "name": "protocol 3 non-targeted envelope refused",
       "manifest": {
         "payload": {
-          "protocol": "1.0.0",
+          "protocol": "3.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -2225,80 +2498,13 @@
               "variables": []
             }
           ],
-          "directives": [],
-          "experiments": [
-            {
-              "tag": "support.reply",
-              "experimentId": "exp_1",
-              "salt": "AAECAwQFBgcICQoLDA0ODw",
-              "subjectKey": "instance",
-              "audience": {
-                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
-                "selector": {
-                  "mode": "tags",
-                  "match": "all",
-                  "conditions": [
-                    {
-                      "key": "device_id",
-                      "value": "device-042"
-                    }
-                  ]
-                }
-              },
-              "arms": [
-                {
-                  "arm": "control",
-                  "weightBps": 0,
-                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
-                  "overrides": []
-                },
-                {
-                  "arm": "candidate",
-                  "weightBps": 10000,
-                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
-                  "overrides": [
-                    {
-                      "tag": "support.reply",
-                      "kind": "prompt",
-                      "artifactId": "art_support.reply",
-                      "versionId": "ver_candidate",
-                      "versionOrdinal": 1,
-                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
-                      "byteLength": 9,
-                      "model": "claude-sonnet-5",
-                      "variables": []
-                    }
-                  ]
-                }
-              ]
-            }
-          ],
-          "requiredCapabilities": [
-            "audience_v1"
-          ],
-          "observations": [
-            {
-              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
-              "selector": {
-                "mode": "tags",
-                "match": "all",
-                "conditions": [
-                  {
-                    "key": "device_id",
-                    "value": "device-042"
-                  }
-                ]
-              },
-              "tag": "support.reply",
-              "observeFrom": "2026-09-12T14:00:00Z"
-            }
-          ]
+          "directives": []
         },
         "signatures": [
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "7x44NWfb7ZRrdJz3KOsEEAqVwCFQvOI2IWJQcM53fQgS5BGnx63FRBMnX-W6WB4QVZCq1tApTf7O9Zuf-cdSJQ"
+            "sig": "M2b6pVNDICkbm204YG3eYB2XFCB3C2CX4qUG-sb9_kvjYxFf4JwX1jYf9tEa7akfK-Ea7ZQoagP1el0y120swg"
           }
         ],
         "countersignatures": []
@@ -2352,7 +2558,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "jOX-jt-a9u8U-E5QQGJrS1Q_CKEaLE2Gw6o-oeS9YQT7YUI5lbiKT7U98XVkdDXSi1qhBhcD2W-pnk04vXXxPg"
+            "sig": "eh9pbt_QsoNt8Q6BM8cR-LYHLafSSZlzJ2-9WDo6nFPbH_qDOPm2GQ_Uod-AxaUd41KVEgOd90--UdG6NpxgNw"
           }
         ]
       },
@@ -2364,12 +2570,13 @@
       },
       "storedGeneration": 0,
       "expected": {
-        "ok": true
+        "ok": false,
+        "reason": "protocol_unsupported"
       },
-      "schemaOk": true
+      "schemaOk": false
     },
     {
-      "name": "legacy protocol 1.0 with operator refused",
+      "name": "protocol 1.0 targeted envelope refused",
       "manifest": {
         "payload": {
           "protocol": "1.0.0",
@@ -2407,7 +2614,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -2446,14 +2652,13 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v1"
+            "audience"
           ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -2471,7 +2676,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "L_TbMnWHDP2gamvff_n-DUzg-JhzVB3s60ly2gVC5toFs82oiZybFwPr9b3FoPKa6Zi89dwwEhPkF6A2jC9hjA"
+            "sig": "qRjqwWvZzmBjVQdmQguvs9K5rI4NDldWXRmijP2VBepS7UE1OVXWLtPjsxIie26jX_QYxq9ZuHAIjxoJm24Lqg"
           }
         ],
         "countersignatures": []
@@ -2525,7 +2730,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "U_DqLVx9ZqCU4dF6Z4tkCOzc3hmcAXOR-khyLZjLIXOdvccsIkiySHfX3Ora__W3cDb6_GB9v0kp9yIdRbG84A"
+            "sig": "Zo3UTt1J3T8F2d-l3Oh-cGgyu36xemgjuvZ-Nr4wH0-hGc8cntUgrXZgM3dUR58XJCH_mD6zt8WidYejAd9RHQ"
           }
         ]
       },
@@ -2543,10 +2748,182 @@
       "schemaOk": false
     },
     {
-      "name": "legacy protocol 1.0 non-list conditions refused",
+      "name": "protocol 1.0 canonical selector refused",
       "manifest": {
         "payload": {
           "protocol": "1.0.0",
+          "organizationId": "org_1",
+          "agentId": "agt_1",
+          "target": "prod",
+          "generation": 1,
+          "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+          "issuedAt": "2026-10-05T02:23:52.295Z",
+          "leaseSeconds": 3600,
+          "onLeaseExpiry": "degrade",
+          "applyPolicy": "auto",
+          "requireCountersign": false,
+          "slots": [
+            {
+              "tag": "support.reply",
+              "kind": "prompt",
+              "artifactId": "art_support.reply",
+              "versionId": "ver_base",
+              "versionOrdinal": 1,
+              "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+              "byteLength": 9,
+              "model": "claude-sonnet-5",
+              "variables": []
+            }
+          ],
+          "directives": [],
+          "experiments": [
+            {
+              "tag": "support.reply",
+              "experimentId": "exp_1",
+              "salt": "AAECAwQFBgcICQoLDA0ODw",
+              "subjectKey": "instance",
+              "audience": {
+                "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "selector": {
+                  "mode": "tags",
+                  "conditions": [
+                    {
+                      "key": "device_id",
+                      "value": "device-042",
+                      "operator": "is"
+                    }
+                  ]
+                }
+              },
+              "arms": [
+                {
+                  "arm": "control",
+                  "weightBps": 0,
+                  "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+                  "overrides": []
+                },
+                {
+                  "arm": "candidate",
+                  "weightBps": 10000,
+                  "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+                  "overrides": [
+                    {
+                      "tag": "support.reply",
+                      "kind": "prompt",
+                      "artifactId": "art_support.reply",
+                      "versionId": "ver_candidate",
+                      "versionOrdinal": 1,
+                      "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                      "byteLength": 9,
+                      "model": "claude-sonnet-5",
+                      "variables": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "requiredCapabilities": [
+            "audience"
+          ],
+          "observations": [
+            {
+              "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+              "selector": {
+                "mode": "tags",
+                "conditions": [
+                  {
+                    "key": "device_id",
+                    "value": "device-042",
+                    "operator": "is"
+                  }
+                ]
+              },
+              "tag": "support.reply",
+              "observeFrom": "2026-09-12T14:00:00Z"
+            }
+          ]
+        },
+        "signatures": [
+          {
+            "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
+            "alg": "ES256",
+            "sig": "qruXguYsFQ7LkV6_Z2w4krzFToQBaG86rauIEe29IPZFpRDBok-utX7dwzC-kT6TggYpErON7-VtJp8oycQy4Q"
+          }
+        ],
+        "countersignatures": []
+      },
+      "root": {
+        "signed": {
+          "type": "root",
+          "protocol": "1.0.0",
+          "purpose": "platform",
+          "environment": "prod",
+          "version": 1,
+          "expires": "2027-12-11T00:00:00Z",
+          "keys": {
+            "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "kHE8TI-jnQoL1Gb2fyooDgcvVUJGUQQwPXzfX1MGiK4",
+                "y": "-7-BQROtrrTIaS5tnbfiS72az-XDBzbph57mB8MT1jU"
+              }
+            },
+            "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d": {
+              "keyType": "ecdsa-p256",
+              "scheme": "ES256",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "2MDfMOVEz8pM_m7u_O9zMlr4T2GHN_tlpj9pfVMGdyo",
+                "y": "ym9DiH-4GitdO8-tBC3sZePPU-bEV9Hc0kYOen_IYho"
+              }
+            }
+          },
+          "roles": {
+            "root": {
+              "keyIds": [
+                "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77"
+              ],
+              "threshold": 1
+            },
+            "targets": {
+              "keyIds": [
+                "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d"
+              ],
+              "threshold": 1
+            }
+          }
+        },
+        "signatures": [
+          {
+            "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
+            "alg": "ES256",
+            "sig": "gGXHAL1AhGOjmMgh14f-onaLdAwa0etkRfC5yH1j4bvasKdyJ8IDYNOrtE9g-eNiBBFxSPom2a4hYa7i3dBg4w"
+          }
+        ]
+      },
+      "now": "2026-09-12T14:03:10Z",
+      "scope": {
+        "organizationId": "org_1",
+        "agentId": "agt_1",
+        "target": "prod"
+      },
+      "storedGeneration": 0,
+      "expected": {
+        "ok": false,
+        "reason": "protocol_unsupported"
+      },
+      "schemaOk": false
+    },
+    {
+      "name": "non-list conditions refused",
+      "manifest": {
+        "payload": {
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -2614,7 +2991,7 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v1"
+            "audience"
           ],
           "observations": [
             {
@@ -2633,7 +3010,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "h3ScHHLuSFFir5HOUyqt6y-RI97uixctk5ZqQdU4AkNxwTQyutpfXKNQWOKCqYc03w-vfb2Gd7hzOD75JnSfvg"
+            "sig": "mQMfvI5Tmtp7ibTrpv8sYnTsAgpH9pyR86g7VMakZVaKBlVOu80jv5zOUGoIAdLRfYnBKzySvphqxyJJW4V4sg"
           }
         ],
         "countersignatures": []
@@ -2687,7 +3064,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "mRS329Z95zclgPzdzYZxlm5giaZdj47R6tXKvzUZ1YfCrUfyGwxV3a2S4dDY_FpJ5rtp3JGseEbMFBmjUV9hWg"
+            "sig": "KZpDPk55QU3CbkuYR9-3b0CeH56wIT9RrqiJ7dNeQrb0v--kA1kMQL3mDlnH32wTd5fe7xCVu_7IWYNqa_VADQ"
           }
         ]
       },
@@ -2705,10 +3082,10 @@
       "schemaOk": false
     },
     {
-      "name": "protocol 1.1 match any refused",
+      "name": "manifest match field refused",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -2743,14 +3120,14 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "any",
                   "conditions": [
                     {
                       "key": "device_id",
                       "value": "device-042",
                       "operator": "is"
                     }
-                  ]
+                  ],
+                  "match": "any"
                 }
               },
               "arms": [
@@ -2782,21 +3159,21 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v2"
+            "audience"
           ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "any",
                 "conditions": [
                   {
                     "key": "device_id",
                     "value": "device-042",
                     "operator": "is"
                   }
-                ]
+                ],
+                "match": "any"
               },
               "tag": "support.reply",
               "observeFrom": "2026-09-12T14:00:00Z"
@@ -2807,7 +3184,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "TwEE8drmRoW6WrQJvN_KZoEUDX11BDJY3jYiTwTmzucTf2c5RSOO-GgjgwDh97QOyK2WR4wyK7l_88sUlw_k1A"
+            "sig": "NgWAV_9GxhkzU0CP1UL4BSUbI4BFzsLP854dJQ4Jzfu-diyx5evicxZ_w74OQbA8XQ9Gl-NU5JCLfg4I_IqTdg"
           }
         ],
         "countersignatures": []
@@ -2861,7 +3238,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "qv2ABuxTyfWIxyPt55BcerO9svU2SHVQ2mWHph0E5I0UflIhZpjXclm4iw679P6OLWvAbuSAMpwaxmaFtMXcjQ"
+            "sig": "7sOBp9lNkLztLWaem4FpMeEP3d1W6w4kS-fpyCfJt0K7WCLeerrjYH4E65T8Xll21oIXRHlXPBnXGtQ1FmHDgA"
           }
         ]
       },
@@ -2879,10 +3256,10 @@
       "schemaOk": false
     },
     {
-      "name": "protocol 1.1 missing operator refused",
+      "name": "manifest missing operator refused",
       "manifest": {
         "payload": {
-          "protocol": "1.1.1",
+          "protocol": "2.0.0",
           "organizationId": "org_1",
           "agentId": "agt_1",
           "target": "prod",
@@ -2917,7 +3294,6 @@
                 "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
                 "selector": {
                   "mode": "tags",
-                  "match": "all",
                   "conditions": [
                     {
                       "key": "device_id",
@@ -2955,14 +3331,13 @@
             }
           ],
           "requiredCapabilities": [
-            "audience_v2"
+            "audience"
           ],
           "observations": [
             {
               "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
               "selector": {
                 "mode": "tags",
-                "match": "all",
                 "conditions": [
                   {
                     "key": "device_id",
@@ -2979,7 +3354,7 @@
           {
             "keyId": "a1513a0ec27abeec965ea7e37f519a2b7d9f79bee773c7875dbfdcb0c411f49d",
             "alg": "ES256",
-            "sig": "mR41r6Yq-6M0NyyogxVsvuVk0j1vM41qol8XdGewRZ8uYv94hXBJsYMH0AS6xnNQvR6RZzI29bPcTuzn0pmSAw"
+            "sig": "gKOndgFL9jg7aWFr1fkQ2_j6W-g4VSxfrNvsI0NWU6qR2SnB3hXoQ02Bg2PhgytVzmiAHjIxJp7wFzcGMEVTIQ"
           }
         ],
         "countersignatures": []
@@ -3033,7 +3408,7 @@
           {
             "keyId": "9eb66648c3fe3a4f4c53ebd2f6d778badc506f09a67c47052b55fe73f6bbaf77",
             "alg": "ES256",
-            "sig": "412i87XR07JTbG5vkp4mvfQ96iaPNGVWrj5-IieOnD8RNjMLiuyjbZJFd4JoCAORvTPMg5hmJzQ6tu93R3Xwow"
+            "sig": "hG1HY1YX-t_FADTG1FvfpgMpU_KYpVeGO9BCK_Hr4CRPQ_lxxbX5qJ7ZEmH2XK-u5_DsFO0yEzWm-aV5M92gyw"
           }
         ]
       },

@@ -351,12 +351,14 @@
         "capabilities": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
           "items": {
-            "enum": [
-              "audience_v1",
-              "audience_v2"
-            ]
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "contains": {
+            "const": "audience"
           }
         },
         "registration": {
@@ -409,69 +411,82 @@
       "allOf": [
         {
           "if": {
-            "anyOf": [
-              {
-                "required": [
-                  "capabilities"
-                ],
-                "type": "object"
-              },
-              {
-                "required": [
-                  "registration"
-                ],
-                "type": "object"
+            "properties": {
+              "protocol": {
+                "const": "2.0.0"
               }
-            ]
+            },
+            "required": [
+              "protocol"
+            ],
+            "type": "object"
           },
           "then": {
             "required": [
-              "capabilities",
+              "capabilities"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "capabilities"
+            ],
+            "type": "object"
+          },
+          "then": {
+            "properties": {
+              "protocol": {
+                "const": "2.0.0"
+              },
+              "capabilities": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                },
+                "contains": {
+                  "const": "audience"
+                }
+              }
+            },
+            "type": "object"
+          }
+        },
+        {
+          "if": {
+            "required": [
               "registration"
             ],
-            "properties": {},
-            "type": "object",
-            "oneOf": [
-              {
-                "properties": {
-                  "protocol": {
-                    "const": "1.0.0"
-                  },
-                  "capabilities": {
-                    "prefixItems": [
-                      {
-                        "const": "audience_v1"
-                      }
-                    ],
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 1
-                  }
-                },
-                "type": "object"
+            "type": "object"
+          },
+          "then": {
+            "required": [
+              "capabilities"
+            ],
+            "properties": {
+              "protocol": {
+                "const": "2.0.0"
               },
-              {
-                "properties": {
-                  "protocol": {
-                    "enum": [
-                      "1.1.0",
-                      "1.1.1"
-                    ]
-                  },
-                  "capabilities": {
-                    "prefixItems": [
-                      {
-                        "const": "audience_v2"
-                      }
-                    ],
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 1
-                  }
+              "capabilities": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
                 },
-                "type": "object"
+                "contains": {
+                  "const": "audience"
+                }
               }
-            ]
+            },
+            "type": "object"
           }
         }
       ]
@@ -579,12 +594,14 @@
         "capabilities": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
           "items": {
-            "enum": [
-              "audience_v1",
-              "audience_v2"
-            ]
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "contains": {
+            "const": "audience"
           }
         }
       },
@@ -611,48 +628,25 @@
               "protocol",
               "capabilities"
             ],
-            "type": "object",
-            "oneOf": [
-              {
-                "properties": {
-                  "protocol": {
-                    "const": "1.0.0"
-                  },
-                  "capabilities": {
-                    "prefixItems": [
-                      {
-                        "const": "audience_v1"
-                      }
-                    ],
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 1
-                  }
-                },
-                "type": "object"
+            "properties": {
+              "protocol": {
+                "const": "2.0.0"
               },
-              {
-                "properties": {
-                  "protocol": {
-                    "enum": [
-                      "1.1.0",
-                      "1.1.1"
-                    ]
-                  },
-                  "capabilities": {
-                    "prefixItems": [
-                      {
-                        "const": "audience_v2"
-                      }
-                    ],
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 1
-                  }
+              "capabilities": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
                 },
-                "type": "object"
+                "contains": {
+                  "const": "audience"
+                }
               }
-            ]
+            },
+            "type": "object"
           }
         }
       ]

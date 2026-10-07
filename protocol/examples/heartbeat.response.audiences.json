@@ -18,8 +18,8 @@
   "pollSeconds": 30,
   "edgePointerUrl": "https://edge.airprompter.com/g/BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU/generation.json",
   "latestGeneration": 42,
-  "protocol": "1.1.1",
+  "protocol": "2.0.0",
   "capabilities": [
-    "audience_v2"
+    "audience"
   ]
 }

@@ -1,0 +1,85 @@
+{
+  "schema": "manifest",
+  "reason": "Audience targeting is only valid in the protocol 2 audience envelope",
+  "document": {
+    "payload": {
+      "protocol": "0.3.4",
+      "organizationId": "org_1",
+      "agentId": "agt_1",
+      "target": "prod",
+      "generation": 1,
+      "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+      "issuedAt": "2026-10-05T02:23:52.295Z",
+      "leaseSeconds": 3600,
+      "onLeaseExpiry": "degrade",
+      "applyPolicy": "auto",
+      "requireCountersign": false,
+      "slots": [
+        {
+          "tag": "support.reply",
+          "kind": "prompt",
+          "artifactId": "art_support.reply",
+          "versionId": "ver_base",
+          "versionOrdinal": 1,
+          "contentHash": "sha256:2ef42ec21d9300dd21ae3c7ca3711806cce3003fa4edafd22ee744fe86599799",
+          "byteLength": 9,
+          "model": "claude-sonnet-5",
+          "variables": []
+        }
+      ],
+      "directives": [],
+      "experiment": {
+        "experimentId": "exp_1",
+        "salt": "AAECAwQFBgcICQoLDA0ODw",
+        "subjectKey": "instance",
+        "audience": {
+          "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
+          "selector": {
+            "mode": "tags",
+            "conditions": [
+              {
+                "key": "device_id",
+                "value": "device-042",
+                "operator": "is"
+              }
+            ]
+          }
+        },
+        "arms": [
+          {
+            "arm": "control",
+            "weightBps": 0,
+            "releaseDigest": "sha256:f877d6563c8c9680c00aef6d10e1e595707234d79706daf0a77c81afd249297e",
+            "overrides": []
+          },
+          {
+            "arm": "candidate",
+            "weightBps": 10000,
+            "releaseDigest": "sha256:29510cd0d1208483dab5ed86e0d036d47419f8b8e21173ee89875bc6b3444e94",
+            "overrides": [
+              {
+                "tag": "support.reply",
+                "kind": "prompt",
+                "artifactId": "art_support.reply",
+                "versionId": "ver_candidate",
+                "versionOrdinal": 1,
+                "contentHash": "sha256:b2452d1eba32254aac41a394ae0ded977d9e5e6584313170b2a25e4b0a44db88",
+                "byteLength": 9,
+                "model": "claude-sonnet-5",
+                "variables": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "signatures": [
+      {
+        "keyId": "5d4a1bb5cbec0a5076384a44efaa8e5ea46a5429c464937df7c7895efb0c70a9",
+        "alg": "ES256",
+        "sig": "slIaAz--io_UkIUMAbwVkDZhX-WQJ4DUuw01WBcFHBQDd1vGHjHtwvLs1PWMP7MwkrE37UupFX-Ld6m7G7oZLg"
+      }
+    ],
+    "countersignatures": []
+  }
+}

@@ -1,9 +1,9 @@
 {
-  "protocol": "1.1.1",
+  "protocol": "2.0.0",
   "instanceId": "inst_5f3c9a2b7e1d4c08",
   "sdk": {
     "name": "agent-sdk-python",
-    "version": "0.3.0"
+    "version": "0.5.0"
   },
   "host": {
     "os": "linux",
@@ -50,7 +50,7 @@
     "source": "pinned"
   },
   "capabilities": [
-    "audience_v2"
+    "audience"
   ],
   "registration": {
     "tagKeys": [

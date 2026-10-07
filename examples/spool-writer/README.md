@@ -14,10 +14,11 @@ lines each, no dependencies, the same vectors the SDKs pass:
 
 Both implement, from `protocol/spool-format.md`:
 
-- one `window` row per minute per `(tag, versionId, arm, model, status, errorClass)`;
+- one `window` row per minute per `(tag, artifactId, versionId, arm, model, status, errorClass, audienceIds, outcomeRunMinute)`, with later dimensions omitted by legacy row versions;
 - latency into the 16 fixed bucket edges (`protocol/schemas/latency-buckets.json`) plus the rounded sum;
 - tokens as uncached input, cached input and output — split OpenAI's `cached_tokens` out of `prompt_tokens` yourself (the SDKs' `normalizeUsage` shows how);
 - `checks` counters and feedback `outcomes` (`{n, sum}` per declared signal name; booleans as 1/0) that ride on the `ok` window and never add to `count`;
+- audience- or artifact-aware feedback without an authenticated `outcomeRunMinute` attaches only to an already measured matching run in the open minute, so a standalone writer never emits an invalid zero-run v2/v3 row;
 - segment naming `seg-<instanceId>-<epochMinute>-<n>.ndjson`, written as `.open`, `fsync`, then renamed; a new segment on a new minute or when a line would push past 1 MiB; a sealed segment is never reopened.
 
 ```js
@@ -31,8 +32,11 @@ spool.feedback({ tag, versionId, arm, model, outcomes: { accepted: true } });   
 process.on("beforeExit", () => spool.close());
 ```
 
-`tag`, `versionId` and `arm` come from the release you rendered (or from the
-`runRef` a compatible endpoint returned). The `sdk` field names *your*
+`tag`, `artifactId`, `versionId` and `arm` come from the release you rendered
+(or from the authenticated `runRef` a compatible endpoint returned). The
+immutable Team `artifactId` prevents equal per-prompt version identifiers
+from merging across prompts. Local tag values, device IDs and user IDs never
+enter the row. The `sdk` field names *your*
 writer: ingest keys on it, so a misreporting writer is isolated without
 blaming the fleet.
 

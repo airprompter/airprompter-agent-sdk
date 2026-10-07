@@ -2,7 +2,8 @@
  * The spool writer (`protocol/spool-format.md`, D52/D66).
  *
  * Minute windows accumulate in memory per dimension set
- * `(tag, versionId, arm, model, status, errorClass)` and are written as
+ * `(tag, artifactId, versionId, arm, model, status, errorClass, audienceIds,
+ * outcomeRunMinute)` and are written as
  * `window` rows when the minute closes. Segments are append-only NDJSON
  * under `<store>/spool/telemetry/`, open as `seg-<inst>-<epochMinute>-<n>.ndjson.open`,
  * closed by fsync + rename; rotated at the minute boundary or 1 MiB. Nothing
@@ -24,7 +25,7 @@
 import { basename, join } from "node:path";
 
 import { manifestNameOf, writeSegmentManifest } from "./manifest.js";
-import { nodeFs, fsFailureCode, latencyBucketIndex, minuteOf, epochMinute, LATENCY_BUCKET_EDGES_MS, type FsPort, type ErrorClass, type Observation, type WindowRow, type RefusalRow, type DroppedRow, type SpoolRow } from "@airprompter/agent-core";
+import { nodeFs, fsFailureCode, latencyBucketIndex, minuteOf, epochMinute, validAudienceIds, validAudienceMinute, LATENCY_BUCKET_EDGES_MS, type FsPort, type ErrorClass, type Observation, type WindowRow, type RefusalRow, type DroppedRow, type SpoolRow } from "@airprompter/agent-core";
 
 export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "@airprompter/agent-core";
 export type { ErrorClass, Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow } from "@airprompter/agent-core";
@@ -34,6 +35,8 @@ export const SEGMENT_MAX_BYTES = 1024 * 1024;
 export const HOST_SPOOL_BUDGET_BYTES = 100 * 1024 * 1024;
 /** A serverless invocation keeps this much in memory; beyond it the oldest rows go and a `dropped` row says so. */
 export const SERVERLESS_BUFFER_BYTES = 256 * 1024;
+const OUTCOME_NAME = /^[a-z][a-zA-Z0-9]{0,31}$/;
+const hasValidOutcome = (outcomes: Record<string, number | boolean>): boolean => Object.entries(outcomes).some(([name, value]) => OUTCOME_NAME.test(name) && (typeof value === "boolean" || Number.isFinite(value)));
 
 export function segmentName(instanceId: string, minute: number, n: number): string {
   return `seg-${instanceId}-${minute}-${n}.ndjson`;
@@ -396,18 +399,25 @@ export class SpoolWriter {
     private readonly identity: { instanceId: string; instanceClass: "resident" | "ephemeral"; sdk: string },
   ) {}
 
-  private window(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model" | "status"> & { errorClass?: ErrorClass | null; usageSource?: Observation["usageSource"]; audienceIds?: readonly string[]; runMinute?: string; outcomeRunMinute?: string }, nowMs: number): WindowRow {
-    const minute = dimensions.outcomeRunMinute ? minuteOf(nowMs) : dimensions.runMinute ?? minuteOf(nowMs);
+  private window(dimensions: Pick<Observation, "tag" | "versionId" | "artifactId" | "arm" | "model" | "status"> & { errorClass?: ErrorClass | null; usageSource?: Observation["usageSource"]; audienceIds?: readonly string[]; runMinute?: string; outcomeRunMinute?: string }, nowMs: number): WindowRow {
+    const minute = minuteOf(nowMs);
+    if (dimensions.artifactId !== undefined && (typeof dimensions.artifactId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(dimensions.artifactId))) throw new Error("telemetry_artifact_id_invalid");
+    if (dimensions.audienceIds !== undefined && !validAudienceIds(dimensions.audienceIds)) throw new Error("telemetry_audience_ids_invalid");
+    if (dimensions.outcomeRunMinute !== undefined && ((dimensions.artifactId === undefined && dimensions.audienceIds === undefined) || !validAudienceMinute(dimensions.outcomeRunMinute) || Date.parse(dimensions.outcomeRunMinute) > Date.parse(minute))) throw new Error("telemetry_outcome_run_minute_invalid");
+    // Measurements belong to the minute they complete. Reopening a sealed render minute would emit the same
+    // ingest SET key twice and lose the earlier aggregate. Only feedback carries its original run minute separately.
     if (this.openMinute !== null && this.openMinute !== minute) this.closeWindows(nowMs);
     this.openMinute = minute;
     const errorClass = dimensions.errorClass ?? null;
-    const key = [dimensions.tag, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass ?? "", JSON.stringify(dimensions.audienceIds ?? null), dimensions.outcomeRunMinute ?? ""].join("\u0000");
+    const outcomeRunMinute = dimensions.outcomeRunMinute === minute ? "" : dimensions.outcomeRunMinute ?? "";
+    const key = [dimensions.tag, dimensions.artifactId ?? "", dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass ?? "", JSON.stringify(dimensions.audienceIds ?? null), outcomeRunMinute].join("\u0000");
     let row = this.open.get(key);
     if (!row) {
       row = {
         type: "window",
-        v: dimensions.audienceIds ? 2 : 1,
-        ...(dimensions.audienceIds ? {audienceIds: [...dimensions.audienceIds]} : {}),
+        v: dimensions.artifactId !== undefined ? 3 : dimensions.audienceIds !== undefined ? 2 : 1,
+        ...(dimensions.artifactId !== undefined ? {artifactId: dimensions.artifactId} : {}),
+        ...(dimensions.audienceIds !== undefined ? {audienceIds: [...dimensions.audienceIds]} : {}),
         ...(dimensions.outcomeRunMinute ? {outcomeRunMinute: dimensions.outcomeRunMinute} : {}),
         minute,
         instanceId: this.identity.instanceId,
@@ -431,6 +441,7 @@ export class SpoolWriter {
 
   observe(observation: Observation, nowMs: number): void {
     const row = this.window(observation, nowMs);
+    if (row.outcomeRunMinute === row.minute) delete row.outcomeRunMinute;
     row.count += 1;
     const bucket = latencyBucketIndex(observation.latencyMs);
     row.latencyMs.buckets[bucket] = (row.latencyMs.buckets[bucket] ?? 0) + 1;
@@ -445,12 +456,12 @@ export class SpoolWriter {
   }
 
   /** T29: output-check counts against a run already counted (an app that evaluated after the fact): the run's window, no extra count. */
-  checks(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute" | "runMinute">, counts: { passed: number; failed: number }, nowMs: number): void {
-    if (dimensions.audienceIds !== undefined) {
-      // Audience v2 forbids checks-only zero-run rows. Add these only to the matching open, measured run.
-      const minute = dimensions.runMinute ?? minuteOf(nowMs);
+  checks(dimensions: Pick<Observation, "tag" | "versionId" | "artifactId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute" | "runMinute">, counts: { passed: number; failed: number }, nowMs: number): void {
+    if (dimensions.audienceIds !== undefined || dimensions.artifactId !== undefined) {
+      // Audience v2 and artifact-aware v3 forbid checks-only zero-run rows. Update only the open measured row.
+      const minute = minuteOf(nowMs);
       if (this.openMinute !== minute) return;
-      const key = [dimensions.tag, dimensions.versionId, dimensions.arm, dimensions.model, "ok", "", JSON.stringify(dimensions.audienceIds), ""].join("\u0000");
+      const key = [dimensions.tag, dimensions.artifactId ?? "", dimensions.versionId, dimensions.arm, dimensions.model, "ok", "", JSON.stringify(dimensions.audienceIds ?? null), ""].join("\u0000");
       const existing = this.open.get(key);
       if (!existing || existing.count === 0) return;
       existing.checks = { passed: (existing.checks?.passed ?? 0) + counts.passed, failed: (existing.checks?.failed ?? 0) + counts.failed };
@@ -461,7 +472,19 @@ export class SpoolWriter {
   }
 
   /** Quality signals against a run already counted: they ride on the run's window (status ok) and never add to `count`. */
-  outcomes(dimensions: Pick<Observation, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute">, outcomes: Record<string, number | boolean>, nowMs: number): void {
+  outcomes(dimensions: Pick<Observation, "tag" | "artifactId" | "versionId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute">, outcomes: Record<string, number | boolean>, nowMs: number): void {
+    if (!hasValidOutcome(outcomes)) return;
+    if (dimensions.audienceIds !== undefined && !validAudienceIds(dimensions.audienceIds)) return;
+    if (dimensions.outcomeRunMinute !== undefined && ((dimensions.artifactId === undefined && dimensions.audienceIds === undefined) || !validAudienceMinute(dimensions.outcomeRunMinute) || Date.parse(dimensions.outcomeRunMinute) > Date.parse(minuteOf(nowMs)))) return;
+    if ((dimensions.audienceIds !== undefined || dimensions.artifactId !== undefined) && dimensions.outcomeRunMinute === undefined) {
+      const minute = minuteOf(nowMs);
+      if (this.openMinute !== minute) return;
+      const key = [dimensions.tag, dimensions.artifactId ?? "", dimensions.versionId, dimensions.arm, dimensions.model, "ok", "", JSON.stringify(dimensions.audienceIds ?? null), ""].join("\u0000");
+      const existing = this.open.get(key);
+      if (!existing || existing.count === 0) return;
+      mergeOutcomes(existing, outcomes);
+      return;
+    }
     mergeOutcomes(this.window({ ...dimensions, status: "ok" }, nowMs), outcomes);
   }
 
@@ -490,7 +513,7 @@ export class SpoolWriter {
 function mergeOutcomes(row: WindowRow, outcomes: Record<string, number | boolean>): void {
   row.outcomes ??= {};
   for (const [name, value] of Object.entries(outcomes)) {
-    if (!/^[a-z][a-zA-Z0-9]{0,31}$/.test(name)) continue;
+    if (!OUTCOME_NAME.test(name)) continue;
     if (typeof value === "number" && !Number.isFinite(value)) continue;
     const current = row.outcomes[name] ?? { n: 0, sum: 0 };
     row.outcomes[name] = { n: current.n + 1, sum: current.sum + (typeof value === "boolean" ? (value ? 1 : 0) : value) };

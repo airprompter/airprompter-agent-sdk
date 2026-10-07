@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://airprompter.com/protocol/0.2/heartbeat.schema.json",
   "title": "AirPrompter heartbeat",
-  "description": "One route, one Lambda (D41): an instance reports its state and receives the presigned S3 upload grant for its spool (\u00a79.1). Telemetry bytes never pass through this route. Everything here is content-free by schema: no prompt text, no outputs, no end-user identifiers.",
+  "description": "One route, one Lambda (D41): an instance reports its state and receives the presigned S3 upload grant for its spool (§9.1). Telemetry bytes never pass through this route. Everything here is content-free by schema: no prompt text, no outputs, no end-user identifiers.",
   "$defs": {
     "request": {
       "type": "object",
@@ -37,7 +37,7 @@
           ]
         },
         "heartbeatIntervalSeconds": {
-          "description": "How often this instance intends to report. The server clamps it to 30\u20133600 and echoes the cadence it holds the instance to; three misses expire the instance from the fleet view.",
+          "description": "How often this instance intends to report. The server clamps it to 30–3600 and echoes the cadence it holds the instance to; three misses expire the instance from the fleet view.",
           "type": "integer",
           "minimum": 1,
           "maximum": 3600
@@ -190,7 +190,7 @@
           }
         },
         "unavailableModels": {
-          "description": "With `refusal: model_unavailable` \u2014 the one local refusal after the chain verified \u2014 the required models this runtime cannot call (one per refusing slot at most).",
+          "description": "With `refusal: model_unavailable` — the one local refusal after the chain verified — the required models this runtime cannot call (one per refusing slot at most).",
           "type": "array",
           "maxItems": 16,
           "items": {
@@ -202,7 +202,7 @@
           "$ref": "manifest.schema.json#/$defs/keyId"
         },
         "storageProtection": {
-          "description": "How the store's KEK is held (\u00a710). `file_key` is reported and shown as a finding, never blocked (D15).",
+          "description": "How the store's KEK is held (§10). `file_key` is reported and shown as a finding, never blocked (D15).",
           "type": "string",
           "enum": [
             "os_keystore",
@@ -213,7 +213,7 @@
           ]
         },
         "catalog": {
-          "description": "Models this instance can actually call, as the provider names them. Promotion refuses a slot whose model is absent (\u00a77).",
+          "description": "Models this instance can actually call, as the provider names them. Promotion refuses a slot whose model is absent (§7).",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -229,7 +229,7 @@
               }
             },
             "variables": {
-              "description": "0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) \u2014 names only, never values. The seal warns when a pin declares a `source: runtime` variable no live instance can fill.",
+              "description": "0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) — names only, never values. The seal warns when a pin declares a `source: runtime` variable no live instance can fill.",
               "type": "array",
               "maxItems": 256,
               "uniqueItems": true,
@@ -276,7 +276,7 @@
           }
         },
         "unlockRequestsSeen": {
-          "description": "The open request_unlock directives this instance has surfaced to its operator and hook, by releaseDigest \u2014 so the fleet view can say who saw a request, and when one expired unseen.",
+          "description": "The open request_unlock directives this instance has surfaced to its operator and hook, by releaseDigest — so the fleet view can say who saw a request, and when one expired unseen.",
           "type": "array",
           "maxItems": 8,
           "uniqueItems": true,
@@ -353,7 +353,10 @@
           "minItems": 1,
           "maxItems": 1,
           "items": {
-            "const": "audience_v1"
+            "enum": [
+              "audience_v1",
+              "audience_v2"
+            ]
           }
         },
         "registration": {
@@ -372,7 +375,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 64,
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])+$"
               }
             },
             "prompts": {
@@ -395,7 +398,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 128,
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])+$"
                   }
                 }
               }
@@ -426,18 +429,52 @@
               "capabilities",
               "registration"
             ],
-            "properties": {
-              "protocol": {
-                "const": "1.0.0"
+            "properties": {},
+            "type": "object",
+            "oneOf": [
+              {
+                "properties": {
+                  "protocol": {
+                    "const": "1.0.0"
+                  },
+                  "capabilities": {
+                    "prefixItems": [
+                      {
+                        "const": "audience_v1"
+                      }
+                    ],
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "protocol": {
+                    "const": "1.1.0"
+                  },
+                  "capabilities": {
+                    "prefixItems": [
+                      {
+                        "const": "audience_v2"
+                      }
+                    ],
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1
+                  }
+                },
+                "type": "object"
               }
-            },
-            "type": "object"
+            ]
           }
         }
       ]
     },
     "uploadGrant": {
-      "description": "A presigned S3 POST policy minted by the grant issuer (\u00a79.1). The policy pins the key prefix, the content-length range, the content type, server-side encryption and the grant id; it expires within 15 minutes.",
+      "description": "A presigned S3 POST policy minted by the grant issuer (§9.1). The policy pins the key prefix, the content-length range, the content type, server-side encryption and the grant id; it expires within 15 minutes.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -519,7 +556,7 @@
           "pattern": "^https://"
         },
         "heartbeatIntervalSeconds": {
-          "description": "The cadence the server holds this instance to (the request's value, clamped to 30\u20133600). Adopt it.",
+          "description": "The cadence the server holds this instance to (the request's value, clamped to 30–3600). Adopt it.",
           "type": "integer",
           "minimum": 30,
           "maximum": 3600
@@ -534,14 +571,17 @@
           "minimum": 0
         },
         "protocol": {
-          "const": "1.0.0"
+          "$ref": "manifest.schema.json#/$defs/protocolVersion"
         },
         "capabilities": {
           "type": "array",
           "minItems": 1,
           "maxItems": 1,
           "items": {
-            "const": "audience_v1"
+            "enum": [
+              "audience_v1",
+              "audience_v2"
+            ]
           }
         }
       },
@@ -568,7 +608,45 @@
               "protocol",
               "capabilities"
             ],
-            "type": "object"
+            "type": "object",
+            "oneOf": [
+              {
+                "properties": {
+                  "protocol": {
+                    "const": "1.0.0"
+                  },
+                  "capabilities": {
+                    "prefixItems": [
+                      {
+                        "const": "audience_v1"
+                      }
+                    ],
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "protocol": {
+                    "const": "1.1.0"
+                  },
+                  "capabilities": {
+                    "prefixItems": [
+                      {
+                        "const": "audience_v2"
+                      }
+                    ],
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1
+                  }
+                },
+                "type": "object"
+              }
+            ]
           }
         }
       ]

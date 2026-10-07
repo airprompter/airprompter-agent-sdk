@@ -236,7 +236,12 @@ function validAudiencePayload(p) {
   const targeted=p.requiredCapabilities!==undefined || p.observations!==undefined || experiments.some(e=>e.audience!==undefined) || (object(p.experiment) && p.experiment.audience!==undefined);
   // Major 0 remains legacy-compatible. Major 1 always requires its frozen audience negotiation envelope.
   if (!targeted) return Number(String(p.protocol).split(".")[0]) !== 1;
-  if (p.protocol!=="1.0.0" || JSON.stringify(p.requiredCapabilities)!== '["audience_v1"]' || p.experiment!==undefined || !Array.isArray(p.slots) || !Array.isArray(p.observations) || p.observations.length<1 || p.observations.length>8 || experiments.length>32) return false;
+  const v2=p.protocol==="1.1.0" && JSON.stringify(p.requiredCapabilities)==='["audience_v2"]';
+  const v1=p.protocol==="1.0.0" && JSON.stringify(p.requiredCapabilities)==='["audience_v1"]';
+  if ((!v2 && !v1) || p.experiment!==undefined || !Array.isArray(p.slots) || !Array.isArray(p.observations) || p.observations.length<1 || p.observations.length>8 || experiments.length>32) return false;
+  const selectors=[...p.observations,...experiments.map(e=>e.audience)].map(entry=>object(entry)?entry.selector:null);
+  if (v1 && selectors.some(selector=>object(selector)&&Array.isArray(selector.conditions)&&selector.conditions.some(condition=>object(condition)&&condition.operator!==undefined))) return false;
+  if (v2 && selectors.some(selector=>object(selector)&&selector.mode==="tags"&&(selector.match!=="all"||!Array.isArray(selector.conditions)||selector.conditions.some(condition=>!object(condition)||condition.operator===undefined)))) return false;
   const seen=new Set();
   for (const o of p.observations) {
     if (!object(o) || !keys(o,["audienceId","selector","tag","observeFrom"]) || !id(o.audienceId) || seen.has(o.audienceId) || !audiencePredicate({selector:o.selector,tags:{}}).valid || !p.slots.some(slot=>object(slot)&&slot.tag===o.tag)) return false;

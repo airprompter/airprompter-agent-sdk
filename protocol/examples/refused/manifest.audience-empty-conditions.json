@@ -3,7 +3,7 @@
   "reason": "Empty targeting cannot mean fleet-wide",
   "document": {
     "payload": {
-      "protocol": "1.0.0",
+      "protocol": "1.1.0",
       "organizationId": "org_1",
       "agentId": "agt_1",
       "target": "prod",
@@ -42,7 +42,8 @@
               "conditions": [
                 {
                   "key": "device_id",
-                  "value": "device-042"
+                  "value": "device-042",
+                  "operator": "is"
                 }
               ]
             }
@@ -76,7 +77,7 @@
         }
       ],
       "requiredCapabilities": [
-        "audience_v1"
+        "audience_v2"
       ],
       "observations": [
         {

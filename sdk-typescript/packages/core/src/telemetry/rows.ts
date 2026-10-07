@@ -31,6 +31,7 @@ export interface Observation {
   runMinute?: string;
   audienceIds?: readonly string[];
   outcomeRunMinute?: string;
+  artifactId?: string;
   tag: string;
   versionId: string;
   arm: string;
@@ -46,7 +47,8 @@ export interface Observation {
 
 export interface WindowRow {
   type: "window";
-  v: 1 | 2;
+  v: 1 | 2 | 3;
+  artifactId?: string;
   audienceIds?: readonly string[];
   outcomeRunMinute?: string;
   minute: string;

@@ -16,6 +16,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const LATENCY_BUCKET_EDGES_MS = JSON.parse(readFileSync(join(existsSync(join(here, "..", "protocol", "schemas")) ? join(here, "..", "protocol") : join(here, "protocol"), "schemas", "latency-buckets.json"), "utf8")).edges;
 export const SEGMENT_MAX_BYTES = 1024 * 1024;
 const OUTCOME_NAME = /^[a-z][a-zA-Z0-9]{0,31}$/;
+const OUTCOME_MINUTE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z$/;
+
+const validOutcomeRunMinute = (value) => {
+  if (typeof value !== "string" || !OUTCOME_MINUTE.test(value) || value.startsWith("0000-") || !Number.isFinite(Date.parse(value))) return false;
+  const date = value.slice(0, 10);
+  const midnight = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(midnight) && new Date(midnight).toISOString().slice(0, 10) === date && Number(value.slice(11, 13)) < 24 && Number(value.slice(14, 16)) < 60;
+};
+const validAudienceIds = (value) => Array.isArray(value) && value.length <= 8 && value.every((id, i) => typeof id === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(id) && (i === 0 || value[i - 1] < id));
+const hasValidOutcome = (outcomes) => Object.entries(outcomes).some(([name, value]) => OUTCOME_NAME.test(name) && (typeof value === "boolean" || isFinite(value)));
 
 export function latencyBucketIndex(latencyMs) {
   const index = LATENCY_BUCKET_EDGES_MS.findIndex((edge) => latencyMs <= edge);
@@ -68,7 +78,7 @@ export function mergeOutcomes(row, outcomes) {
   }
 }
 
-/** Minute windows per dimension set (tag, versionId, arm, model, status, errorClass). */
+/** Minute windows per dimension set (tag, artifactId, versionId, arm, model, status, errorClass, audienceIds, outcomeRunMinute). */
 export class WindowAggregator {
   constructor({ instanceId, instanceClass, sdk }) {
     this.identity = { instanceId, instanceClass, sdk };
@@ -78,15 +88,19 @@ export class WindowAggregator {
   }
   window(at, dimensions) {
     const minute = minuteOf(at);
+    if (dimensions.artifactId !== undefined && (typeof dimensions.artifactId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(dimensions.artifactId))) throw new Error("telemetry_artifact_id_invalid");
+    if (dimensions.audienceIds !== undefined && !validAudienceIds(dimensions.audienceIds)) throw new Error("telemetry_audience_ids_invalid");
+    if (dimensions.outcomeRunMinute !== undefined && ((dimensions.artifactId === undefined && dimensions.audienceIds === undefined) || !validOutcomeRunMinute(dimensions.outcomeRunMinute) || dimensions.outcomeRunMinute > minute)) throw new Error("telemetry_outcome_run_minute_invalid");
     if (this.openMinute !== null && this.openMinute !== minute) this.close(at);
     this.openMinute = minute;
     const errorClass = dimensions.errorClass ?? null;
-    const key = JSON.stringify([dimensions.tag, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass]);
+    const outcomeRunMinute = dimensions.outcomeRunMinute === minute ? null : dimensions.outcomeRunMinute ?? null;
+    const key = JSON.stringify([dimensions.tag, dimensions.artifactId ?? null, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass, dimensions.audienceIds ?? null, outcomeRunMinute]);
     let row = this.open.get(key);
     if (!row) {
       row = {
         type: "window",
-        v: 1,
+        v: dimensions.artifactId !== undefined ? 3 : dimensions.audienceIds !== undefined ? 2 : 1,
         minute,
         instanceId: this.identity.instanceId,
         instanceClass: this.identity.instanceClass,
@@ -102,12 +116,16 @@ export class WindowAggregator {
         tokens: { input: 0, output: 0 },
         sdk: this.identity.sdk,
       };
+      if (dimensions.artifactId !== undefined) row.artifactId = dimensions.artifactId;
+      if (dimensions.audienceIds !== undefined) row.audienceIds = [...dimensions.audienceIds];
+      if (dimensions.outcomeRunMinute !== undefined) row.outcomeRunMinute = dimensions.outcomeRunMinute;
       this.open.set(key, row);
     }
     return row;
   }
   observe(at, observation) {
     const row = this.window(at, observation);
+    if (row.outcomeRunMinute === row.minute) delete row.outcomeRunMinute;
     row.count += 1;
     row.latencyMs.buckets[latencyBucketIndex(observation.latencyMs)] += 1;
     row.latencyMs.sum += Math.max(0, Math.round(observation.latencyMs));
@@ -118,6 +136,18 @@ export class WindowAggregator {
     if (observation.outcomes) mergeOutcomes(row, observation.outcomes);
   }
   outcomes(at, feedback) {
+    if (!hasValidOutcome(feedback.outcomes)) return;
+    if (feedback.audienceIds !== undefined && !validAudienceIds(feedback.audienceIds)) return;
+    if (feedback.outcomeRunMinute !== undefined && ((feedback.artifactId === undefined && feedback.audienceIds === undefined) || !validOutcomeRunMinute(feedback.outcomeRunMinute) || feedback.outcomeRunMinute > minuteOf(at))) return;
+    if ((feedback.audienceIds !== undefined || feedback.artifactId !== undefined) && feedback.outcomeRunMinute === undefined) {
+      const minute = minuteOf(at);
+      if (this.openMinute !== minute) return;
+      const key = JSON.stringify([feedback.tag, feedback.artifactId ?? null, feedback.versionId, feedback.arm, feedback.model, "ok", null, feedback.audienceIds ?? null, null]);
+      const existing = this.open.get(key);
+      if (!existing || existing.count === 0) return;
+      mergeOutcomes(existing, feedback.outcomes);
+      return;
+    }
     mergeOutcomes(this.window(at, { ...feedback, status: "ok" }), feedback.outcomes);
   }
   close(_at) {

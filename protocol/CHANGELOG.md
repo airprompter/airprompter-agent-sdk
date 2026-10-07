@@ -1,5 +1,12 @@
 # Protocol changelog
 
+## 1.1.0 · Tag operators and artifact-aware telemetry (unpublished)
+
+- Audience conditions add a case-sensitive `operator`: `is` or `contains`. Multiple conditions remain an implicit conjunction in AirPrompter; an empty condition list is represented by the existing All devices selector.
+- The new signed envelope requires `protocol: "1.1.0"` with `requiredCapabilities: ["audience_v2"]`. SDKs retain `1.0.0` / `audience_v1` reading, but refuse v2 operators inside a v1 envelope so one release can never have two meanings.
+- Authenticated run references carry the stable Team prompt `artifactId`. Version-3 telemetry windows require it, preventing version ordinals from different prompts from merging after a slot changes prompts; legacy rows remain readable without it.
+- Audience tag values remain local. Registration sends bounded key names and prompt labels only, and the authored selector is broadcast as part of the signed release for each SDK to evaluate locally.
+
 ## 1.0.0 · Audience targeting (unpublished)
 
 - Exact local All/Any tags and explicit fleet targeting; names-only negotiated registration.

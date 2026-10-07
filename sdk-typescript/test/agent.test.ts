@@ -8,6 +8,7 @@
  */
 
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +19,7 @@ import { createEncryptedBundle, createPlaintextBundle } from "../packages/core/s
 import { generateX25519KeyPair } from "../packages/core/src/bundle/hpke.js";
 import { keyThumbprint, publicJwkOf, releaseDigest } from "../packages/core/src/protocol/trust.js";
 import { MissingVariableError } from "../packages/core/src/render/template.js";
-import { parseRunRef } from "../packages/core/src/render/runRef.js";
+import { mintRunRef, parseRunRef, type RunRefFacts } from "../packages/core/src/render/runRef.js";
 import type { WindowRow } from "../packages/telemetry/src/spool/writer.js";
 import { FakeControlPlane, newKey } from "./helpers/controlPlane.js";
 
@@ -30,6 +31,35 @@ test("runRef rejects malformed non-ASCII MAC input without throwing", () => {
   const key = Buffer.alloc(32);
   assert.equal(parseRunRef(`${body}.é`, key), null);
   assert.equal(parseRunRef(`${body}.${"A".repeat(21)}é`, key), null);
+});
+
+test("artifact-aware runRef facts round-trip as an atomic artifact and model pair", () => {
+  const key = Buffer.alloc(32);
+  const facts: RunRefFacts = { agentId: "agt_1", target: "prod", tag: "support.reply", versionId: "ver_1", arm: "none", generation: 1, bucket: null, artifactId: "prm_1", model: "gpt-5" };
+  assert.deepEqual(parseRunRef(mintRunRef(facts, key), key), facts);
+  assert.throws(() => mintRunRef({ ...facts, model: undefined } as unknown as RunRefFacts, key), /run_ref_facts_invalid/);
+  assert.throws(() => mintRunRef({ ...facts, artifactId: 123 } as unknown as RunRefFacts, key), /run_ref_facts_invalid/);
+  assert.throws(() => mintRunRef({ ...facts, artifactId: "prm_😀" }, key), /run_ref_facts_invalid/);
+  assert.throws(() => mintRunRef({ ...facts, model: "gpt·5" }, key), /run_ref_facts_invalid/);
+  for (const field of ["agentId", "target", "tag", "versionId", "arm"] as const) {
+    assert.throws(() => mintRunRef({ ...facts, [field]: `${facts[field]}·extra` }, key), /run_ref_facts_invalid/, field);
+  }
+  assert.deepEqual(parseRunRef(mintRunRef({ ...facts, generation: Number.MAX_SAFE_INTEGER, bucket: 9999 }, key), key), { ...facts, generation: Number.MAX_SAFE_INTEGER, bucket: 9999 });
+  for (const generation of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, 0, -1, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => mintRunRef({ ...facts, generation }, key), /run_ref_facts_invalid/, `generation ${generation}`);
+  }
+  for (const bucket of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1, 10000]) {
+    assert.throws(() => mintRunRef({ ...facts, bucket }, key), /run_ref_facts_invalid/, `bucket ${bucket}`);
+  }
+  const signed = (body: string) => `${Buffer.from(body).toString("base64url")}.${createHmac("sha256", key).update(body).digest("base64url").slice(0, 22)}`;
+  for (const generation of ["0", "01", "+1", "1.5", "NaN", "Infinity", "9007199254740992"]) {
+    assert.equal(parseRunRef(signed(`agt_1·prod·support.reply·ver_1·none·${generation}·-`), key), null, `generation ${generation}`);
+  }
+  for (const bucket of ["-1", "00", "+1", "1.5", "NaN", "Infinity", "10000"]) {
+    assert.equal(parseRunRef(signed(`agt_1·prod·support.reply·ver_1·none·1·${bucket}`), key), null, `bucket ${bucket}`);
+  }
+  assert.throws(() => mintRunRef({ ...facts, audienceIds: ["aud_AAAAAAAAAAAAAAAAAAAAAA"], runMinute: undefined } as unknown as RunRefFacts, key), /run_ref_facts_invalid/);
+  assert.throws(() => mintRunRef({ agentId: "agt_1", target: "prod", tag: "support.reply", versionId: "ver_1", arm: "none", generation: 1, bucket: null, runMinute: "2026-09-12T14:03:00Z" } as unknown as RunRefFacts, key), /run_ref_facts_invalid/);
 });
 
 function triageSlots(plane: FakeControlPlane) {
@@ -80,6 +110,7 @@ test("first start pulls, verifies and serves; render fences end-user text and ha
   assert.throws(() => ap.prompt("support.triage").render({ team: "Billing" }), (e: unknown) => e instanceof MissingVariableError && e.missing.join() === "ticket");
   assert.throws(() => ap.prompt("support.triage").render({ team: "Billing", ticket: "x", extra: "y" }), /not declared/);
   assert.equal(ap.prompt("support.reply").render({}).text, "Reply politely to .");
+  assert.equal(ap.feedback(rendered.runRef, { rating: 5 }, { model: 123 as unknown as string }), false);
   assert.throws(() => ap.prompt("no.such").render({}), /no slot/);
   await ap.stop();
   rmSync(stateDir, { recursive: true, force: true });
@@ -159,17 +190,25 @@ test("workflows yield steps in order with their texts; telemetry and feedback la
   const stateDir = tempDir();
   const plane = new FakeControlPlane(scope);
   const wf = plane.slot({ tag: "docs.flow", text: "flow", steps: [{ text: "Summarise {{doc}}" }, { text: "Translate to {{lang}}" }], variables: [{ name: "doc", required: true, trust: "end_user" }, { name: "lang", required: true, trust: "operator" }] });
-  plane.promote([wf, ...triageSlots(plane)]);
+  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "all" as const } };
+  const manifest = plane.promote([wf, ...triageSlots(plane)], { protocol: "1.1.0" });
+  manifest.payload.requiredCapabilities = ["audience_v2"];
+  manifest.payload.observations = [{ ...audience, tag: wf.tag, observeFrom: "2026-09-12T14:00:00Z" }];
+  manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
+  (plane as any).current.bytes = Buffer.from(JSON.stringify(manifest));
   let clock = Date.parse("2026-09-12T14:03:10Z");
   const ap = await start(plane, stateDir, { now: () => clock });
   const flow = ap.workflow("docs.flow");
   assert.deepEqual(flow.steps.map((s) => [s.stepId, s.text]), [["docs.flow#1", "Summarise {{doc}}"], ["docs.flow#2", "Translate to {{lang}}"]]);
   assert.equal(flow.model, "claude-sonnet-5");
+  await assert.rejects(flow.renderStepAsync("docs.flow#1", {}), MissingVariableError);
 
   const rendered = ap.prompt("support.triage").render({ team: "Billing", ticket: "my printer is on fire" });
-  ap.report({ tag: "support.triage", versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, status: "ok", latencyMs: 812, tokens: { input: 400, output: 90, cachedInput: 100 }, checks: { passed: 1 } });
-  ap.report({ tag: "support.triage", versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, status: "ok", latencyMs: 1201, tokens: { input: 380, output: 70 } });
-  ap.report({ tag: "support.triage", versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, status: "error", errorClass: "provider_timeout", latencyMs: 30000 });
+  assert.equal(rendered.runMinute, "2026-09-12T14:03:00Z", "fleet-wide renders retain their original minute for delayed feedback");
+  const cohort = { ...(rendered.audienceIds !== undefined ? { audienceIds: rendered.audienceIds } : {}), runMinute: rendered.runMinute };
+  ap.report({ tag: "support.triage", artifactId: rendered.artifactId, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, status: "ok", latencyMs: 812, tokens: { input: 400, output: 90, cachedInput: 100 }, checks: { passed: 1 }, ...cohort });
+  ap.report({ tag: "support.triage", artifactId: rendered.artifactId, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, status: "ok", latencyMs: 1201, tokens: { input: 380, output: 70 }, ...cohort });
+  ap.report({ tag: "support.triage", artifactId: rendered.artifactId, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, status: "error", errorClass: "provider_timeout", latencyMs: 30000, ...cohort });
   assert.equal(ap.feedback(rendered.runRef, { thumbs: "up", rating: 4, freeText: "should be dropped", accepted: true }), true);
   assert.equal(ap.feedback("forged.token", { rating: 5 }), false);
   clock += 60_000; // the minute closes on the next observation
@@ -190,9 +229,13 @@ test("workflows yield steps in order with their texts; telemetry and feedback la
   assert.equal(triageOk.latencyMs.buckets[11], 1, "1201 ms → the ≤2048 bucket");
   assert.deepEqual(triageOk.checks, { passed: 1, failed: 0 });
   assert.deepEqual(triageOk.outcomes, { thumbs: { n: 1, sum: 1 }, rating: { n: 1, sum: 4 }, accepted: { n: 1, sum: 1 } });
+  assert.equal(triageOk.outcomeRunMinute, undefined, "same-minute feedback merges into the observed row");
   const timeout = rows.find((r) => r.type === "window" && r.errorClass === "provider_timeout")!;
   assert.equal(timeout.count, 1);
   assert.equal(timeout.latencyMs.buckets[15], 1, "30 s → the open-ended bucket");
+  const workflowFailure = rows.find((r) => r.type === "window" && r.tag === "docs.flow" && r.errorClass === "render_missing_variable")!;
+  assert.equal(workflowFailure.artifactId, wf.artifactId);
+  assert.deepEqual(workflowFailure.audienceIds, [audience.audienceId]);
   const text = JSON.stringify(rows);
   for (const forbidden of ["Billing", "printer", "should be dropped", "freeText", "triage assistant"]) assert.equal(text.includes(forbidden), false, `${forbidden} must never reach the spool`);
   rmSync(stateDir, { recursive: true, force: true });
@@ -402,12 +445,14 @@ test("feedback on a candidate-arm run lands on the window of the model that ran"
     rendered = ap.prompt("support.reply", { subject }).render({});
   }
   assert.equal(rendered.model, "gpt-5");
-  ap.report({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, status: "ok", latencyMs: 1 });
-  assert.equal(ap.feedback(rendered.runRef, { rating: 5 }), true);
+  await ap.observe(rendered, () => ({ usage: { prompt_tokens: 1, completion_tokens: 1 } }), { model: "gpt-5-mini" });
+  plane.promote([plane.slot({ tag: "support.reply", text: "replacement", versionId: rendered.versionId, model: "claude-sonnet-5" })]);
+  await ap.syncNow();
+  assert.equal(ap.feedback(rendered.runRef, { rating: 5 }, { model: "gpt-5-mini" }), true);
   await ap.stop();
   const windows = ap.drainMemorySink().filter((r) => (r as { type: string }).type === "window") as WindowRow[];
   assert.equal(windows.length, 1, "one window: the feedback merged into the run's");
-  assert.equal(windows[0]!.model, "gpt-5");
+  assert.equal(windows[0]!.model, "gpt-5-mini");
   assert.equal(windows[0]!.count, 1);
   assert.deepEqual(windows[0]!.outcomes, { rating: { n: 1, sum: 5 } });
   rmSync(stateDir, { recursive: true, force: true });
@@ -488,9 +533,9 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   const plane = new FakeControlPlane(scope);
   const base = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
   const candidate = plane.slot({tag:"support.reply",text:"Candidate",versionId:"ver_candidate"});
-  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"tags" as const,match:"all" as const,conditions:[{key:"device_id",value:"private-device-042"}]}};
-  const manifest = plane.promote([base],{protocol:"1.0.0",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
-  manifest.payload.requiredCapabilities=["audience_v1"];
+  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"tags" as const,match:"all" as const,conditions:[{key:"device_id",operator:"is" as const,value:"private-device-042"}]}};
+  const manifest = plane.promote([base],{protocol:"1.1.0",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
+  manifest.payload.requiredCapabilities=["audience_v2"];
   manifest.payload.observations=[{...audience,tag:base.tag,observeFrom:"2026-09-12T14:00:00Z"}];
   manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
   (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));
@@ -501,7 +546,10 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
     const rendered=handle.render();
     assert.equal(rendered.text,"Candidate");
     assert.deepEqual(rendered.audienceIds,[audience.audienceId]);
-    const heartbeat=JSON.stringify(ap.heartbeatBody());
+    const heartbeatBody=ap.heartbeatBody();
+    assert.equal(heartbeatBody.protocol,"1.1.0");
+    assert.deepEqual(heartbeatBody.capabilities,["audience_v2"]);
+    const heartbeat=JSON.stringify(heartbeatBody);
     assert.equal(heartbeat.includes("private-device-042"),false);
     assert.equal(heartbeat.includes("secret-west"),false);
     assert.deepEqual((ap.heartbeatBody().registration as any).tagKeys,["device_id","region"]);
@@ -519,7 +567,8 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   const spoolDir=join(stateDir,"airprompter","agt_1","prod","spool","telemetry");
   const rows=readdirSync(spoolDir).filter(n=>n.endsWith(".ndjson")).flatMap(n=>readFileSync(join(spoolDir,n),"utf8").trim().split("\n").map(line=>JSON.parse(line)));
   const feedback=rows.find(r=>r.type==="window" && r.outcomes?.thumbs);
-  assert.equal(feedback.v,2);
+  assert.equal(feedback.v,3);
+  assert.equal(feedback.artifactId,candidate.artifactId);
   assert.deepEqual(feedback.outcomes.thumbs,{n:1,sum:1});
   assert.equal(feedback.count,0);
   assert.equal(feedback.versionId,"ver_candidate");
@@ -543,7 +592,10 @@ test("audience registration stays bounded without limiting legacy prompt serving
       const tag = index === 0 ? "support.reply" : `prompt.slot${String(index).padStart(2, "0")}`;
       assert.equal(ap.prompt(tag, { displayName: `Prompt ${index}` }).render().text, `Text ${index}`);
     }
-    (ap as any).audienceServerSupported = true; // exercise names-only registration on a legacy manifest after server negotiation
+    (ap as any).audienceServerCapability = "audience_v1";
+    assert.equal(ap.heartbeatBody().protocol,"1.0.0");
+    assert.deepEqual(ap.heartbeatBody().capabilities,["audience_v1"]);
+    (ap as any).audienceServerCapability = "audience_v2"; // exercise names-only registration after current negotiation
     const registration = ap.heartbeatBody().registration as any;
     assert.equal(registration.prompts.length, 32);
     assert.ok(registration.prompts.some((entry: any) => entry.tag === "prompt.slot32"));
@@ -561,9 +613,9 @@ test("audience registration evicts stale names, keeps active names, and serves o
   const tags = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`old_key_${String(index).padStart(2, "0")}`, `private_value_${index}`]));
   const base = plane.slot({ tag: "support.reply", text: "Published" });
   const slots = [base, ...Array.from({ length: 32 }, (_, index) => plane.slot({ tag: `prompt.slot${String(index).padStart(2, "0")}`, text: `Prompt ${index}` }))];
-  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, match: "any" as const, conditions: [{ key: "new_key", value: "new_value" }, { key: "override_key", value: "override_value" }] } };
-  const manifest = plane.promote(slots, { protocol: "1.0.0" });
-  manifest.payload.requiredCapabilities = ["audience_v1"];
+  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, match: "all" as const, conditions: [{ key: "new_key", operator: "is" as const, value: "new_value" }] } };
+  const manifest = plane.promote(slots, { protocol: "1.1.0" });
+  manifest.payload.requiredCapabilities = ["audience_v2"];
   manifest.payload.observations = [{ ...audience, tag: base.tag, observeFrom: "2026-09-12T14:00:00Z" }];
   manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
   (plane as any).current.bytes = Buffer.from(JSON.stringify(manifest));
@@ -591,7 +643,7 @@ test("audience registration evicts stale names, keeps active names, and serves o
     assert.equal(heartbeat.includes("override_value"), false);
 
     ap.setTags({ new_key: "no_match" });
-    assert.deepEqual(ap.prompt(base.tag, { tags: { override_key: "override_value" } }).render().audienceIds, [audience.audienceId]);
+    assert.deepEqual(ap.prompt(base.tag, { tags: { new_key: "new_value" } }).render().audienceIds, [audience.audienceId]);
     const active64 = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`active_key_${String(index).padStart(2, "0")}`, "value"]));
     ap.setTags(active64);
     assert.throws(() => ap.setTags({ ...active64, extra_key: "value" }), /audience_tags_invalid/);
@@ -624,6 +676,20 @@ test("identical text never guesses different captured cohorts; explicit attribut
   registry.register("identical",b);assert.equal(registry.match(["identical"]),undefined);
   registry.register("identical",a);assert.equal(registry.match(["identical"]),undefined);
   withAttribution(a,()=>assert.deepEqual(currentAttribution(),a));
+  const artifacts=new RenderRegistry(2);
+  artifacts.register("same prompt text",{tag:"support.reply",artifactId:"prm_alpha",versionId:"ver_1",arm:"none",model:"gpt-5"});
+  artifacts.register("same prompt text",{tag:"support.reply",artifactId:"prm_beta",versionId:"ver_1",arm:"none",model:"gpt-5"});
+  assert.equal(artifacts.match(["same prompt text"]),undefined);
+  const versions=new RenderRegistry(2);
+  versions.register("same artifact text",{tag:"support.reply",artifactId:"prm_alpha",versionId:"ver_1",arm:"control",model:"gpt-5"});
+  versions.register("same artifact text",{tag:"support.reply",artifactId:"prm_alpha",versionId:"ver_2",arm:"candidate",model:"gpt-5"});
+  assert.equal(versions.match(["same artifact text"]),undefined);
+  const minutes=new RenderRegistry(2);
+  const firstMinute={tag:"support.reply",artifactId:"prm_alpha",versionId:"ver_1",arm:"candidate",model:"gpt-5",audienceIds:["aud_AAAAAAAAAAAAAAAAAAAAAA"],runMinute:"2026-09-12T14:03:00Z"};
+  const secondMinute={...firstMinute,runMinute:"2026-09-12T14:04:00Z"};
+  minutes.register("repeated prompt text",firstMinute);
+  minutes.register("repeated prompt text",secondMinute);
+  assert.deepEqual(minutes.match(["repeated prompt text"]),secondMinute);
   assert.equal(validAudienceInstant("2026-02-30T12:00:00Z"),false);
   assert.equal(validAudienceInstant("2026-09-12T24:00:00Z"),false);
 });
@@ -634,8 +700,8 @@ test("manual output checks retain audience attribution only on an open measured 
   const plain = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
   const checked = {...plain,outputChecks:[{name:"category",kind:"enum" as const,path:"category",values:["ok"]}]};
   const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"all" as const}};
-  const manifest=plane.promote([checked],{protocol:"1.0.0"});
-  manifest.payload.requiredCapabilities=["audience_v1"];
+  const manifest=plane.promote([checked],{protocol:"1.1.0"});
+  manifest.payload.requiredCapabilities=["audience_v2"];
   manifest.payload.observations=[{...audience,tag:checked.tag,observeFrom:"2026-09-12T14:00:00Z"}];
   manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
   (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));
@@ -649,7 +715,8 @@ test("manual output checks retain audience attribution only on an open measured 
     await ap.stop();
     const rows=ap.drainMemorySink().filter((r:any)=>r.type==="window") as any[];
     assert.equal(rows.length,1);
-    assert.equal(rows[0].v,2);
+    assert.equal(rows[0].v,3);
+    assert.equal(rows[0].artifactId,checked.artifactId);
     assert.equal(rows[0].count,1);
     assert.deepEqual(rows[0].audienceIds,[audience.audienceId]);
     assert.deepEqual(rows[0].checks,{passed:2,failed:0});

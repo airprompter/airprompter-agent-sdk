@@ -171,13 +171,15 @@ def ordered_steps(slot_tag: str, steps: Sequence[A]) -> list[A]:
             raise StepError("step_tag_mismatch")
     return ordered
 
-# 1.0.0: one exact local audience model; no matching function returns or logs values.
-AUDIENCE_CAPABILITY = "audience_v1"
-AUDIENCE_PROTOCOL_VERSION = "1.0.0"
+# 1.1.0: local is/contains predicates; no matching function returns or logs values.
+AUDIENCE_CAPABILITY = "audience_v2"
+AUDIENCE_PROTOCOL_VERSION = "1.1.0"
+LEGACY_AUDIENCE_CAPABILITY = "audience_v1"
+LEGACY_AUDIENCE_PROTOCOL_VERSION = "1.0.0"
 ECMASCRIPT_TRIM = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 
 def _audience_string(value: Any, limit: int) -> bool:
-    return isinstance(value, str) and len(value.encode("utf-16-le", errors="surrogatepass")) // 2 <= limit and not re.search(r"[\x00-\x1f\x7f]", value)
+    return isinstance(value, str) and len(value) <= limit and not re.search(r"[\x00-\x1f\x7f]", value) and not any(0xD800 <= ord(char) <= 0xDFFF for char in value)
 
 def valid_audience_key(value: Any) -> bool:
     return _audience_string(value, 64) and bool(value.strip(ECMASCRIPT_TRIM))
@@ -206,19 +208,19 @@ def valid_audience_selector(value: Any) -> bool:
     if value.get("mode") != "tags" or set(value) != {"mode", "match", "conditions"} or value.get("match") not in ("all", "any"): return False
     conditions = value.get("conditions")
     if not isinstance(conditions, list) or not 1 <= len(conditions) <= 16: return False
-    pairs, keys = set(), set()
+    pairs = set()
     for c in conditions:
-        if not isinstance(c, Mapping) or set(c) != {"key", "value"} or not valid_audience_key(c["key"]) or not _audience_string(c["value"], 256): return False
-        pair = (c["key"], c["value"])
-        if pair in pairs or (value["match"] == "all" and c["key"] in keys): return False
-        pairs.add(pair); keys.add(c["key"])
+        if not isinstance(c, Mapping) or not set(c).issubset({"key", "operator", "value"}) or not {"key", "value"}.issubset(c) or c.get("operator", "is") not in ("is", "contains") or not valid_audience_key(c["key"]) or not _audience_string(c["value"], 256) or (c.get("operator") == "contains" and c["value"] == ""): return False
+        pair = (c["key"], c.get("operator", "is"), c["value"])
+        if pair in pairs: return False
+        pairs.add(pair)
     return True
 
 def matches_audience(selector: Mapping[str, Any], tags: Mapping[str, str]) -> bool:
     """Invalid/missing values never broaden targeting. Exact means no Unicode normalization or trimming."""
     if not valid_audience_selector(selector): return False
     if selector["mode"] == "all": return True
-    matched = [c["key"] in tags and isinstance(tags[c["key"]], str) and tags[c["key"]] == c["value"] for c in selector["conditions"]]
+    matched = [c["key"] in tags and _audience_string(tags[c["key"]], 256) and (c["value"] in tags[c["key"]] if c.get("operator", "is") == "contains" else tags[c["key"]] == c["value"]) for c in selector["conditions"]]
     return all(matched) if selector["match"] == "all" else any(matched)
 
 def copy_audience_tags(tags: Mapping[str, str]) -> Mapping[str, str]:
@@ -237,7 +239,14 @@ def valid_audience_manifest(p: Mapping[str, Any]) -> bool:
         try: return int(str(p.get("protocol", "")).split(".")[0]) != 1
         except ValueError: return True
     observations = p.get("observations")
-    if p.get("protocol") != AUDIENCE_PROTOCOL_VERSION or p.get("requiredCapabilities") != [AUDIENCE_CAPABILITY] or "experiment" in p or not isinstance(observations, list) or not 1 <= len(observations) <= 8 or not isinstance(p.get("slots"), list) or len(experiments) > 32: return False
+    supported_envelope = (p.get("protocol") == AUDIENCE_PROTOCOL_VERSION and p.get("requiredCapabilities") == [AUDIENCE_CAPABILITY]) or (p.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION and p.get("requiredCapabilities") == [LEGACY_AUDIENCE_CAPABILITY])
+    if not supported_envelope or "experiment" in p or not isinstance(observations, list) or not 1 <= len(observations) <= 8 or not isinstance(p.get("slots"), list) or len(experiments) > 32: return False
+    selectors = [o.get("selector") for o in observations if isinstance(o, Mapping)] + [e.get("audience", {}).get("selector") for e in experiments if isinstance(e.get("audience"), Mapping)]
+    # v1 has no operator. v2 is the approved minimal model: implicit AND, with every condition explicit.
+    if p.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION:
+        if any(isinstance(selector, Mapping) and isinstance(selector.get("conditions"), list) and any(isinstance(condition, Mapping) and "operator" in condition for condition in selector["conditions"]) for selector in selectors): return False
+    if p.get("protocol") == AUDIENCE_PROTOCOL_VERSION:
+        if any(isinstance(selector, Mapping) and selector.get("mode") == "tags" and (selector.get("match") != "all" or not isinstance(selector.get("conditions"), list) or any(not isinstance(condition, Mapping) or "operator" not in condition for condition in selector["conditions"])) for selector in selectors): return False
     ids = set()
     for o in observations:
         if not isinstance(o, Mapping) or set(o) != {"audienceId","selector","tag","observeFrom"} or not valid_audience_ids([o.get("audienceId")]) or not valid_audience_selector(o.get("selector")) or o["audienceId"] in ids or not any(isinstance(s,Mapping) and s.get("tag") == o["tag"] for s in p["slots"]): return False

@@ -10,7 +10,7 @@
  * protocolAtLeast("0.3.10", "0.3.9"); // true — numeric per part, never a string compare
  * ```
  */
-export const PROTOCOL_VERSION = "1.0.0";
+export const PROTOCOL_VERSION = "1.1.0";
 /** This package's own version, as the heartbeat and store.json (S8: the writer) record it. */
 export const SDK_VERSION = "0.4.0";
 

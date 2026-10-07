@@ -28,6 +28,7 @@ import datetime as dt
 from typing import Any, Mapping, Optional
 
 from ..agent import AirPrompterAgent, Rendered, WorkflowStep
+from airprompter_agent_core.render.run_ref import parse_run_ref
 from airprompter_agent_telemetry.spool.writer import Observation
 from airprompter_agent_runtime.inference import apply_inference
 from airprompter_agent_runtime.observe import classify_error, classify_result, normalize_usage
@@ -89,11 +90,28 @@ class AirPrompterLiteLLMCallback(_Base):
             matched = self._ap.attribution_for({"messages": kwargs.get("messages")})
             if matched is None:
                 return
-            attribution = {"tag": matched.tag, "versionId": matched.version_id, "arm": matched.arm, "model": matched.model}
+            attribution = {"tag": matched.tag, "versionId": matched.version_id, "arm": matched.arm, "model": matched.model, "artifactId": matched.artifact_id, "audienceIds": matched.audience_ids, "runMinute": matched.run_minute}
+        elif "runRef" in attribution:
+            # A supplied run reference is the only authority for cohort dimensions.
+            # Dropping malformed references prevents application metadata from
+            # forging artifact/audience attribution in the telemetry stream.
+            facts = parse_run_ref(str(attribution.get("runRef")), self._ap._run_ref_key)
+            if facts is None:
+                return
+            attribution = {"tag": facts.tag, "versionId": facts.version_id, "arm": facts.arm, "model": facts.model, "artifactId": facts.artifact_id, "audienceIds": facts.audience_ids, "runMinute": facts.run_minute}
+        else:
+            # Legacy metadata may identify a slot/version, but it is unsigned and
+            # therefore cannot add protocol-v3 cohort dimensions.
+            attribution = {"tag": attribution["tag"], "versionId": attribution["versionId"], "arm": attribution.get("arm", "none"), "model": attribution.get("model")}
         model = str(kwargs.get("model") or attribution.get("model") or "unknown")
+        cohort = {
+            "artifact_id": attribution.get("artifactId"),
+            "audience_ids": tuple(attribution["audienceIds"]) if attribution.get("audienceIds") is not None else None,
+            "run_minute": attribution.get("runMinute"),
+        }
         latency = _latency_ms(start_time, end_time)
         if error is not None:
-            observation = Observation(tag=str(attribution["tag"]), version_id=str(attribution["versionId"]), arm=str(attribution.get("arm", "none")), model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable")
+            observation = Observation(tag=str(attribution["tag"]), version_id=str(attribution["versionId"]), arm=str(attribution.get("arm", "none")), model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable", **cohort)
         else:
             usage = normalize_usage(response_obj)
             error_class = classify_result(response_obj)
@@ -107,6 +125,7 @@ class AirPrompterLiteLLMCallback(_Base):
                 latency_ms=latency,
                 tokens={"input": usage.input, "cachedInput": usage.cached_input, "output": usage.output},
                 usage_source=usage.source,
+                **cohort,
             )
         self._ap.report(observation)
 

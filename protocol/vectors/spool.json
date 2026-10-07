@@ -483,6 +483,28 @@
       ]
     }
   ],
+  "invalidArtifactIds": [
+    {
+      "name": "empty",
+      "artifactId": "",
+      "reason": "telemetry_artifact_id_invalid"
+    },
+    {
+      "name": "unicode",
+      "artifactId": "prm_😀",
+      "reason": "telemetry_artifact_id_invalid"
+    },
+    {
+      "name": "slash",
+      "artifactId": "prm/support",
+      "reason": "telemetry_artifact_id_invalid"
+    },
+    {
+      "name": "leading punctuation",
+      "artifactId": "_prm_support",
+      "reason": "telemetry_artifact_id_invalid"
+    }
+  ],
   "windows": [
     {
       "name": "two runs and feedback on one window",
@@ -955,6 +977,760 @@
             "output": 0
           },
           "sdk": "agent-sdk-ts/0.1.0"
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "prompt artifacts split otherwise equal versions",
+      "note": "artifactId is a v3 dimension: two Team prompts that both have version 1 never merge after a slot changes prompts",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_1",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "artifactId": "prm_support_alpha",
+            "latencyMs": 10
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790001,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_1",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "artifactId": "prm_support_beta",
+            "latencyMs": 20
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790002
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 3,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_1",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 10
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "artifactId": "prm_support_alpha"
+        },
+        {
+          "type": "window",
+          "v": 3,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_1",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 20
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "artifactId": "prm_support_beta"
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "artifact-aware delayed feedback",
+      "note": "v3 delayed feedback keeps the stable prompt identity and original run minute without requiring an observed audience",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "feedback",
+          "at": 1789221850000,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "outcomeRunMinute": "2026-09-12T14:03:00Z",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221850001
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 3,
+          "minute": "2026-09-12T14:04:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 0,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 0
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "artifactId": "prm_support_alpha",
+          "outcomeRunMinute": "2026-09-12T14:03:00Z",
+          "outcomes": {
+            "thumbs": {
+              "n": 1,
+              "sum": 1
+            }
+          }
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "artifact feedback in its run minute merges",
+      "note": "an authenticated run minute equal to the filing minute is normalized onto the observed v3 window, including when feedback arrives first",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "feedback",
+          "at": 1789221790000,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "outcomeRunMinute": "2026-09-12T14:03:00Z",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790001,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "artifactId": "prm_support_alpha",
+            "latencyMs": 10
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790002
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 3,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 10
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "artifactId": "prm_support_alpha",
+          "outcomes": {
+            "thumbs": {
+              "n": 1,
+              "sum": 1
+            }
+          }
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "unattributed v2 and v3 feedback is ignored",
+      "note": "audience- or artifact-aware feedback cannot create a zero-run row without an authenticated outcomeRunMinute",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "feedback",
+          "at": 1789221790000,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790001,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "audienceIds": [
+              "aud_AAAAAAAAAAAAAAAAAAAAAA"
+            ],
+            "outcomes": {
+              "thumbs": false
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790002
+        }
+      ],
+      "expectedWindows": [],
+      "expectedRefusals": []
+    },
+    {
+      "name": "invalid outcome attribution is ignored",
+      "note": "writers refuse malformed or impossible run minutes, a run minute on legacy v1, and non-opaque audience ids before a row is created",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "feedback",
+          "at": 1789221790000,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "outcomeRunMinute": "not-a-minute",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790001,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "outcomeRunMinute": "2026-02-30T14:03:00Z",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790002,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "outcomeRunMinute": "2026-09-12T14:03:00Z",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790003,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "audienceIds": [
+              "raw-device-value"
+            ],
+            "outcomeRunMinute": "2026-09-12T14:03:00Z",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790004,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "outcomeRunMinute": "2026-09-12T14:04:00Z",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790005,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "outcomeRunMinute": "2026-09-12T14:03:00Z",
+            "outcomes": {
+              "Bad-Name": 1
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790006
+        }
+      ],
+      "expectedWindows": [],
+      "expectedRefusals": []
+    },
+    {
+      "name": "same-minute v2 and v3 feedback finds measured runs",
+      "note": "without outcomeRunMinute, audience- or artifact-aware feedback may attach only to an already measured matching run in the open minute",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "artifactId": "prm_support_alpha",
+            "latencyMs": 10
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790001,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "artifactId": "prm_support_alpha",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790002,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "audienceIds": [
+              "aud_AAAAAAAAAAAAAAAAAAAAAA"
+            ],
+            "latencyMs": 20
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790003,
+          "feedback": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "audienceIds": [
+              "aud_AAAAAAAAAAAAAAAAAAAAAA"
+            ],
+            "outcomes": {
+              "thumbs": false
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790004
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 3,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 10
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "artifactId": "prm_support_alpha",
+          "outcomes": {
+            "thumbs": {
+              "n": 1,
+              "sum": 1
+            }
+          }
+        },
+        {
+          "type": "window",
+          "v": 2,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 20
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "audienceIds": [
+            "aud_AAAAAAAAAAAAAAAAAAAAAA"
+          ],
+          "outcomes": {
+            "thumbs": {
+              "n": 1,
+              "sum": 0
+            }
+          }
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "late completion never reopens a sealed minute",
+      "note": "runMinute is feedback attribution only; observations aggregate by completion minute so a sealed SET key is never replaced",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "artifactId": "prm_support_alpha",
+            "runMinute": "2026-09-12T14:03:00Z",
+            "latencyMs": 10
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790001
+        },
+        {
+          "kind": "observe",
+          "at": 1789221850000,
+          "observation": {
+            "tag": "support.triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "artifactId": "prm_support_alpha",
+            "runMinute": "2026-09-12T14:03:00Z",
+            "latencyMs": 20
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221850001
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 3,
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 10
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "artifactId": "prm_support_alpha"
+        },
+        {
+          "type": "window",
+          "v": 3,
+          "minute": "2026-09-12T14:04:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "count": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 20
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "artifactId": "prm_support_alpha"
         }
       ],
       "expectedRefusals": []

@@ -144,7 +144,7 @@ def op_aggregate_windows(a: dict) -> dict:
             writer.observe(Observation.from_wire(event["observation"]), event["at"])
         elif event["kind"] == "feedback":
             fb = event["feedback"]
-            writer.outcomes(tag=fb["tag"], version_id=fb["versionId"], arm=fb["arm"], model=fb["model"], outcomes=fb["outcomes"], at_ms=event["at"])
+            writer.outcomes(tag=fb["tag"], artifact_id=fb.get("artifactId"), version_id=fb["versionId"], arm=fb["arm"], model=fb["model"], outcomes=fb["outcomes"], at_ms=event["at"], audience_ids=tuple(fb["audienceIds"]) if "audienceIds" in fb else None, outcome_run_minute=fb.get("outcomeRunMinute"))
         elif event["kind"] == "close":
             writer.close_windows(event["at"])
     return {"windows": [row for row in sink.drain() if row["type"] == "window"]}

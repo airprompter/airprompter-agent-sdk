@@ -43,6 +43,7 @@ class Rendered:
     text: str
     model: str
     version_id: str
+    artifact_id: str
     arm: str
     generation: int
     run_ref: str
@@ -58,6 +59,7 @@ class WorkflowStep:
     step_id: str
     ordinal: int
     version_id: str
+    artifact_id: str
     text: str
     run_ref: str
     #: 0.3.2: how the model is called for this step, as its prompt version declared it — the wrappers apply it.
@@ -201,7 +203,7 @@ class ReleaseResolver:
         payload = self._payload
         local_tags = self._tags() if tags is None else tags
         now = self._now_ms()
-        cohort = {"audience_ids": captured_audience_ids(payload["observations"], tag, local_tags, now), "run_minute": minute_of(now)} if "observations" in payload else {}
+        cohort = {"run_minute": minute_of(now), **({"audience_ids": captured_audience_ids(payload["observations"], tag, local_tags, now)} if "observations" in payload else {})}
         disabled = self.disabled()
         if disabled.agent:
             return ResolveOutcome(False, reason="disabled", tag=None)
@@ -236,8 +238,9 @@ class ReleaseResolver:
         slot = resolved.slot
         generation = self.release.generation
         rendered_text = self.render_text(tag=slot["tag"], text=self.text_of(slot) if text is None else text, variables=slot.get("variables", []), values=values or {}, fenced=fenced)
-        facts = RunRefFacts(self._agent_id, self._target, slot["tag"], slot["versionId"], resolved.arm, generation, resolved.bucket, getattr(resolved,"audience_ids",None), getattr(resolved,"run_minute",None))
-        return Rendered(text=rendered_text, model=slot["model"], version_id=slot["versionId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")), audience_ids=facts.audience_ids, run_minute=facts.run_minute)
+        run_minute = getattr(resolved, "run_minute", None) or minute_of(self._now_ms())
+        facts = RunRefFacts(self._agent_id, self._target, slot["tag"], slot["versionId"], resolved.arm, generation, resolved.bucket, getattr(resolved,"audience_ids",None), run_minute, slot["artifactId"], slot["model"])
+        return Rendered(text=rendered_text, model=slot["model"], version_id=slot["versionId"], artifact_id=slot["artifactId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")), audience_ids=facts.audience_ids, run_minute=facts.run_minute)
 
     def render_text(self, *, tag: str, text: str, variables: Sequence[Mapping[str, Any]], values: Mapping[str, Any], fenced: Optional[Iterable[str]] = None) -> str:
         """The one render path: a prompt's text or a workflow step's, with the slot's declarations and this
@@ -253,14 +256,16 @@ class ReleaseResolver:
         if slot.get("kind") != "workflow" or not slot.get("steps"):
             raise ValueError(f"{slot['tag']} is not a workflow slot")
         generation = self.release.generation
+        run_minute = getattr(resolved, "run_minute", None) or minute_of(self._now_ms())
         steps = [
             WorkflowStep(
                 step_id=step["stepId"],
                 ordinal=step["ordinal"],
                 version_id=step["promptVersionId"],
+                artifact_id=step["promptArtifactId"],
                 text=(self.release.payloads.get(step["contentHash"]) or b"").decode("utf-8"),
-                run_ref=mint_run_ref(RunRefFacts(self._agent_id, self._target, step["stepId"], step["promptVersionId"], resolved.arm, generation, resolved.bucket, getattr(resolved,"audience_ids",None), getattr(resolved,"run_minute",None)), self._run_ref_key),
-                audience_ids=getattr(resolved,"audience_ids",None), run_minute=getattr(resolved,"run_minute",None),
+                run_ref=mint_run_ref(RunRefFacts(self._agent_id, self._target, step["stepId"], step["promptVersionId"], resolved.arm, generation, resolved.bucket, getattr(resolved,"audience_ids",None), run_minute, step["promptArtifactId"], slot["model"]), self._run_ref_key),
+                audience_ids=getattr(resolved,"audience_ids",None), run_minute=run_minute,
                 inference=copy_inference(step.get("inference")),
                 model=slot["model"],
             )

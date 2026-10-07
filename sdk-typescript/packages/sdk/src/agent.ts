@@ -63,6 +63,8 @@ import { PROTOCOL_VERSION, SDK_VERSION } from "@airprompter/agent-core";
 export const SDK_NAME = "agent-sdk-ts";
 /** This package's version and the protocol it speaks (`protocol/version.ts`); the heartbeat names both, store.json records the first (S8). */
 export { PROTOCOL_VERSION, SDK_VERSION };
+const LEGACY_AUDIENCE_CAPABILITY = "audience_v1" as const;
+const LEGACY_AUDIENCE_PROTOCOL_VERSION = "1.0.0" as const;
 /** A vendored bundle this close to its notAfter logs `vendored_bundle_expiring_soon` at start (the platform warns at the same distance). */
 export const VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30;
 
@@ -519,7 +521,7 @@ export class AirPrompterAgent {
   private lastFlushMinute: number | null = null;
   private trustedRoot: RootMetadata;
   private readonly runRefKey: Buffer;
-  private audienceServerSupported = false;
+  private audienceServerCapability: typeof AUDIENCE_CAPABILITY | typeof LEGACY_AUDIENCE_CAPABILITY | null = null;
   private audienceTags: Readonly<Record<string,string>> = {};
   /** Bounded, names-only registration; active keys are kept ahead of recent stale names. */
   private readonly audienceTagKeys = new Set<string>();
@@ -1418,12 +1420,7 @@ export class AirPrompterAgent {
     return Array.isArray(this.options.models) ? [...this.options.models] : Object.keys(this.options.models);
   }
 
-  /** The protocol's heartbeat body, built from what this process knows about itself. Content-free by construction. */
-  /**
-   * Why the boot sync brought nothing, in the control plane's own terms — the sentence a customer reads first, so it
-   * names the fix: a 404 is "nothing promoted to this environment" (or a key bound elsewhere), a 401 is the key, a 403
-   * carries the server's code, and a transport failure carries its message.
-   */
+  /** Explain a failed boot sync with an actionable, content-free message. */
   private describeFetchFailure(): string {
     const scope = `${this.options.agentId} on ${this.options.target}`;
     const { reason, detail } = this.lastSyncDetail;
@@ -1453,10 +1450,13 @@ export class AirPrompterAgent {
     const stagedDigest = this.stagedManifest?.payload.releaseDigest;
     const applyState = status.applyState === "awaiting_unlock" && this.stagedManifest ? (this.options.requireCountersign && !this.stagedManifest.countersignatures?.length ? "awaiting_countersign" : "awaiting_unlock") : status.applyState;
     const report = this.spoolReporter?.() ?? null;
+    const activePayload = this.active?.manifest.payload;
+    const activeAudienceCapability = activePayload?.protocol === AUDIENCE_PROTOCOL_VERSION && activePayload.requiredCapabilities?.includes(AUDIENCE_CAPABILITY) ? AUDIENCE_CAPABILITY : activePayload?.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && activePayload?.requiredCapabilities?.includes(LEGACY_AUDIENCE_CAPABILITY) ? LEGACY_AUDIENCE_CAPABILITY : null;
+    const audienceCapability = this.audienceServerCapability ?? activeAudienceCapability;
     return {
-      protocol: PROTOCOL_VERSION,
-      ...((this.audienceServerSupported || (this.active?.manifest.payload.protocol === AUDIENCE_PROTOCOL_VERSION && this.active.manifest.payload.requiredCapabilities?.includes(AUDIENCE_CAPABILITY))) ? {
-        capabilities: [AUDIENCE_CAPABILITY],
+      protocol: audienceCapability === LEGACY_AUDIENCE_CAPABILITY ? LEGACY_AUDIENCE_PROTOCOL_VERSION : PROTOCOL_VERSION,
+      ...(audienceCapability ? {
+        capabilities: [audienceCapability],
         registration: {tagKeys: [...this.audienceTagKeys].sort(), prompts: [...this.audiencePromptLabels].sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0).map(([tag,displayName])=>({tag,displayName}))},
       } : {}),
       instanceId: this.ownInstanceId,
@@ -1540,7 +1540,7 @@ export class AirPrompterAgent {
 
   /** T26: the heartbeat's answer carries the grant (or a hold) and the upload cadence. */
   private takeGrant(response: Record<string, unknown>): void {
-    this.audienceServerSupported = response.protocol === AUDIENCE_PROTOCOL_VERSION && Array.isArray(response.capabilities) && response.capabilities.includes(AUDIENCE_CAPABILITY);
+    this.audienceServerCapability = response.protocol === AUDIENCE_PROTOCOL_VERSION && Array.isArray(response.capabilities) && response.capabilities.includes(AUDIENCE_CAPABILITY) ? AUDIENCE_CAPABILITY : response.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && Array.isArray(response.capabilities) && response.capabilities.includes(LEGACY_AUDIENCE_CAPABILITY) ? LEGACY_AUDIENCE_CAPABILITY : null;
     const interval = Number(response.uploadIntervalSeconds);
     if (Number.isFinite(interval) && interval >= 1) this.uploadIntervalSeconds = interval;
     const grant = response.uploadGrant as UploadGrant | undefined;
@@ -1742,7 +1742,7 @@ export class AirPrompterAgent {
       throw new RenderRefusedError("disabled", tag, active.generation);
     }
     this.guardLease(tag);
-    return { slot: outcome.slot, arm: outcome.arm, bucket: outcome.bucket, ...(outcome.audienceIds ? {audienceIds: outcome.audienceIds, runMinute: outcome.runMinute} : {}) };
+    return { slot: outcome.slot, arm: outcome.arm, bucket: outcome.bucket, ...(outcome.audienceIds ? {audienceIds: outcome.audienceIds} : {}), runMinute: outcome.runMinute! };
   }
 
   /** Replace process tags locally. Registration remembers key names, never their values. */
@@ -1787,8 +1787,8 @@ export class AirPrompterAgent {
       return { resolver, resolved, text, plan };
     };
     const finish = (prepared: ReturnType<typeof prepare>, filled: FilledRender): Rendered => {
-      const rendered = this.renderObserved(() => prepared.resolver.render(prepared.resolved, filled.values, { fenced: filled.fenced, text: prepared.text }), { tag, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model });
-      this.renders.register(rendered.text, { ...(rendered.audienceIds ? {audienceIds: rendered.audienceIds,runMinute: rendered.runMinute} : {}), tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
+      const rendered = this.renderObserved(() => prepared.resolver.render(prepared.resolved, filled.values, { fenced: filled.fenced, text: prepared.text }), { tag, artifactId: prepared.resolved.slot.artifactId, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model, ...(prepared.resolved.audienceIds ? {audienceIds: prepared.resolved.audienceIds} : {}), ...(prepared.resolved.runMinute ? {runMinute: prepared.resolved.runMinute} : {}) });
+      this.renders.register(rendered.text, { ...(rendered.audienceIds ? {audienceIds: rendered.audienceIds} : {}), runMinute: rendered.runMinute!, artifactId: rendered.artifactId, tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
       this.sayStricter(tag, prepared.resolved.slot, filled);
       return rendered;
     };
@@ -1800,7 +1800,7 @@ export class AirPrompterAgent {
     /** The same render, with callable sources awaited (each under its own timeout), values fenced by the stricter trust. */
     const renderAsync = async (values: RenderValues = {}): Promise<Rendered> => {
       const prepared = prepare(values);
-      const filled = await this.fillObserved(prepared.plan, { tag, subject: options.subject, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm }, { tag, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model });
+      const filled = await this.fillObserved(prepared.plan, { tag, subject: options.subject, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm }, { tag, artifactId: prepared.resolved.slot.artifactId, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model, ...(prepared.resolved.audienceIds ? {audienceIds: prepared.resolved.audienceIds} : {}), ...(prepared.resolved.runMinute ? {runMinute: prepared.resolved.runMinute} : {}) });
       return finish(prepared, filled);
     };
     /** The required names a render would still lack after these values and the registered sources — check it at start-up. */
@@ -1809,12 +1809,8 @@ export class AirPrompterAgent {
     return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, options.subject, localTags()).slot.variables };
   }
 
-  /**
-   * A render, observed: a `MissingVariableError` is also one content-free error row (`render_missing_variable`),
-   * so the board sees a version this host cannot render. The row names the slot, never a step (a step id is not a
-   * spool tag) and never a variable.
-   */
-  private renderObserved<T>(render: () => T, row: { tag: string; versionId: string; arm: string; model: string }): T {
+  /** Count a render failure against its selected artifact and audience. */
+  private renderObserved<T>(render: () => T, row: { tag: string; artifactId: string; versionId: string; arm: string; model: string; audienceIds?: readonly string[]; runMinute?: string }): T {
     try {
       return render();
     } catch (error) {
@@ -1823,12 +1819,8 @@ export class AirPrompterAgent {
     }
   }
 
-  /**
-   * Sources run here. A failure is logged by name and reason only and counted as the same error row as a missing
-   * variable — the window schema has no class for "a source failed" (a protocol 0.3.4 note), and to the board the
-   * outcome is the same: this host could not render the version.
-   */
-  private async fillObserved(plan: FillPlan, context: { tag: string; subject: string | undefined; versionId: string; arm: string }, row: { tag: string; versionId: string; arm: string; model: string }): Promise<FilledRender> {
+  /** Count a variable-source failure against its selected artifact and audience. */
+  private async fillObserved(plan: FillPlan, context: { tag: string; subject: string | undefined; versionId: string; arm: string }, row: { tag: string; artifactId: string; versionId: string; arm: string; model: string; audienceIds?: readonly string[]; runMinute?: string }): Promise<FilledRender> {
     try {
       return await fillAsync(plan, context, this.variables);
     } catch (error) {
@@ -1858,22 +1850,17 @@ export class AirPrompterAgent {
   workflow(tag: string, options: { subject?: string } = {}) {
     const resolved = this.resolveSlot(tag, options.subject);
     const workflow = this.resolver().workflow(resolved);
-    for (const step of workflow.steps) this.renders.register(step.text, { ...(step.audienceIds ? {audienceIds: step.audienceIds,runMinute: step.runMinute} : {}), tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
-    /**
-     * A step's text with its variables filled — the workflow's declarations, the same precedence and the same
-     * fencing as a prompt (the resolver renders both), each step scanned on its own: a source is called for step 3
-     * and not for step 1 when only step 3 uses it. A source sees the step id as its tag; the error row, when there
-     * is one, names the workflow slot.
-     */
+    for (const step of workflow.steps) this.renders.register(step.text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
+    /** Render one workflow step with the workflow's variable rules. */
     const resolver = this.resolver();
-    const row = { tag, versionId: resolved.slot.versionId, arm: workflow.arm, model: workflow.model };
+    const row = { tag, artifactId: resolved.slot.artifactId, versionId: resolved.slot.versionId, arm: workflow.arm, model: workflow.model, ...(resolved.audienceIds ? { audienceIds: resolved.audienceIds } : {}), ...(resolved.runMinute ? { runMinute: resolved.runMinute } : {}) };
     const renderStepAsync = async (stepId: string, values: RenderValues = {}): Promise<string> => {
       const step = workflow.steps.find((entry) => entry.stepId === stepId);
       if (!step) throw new Error(`no step ${stepId} on ${tag}`);
       const plan = planFill({ tag: step.stepId, variables: resolved.slot.variables, text: step.text, values, registry: this.variables });
       const filled = await this.fillObserved(plan, { tag: step.stepId, subject: options.subject, versionId: step.versionId, arm: workflow.arm }, row);
       const text = this.renderObserved(() => resolver.renderText({ tag: step.stepId, text: step.text, variables: resolved.slot.variables, values: filled.values, fenced: filled.fenced }), row);
-      this.renders.register(text, { ...(step.audienceIds ? {audienceIds: step.audienceIds,runMinute: step.runMinute} : {}), tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
+      this.renders.register(text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
       this.sayStricter(step.stepId, resolved.slot, filled);
       return text;
     };
@@ -1885,15 +1872,8 @@ export class AirPrompterAgent {
     this.spool.observe(observation, this.nowMs());
   }
 
-  /**
-   * Time a model call against a rendered prompt (or a workflow step) and
-   * report it: latency, `usage` read off the provider's response (OpenAI,
-   * Anthropic, Bedrock shapes), a thrown failure classified into the closed
-   * error set. The result comes back unchanged; an error is re-thrown after
-   * it is counted. Nothing of the response but its usage and finish reason
-   * is read; nothing of an error but its code and status.
-   */
-  async observe<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "runMinute">, call: () => Promise<T> | T, options: ObserveOptions = {}): Promise<T> {
+  /** Observe a provider call without changing its return or error. */
+  async observe<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "runMinute"> & { artifactId?: string }, call: () => Promise<T> | T, options: ObserveOptions = {}): Promise<T> {
     // T29: the slot's declared output checks run on the result here, on the host, and only their counts leave.
     const declared = this.declaredChecksFor(rendered.tag, rendered.arm);
     const evaluate: ObserveOptions["evaluate"] | undefined =
@@ -1912,13 +1892,13 @@ export class AirPrompterAgent {
    * T29: run the slot's declared output checks on an output you already have (an app that calls the model without
    * `observe()`, or one that wants the per-check results), and count them on the window. Never throws.
    */
-  checks(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "runMinute">, output: unknown, options: { outputTokens?: number | null; record?: boolean } = {}): CheckOutcome {
+  checks(rendered: Pick<Rendered, "tag" | "artifactId" | "versionId" | "arm" | "model" | "audienceIds" | "runMinute">, output: unknown, options: { outputTokens?: number | null; record?: boolean } = {}): CheckOutcome {
     const declared = this.declaredChecksFor(rendered.tag, rendered.arm);
     const text = typeof output === "string" ? output : outputTextOf(output);
     if (declared.length === 0 || text === null) return { passed: 0, failed: 0, results: [] };
     const outcome = evaluateChecks(declared, { text, outputTokens: options.outputTokens ?? null });
     if (options.record !== false && (outcome.passed > 0 || outcome.failed > 0)) {
-      this.spool.checks({ tag: rendered.tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.audienceIds !== undefined ? {audienceIds:rendered.audienceIds,runMinute:rendered.runMinute} : {}) }, { passed: outcome.passed, failed: outcome.failed }, this.nowMs());
+      this.spool.checks({ tag: rendered.tag, artifactId: rendered.artifactId, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.audienceIds !== undefined ? {audienceIds:rendered.audienceIds} : {}), runMinute:rendered.runMinute! }, { passed: outcome.passed, failed: outcome.failed }, this.nowMs());
     }
     return outcome;
   }
@@ -1934,25 +1914,19 @@ export class AirPrompterAgent {
 
   // ------------------------------------------------------------------ T33: wrapped clients
 
-  /**
-   * The OpenAI or Anthropic client, observed without a change at the call site: `chat.completions.create`,
-   * `responses.create`, `messages.create` (streaming or not) and the `.stream()` helpers are timed, their usage and
-   * finish reason read, the slot's checks run on the text, and one content-free observation filed — attributed to
-   * the render whose text the request carries (or to an enclosing `attribute()` scope). A call that names no render
-   * passes through untouched; nothing the wrapper does can fail the call. Everything else on the client is its own.
-   */
+  /** Observe supported provider methods using explicit or rendered-text attribution. */
   wrap<T extends object>(client: T): T {
     return wrapClient(client, this.wrapHooks());
   }
 
   /** Run `fn` with every wrapped call inside it (across awaits) attributed to `rendered`, whatever text it carries. */
-  attribute<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "inference" | "audienceIds" | "runMinute"> | (Pick<Rendered, "versionId" | "model" | "inference"> & { stepId: string; arm?: string; runRef?: string }), fn: () => T): T {
+  attribute<T>(rendered: Pick<Rendered, "tag" | "artifactId" | "versionId" | "arm" | "model" | "inference" | "audienceIds" | "runMinute"> | (Pick<Rendered, "artifactId" | "versionId" | "model" | "inference"> & { stepId: string; arm?: string; runRef?: string }), fn: () => T): T {
     // A workflow step attributes under its step id (`<tag>#<n>`); its arm is the one its run reference carries (the
     // workflow's), unless the caller names one.
     const tag = "stepId" in rendered ? rendered.stepId : rendered.tag;
     const arm = rendered.arm ?? ("runRef" in rendered && rendered.runRef ? parseRunRef(rendered.runRef, this.runRefKey)?.arm : undefined) ?? "none";
     const cohort = "audienceIds" in rendered ? rendered : ("runRef" in rendered && rendered.runRef ? parseRunRef(rendered.runRef, this.runRefKey) : null);
-    return withAttribution({ ...(cohort?.audienceIds ? {audienceIds: cohort.audienceIds,runMinute: cohort.runMinute} : {}), tag, versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
+    return withAttribution({ ...(cohort?.audienceIds ? {audienceIds: cohort.audienceIds} : {}), runMinute: cohort?.runMinute!, artifactId: cohort?.artifactId ?? rendered.artifactId, tag, versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
   }
 
   /** A Vercel AI SDK middleware for `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })`. */
@@ -1973,12 +1947,7 @@ export class AirPrompterAgent {
     };
   }
 
-  /**
-   * T34: run the golden sets the active (or, with `staged: true`, the staged) release carries — every slot with one,
-   * on the control arm and on each arm that overrides the slot — through the customer's model call, and record
-   * `goldenPass` per case on the arm's window. Returns the reports (counts and the names of failed expectations; never
-   * an output). `tag` narrows to one slot.
-   */
+  /** Run active or staged golden sets and record pass counts. */
   async golden(options: { invoke?: GoldenInvoke; tag?: string; staged?: boolean; concurrency?: number } = {}): Promise<GoldenReport[]> {
     const invoke = options.invoke ?? this.options.golden?.invoke;
     if (!invoke) throw new Error("golden(): no model call — pass invoke, or start with golden.invoke");
@@ -2011,7 +1980,8 @@ export class AirPrompterAgent {
       const set = parseGoldenSet(setBytes, slot.goldenSet!);
       const report = await runGoldenSet({ slot, arm, text: Buffer.from(text).toString("utf8"), set, invoke, ...(concurrency !== undefined ? { concurrency } : {}), ...(this.options.delimiters ? { delimiters: this.options.delimiters } : {}) });
       // One `goldenPass` per case on the arm's window: the rollout reads pass counts per arm; nothing else leaves the host.
-      for (const result of report.results) this.spool.outcomes({ tag: slot.tag, versionId: slot.versionId, arm, model: slot.model }, { goldenPass: result.ok }, this.nowMs());
+      const outcomeRunMinute = new Date(Math.floor(this.nowMs()/60_000)*60_000).toISOString();
+      for (const result of report.results) this.spool.outcomes({ tag: slot.tag, artifactId: slot.artifactId, versionId: slot.versionId, arm, model: slot.model, outcomeRunMinute }, { goldenPass: result.ok }, this.nowMs());
       this.log({ event: "golden_set_run", generation: payload.generation, tag: slot.tag, arm, setId: set.setId, cases: report.cases, passed: report.passed, minPassBps: report.minPassBps, met: report.meetsThreshold });
       reports.push(report);
     }
@@ -2045,10 +2015,14 @@ export class AirPrompterAgent {
     return { name: "prompt", criteria, protection: [...JUDGE_RUBRICS.protection.criteria] };
   }
 
-  /** Quality signals against a run: numbers, booleans and declared enums only; anything else is refused. */
-  feedback(runRef: string, signals: Record<string, unknown>): boolean {
+  /** File bounded quality signals; `options.model` names the actual provider model when it overrode the slot. */
+  feedback(runRef: string, signals: Record<string, unknown>, options: { model?: string } = {}): boolean {
     const facts = parseRunRef(runRef, this.runRefKey);
     if (!facts) return false;
+    if (options.model !== undefined && (typeof options.model !== "string" || options.model.length < 1 || options.model.length > 128 || /[\u0000-\u001f\u007f]/u.test(options.model))) {
+      this.log({ event: "feedback_rejected", rejected: { model: "invalid_model" } });
+      return false;
+    }
     const normalized = normalizeFeedback(signals);
     if (Object.keys(normalized.rejected).length) this.log({ event: "feedback_rejected", rejected: normalized.rejected });
     if (!normalized.accepted) return false;
@@ -2056,7 +2030,7 @@ export class AirPrompterAgent {
     const payload = this.active?.manifest.payload;
     const override = payload ? experimentForTag(payload, facts.tag)?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag) : undefined;
     const slot = override ?? payload?.slots.find((entry) => entry.tag === facts.tag);
-    this.spool.outcomes({ tag: facts.tag, versionId: facts.versionId, arm: facts.arm, model: slot?.versionId === facts.versionId ? slot.model : "unknown", ...(facts.audienceIds ? {audienceIds: facts.audienceIds,outcomeRunMinute: facts.runMinute} : {}) }, normalized.outcomes, this.nowMs());
+    this.spool.outcomes({ tag: facts.tag, ...(facts.artifactId ? {artifactId: facts.artifactId} : {}), versionId: facts.versionId, arm: facts.arm, model: options.model ?? facts.model ?? (slot?.versionId === facts.versionId ? slot.model : "unknown"), ...(facts.audienceIds ? {audienceIds: facts.audienceIds} : {}), ...(facts.runMinute ? {outcomeRunMinute: facts.runMinute} : {}) }, normalized.outcomes, this.nowMs());
     return true;
   }
 

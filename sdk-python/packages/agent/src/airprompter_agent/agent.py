@@ -48,7 +48,7 @@ from airprompter_agent_core.protocol.assignment import ramp_weights_at
 from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from airprompter_agent_runtime.wrap import WrapHooks, wrap_client
-from airprompter_agent_core.protocol.assignment import copy_audience_tags, valid_audience_label, AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION
+from airprompter_agent_core.protocol.assignment import copy_audience_tags, valid_audience_label, AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION, LEGACY_AUDIENCE_CAPABILITY, LEGACY_AUDIENCE_PROTOCOL_VERSION
 from airprompter_agent_core.render.run_ref import parse_run_ref
 from airprompter_agent_core.render.template import Delimiters
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
@@ -507,7 +507,7 @@ class AirPrompterAgent:
         self._stopped = False
         # S6: the runRef key is derived from the STORE's id, which every process on the host shares, so a run_ref minted by one
         # worker parses in another.
-        self._audience_server_supported = False
+        self._audience_server_capability: Optional[str] = None
         self._audience_tags = copy_audience_tags(options.get("tags") or {})
         self._audience_tag_keys = dict.fromkeys(self._audience_tags)
         self._audience_prompt_labels = {}
@@ -1455,8 +1455,11 @@ class AirPrompterAgent:
             apply_state = "awaiting_countersign" if self._o.get("require_countersign") and not self._staged_manifest.get("countersignatures") else "awaiting_unlock"
         mode = self._sync_options.mode
         source_names = self.variables.names()
+        active_payload = self._active.manifest["payload"] if self._active else {}
+        active_audience_capability = AUDIENCE_CAPABILITY if active_payload.get("protocol") == AUDIENCE_PROTOCOL_VERSION and AUDIENCE_CAPABILITY in active_payload.get("requiredCapabilities", []) else LEGACY_AUDIENCE_CAPABILITY if active_payload.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION and LEGACY_AUDIENCE_CAPABILITY in active_payload.get("requiredCapabilities", []) else None
+        audience_capability = self._audience_server_capability or active_audience_capability
         body: dict[str, Any] = {
-            "protocol": PROTOCOL_VERSION,
+            "protocol": LEGACY_AUDIENCE_PROTOCOL_VERSION if audience_capability == LEGACY_AUDIENCE_CAPABILITY else PROTOCOL_VERSION,
             "instanceId": self._own_instance_id,
             "instanceClass": self._telemetry.instance_class or ("ephemeral" if mode == "on_invoke" else "resident"),
             "sdk": {"name": SDK_NAME, "version": SDK_VERSION},
@@ -1490,9 +1493,8 @@ class AirPrompterAgent:
             body["activeReleaseDigest"] = active_digest
         if staged_digest:
             body["stagedReleaseDigest"] = staged_digest
-        active_payload = self._active.manifest["payload"] if self._active else {}
-        if self._audience_server_supported or (active_payload.get("protocol") == AUDIENCE_PROTOCOL_VERSION and AUDIENCE_CAPABILITY in active_payload.get("requiredCapabilities", [])):
-            body["capabilities"] = [AUDIENCE_CAPABILITY]
+        if audience_capability:
+            body["capabilities"] = [audience_capability]
             body["registration"] = {"tagKeys": sorted(self._audience_tag_keys), "prompts": [{"tag": tag, "displayName": label} for tag,label in sorted(self._audience_prompt_labels.items())]}
         if status.apply_state == "refused" and status.last_refusal and _REFUSAL_WORD.match(status.last_refusal):
             body["refusal"] = status.last_refusal
@@ -1515,7 +1517,8 @@ class AirPrompterAgent:
                     response = result.response or {}
                     behind = False
                     with self._lock:
-                        self._audience_server_supported = response.get("protocol") == AUDIENCE_PROTOCOL_VERSION and AUDIENCE_CAPABILITY in response.get("capabilities", [])
+                        capabilities = response.get("capabilities", [])
+                        self._audience_server_capability = AUDIENCE_CAPABILITY if response.get("protocol") == AUDIENCE_PROTOCOL_VERSION and AUDIENCE_CAPABILITY in capabilities else LEGACY_AUDIENCE_CAPABILITY if response.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION and LEGACY_AUDIENCE_CAPABILITY in capabilities else None
                         self._last_heartbeat_ms = self._now_ms()
                         self._last_heartbeat_refusal = None
                         self._last_contact_ms = self._now_ms()
@@ -1800,7 +1803,7 @@ class AirPrompterAgent:
 
         @property
         def row(self) -> dict[str, Any]:
-            return {"tag": self.resolved.slot["tag"], "version_id": self.resolved.slot["versionId"], "arm": self.resolved.arm, "model": self.resolved.slot["model"]}
+            return {"tag": self.resolved.slot["tag"], "artifact_id": self.resolved.slot["artifactId"], "version_id": self.resolved.slot["versionId"], "arm": self.resolved.arm, "model": self.resolved.slot["model"], "audience_ids": self.resolved.audience_ids, "run_minute": self.resolved.run_minute}
 
     def _prepare(self, tag: str, subject: Optional[str], values: Mapping[str, Any], tags: Optional[Mapping[str,str]] = None) -> "AirPrompterAgent._Prepared":
         with self._lock:
@@ -1816,7 +1819,7 @@ class AirPrompterAgent:
     def _finish(self, prepared: "AirPrompterAgent._Prepared", filled: FilledRender) -> Rendered:
         rendered = self._render_observed(lambda: prepared.resolver.render(prepared.resolved, filled.values, fenced=filled.fenced, text=prepared.text), prepared.row)
         # The registry keeps its own copy of the block: the one handed out is the caller's to edit.
-        self._renders.register(rendered.text, Attribution(rendered.tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference), rendered.audience_ids, rendered.run_minute))
+        self._renders.register(rendered.text, Attribution(rendered.tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference), rendered.audience_ids, rendered.run_minute, rendered.artifact_id))
         self._say_stricter(rendered.tag, prepared.resolved.slot, filled)
         return rendered
 
@@ -1845,7 +1848,7 @@ class AirPrompterAgent:
             raise
 
     def _missing_row(self, row: Mapping[str, Any]) -> None:
-        self.spool.observe(Observation(tag=row["tag"], version_id=row["version_id"], arm=row["arm"], model=row["model"], status="error", error_class="render_missing_variable", latency_ms=0, usage_source="unavailable"), self._now_ms())
+        self.spool.observe(Observation(tag=row["tag"], artifact_id=row.get("artifact_id"), version_id=row["version_id"], arm=row["arm"], model=row["model"], status="error", error_class="render_missing_variable", latency_ms=0, usage_source="unavailable", audience_ids=row.get("audience_ids"), run_minute=row.get("run_minute")), self._now_ms())
 
     def _source_failed(self, error: BaseException, tag: str, row: Mapping[str, Any]) -> None:
         """A failed source is logged by name and reason only and counted as the same error row as a missing variable —
@@ -1893,8 +1896,8 @@ class AirPrompterAgent:
             slot = resolved.slot
             workflow = resolver.workflow(resolved)
             for step in workflow.steps:
-                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute))
-        row = {"tag": tag, "version_id": slot["versionId"], "arm": workflow.arm, "model": workflow.model}
+                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute, step.artifact_id))
+        row = {"tag": tag, "artifact_id": slot["artifactId"], "version_id": slot["versionId"], "arm": workflow.arm, "model": workflow.model, "audience_ids": resolved.audience_ids, "run_minute": resolved.run_minute}
         declared = list(slot.get("variables", []))
 
         def step_of(step_id: str) -> WorkflowStep:
@@ -1905,7 +1908,7 @@ class AirPrompterAgent:
 
         def finish(step: WorkflowStep, filled: FilledRender) -> str:
             text = self._render_observed(lambda: resolver.render_text(tag=step.step_id, text=step.text, variables=declared, values=filled.values, fenced=filled.fenced), row)
-            self._renders.register(text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute))
+            self._renders.register(text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute, step.artifact_id))
             self._say_stricter(step.step_id, slot, filled)
             return text
 
@@ -1977,7 +1980,7 @@ class AirPrompterAgent:
             return {"passed": 0, "failed": 0, "results": []}
         outcome = evaluate_checks(declared, text, output_tokens)
         if record and (outcome["passed"] or outcome["failed"]):
-            self.spool.checks(tag=target.tag, version_id=target.version_id, arm=target.arm, model=target.model, passed=outcome["passed"], failed=outcome["failed"], at_ms=self._now_ms(), audience_ids=target.audience_ids, run_minute=target.run_minute)
+            self.spool.checks(tag=target.tag, artifact_id=getattr(rendered, "artifact_id", None), version_id=target.version_id, arm=target.arm, model=target.model, passed=outcome["passed"], failed=outcome["failed"], at_ms=self._now_ms(), audience_ids=target.audience_ids, run_minute=target.run_minute)
         return outcome
 
     def _declared_checks_for(self, tag: str, arm: str) -> list[Mapping[str, Any]]:
@@ -2013,8 +2016,8 @@ class AirPrompterAgent:
             return rendered
         if isinstance(rendered, WorkflowStep):
             facts = parse_run_ref(rendered.run_ref, self._run_ref_key)
-            return ObserveTarget(rendered.step_id, rendered.version_id, facts.arm if facts else "none", model or rendered.model or "unknown", rendered.audience_ids, rendered.run_minute)
-        return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model, rendered.audience_ids, rendered.run_minute)
+            return ObserveTarget(rendered.step_id, rendered.version_id, facts.arm if facts else "none", model or rendered.model or "unknown", rendered.audience_ids, rendered.run_minute, rendered.artifact_id)
+        return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model, rendered.audience_ids, rendered.run_minute, rendered.artifact_id)
 
     # ------------------------------------------------------------------ T33: wrapped clients
 
@@ -2031,7 +2034,7 @@ class AirPrompterAgent:
         """``with ap.attribute(rendered):`` — every wrapped call inside the block is that render's, whatever text it carries."""
         target = self._target_of(rendered, None)
         # The observe target carries no settings; the rendered prompt (or the workflow step) does.
-        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, copy_inference(getattr(rendered, "inference", None)), target.audience_ids, target.run_minute))
+        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, copy_inference(getattr(rendered, "inference", None)), target.audience_ids, target.run_minute, target.artifact_id))
 
     def attribution_for(self, params: Any) -> Optional[Attribution]:
         """The render a request's parameters name: an explicit scope first, else a message whose text is a recent render."""
@@ -2041,7 +2044,7 @@ class AirPrompterAgent:
         return WrapHooks(attribute=self.attribution_for, begin=self._begin_observation, log=self._log)
 
     def _begin_observation(self, attribution: Attribution, model: str) -> PendingObservation:
-        target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model, attribution.audience_ids, attribution.run_minute)
+        target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model, attribution.audience_ids, attribution.run_minute, attribution.artifact_id)
         return PendingObservation(target, lambda o: self.spool.observe(o, self._now_ms()), model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
 
     def golden(self, *, invoke: Optional[GoldenInvoke] = None, tag: Optional[str] = None, staged: bool = False, concurrency: Optional[int] = None) -> list[GoldenReport]:
@@ -2081,8 +2084,9 @@ class AirPrompterAgent:
             golden_set = parse_golden_set(set_bytes, slot["goldenSet"])
             report = run_golden_set(slot=slot, arm=arm, text=text.decode("utf-8"), golden_set=golden_set, invoke=invoke, concurrency=concurrency, delimiters=self._o.get("delimiters"))
             # One goldenPass per case on the arm's window: the rollout reads pass counts per arm; nothing else leaves the host.
+            outcome_run_minute = iso_ms((self._now_ms() // 60_000) * 60_000)
             for result in report.results:
-                self.spool.outcomes(tag=slot["tag"], version_id=slot["versionId"], arm=arm, model=slot["model"], outcomes={"goldenPass": result.ok}, at_ms=self._now_ms())
+                self.spool.outcomes(tag=slot["tag"], artifact_id=slot["artifactId"], version_id=slot["versionId"], arm=arm, model=slot["model"], outcomes={"goldenPass": result.ok}, at_ms=self._now_ms(), outcome_run_minute=outcome_run_minute)
             self._log({"event": "golden_set_run", "generation": payload["generation"], "tag": slot["tag"], "arm": arm, "setId": golden_set["setId"], "cases": report.cases, "passed": report.passed, "minPassBps": report.min_pass_bps, "met": report.meets_threshold})
             reports.append(report)
         self._last_golden = {"generation": payload["generation"], "met": golden_reports_meet(reports), "reports": [r.summary() for r in reports]}
@@ -2120,10 +2124,13 @@ class AirPrompterAgent:
         criteria = rubric_from_prompt(text.decode("utf-8")) if text else []
         return JudgeRubric(name="prompt", criteria=tuple(criteria), protection=JUDGE_RUBRICS["protection"].criteria)
 
-    def feedback(self, run_ref: str, signals: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> bool:
-        """Quality signals against a run: numbers, booleans and declared enums only; anything else is refused."""
+    def feedback(self, run_ref: str, signals: Optional[Mapping[str, Any]] = None, /, *, model: Optional[str] = None, **kwargs: Any) -> bool:
+        """File bounded quality signals; ``model=`` names the actual provider model when it overrode the slot."""
         facts = parse_run_ref(run_ref, self._run_ref_key)
         if facts is None:
+            return False
+        if model is not None and (not isinstance(model, str) or not 1 <= len(model) <= 128 or re.search(r"[\x00-\x1f\x7f]", model)):
+            self._log({"event": "feedback_rejected", "rejected": {"model": "invalid_model"}})
             return False
         normalized = normalize_feedback({**(signals or {}), **kwargs})
         if normalized.rejected:
@@ -2138,7 +2145,7 @@ class AirPrompterAgent:
             arm = next((a for a in experiment["arms"] if a["arm"] == facts.arm), None)
             override = next((entry for entry in (arm or {}).get("overrides", []) if entry["tag"] == facts.tag), None)
         slot = override or (next((entry for entry in payload["slots"] if entry["tag"] == facts.tag), None) if payload else None)
-        self.spool.outcomes(tag=facts.tag, version_id=facts.version_id, arm=facts.arm, model=slot["model"] if slot and slot["versionId"] == facts.version_id else "unknown", outcomes=normalized.outcomes, at_ms=self._now_ms(), audience_ids=facts.audience_ids, outcome_run_minute=facts.run_minute)
+        self.spool.outcomes(tag=facts.tag, artifact_id=facts.artifact_id, version_id=facts.version_id, arm=facts.arm, model=model or facts.model or (slot["model"] if slot and slot["versionId"] == facts.version_id else "unknown"), outcomes=normalized.outcomes, at_ms=self._now_ms(), audience_ids=facts.audience_ids, outcome_run_minute=facts.run_minute)
         return True
 
     # ------------------------------------------------------------------ status

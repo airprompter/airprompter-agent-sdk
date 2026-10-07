@@ -29,6 +29,7 @@ export interface Rendered {
   model: string;
   /** 0.3.1: how the model is called for this slot, as the version declared it — the wrappers apply it. */
   inference?: SlotInference;
+  artifactId: string;
   versionId: string;
   arm: string;
   generation: number;
@@ -126,7 +127,7 @@ export class ReleaseResolver {
     const payload = this.payload;
     const now = this.input.nowMs();
     const tags = tagsOverride ?? this.input.tags?.() ?? {};
-    const cohort = payload.observations ? { audienceIds: Object.freeze(capturedAudienceIds(payload.observations,tag,tags,now)), runMinute: minuteOf(now) } : {};
+    const cohort = { runMinute: minuteOf(now), ...(payload.observations ? { audienceIds: Object.freeze(capturedAudienceIds(payload.observations,tag,tags,now)) } : {}) };
     const disabled = this.disabled();
     if (disabled.agent) return { ok: false, reason: "disabled", tag: null };
     if (disabled.slots.includes(tag)) return { ok: false, reason: "disabled", tag };
@@ -151,47 +152,40 @@ export class ReleaseResolver {
     return Buffer.from(bytes).toString("utf8");
   }
 
-  /**
-   * Render a prompt slot the resolver already resolved. `fenced` names variables a source of `end_user` trust filled:
-   * they are rendered as end-user text whatever the slot declared — the declaration can be tightened here, never
-   * loosened (the set is applied on top of the slot's own list). `text` is the slot's payload when the caller has
-   * already read it (one decode per render, not two).
-   */
+  /** Render a resolved prompt. `fenced` can tighten declared trust; `text` avoids decoding a payload twice. */
   render(resolved: ReleaseSlot & {audienceIds?: readonly string[];runMinute?: string}, values: Record<string, string | number | boolean | null | undefined> = {}, options: { fenced?: ReadonlySet<string>; text?: string } = {}): Rendered {
     const { slot, arm, bucket } = resolved;
     const generation = this.input.release.generation;
     if (resolved.audienceIds && !resolved.runMinute) throw new Error("audience_cohort_invalid");
-    const cohort = resolved.audienceIds ? {audienceIds: resolved.audienceIds,runMinute: resolved.runMinute!} : {};
+    const cohort = {runMinute: resolved.runMinute ?? minuteOf(this.input.nowMs()), ...(resolved.audienceIds ? {audienceIds: resolved.audienceIds} : {})};
     const text = this.renderText({ tag: slot.tag, text: options.text ?? this.textOf(slot), variables: slot.variables, values, fenced: options.fenced });
-    const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, versionId: slot.versionId, arm, generation, bucket, ...cohort };
-    return { text, model: slot.model, ...(slot.inference ? { inference: snapshotInference(slot.inference) } : {}), versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag, ...cohort };
+    const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, artifactId: slot.artifactId, model: slot.model, versionId: slot.versionId, arm, generation, bucket, ...cohort };
+    return { text, model: slot.model, ...(slot.inference ? { inference: snapshotInference(slot.inference) } : {}), artifactId: slot.artifactId, versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag, ...cohort };
   }
 
-  /**
-   * One text with the slot's declarations and this resolver's delimiters — the prompt path and a workflow step share
-   * it, so both fence the same way. `fenced` tightens declarations to `end_user`; nothing here can loosen one.
-   */
+  /** Render prompt or workflow text with the slot declarations and configured delimiters. */
   renderText(input: { tag: string; text: string; variables: readonly SlotVariable[]; values: Record<string, string | number | boolean | null | undefined>; fenced?: ReadonlySet<string> | undefined }): string {
     const variables = input.fenced && input.fenced.size > 0 ? input.variables.map((variable) => (input.fenced!.has(variable.name) && variable.trust !== "end_user" ? { ...variable, trust: "end_user" as const } : variable)) : input.variables;
     return renderTemplate({ tag: input.tag, text: input.text, variables, values: input.values, ...(this.input.delimiters ? { delimiters: this.input.delimiters } : {}) });
   }
 
   /** A workflow slot's steps in ordinal order, each with its prompt text and run reference. */
-  workflow(resolved: ReleaseSlot & {audienceIds?: readonly string[];runMinute?: string}): { model: string; arm: string; steps: Array<{ stepId: string; ordinal: number; versionId: string; text: string; runRef: string; model: string; inference?: SlotInference; audienceIds?: readonly string[]; runMinute?: string }>; variables: ManifestSlot["variables"] } {
+  workflow(resolved: ReleaseSlot & {audienceIds?: readonly string[];runMinute?: string}): { model: string; arm: string; steps: Array<{ stepId: string; ordinal: number; artifactId: string; versionId: string; text: string; runRef: string; model: string; inference?: SlotInference; audienceIds?: readonly string[]; runMinute?: string }>; variables: ManifestSlot["variables"] } {
     const { slot, arm, bucket } = resolved;
     if (slot.kind !== "workflow" || !slot.steps) throw new Error(`${slot.tag} is not a workflow slot`);
     const generation = this.input.release.generation;
     if (resolved.audienceIds && !resolved.runMinute) throw new Error("audience_cohort_invalid");
-    const cohort = resolved.audienceIds ? {audienceIds: resolved.audienceIds,runMinute: resolved.runMinute!} : {};
+    const cohort = {runMinute: resolved.runMinute ?? minuteOf(this.input.nowMs()), ...(resolved.audienceIds ? {audienceIds: resolved.audienceIds} : {})};
     const steps = orderedSteps(slot.tag, slot.steps).map((step) => ({
       stepId: step.stepId,
       ordinal: step.ordinal,
+      artifactId: step.promptArtifactId,
       versionId: step.promptVersionId,
       text: (() => {
         const bytes = this.input.release.payloads.get(step.contentHash);
         return bytes ? Buffer.from(bytes).toString("utf8") : "";
       })(),
-      runRef: mintRunRef({ agentId: this.input.agentId, target: this.input.target, tag: step.stepId, versionId: step.promptVersionId, arm, generation, bucket, ...cohort }, Buffer.from(this.input.runRefKey)),
+      runRef: mintRunRef({ agentId: this.input.agentId, target: this.input.target, tag: step.stepId, artifactId: step.promptArtifactId, model: slot.model, versionId: step.promptVersionId, arm, generation, bucket, ...cohort }, Buffer.from(this.input.runRefKey)),
       ...cohort,
       // The workflow's pinned model (every step runs on it), and — 0.3.2 — the step's own settings for it.
       model: slot.model,

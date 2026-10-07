@@ -1,6 +1,6 @@
 # Changelog
 
-The SDKs and the CLI, by version. The six npm packages and the five Python
+The SDKs and the CLI, by version. The nine npm packages and the eight Python
 distributions move in lockstep: one version number, released together by
 tag (`sdk-typescript/vX.Y.Z`, `sdk-python/vX.Y.Z`). The wire protocol has
 its own version and its own [changelog](protocol/CHANGELOG.md); each SDK
@@ -9,6 +9,17 @@ versions follow [SemVer](https://semver.org/) — before 1.0, a minor bump
 may change a public shape and says so here.
 
 ## Unreleased
+
+## 0.4.0 — 2026-10-06 (protocol 1.1.0)
+
+### Added
+- Local arbitrary-tag audiences with case-sensitive `is` and `contains` predicates. Every condition must match; tag values stay on the host and only registered tag keys are reported.
+- Artifact-aware protocol-v3 telemetry windows and signed run references preserve Team prompt identity, audience membership, model, and original run minute for delayed feedback.
+- Feedback accepts an actual-model override so ratings merge into the same window when a provider call overrides the prompt's configured model.
+
+### Changed
+- Heartbeats negotiate `audience_v2` on protocol 1.1.0 while retaining the protocol 1.0.0 / `audience_v1` compatibility path.
+- npm and PyPI packages remain lockstep at SDK 0.4.0.
 
 ## CLI 0.3.0 — 2026-10-03 (SDK 0.3.0, protocol 0.3.4)
 

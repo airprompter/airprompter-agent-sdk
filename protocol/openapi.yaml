@@ -418,7 +418,7 @@ paths:
               additionalProperties: false
               required: [runRef, signals]
               properties:
-                runRef: { type: string, maxLength: 512 }
+                runRef: { type: string, maxLength: 2048 }
                 signals:
                   $ref: "feedback-signals.schema.json"
       responses:
@@ -802,6 +802,36 @@ components:
             arms:
               type: array
               items: { type: string }
+        experiments:
+          description: Every active per-slot experiment; the legacy single experiment remains in `experiment`.
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [experimentId, tag, salt, subjectKey, arms]
+            properties:
+              experimentId: { $ref: "schemas/manifest.schema.json#/$defs/identifier" }
+              tag:
+                allOf: [{ $ref: "schemas/manifest.schema.json#/$defs/slotTag" }]
+                nullable: true
+              salt: { type: string, pattern: "^[A-Za-z0-9_-]{22,86}$" }
+              subjectKey: { type: string, enum: [request, instance] }
+              arms:
+                type: array
+                items: { type: string }
+        observations:
+          description: Signed audience rules the managed SDK evaluates locally; observed tag values are never returned to AirPrompter.
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [audienceId, tag, selector]
+            properties:
+              audienceId: { type: string, pattern: "^aud_[A-Za-z0-9_-]{22}$" }
+              tag: { $ref: "schemas/manifest.schema.json#/$defs/slotTag" }
+              selector: { $ref: "schemas/manifest.schema.json#/$defs/audienceSelector" }
     RunRequest:
       type: object
       additionalProperties: false
@@ -846,6 +876,16 @@ components:
           additionalProperties:
             type: string
             maxLength: 128
+        audienceIds:
+          description: Opaque ids selected locally from signed observations; raw tag keys and values never cross this boundary.
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items: { type: string, pattern: "^aud_[A-Za-z0-9_-]{22}$" }
+        catalogueGeneration:
+          description: Signed catalogue generation used for local audience matching; a stale value returns `catalogue_stale` so the SDK can refresh and retry once.
+          type: integer
+          minimum: 1
     RunResponse:
       type: object
       additionalProperties: false
@@ -856,7 +896,7 @@ components:
         runRef:
           description: Opaque reference for `ap.feedback()`; carries no content.
           type: string
-          pattern: "^[A-Za-z0-9_-]{16,128}$"
+          pattern: "^[A-Za-z0-9_-]{16,2048}$"
         output:
           type: string
         model:

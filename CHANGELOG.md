@@ -14,10 +14,12 @@ may change a public shape and says so here.
 
 ### Added
 - Hosted `ManagedAgent` clients accept process and per-run arbitrary tags, match signed audience selectors locally, and transmit only opaque audience ids.
+- Hosted runs carry the signed catalogue generation. A stale catalogue refusal refreshes `/slots`, recomputes audience membership from current local tags, and retries once.
 
 ### Fixed
 - Workflow step telemetry such as `onboarding.flow#1` now passes the shared protocol, TypeScript, and Python validators.
 - SDK 0.4.1 continues to accept protocol 1.1.0 audience manifests while emitting protocol 1.1.1.
+- All-device audiences remain server-derived; managed clients submit only locally matched tag audiences.
 
 ## 0.4.0 — 2026-10-06 (protocol 1.1.0)
 

@@ -3,6 +3,8 @@
 ## 1.1.1 · Hosted audience matching and workflow telemetry
 
 - Hosted SDKs receive signed audience selectors, evaluate arbitrary tag values locally, and send only matching opaque audience ids with a run.
+- Hosted run requests carry `catalogueGeneration`; a `catalogue_stale` refusal tells the SDK to refresh the signed catalogue, recompute local matches, and retry once.
+- The OpenAPI catalogue and run shapes now publish `experiments`, audience observations, opaque `audienceIds`, catalogue generation, and the expanded authenticated run-reference bound.
 - Telemetry window tags accept canonical workflow step ids such as `onboarding.flow#1`, so per-step observations are not rejected by upload validation.
 - Protocol 1.1.0 audience manifests remain valid under the same `audience_v2` selector semantics.
 

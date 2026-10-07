@@ -100,15 +100,16 @@ test("start reads the catalogue with the run key; run() sends the salted subject
   const expectedHash = subjectHash(SALT, "user-42");
   assert.equal(expectedHash, createHash("sha256").update(Buffer.from(SALT, "base64url")).update("user-42").digest("hex"), "the client-mode formula");
   // The wire body, exactly: no subject, the salted hash, streaming on.
-  assert.deepEqual(JSON.parse(run.init.body!), { tag: "support.triage", variables: { team: "Billing", ticket: "charged twice" }, stream: true, subjectHash: expectedHash, metadata: { trace: "t-1" } });
+  assert.deepEqual(JSON.parse(run.init.body!), { tag: "support.triage", variables: { team: "Billing", ticket: "charged twice" }, stream: true, catalogueGeneration: 3, subjectHash: expectedHash, metadata: { trace: "t-1" } });
   assert.equal(run.init.body!.includes("user-42"), false, "the subject never leaves the process");
 });
 
 test("managed audience selectors match arbitrary tags locally and send only opaque audience ids", async () => {
   const deviceAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
   const regionAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "region", operator: "contains", value: "west" }] } } as const;
+  const allAudience = { audienceId: "aud_CCCCCCCCCCCCCCCCCCCCCC", tag: "support.triage", selector: { mode: "all" } } as const;
   const { fetch, calls } = fakeFetch([
-    () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, observations: [deviceAudience, regionAudience] }) }),
+    () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, observations: [deviceAudience, regionAudience, allAudience] }) }),
     () => ({ status: 200, body: RUN_SSE, stream: true }),
     () => ({ status: 200, body: RUN_SSE, stream: true }),
   ]);
@@ -116,6 +117,7 @@ test("managed audience selectors match arbitrary tags locally and send only opaq
   await agent.run("support.triage", { team: "Billing", ticket: "x" });
   const first = JSON.parse(calls[1]!.init.body!);
   assert.deepEqual(first.audienceIds, [deviceAudience.audienceId]);
+  assert.equal(first.catalogueGeneration, CATALOGUE.generation);
   assert.equal(calls[1]!.init.body!.includes("device-007"), false);
   assert.equal(calls[1]!.init.body!.includes("device_id"), false);
 
@@ -124,6 +126,23 @@ test("managed audience selectors match arbitrary tags locally and send only opaq
   const second = JSON.parse(calls[2]!.init.body!);
   assert.deepEqual(second.audienceIds, [regionAudience.audienceId]);
   assert.equal(calls[2]!.init.body!.includes("north-west"), false);
+});
+
+test("managed runs refresh and rematch once when the signed catalogue generation changed", async () => {
+  const oldAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
+  const newAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", match: "all", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
+  const { fetch, calls } = fakeFetch([
+    () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, generation: 1, observations: [oldAudience] }) }),
+    () => ({ status: 409, body: JSON.stringify({ error: "refresh", code: "catalogue_stale", detail: "2" }) }),
+    () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, generation: 2, observations: [newAudience] }) }),
+    () => ({ status: 200, body: RUN_SSE.replace('"generation":3', '"generation":2'), stream: true }),
+  ]);
+  const agent = await ManagedAgent.start({ agentId: "agent-1", target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example", fetch, tags: { device_id: "device-007" } });
+  const result = await agent.run("support.triage", { team: "Billing", ticket: "x" });
+  assert.equal(result.generation, 2);
+  assert.deepEqual(JSON.parse(calls[1]!.init.body!).audienceIds, [oldAudience.audienceId]);
+  assert.deepEqual(JSON.parse(calls[3]!.init.body!).audienceIds, [newAudience.audienceId]);
+  assert.equal(JSON.parse(calls[3]!.init.body!).catalogueGeneration, 2);
 });
 
 test("stream() yields deltas in order and resolves result; an error frame after the head rejects result with the route's code", async () => {

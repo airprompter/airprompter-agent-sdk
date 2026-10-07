@@ -100,7 +100,7 @@ def test_start_reads_catalogue_and_run_sends_salted_hash_never_subject():
     assert str(run.url) == "https://run.example/v1/agents/agent-1/targets/prod/run" and run.method == "POST" and run.headers["accept"] == "text/event-stream"
     expected = subject_hash(SALT, "user-42")
     assert expected == hashlib.sha256(b64url_decode(SALT) + b"user-42").hexdigest(), "the client-mode formula"
-    assert json.loads(run.content) == {"tag": "support.triage", "variables": {"team": "Billing", "ticket": "charged twice"}, "stream": True, "subjectHash": expected, "metadata": {"trace": "t-1"}}
+    assert json.loads(run.content) == {"tag": "support.triage", "variables": {"team": "Billing", "ticket": "charged twice"}, "stream": True, "catalogueGeneration": 3, "subjectHash": expected, "metadata": {"trace": "t-1"}}
     assert b"user-42" not in run.content, "the subject never leaves the process"
     agent.close()
 
@@ -108,7 +108,8 @@ def test_start_reads_catalogue_and_run_sends_salted_hash_never_subject():
 def test_managed_audience_selectors_match_arbitrary_tags_locally_and_send_only_opaque_ids():
     device_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
     region_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "region", "operator": "contains", "value": "west"}]}}
-    catalogue = {**CATALOGUE, "observations": [device_audience, region_audience]}
+    all_audience = {"audienceId": "aud_CCCCCCCCCCCCCCCCCCCCCC", "tag": "support.triage", "selector": {"mode": "all"}}
+    catalogue = {**CATALOGUE, "observations": [device_audience, region_audience, all_audience]}
     transport, calls = scripted([
         {"status": 200, "body": json.dumps(catalogue)},
         {"status": 200, "body": RUN_SSE, "stream": True},
@@ -118,6 +119,7 @@ def test_managed_audience_selectors_match_arbitrary_tags_locally_and_send_only_o
     agent.run("support.triage", {"team": "Billing", "ticket": "x"})
     first = json.loads(calls[1].content)
     assert first["audienceIds"] == [device_audience["audienceId"]]
+    assert first["catalogueGeneration"] == CATALOGUE["generation"]
     assert b"device-007" not in calls[1].content and b"device_id" not in calls[1].content
 
     agent.set_tags({"device_id": "other", "region": "east"})
@@ -125,6 +127,24 @@ def test_managed_audience_selectors_match_arbitrary_tags_locally_and_send_only_o
     second = json.loads(calls[2].content)
     assert second["audienceIds"] == [region_audience["audienceId"]]
     assert b"north-west" not in calls[2].content
+    agent.close()
+
+
+def test_managed_run_refreshes_and_rematches_once_when_catalogue_generation_changed():
+    old_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
+    new_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
+    transport, calls = scripted([
+        {"status": 200, "body": json.dumps({**CATALOGUE, "generation": 1, "observations": [old_audience]})},
+        {"status": 409, "body": json.dumps({"error": "refresh", "code": "catalogue_stale", "detail": "2"})},
+        {"status": 200, "body": json.dumps({**CATALOGUE, "generation": 2, "observations": [new_audience]})},
+        {"status": 200, "body": RUN_SSE.replace('"generation": 3', '"generation": 2'), "stream": True},
+    ])
+    agent = ManagedAgent.start(agent_id="agent-1", target="prod", api_key="apr_run_key", base_url="https://run.example", transport=transport, tags={"device_id": "device-007"})
+    result = agent.run("support.triage", {"team": "Billing", "ticket": "x"})
+    assert result.generation == 2
+    assert json.loads(calls[1].content)["audienceIds"] == [old_audience["audienceId"]]
+    assert json.loads(calls[3].content)["audienceIds"] == [new_audience["audienceId"]]
+    assert json.loads(calls[3].content)["catalogueGeneration"] == 2
     agent.close()
 
 

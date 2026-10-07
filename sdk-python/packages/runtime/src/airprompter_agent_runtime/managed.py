@@ -4,8 +4,9 @@ declared variables, workflow step ids, the experiment's salt and arms)
 with a run key, and ``run()`` / ``stream()`` POST to the run route. The
 subject never leaves the process: ``subjectHash`` is
 ``hex(SHA-256(salt ‖ subject))`` computed here, exactly as client mode
-computes it, so an A/B across modes is one A/B. Refusals are typed; the
-only retry is a 429 honouring ``Retry-After``. Every run streams under the
+computes it, so an A/B across modes is one A/B. Refusals are typed; 429s
+honour ``Retry-After``, while one ``catalogue_stale`` refusal refreshes the
+signed catalogue and recomputes the request. Every run streams under the
 hood — the run route sits behind an edge that closes a silent connection
 at 60 s, and a JSON run is silent until the model finishes — and ``run()``
 assembles the ``done`` frame for callers who did not ask to stream.
@@ -57,6 +58,7 @@ MANAGED_REFUSAL_CODES = (
     "nothing_promoted",
     "step_not_found",
     "already_executed",
+    "catalogue_stale",
     "rate_limited",
     "agent_rate_limited",
     "model_unavailable",
@@ -284,7 +286,7 @@ class ManagedAgent:
         return self
 
     def _audience_ids_for(self, tag: str, override: Optional[Mapping[str, str]] = None) -> Optional[list[str]]:
-        observations = [entry for entry in self._catalogue.get("observations", []) if entry.get("tag") == tag]
+        observations = [entry for entry in self._catalogue.get("observations", []) if entry.get("tag") == tag and entry.get("selector", {}).get("mode") == "tags"]
         if not observations:
             return None
         local_tags = copy_audience_tags({**self._audience_tags, **(override or {})}) if override else self._audience_tags
@@ -367,39 +369,36 @@ class ManagedAgent:
     def stream(self, tag: str, variables: Mapping[str, str], *, subject: Optional[str] = None, step_id: Optional[str] = None, idempotency_key: Optional[str] = None, max_output_tokens: Optional[int] = None, metadata: Optional[Mapping[str, str]] = None, tags: Optional[Mapping[str, str]] = None) -> ManagedRunStream:
         """The run as SSE: iterate the deltas, read ``result``. Declared variables the call site left unfilled are
         filled from the application's sources first (``_fill_for_run``)."""
-        body: dict[str, Any] = {"tag": tag, "variables": self._fill_for_run(tag, variables, subject), "stream": True}
-        audience_ids = self._audience_ids_for(tag, tags)
-        if audience_ids is not None:
-            body["audienceIds"] = audience_ids
-        subject_digest = self.subject_hash_for(subject, tag)
-        if subject_digest:
-            body["subjectHash"] = subject_digest
-        if step_id:
-            body["stepId"] = step_id
-        if idempotency_key:
-            body["idempotencyKey"] = idempotency_key
-        if max_output_tokens:
-            body["maxOutputTokens"] = max_output_tokens
-        if metadata:
-            body["metadata"] = dict(metadata)
         url = f"{self._base_url}/v1/agents/{quote(self._agent_id, safe='')}/targets/{self._target}/run"
         headers = {"authorization": f"Bearer {self._api_key}", "content-type": "application/json", "accept": "text/event-stream", "user-agent": self._user_agent}
-        attempt = 0
+        refreshes = 0
         while True:
-            request = self._client.build_request("POST", url, headers=headers, content=json.dumps(body).encode("utf-8"))
-            response = self._client.send(request, stream=True)
-            if response.status_code == 200:
-                return ManagedRunStream(response, self._on_done)
-            response.read()
-            refusal = _refusal_from(response.status_code, _safe_json(response.text), response.headers.get("retry-after"))
-            response.close()
-            if response.status_code == 429 and attempt < self._retries:
-                attempt += 1
-                self._sleep(max(1.0, refusal.retry_after_seconds or 1.0))
-                continue
-            raise refusal
+            body: dict[str, Any] = {"tag": tag, "variables": self._fill_for_run(tag, variables, subject), "stream": True, "catalogueGeneration": self._catalogue["generation"]}
+            audience_ids = self._audience_ids_for(tag, tags)
+            if audience_ids is not None: body["audienceIds"] = audience_ids
+            subject_digest = self.subject_hash_for(subject, tag)
+            if subject_digest: body["subjectHash"] = subject_digest
+            if step_id: body["stepId"] = step_id
+            if idempotency_key: body["idempotencyKey"] = idempotency_key
+            if max_output_tokens: body["maxOutputTokens"] = max_output_tokens
+            if metadata: body["metadata"] = dict(metadata)
+            attempt = 0
+            while True:
+                request = self._client.build_request("POST", url, headers=headers, content=json.dumps(body).encode("utf-8"))
+                response = self._client.send(request, stream=True)
+                if response.status_code == 200: return ManagedRunStream(response, self._on_done)
+                response.read()
+                refusal = _refusal_from(response.status_code, _safe_json(response.text), response.headers.get("retry-after"))
+                response.close()
+                if refusal.code == "catalogue_stale" and refreshes == 0:
+                    refreshes += 1
+                    self.refresh()
+                    break
+                if response.status_code == 429 and attempt < self._retries:
+                    attempt += 1
+                    self._sleep(max(1.0, refusal.retry_after_seconds or 1.0))
+                    continue
+                raise refusal
 
     def _on_done(self, done: ManagedRunResult) -> None:
-        if done.generation != self._catalogue.get("generation"):
-            # A newer promotion answered: the catalogue may have new tags; read it lazily on the next call.
-            self._catalogue = {**self._catalogue, "generation": done.generation}
+        return None

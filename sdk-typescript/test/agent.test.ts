@@ -588,6 +588,7 @@ test("audience registration stays bounded after capability negotiation without l
   plane.promote(slots);
   const ap = await start(plane, stateDir);
   try {
+    await ap.heartbeatNow();
     for (let index = 0; index < slots.length; index++) {
       const tag = index === 0 ? "support.reply" : `prompt.slot${String(index).padStart(2, "0")}`;
       assert.equal(ap.prompt(tag, { displayName: `Prompt ${index}` }).render().text, `Text ${index}`);

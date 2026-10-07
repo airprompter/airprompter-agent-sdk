@@ -625,6 +625,7 @@ def test_audience_registration_stays_bounded_after_capability_negotiation_withou
     plane.promote(slots)
     ap = start(plane, state_dir)
     try:
+        ap.heartbeat_now()
         for index in range(len(slots)):
             tag = "support.reply" if index == 0 else f"prompt.slot{index:02d}"
             assert ap.prompt(tag, display_name=f"Prompt {index}").render().text == f"Text {index}"

@@ -91,6 +91,8 @@ export interface ManagedCatalogue {
   target: string;
   generation: number;
   releaseDigest: string;
+  /** Optional hosted-run features advertised by newer control planes. */
+  capabilities?: readonly "catalogue_generation"[];
   slots: readonly ManagedSlot[];
   /** The legacy single experiment (it covers every slot); S17: the first of `experiments` when the catalogue lists them. */
   experiment: { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null;
@@ -129,6 +131,26 @@ export interface ManagedRunResult {
   stopReason: "end_turn" | "max_tokens" | "stop_sequence" | "cancelled" | "unknown";
   source: "executed" | "replayed";
   metadata?: Record<string, string>;
+}
+
+export interface ManagedRunFeedbackAttribution {
+  tag: string;
+  versionId: string;
+  arm: string;
+  /** Filing time. */
+  minute: string;
+  /** Present on artifact-aware run references. */
+  artifactId?: string;
+  /** Opaque original run cohorts; raw local tags never appear here. */
+  audienceIds?: readonly string[];
+  /** Original run minute, used for before/after and A/B comparison. */
+  runMinute?: string;
+}
+
+export interface ManagedRunFeedbackResponse {
+  accepted: boolean;
+  attributedTo: ManagedRunFeedbackAttribution | null;
+  rejected: Record<string, string>;
 }
 
 export type ManagedRefusalCode =
@@ -313,7 +335,7 @@ export class ManagedAgent {
    * ref. Numbers, booleans and the declared enums only; the answer says what landed and what was refused and why.
    * A ref that does not verify, or one for another agent or environment, is a `ManagedRunError` (`invalid_run_ref`).
    */
-  async feedback(runRef: string, signals: Record<string, unknown>): Promise<{ accepted: boolean; attributedTo: { tag: string; versionId: string; arm: string; minute: string } | null; rejected: Record<string, string> }> {
+  async feedback(runRef: string, signals: Record<string, unknown>): Promise<ManagedRunFeedbackResponse> {
     const url = `${this.options.baseUrl.replace(/\/$/, "")}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/feedback`;
     const response = await this.fetchImpl(url, {
       method: "POST",
@@ -322,7 +344,7 @@ export class ManagedAgent {
     });
     const text = await response.text();
     if (response.status !== 202) throw refusalFrom(response.status, safeJson(text), response.headers.get("retry-after"));
-    return JSON.parse(text) as { accepted: boolean; attributedTo: { tag: string; versionId: string; arm: string; minute: string } | null; rejected: Record<string, string> };
+    return JSON.parse(text) as ManagedRunFeedbackResponse;
   }
 
   /** One managed run: streams under the hood, returns the assembled result. */
@@ -384,7 +406,7 @@ export class ManagedAgent {
       const audienceIds = this.audienceIdsFor(tag, options.tags);
       const body = JSON.stringify({
         tag, variables: await this.fillForRun(tag, variables, options.subject, options.signal), stream: true,
-        catalogueGeneration: this.catalogue.generation,
+        ...(this.catalogue.capabilities?.includes("catalogue_generation") ? { catalogueGeneration: this.catalogue.generation } : {}),
         ...(subjectHash ? { subjectHash } : {}), ...(audienceIds ? { audienceIds } : {}),
         ...(options.stepId ? { stepId: options.stepId } : {}), ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
         ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}), ...(options.metadata ? { metadata: options.metadata } : {}),

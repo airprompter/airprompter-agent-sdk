@@ -14,7 +14,7 @@ may change a public shape and says so here.
 
 ### Added
 - Hosted `ManagedAgent` clients accept process and per-run arbitrary tags, match signed audience selectors locally, and transmit only opaque audience ids.
-- Hosted runs carry the signed catalogue generation. A stale catalogue refusal refreshes `/slots`, recomputes audience membership from current local tags, and retries once.
+- A catalogue that advertises `catalogue_generation` makes hosted runs carry its signed generation. A stale catalogue refusal refreshes `/slots`, recomputes audience membership from current local tags, and retries once; older services remain compatible because their catalogues do not advertise the field.
 
 ### Fixed
 - Workflow step telemetry such as `onboarding.flow#1` now passes the shared protocol, TypeScript, and Python validators.

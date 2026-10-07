@@ -62,6 +62,7 @@ MANAGED_REFUSAL_CODES = (
     "rate_limited",
     "agent_rate_limited",
     "model_unavailable",
+    "invalid_run_ref",
     "internal",
 )
 
@@ -373,7 +374,8 @@ class ManagedAgent:
         headers = {"authorization": f"Bearer {self._api_key}", "content-type": "application/json", "accept": "text/event-stream", "user-agent": self._user_agent}
         refreshes = 0
         while True:
-            body: dict[str, Any] = {"tag": tag, "variables": self._fill_for_run(tag, variables, subject), "stream": True, "catalogueGeneration": self._catalogue["generation"]}
+            body: dict[str, Any] = {"tag": tag, "variables": self._fill_for_run(tag, variables, subject), "stream": True}
+            if "catalogue_generation" in self._catalogue.get("capabilities", []): body["catalogueGeneration"] = self._catalogue["generation"]
             audience_ids = self._audience_ids_for(tag, tags)
             if audience_ids is not None: body["audienceIds"] = audience_ids
             subject_digest = self.subject_hash_for(subject, tag)

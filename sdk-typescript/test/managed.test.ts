@@ -22,6 +22,7 @@ const CATALOGUE = {
   target: "prod",
   generation: 3,
   releaseDigest: `sha256:${"a".repeat(64)}`,
+  capabilities: ["catalogue_generation"],
   slots: [
     { tag: "support.triage", kind: "prompt", model: "anthropic.claude-sonnet-5", variables: [{ name: "team", required: true, trust: "operator" }, { name: "ticket", required: true, trust: "end_user" }], steps: null },
     { tag: "onboarding.flow", kind: "workflow", model: "anthropic.claude-haiku-4-5", variables: [{ name: "name", required: true, trust: "operator" }], steps: [{ stepId: "welcome#1" }, { stepId: "verify#2" }] },
@@ -145,6 +146,17 @@ test("managed runs refresh and rematch once when the signed catalogue generation
   assert.equal(JSON.parse(calls[3]!.init.body!).catalogueGeneration, 2);
 });
 
+test("an older catalogue does not advertise the generation handshake, so 0.4.1 remains compatible with its strict run route", async () => {
+  const { capabilities: _capabilities, ...legacyCatalogue } = CATALOGUE;
+  const { fetch, calls } = fakeFetch([
+    () => ({ status: 200, body: JSON.stringify(legacyCatalogue) }),
+    () => ({ status: 200, body: RUN_SSE, stream: true }),
+  ]);
+  const agent = await ManagedAgent.start({ agentId: "agent-1", target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example", fetch });
+  await agent.run("support.triage", { team: "Billing", ticket: "x" });
+  assert.equal("catalogueGeneration" in JSON.parse(calls[1]!.init.body!), false);
+});
+
 test("stream() yields deltas in order and resolves result; an error frame after the head rejects result with the route's code", async () => {
   const { agent } = await startWith([() => ({ status: 200, body: RUN_SSE, stream: true }), () => ({ status: 200, body: sse([["delta", { delta: "Prio" }], ["error", { error: "the model is unavailable right now; retry", code: "model_unavailable", retryAfterSeconds: 5 }]]), stream: true })]);
   const stream = await agent.stream("support.triage", { team: "Billing", ticket: "x" });
@@ -211,12 +223,12 @@ test("feedback(runRef, signals) posts to the run surface's feedback route and re
       const body = JSON.parse(call.init.body ?? "{}") as { runRef: string; signals: Record<string, unknown> };
       assert.equal(body.runRef, DONE.runRef);
       assert.deepEqual(body.signals, { accepted: true, rating: 4, note: "text" });
-      return { status: 202, body: JSON.stringify({ accepted: true, attributedTo: { tag: "support.triage", versionId: "rev-5", arm: "none", minute: "2026-09-12T10:03:00Z" }, rejected: { note: "unknown_signal" } }) };
+      return { status: 202, body: JSON.stringify({ accepted: true, attributedTo: { tag: "support.triage", artifactId: "prompt-1", versionId: "rev-5", arm: "none", audienceIds: ["aud_AAAAAAAAAAAAAAAAAAAAAA"], runMinute: "2026-09-12T10:00:00Z", minute: "2026-09-15T10:03:00Z" }, rejected: { note: "unknown_signal" } }) };
     },
     () => ({ status: 400, body: JSON.stringify({ error: "the runRef does not verify", code: "invalid_run_ref" }) }),
   ]);
   const answer = await agent.feedback(DONE.runRef, { accepted: true, rating: 4, note: "text" });
-  assert.deepEqual({ accepted: answer.accepted, arm: answer.attributedTo?.arm, rejected: answer.rejected }, { accepted: true, arm: "none", rejected: { note: "unknown_signal" } });
+  assert.deepEqual(answer.attributedTo, { tag: "support.triage", artifactId: "prompt-1", versionId: "rev-5", arm: "none", audienceIds: ["aud_AAAAAAAAAAAAAAAAAAAAAA"], runMinute: "2026-09-12T10:00:00Z", minute: "2026-09-15T10:03:00Z" });
   const call = calls[1]!;
   assert.equal(call.url, "https://run.example/v1/agents/agent-1/targets/prod/feedback");
   assert.equal(call.init.method, "POST");

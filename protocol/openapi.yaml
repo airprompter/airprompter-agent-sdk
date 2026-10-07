@@ -341,6 +341,14 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The idempotency key was already executed without replay retention, or the signed catalogue changed after the client matched local audience tags
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/CatalogueStaleError"
+                  - $ref: "#/components/schemas/Error"
         "422":
           description: A declared output check failed and the slot is configured to refuse
           content:
@@ -403,9 +411,9 @@ paths:
         verify and name this key's agent and target; the signals go through
         the catalogue (`feedback-signals.schema.json`) — numbers, booleans and
         the declared enums only, free text is rejected by name — and what
-        survives joins the run's arm window as `outcomes[signal] += {n, sum}`
-        in the minute it was filed (late arrival allowed; the gate reads arms,
-        not minutes). Same function URL as the run route.
+        survives joins the original run's arm and audience window as
+        `outcomes[signal] += {n, sum}` in `runMinute`. Late filing time remains
+        separately visible as `minute`. Same function URL as the run route.
       parameters:
         - $ref: "#/components/parameters/agentId"
         - $ref: "#/components/parameters/target"
@@ -434,10 +442,20 @@ paths:
                   accepted: { type: boolean }
                   attributedTo:
                     type: [object, "null"]
+                    additionalProperties: false
+                    required: [tag, versionId, arm, minute]
                     properties:
                       tag: { type: string }
+                      artifactId: { type: string }
                       versionId: { type: string }
                       arm: { type: string }
+                      audienceIds:
+                        description: Opaque original run cohorts, sorted and unique; raw local tag values never appear here.
+                        type: array
+                        maxItems: 8
+                        uniqueItems: true
+                        items: { type: string, pattern: "^aud_[A-Za-z0-9_-]{22}$" }
+                      runMinute: { type: string, format: date-time }
                       minute: { type: string, format: date-time }
                   rejected:
                     type: object
@@ -723,13 +741,30 @@ components:
       properties:
         error:
           type: string
+        code:
+          type: string
+        detail:
+          type: string
+        retryAfterSeconds:
+          type: number
         details:
           type: object
           additionalProperties: true
+    CatalogueStaleError:
+      type: object
+      additionalProperties: false
+      required: [error, code, detail]
+      properties:
+        error: { type: string }
+        code: { type: string, enum: [catalogue_stale] }
+        detail:
+          description: The current signed catalogue generation, encoded as a decimal string.
+          type: string
+          pattern: "^[1-9][0-9]*$"
     RunSlots:
       type: object
       additionalProperties: false
-      required: [agentId, target, generation, releaseDigest, slots, experiment]
+      required: [agentId, target, generation, releaseDigest, capabilities, slots, experiment]
       properties:
         agentId:
           $ref: "schemas/manifest.schema.json#/$defs/identifier"
@@ -742,6 +777,13 @@ components:
         releaseDigest:
           type: string
           pattern: "^sha256:[0-9a-f]{64}$"
+        capabilities:
+          description: Hosted-run request features this route accepts. Older catalogues omit the field, so SDKs omit the corresponding request members.
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [catalogue_generation]
         slots:
           type: array
           items:
@@ -877,7 +919,7 @@ components:
             type: string
             maxLength: 128
         audienceIds:
-          description: Opaque ids selected locally from signed observations; raw tag keys and values never cross this boundary.
+          description: Lexically sorted, unique tag-audience ids selected locally from signed observations. All-device audience ids are server-derived; raw tag keys and values never cross this boundary.
           type: array
           maxItems: 8
           uniqueItems: true

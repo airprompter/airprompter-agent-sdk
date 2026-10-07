@@ -244,17 +244,17 @@ export function audiencePredicate({selector,tags}) {
   let valid = object(selector);
   if (valid && selector.mode === "all") valid = only(selector,["mode"]);
   else if (valid) {
-    valid = selector.mode === "tags" && only(selector,["mode","match","conditions"]) && ["all","any"].includes(selector.match) && Array.isArray(selector.conditions) && selector.conditions.length > 0 && selector.conditions.length <= 16;
+    valid = selector.mode === "tags" && only(selector,["mode","conditions"]) && Array.isArray(selector.conditions) && selector.conditions.length > 0 && selector.conditions.length <= 16;
     const seenPairs = new Set();
     if (valid) for (const c of selector.conditions) {
-      if (!object(c) || !only(c,["key","operator","value"]) || !str(c.key,64) || !c.key.trim() || !str(c.value,256) || (c.operator !== undefined && !["is","contains"].includes(c.operator)) || (c.operator === "contains" && c.value.length === 0)) {valid=false;break;}
-      const pair=JSON.stringify([c.key,c.operator ?? "is",c.value]);
+      if (!object(c) || !only(c,["key","operator","value"]) || !str(c.key,64) || !c.key.trim() || !str(c.value,256) || !["is","contains"].includes(c.operator) || (c.operator === "contains" && c.value.length === 0)) {valid=false;break;}
+      const pair=JSON.stringify([c.key,c.operator,c.value]);
       if (seenPairs.has(pair)) {valid=false;break;}
       seenPairs.add(pair);
     }
   }
   const matches = c => Object.hasOwn(tags,c.key) && str(tags[c.key],256) && (c.operator === "contains" ? tags[c.key].includes(c.value) : tags[c.key] === c.value);
-  return {valid, matches:valid && (selector.mode === "all" || (selector.match === "all" ? selector.conditions.every(matches) : selector.conditions.some(matches)))};
+  return {valid, matches:valid && (selector.mode === "all" || selector.conditions.every(matches))};
 }
 
 /** Independent future-audience scalar validators; expectations share vectors with both SDKs. */

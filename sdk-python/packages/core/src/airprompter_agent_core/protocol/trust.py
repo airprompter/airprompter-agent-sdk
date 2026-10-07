@@ -31,7 +31,7 @@ from .._util import b64url_decode, b64url_encode, instant
 from .assignment import AssignmentError, validate_ramp
 from .canonical_json import canonical_bytes, canonical_json, sha256_prefixed
 
-SUPPORTED_PROTOCOL_MAJORS = frozenset({0, 1})
+SUPPORTED_PROTOCOL_MAJORS = frozenset({0, 2})
 #: S4: the directive kinds a runtime honours. `disable` acts without a local act; `request_unlock` only asks.
 DIRECTIVE_KINDS = frozenset({"request_unlock", "disable"})
 _SIGNATURE = re.compile(r"^[A-Za-z0-9_-]{86}$")

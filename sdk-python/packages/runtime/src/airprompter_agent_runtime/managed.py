@@ -287,7 +287,7 @@ class ManagedAgent:
         return self
 
     def _audience_ids_for(self, tag: str, override: Optional[Mapping[str, str]] = None) -> Optional[list[str]]:
-        observations = [entry for entry in self._catalogue.get("observations", []) if entry.get("tag") == tag and entry.get("selector", {}).get("mode") == "tags"]
+        observations = [entry for entry in self._catalogue.get("observations", []) if entry.get("tag") == tag]
         if not observations:
             return None
         local_tags = copy_audience_tags({**self._audience_tags, **(override or {})}) if override else self._audience_tags

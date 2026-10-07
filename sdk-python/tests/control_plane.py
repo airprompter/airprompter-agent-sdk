@@ -17,7 +17,7 @@ from airprompter_agent_core._util import instant, iso_ms, now_ms
 from airprompter_agent_core.protocol.canonical_json import canonical_bytes, sha256_prefixed
 from airprompter_agent_core.protocol.trust import experiments_of, generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
 
-#: Default fake manifests stay on the pre-audience wire; audience tests opt into 1.0.0 explicitly.
+#: Baseline fake manifests stay on the established non-audience wire; audience tests opt into protocol 2 explicitly.
 PROTOCOL = "0.3.4"
 
 new_key = generate_p256_jwk
@@ -68,6 +68,7 @@ class FakeControlPlane:
         self.heartbeat_latest_generation = True
         self.heartbeat_interval_seconds = 300
         self.heartbeat_refusal: Optional[dict[str, Any]] = None
+        self.heartbeat_capabilities: Any = ["audience"]
         # T26 / S5: the grant issuer and a fake S3 behind it. With ``grant_base_url`` set, every accepted heartbeat answers an
         # ``uploadGrant`` for the body's instance prefix (or ``retryAfterSeconds`` while ``grant_hold`` is set); the POST endpoint
         # at ``<grant_base_url>/s3/agent-telemetry`` checks the policy the way the bucket would and keeps the objects by key.
@@ -253,12 +254,15 @@ class FakeControlPlane:
                 for key in ("protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"):
                     if key not in body:
                         return httpx.Response(400, json={"error": f"heartbeat: missing {key}"})
-                allowed = {"protocol", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"}
+                allowed = {"protocol", "capabilities", "registration", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"}
                 for key in body:
                     if key not in allowed:
                         return httpx.Response(400, json={"error": f"heartbeat: unknown {key}"})
                 self.heartbeats.append(body)
                 answer: dict = {"pollSeconds": 30, "uploadIntervalSeconds": 300, "heartbeatIntervalSeconds": self.heartbeat_interval_seconds, "expiresAt": iso_ms(now_ms() + self.heartbeat_interval_seconds * 3000)}
+                if body.get("protocol") == "2.0.0" and isinstance(body.get("capabilities"), list) and "audience" in body["capabilities"]:
+                    answer["protocol"] = "2.0.0"
+                    answer["capabilities"] = self.heartbeat_capabilities
                 if self.grant_base_url:
                     if self.grant_hold:
                         answer["retryAfterSeconds"] = self.grant_hold["retryAfterSeconds"]

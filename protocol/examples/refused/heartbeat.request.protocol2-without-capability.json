@@ -1,6 +1,6 @@
 {
   "schema": "heartbeat-request",
-  "reason": "Registration never carries observed values",
+  "reason": "Protocol 2 heartbeats must advertise the audience capability",
   "document": {
     "protocol": "2.0.0",
     "instanceId": "inst_5f3c9a2b7e1d4c08",
@@ -51,24 +51,6 @@
     "applyPolicy": {
       "effective": "unlock_required",
       "source": "pinned"
-    },
-    "capabilities": [
-      "audience"
-    ],
-    "registration": {
-      "tagKeys": [
-        "device_id",
-        "region"
-      ],
-      "prompts": [
-        {
-          "tag": "support.reply",
-          "displayName": "Support reply"
-        }
-      ],
-      "tagValues": {
-        "device_id": "device-042"
-      }
     }
   }
 }

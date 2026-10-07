@@ -1039,12 +1039,12 @@
           "type": "array",
           "minItems": 1,
           "maxItems": 1,
-          "items": {
-            "enum": [
-              "audience_v1",
-              "audience_v2"
-            ]
-          }
+          "prefixItems": [
+            {
+              "const": "audience"
+            }
+          ],
+          "items": false
         },
         "observations": {
           "type": "array",
@@ -1116,6 +1116,31 @@
                   "experiments"
                 ],
                 "type": "object"
+              },
+              {
+                "properties": {
+                  "experiment": {
+                    "type": "object",
+                    "required": [
+                      "audience"
+                    ]
+                  }
+                },
+                "required": [
+                  "experiment"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "protocol": {
+                    "const": "2.0.0"
+                  }
+                },
+                "required": [
+                  "protocol"
+                ],
+                "type": "object"
               }
             ]
           },
@@ -1132,11 +1157,18 @@
             },
             "properties": {
               "protocol": {
-                "enum": [
-                  "1.0.0",
-                  "1.1.0",
-                  "1.1.1"
-                ]
+                "const": "2.0.0"
+              },
+              "requiredCapabilities": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "prefixItems": [
+                  {
+                    "const": "audience"
+                  }
+                ],
+                "items": false
               },
               "experiments": {
                 "type": "array",
@@ -1147,158 +1179,26 @@
                     "audience"
                   ]
                 }
-              }
-            },
-            "type": "object",
-            "allOf": [
-              {
-                "if": {
-                  "properties": {
-                    "protocol": {
-                      "const": "1.0.0"
-                    }
-                  },
-                  "required": [
-                    "protocol"
-                  ]
-                },
-                "then": {
-                  "properties": {
-                    "requiredCapabilities": {
-                      "prefixItems": [
-                        {
-                          "const": "audience_v1"
-                        }
-                      ],
-                      "type": "array",
-                      "minItems": 1,
-                      "maxItems": 1
-                    },
-                    "observations": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "selector": {
-                            "$ref": "#/$defs/audienceSelectorV1"
-                          }
-                        }
-                      }
-                    },
-                    "experiments": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "audience": {
-                            "type": "object",
-                            "properties": {
-                              "selector": {
-                                "$ref": "#/$defs/audienceSelectorV1"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
               },
-              {
-                "if": {
-                  "properties": {
-                    "protocol": {
-                      "enum": [
-                        "1.1.0",
-                        "1.1.1"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "protocol"
-                  ]
-                },
-                "then": {
-                  "properties": {
-                    "requiredCapabilities": {
-                      "prefixItems": [
-                        {
-                          "const": "audience_v2"
-                        }
-                      ],
-                      "type": "array",
-                      "minItems": 1,
-                      "maxItems": 1
-                    },
-                    "observations": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "selector": {
-                            "$ref": "#/$defs/audienceSelectorV2"
-                          }
-                        }
-                      }
-                    },
-                    "experiments": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "audience": {
-                            "type": "object",
-                            "properties": {
-                              "selector": {
-                                "$ref": "#/$defs/audienceSelectorV2"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            ]
-          },
-          "else": {
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "requiredCapabilities"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "required": [
-                    "observations"
-                  ],
-                  "type": "object"
-                }
-              ]
-            },
-            "properties": {
-              "experiment": {
-                "not": {
-                  "required": [
-                    "audience"
-                  ],
-                  "type": "object"
-                }
-              },
-              "experiments": {
+              "observations": {
                 "type": "array",
                 "items": {
                   "type": "object",
-                  "not": {
-                    "required": [
-                      "audience"
-                    ],
-                    "type": "object"
+                  "properties": {
+                    "selector": {
+                      "$ref": "#/$defs/audienceSelector"
+                    }
                   }
                 }
+              }
+            },
+            "type": "object"
+          },
+          "else": {
+            "properties": {
+              "protocol": {
+                "type": "string",
+                "pattern": "^0\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
               }
             },
             "type": "object"
@@ -1359,33 +1259,6 @@
       }
     },
     "audienceSelector": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/audienceSelectorV1"
-        },
-        {
-          "$ref": "#/$defs/audienceSelectorV2"
-        }
-      ]
-    },
-    "audienceSnapshot": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "audienceId",
-        "selector"
-      ],
-      "properties": {
-        "audienceId": {
-          "type": "string",
-          "pattern": "^aud_[A-Za-z0-9_-]{22}$"
-        },
-        "selector": {
-          "$ref": "#/$defs/audienceSelector"
-        }
-      }
-    },
-    "audienceSelectorV1": {
       "oneOf": [
         {
           "type": "object",
@@ -1404,78 +1277,11 @@
           "additionalProperties": false,
           "required": [
             "mode",
-            "match",
             "conditions"
           ],
           "properties": {
             "mode": {
               "const": "tags"
-            },
-            "match": {
-              "enum": [
-                "all",
-                "any"
-              ]
-            },
-            "conditions": {
-              "type": "array",
-              "minItems": 1,
-              "maxItems": 16,
-              "uniqueItems": true,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "key",
-                  "value"
-                ],
-                "properties": {
-                  "key": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 64,
-                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])+$"
-                  },
-                  "value": {
-                    "type": "string",
-                    "maxLength": 256,
-                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])*$"
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "audienceSelectorV2": {
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "mode"
-          ],
-          "properties": {
-            "mode": {
-              "const": "all"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "mode",
-            "match",
-            "conditions"
-          ],
-          "properties": {
-            "mode": {
-              "const": "tags"
-            },
-            "match": {
-              "const": "all"
             },
             "conditions": {
               "type": "array",
@@ -1497,17 +1303,17 @@
                     "maxLength": 64,
                     "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])+$"
                   },
-                  "value": {
-                    "type": "string",
-                    "maxLength": 256,
-                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])*$"
-                  },
                   "operator": {
                     "type": "string",
                     "enum": [
                       "is",
                       "contains"
                     ]
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])*$"
                   }
                 },
                 "allOf": [
@@ -1525,10 +1331,10 @@
                     },
                     "then": {
                       "properties": {
-                    "value": {
-                      "type": "string",
-                      "minLength": 1
-                    }
+                        "value": {
+                          "type": "string",
+                          "minLength": 1
+                        }
                       },
                       "type": "object"
                     }
@@ -1539,6 +1345,23 @@
           }
         }
       ]
+    },
+    "audienceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audienceId",
+        "selector"
+      ],
+      "properties": {
+        "audienceId": {
+          "type": "string",
+          "pattern": "^aud_[A-Za-z0-9_-]{22}$"
+        },
+        "selector": {
+          "$ref": "#/$defs/audienceSelector"
+        }
+      }
     }
   }
 }

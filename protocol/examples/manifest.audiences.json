@@ -1,6 +1,6 @@
 {
   "payload": {
-    "protocol": "1.1.1",
+    "protocol": "2.0.0",
     "organizationId": "org_1",
     "agentId": "agt_1",
     "target": "prod",
@@ -35,7 +35,6 @@
           "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
           "selector": {
             "mode": "tags",
-            "match": "all",
             "conditions": [
               {
                 "key": "device_id",
@@ -74,14 +73,13 @@
       }
     ],
     "requiredCapabilities": [
-      "audience_v2"
+      "audience"
     ],
     "observations": [
       {
         "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA",
         "selector": {
           "mode": "tags",
-          "match": "all",
           "conditions": [
             {
               "key": "device_id",

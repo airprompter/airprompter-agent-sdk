@@ -10,6 +10,13 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-07 (protocol 2.0.0)
+
+### Changed
+- Audience targeting has one capability, `audience`, and one selector shape. Tag conditions require an explicit `is` or `contains` operator and combine with implicit AND semantics.
+- The first heartbeat advertises audience support without registration. Names-only registration begins after the authenticated service response echoes protocol 2.0.0 and the capability.
+- Targeted manifests from the unpublished draft protocol are refused. Non-targeted major-zero manifests remain readable.
+
 ## 0.4.1 — 2026-10-06 (protocol 1.1.1)
 
 ### Added
@@ -18,7 +25,7 @@ may change a public shape and says so here.
 
 ### Fixed
 - Workflow step telemetry such as `onboarding.flow#1` now passes the shared protocol, TypeScript, and Python validators.
-- SDK 0.4.1 continues to accept protocol 1.1.0 audience manifests while emitting protocol 1.1.1.
+- Hosted clients preserve workflow telemetry and catalogue-refresh behavior introduced in this release line.
 - All-device audiences remain server-derived; managed clients submit only locally matched tag audiences.
 
 ## 0.4.0 — 2026-10-06 (protocol 1.1.0)
@@ -29,7 +36,7 @@ may change a public shape and says so here.
 - Feedback accepts an actual-model override so ratings merge into the same window when a provider call overrides the prompt's configured model.
 
 ### Changed
-- Heartbeats negotiate `audience_v2` on protocol 1.1.0 while retaining the protocol 1.0.0 / `audience_v1` compatibility path.
+- This unpublished draft introduced capability negotiation for audience targeting; protocol 2.0.0 replaces the draft contract before production release.
 - npm and PyPI packages remain lockstep at SDK 0.4.0.
 
 ## CLI 0.3.0 — 2026-10-03 (SDK 0.3.0, protocol 0.3.4)

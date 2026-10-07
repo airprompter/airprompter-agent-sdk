@@ -48,7 +48,7 @@ from airprompter_agent_core.protocol.assignment import ramp_weights_at
 from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from airprompter_agent_runtime.wrap import WrapHooks, wrap_client
-from airprompter_agent_core.protocol.assignment import copy_audience_tags, valid_audience_label, AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION, LEGACY_AUDIENCE_CAPABILITY, LEGACY_AUDIENCE_PROTOCOL_VERSION
+from airprompter_agent_core.protocol.assignment import copy_audience_tags, valid_audience_label, AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION
 from airprompter_agent_core.render.run_ref import parse_run_ref
 from airprompter_agent_core.render.template import Delimiters
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
@@ -1455,11 +1455,9 @@ class AirPrompterAgent:
             apply_state = "awaiting_countersign" if self._o.get("require_countersign") and not self._staged_manifest.get("countersignatures") else "awaiting_unlock"
         mode = self._sync_options.mode
         source_names = self.variables.names()
-        active_payload = self._active.manifest["payload"] if self._active else {}
-        active_audience_capability = AUDIENCE_CAPABILITY if active_payload.get("protocol") == AUDIENCE_PROTOCOL_VERSION and AUDIENCE_CAPABILITY in active_payload.get("requiredCapabilities", []) else LEGACY_AUDIENCE_CAPABILITY if active_payload.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION and LEGACY_AUDIENCE_CAPABILITY in active_payload.get("requiredCapabilities", []) else None
-        audience_capability = self._audience_server_capability or active_audience_capability
         body: dict[str, Any] = {
-            "protocol": LEGACY_AUDIENCE_PROTOCOL_VERSION if audience_capability == LEGACY_AUDIENCE_CAPABILITY else PROTOCOL_VERSION,
+            "protocol": PROTOCOL_VERSION,
+            "capabilities": [AUDIENCE_CAPABILITY],
             "instanceId": self._own_instance_id,
             "instanceClass": self._telemetry.instance_class or ("ephemeral" if mode == "on_invoke" else "resident"),
             "sdk": {"name": SDK_NAME, "version": SDK_VERSION},
@@ -1493,8 +1491,7 @@ class AirPrompterAgent:
             body["activeReleaseDigest"] = active_digest
         if staged_digest:
             body["stagedReleaseDigest"] = staged_digest
-        if audience_capability:
-            body["capabilities"] = [audience_capability]
+        if self._audience_server_capability == AUDIENCE_CAPABILITY:
             body["registration"] = {"tagKeys": sorted(self._audience_tag_keys), "prompts": [{"tag": tag, "displayName": label} for tag,label in sorted(self._audience_prompt_labels.items())]}
         if status.apply_state == "refused" and status.last_refusal and _REFUSAL_WORD.match(status.last_refusal):
             body["refusal"] = status.last_refusal
@@ -1518,7 +1515,13 @@ class AirPrompterAgent:
                     behind = False
                     with self._lock:
                         capabilities = response.get("capabilities", [])
-                        self._audience_server_capability = AUDIENCE_CAPABILITY if response.get("protocol") == AUDIENCE_PROTOCOL_VERSION and AUDIENCE_CAPABILITY in capabilities else LEGACY_AUDIENCE_CAPABILITY if response.get("protocol") == LEGACY_AUDIENCE_PROTOCOL_VERSION and LEGACY_AUDIENCE_CAPABILITY in capabilities else None
+                        valid_capabilities = (
+                            isinstance(capabilities, list)
+                            and 1 <= len(capabilities) <= 16
+                            and all(isinstance(capability, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", capability) for capability in capabilities)
+                            and len(set(capabilities)) == len(capabilities)
+                        )
+                        self._audience_server_capability = AUDIENCE_CAPABILITY if response.get("protocol") == AUDIENCE_PROTOCOL_VERSION and valid_capabilities and AUDIENCE_CAPABILITY in capabilities else None
                         self._last_heartbeat_ms = self._now_ms()
                         self._last_heartbeat_refusal = None
                         self._last_contact_ms = self._now_ms()

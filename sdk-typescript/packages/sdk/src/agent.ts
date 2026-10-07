@@ -63,8 +63,6 @@ import { PROTOCOL_VERSION, SDK_VERSION } from "@airprompter/agent-core";
 export const SDK_NAME = "agent-sdk-ts";
 /** This package's version and the protocol it speaks (`protocol/version.ts`); the heartbeat names both, store.json records the first (S8). */
 export { PROTOCOL_VERSION, SDK_VERSION };
-const LEGACY_AUDIENCE_CAPABILITY = "audience_v1" as const;
-const LEGACY_AUDIENCE_PROTOCOL_VERSION = "1.0.0" as const;
 /** A vendored bundle this close to its notAfter logs `vendored_bundle_expiring_soon` at start (the platform warns at the same distance). */
 export const VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30;
 
@@ -521,7 +519,7 @@ export class AirPrompterAgent {
   private lastFlushMinute: number | null = null;
   private trustedRoot: RootMetadata;
   private readonly runRefKey: Buffer;
-  private audienceServerCapability: typeof AUDIENCE_CAPABILITY | typeof LEGACY_AUDIENCE_CAPABILITY | null = null;
+  private audienceServerCapability: typeof AUDIENCE_CAPABILITY | null = null;
   private audienceTags: Readonly<Record<string,string>> = {};
   /** Bounded, names-only registration; active keys are kept ahead of recent stale names. */
   private readonly audienceTagKeys = new Set<string>();
@@ -1450,13 +1448,10 @@ export class AirPrompterAgent {
     const stagedDigest = this.stagedManifest?.payload.releaseDigest;
     const applyState = status.applyState === "awaiting_unlock" && this.stagedManifest ? (this.options.requireCountersign && !this.stagedManifest.countersignatures?.length ? "awaiting_countersign" : "awaiting_unlock") : status.applyState;
     const report = this.spoolReporter?.() ?? null;
-    const activePayload = this.active?.manifest.payload;
-    const activeAudienceCapability = activePayload?.protocol === AUDIENCE_PROTOCOL_VERSION && activePayload.requiredCapabilities?.includes(AUDIENCE_CAPABILITY) ? AUDIENCE_CAPABILITY : activePayload?.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && activePayload?.requiredCapabilities?.includes(LEGACY_AUDIENCE_CAPABILITY) ? LEGACY_AUDIENCE_CAPABILITY : null;
-    const audienceCapability = this.audienceServerCapability ?? activeAudienceCapability;
     return {
-      protocol: audienceCapability === LEGACY_AUDIENCE_CAPABILITY ? LEGACY_AUDIENCE_PROTOCOL_VERSION : PROTOCOL_VERSION,
-      ...(audienceCapability ? {
-        capabilities: [audienceCapability],
+      protocol: PROTOCOL_VERSION,
+      capabilities: [AUDIENCE_CAPABILITY],
+      ...(this.audienceServerCapability === AUDIENCE_CAPABILITY ? {
         registration: {tagKeys: [...this.audienceTagKeys].sort(), prompts: [...this.audiencePromptLabels].sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0).map(([tag,displayName])=>({tag,displayName}))},
       } : {}),
       instanceId: this.ownInstanceId,
@@ -1540,7 +1535,13 @@ export class AirPrompterAgent {
 
   /** T26: the heartbeat's answer carries the grant (or a hold) and the upload cadence. */
   private takeGrant(response: Record<string, unknown>): void {
-    this.audienceServerCapability = response.protocol === AUDIENCE_PROTOCOL_VERSION && Array.isArray(response.capabilities) && response.capabilities.includes(AUDIENCE_CAPABILITY) ? AUDIENCE_CAPABILITY : response.protocol === LEGACY_AUDIENCE_PROTOCOL_VERSION && Array.isArray(response.capabilities) && response.capabilities.includes(LEGACY_AUDIENCE_CAPABILITY) ? LEGACY_AUDIENCE_CAPABILITY : null;
+    const capabilities = response.capabilities;
+    const validCapabilities = Array.isArray(capabilities)
+      && capabilities.length >= 1
+      && capabilities.length <= 16
+      && capabilities.every((entry) => typeof entry === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(entry))
+      && new Set(capabilities).size === capabilities.length;
+    this.audienceServerCapability = response.protocol === AUDIENCE_PROTOCOL_VERSION && validCapabilities && capabilities.includes(AUDIENCE_CAPABILITY) ? AUDIENCE_CAPABILITY : null;
     const interval = Number(response.uploadIntervalSeconds);
     if (Number.isFinite(interval) && interval >= 1) this.uploadIntervalSeconds = interval;
     const grant = response.uploadGrant as UploadGrant | undefined;

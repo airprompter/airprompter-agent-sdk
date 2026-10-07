@@ -192,8 +192,8 @@ def test_workflows_telemetry_feedback_spool(state_dir):
     plane = FakeControlPlane(SCOPE)
     wf = plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Summarise {{doc}}"}, {"text": "Translate to {{lang}}"}], variables=[{"name": "doc", "required": True, "trust": "end_user"}, {"name": "lang", "required": True, "trust": "operator"}])
     audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "all"}}
-    manifest = plane.promote([wf, *triage_slots(plane)], protocol="1.1.1")
-    manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
+    manifest = plane.promote([wf, *triage_slots(plane)], protocol="2.0.0")
+    manifest["payload"]["requiredCapabilities"] = ["audience"]
     manifest["payload"]["observations"] = [{**audience, "tag": wf["tag"], "observeFrom": "2026-09-12T14:00:00Z"}]
     manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
     plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
@@ -565,9 +565,9 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
     base = plane.slot(tag="support.reply", text="Published", version_id="ver_base")
     candidate = plane.slot(tag="support.reply", text="Candidate {{candidate_value}}", version_id="ver_candidate", variables=[{"name":"candidate_value","required":True,"trust":"operator"}])
     candidate["outputChecks"] = [{"kind":"enum","name":"category","path":"category","values":["ok"]}]
-    audience = {"audienceId":"aud_AAAAAAAAAAAAAAAAAAAAAA", "selector":{"mode":"tags","match":"all","conditions":[{"key":"device_id","operator":"is","value":"private-device-042"}]}}
-    manifest = plane.promote([base], protocol="1.1.1", experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
-    manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
+    audience = {"audienceId":"aud_AAAAAAAAAAAAAAAAAAAAAA", "selector":{"mode":"tags","conditions":[{"key":"device_id","operator":"is","value":"private-device-042"}]}}
+    manifest = plane.promote([base], protocol="2.0.0", experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
+    manifest["payload"]["requiredCapabilities"] = ["audience"]
     manifest["payload"]["observations"] = [{**audience,"tag":base["tag"],"observeFrom":"2026-09-12T14:00:00Z"}]
     manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
     plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
@@ -591,7 +591,7 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
         with ap.attribute(step):
             assert current_attribution().artifact_id == rendered.artifact_id and current_attribution().audience_ids == rendered.audience_ids and current_attribution().run_minute == rendered.run_minute
         heartbeat = ap.heartbeat_body()
-        assert heartbeat["protocol"] == "1.1.1" and heartbeat["capabilities"] == ["audience_v2"]
+        assert heartbeat["protocol"] == "2.0.0" and heartbeat["capabilities"] == ["audience"]
         assert heartbeat["registration"]["tagKeys"] == ["device_id","region"]
         assert "private-device-042" not in json.dumps(heartbeat) and "secret-west" not in json.dumps(heartbeat)
         ap.set_tags({"device_id":"private-device-043"})
@@ -619,7 +619,7 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
 
 
 
-def test_audience_registration_stays_bounded_without_limiting_legacy_prompt_serving(state_dir):
+def test_audience_registration_stays_bounded_after_capability_negotiation_without_limiting_prompt_serving(state_dir):
     plane = FakeControlPlane(SCOPE)
     slots = [plane.slot(tag="support.reply", text="Text 0")] + [plane.slot(tag=f"prompt.slot{i:02d}", text=f"Text {i}") for i in range(1, 33)]
     plane.promote(slots)
@@ -628,14 +628,33 @@ def test_audience_registration_stays_bounded_without_limiting_legacy_prompt_serv
         for index in range(len(slots)):
             tag = "support.reply" if index == 0 else f"prompt.slot{index:02d}"
             assert ap.prompt(tag, display_name=f"Prompt {index}").render().text == f"Text {index}"
-        ap._audience_server_capability = "audience_v1"
-        assert ap.heartbeat_body()["protocol"] == "1.0.0" and ap.heartbeat_body()["capabilities"] == ["audience_v1"]
-        ap._audience_server_capability = "audience_v2"  # exercise names-only registration after current negotiation
+        first_heartbeat = plane.heartbeats[0]
+        assert first_heartbeat["protocol"] == "2.0.0" and first_heartbeat["capabilities"] == ["audience"]
+        assert "registration" not in first_heartbeat
         registration = ap.heartbeat_body()["registration"]
         assert len(registration["prompts"]) == 32
         assert any(entry["tag"] == "prompt.slot32" for entry in registration["prompts"])
         assert registration["tagKeys"] == []
         assert ap.status().generation == 1
+    finally:
+        ap.stop()
+
+
+@pytest.mark.parametrize(("capabilities", "negotiated"), [
+    ("audience", False),
+    (["audience", "audience"], False),
+    (["audience", "Bad-Capability"], False),
+    (["future_feature"], False),
+    (["future_feature", "audience"], True),
+])
+def test_only_a_well_formed_authenticated_capability_echo_unlocks_audience_registration(tmp_path, capabilities, negotiated):
+    plane = FakeControlPlane(SCOPE)
+    plane.heartbeat_capabilities = capabilities
+    plane.promote([plane.slot(tag="support.reply", text="Published")])
+    ap = start(plane, str(tmp_path), tags={"device_id": "private-device"})
+    try:
+        ap.prompt("support.reply", display_name="Support reply")
+        assert ("registration" in ap.heartbeat_body()) is negotiated
     finally:
         ap.stop()
 
@@ -647,9 +666,9 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
     old_tags = {f"old_key_{index:02d}": f"private_value_{index}" for index in range(64)}
     base = plane.slot(tag="support.reply", text="Published")
     slots = [base] + [plane.slot(tag=f"prompt.slot{index:02d}", text=f"Prompt {index}") for index in range(32)]
-    audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "tags", "match": "all", "conditions": [{"key": "new_key", "operator": "is", "value": "new_value"}]}}
-    manifest = plane.promote(slots, protocol="1.1.1")
-    manifest["payload"]["requiredCapabilities"] = ["audience_v2"]
+    audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "tags", "conditions": [{"key": "new_key", "operator": "is", "value": "new_value"}]}}
+    manifest = plane.promote(slots, protocol="2.0.0")
+    manifest["payload"]["requiredCapabilities"] = ["audience"]
     manifest["payload"]["observations"] = [{**audience, "tag": base["tag"], "observeFrom": "2026-09-12T14:00:00Z"}]
     manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
     plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
@@ -688,9 +707,7 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
     try:
         assert offline.prompt("support.reply").render().audience_ids == (audience["audienceId"],)
         heartbeat = offline.heartbeat_body()
-        registration = heartbeat["registration"]
-        assert registration["tagKeys"] == ["new_key"]
-        assert len(registration["prompts"]) <= 32
+        assert "registration" not in heartbeat  # no authenticated capability echo while offline
         assert "new_value" not in json.dumps(heartbeat)
     finally:
         offline.stop()

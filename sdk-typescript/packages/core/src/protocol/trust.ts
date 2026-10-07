@@ -19,7 +19,7 @@ import { isAssignmentError, validateRamp, validAudienceManifest } from "./assign
 import { canonicalBytes, canonicalJson, sha256Prefixed } from "./canonicalJson.js";
 import { DIRECTIVE_KINDS, experimentConflict, experimentsOf, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type SlotInference, type Target } from "./types.js";
 
-export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([0, 1]);
+export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([0, 2]);
 
 /** RFC 7638: sha256 over canonical {crv, kty, x, y}, lowercase hex. */
 export function keyThumbprint(jwk: P256PublicJwk): string {

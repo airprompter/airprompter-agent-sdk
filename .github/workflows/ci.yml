@@ -311,7 +311,7 @@ jobs:
       - name: Size
         shell: bash
         run: ls -l "cli/dist/${{ matrix.artifact }}" | awk '{ printf "%s %.1f MiB\n", $NF, $5/1048576 }'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
           path: cli/dist/${{ matrix.artifact }}

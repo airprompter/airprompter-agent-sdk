@@ -654,6 +654,7 @@ def test_only_a_well_formed_authenticated_capability_echo_unlocks_audience_regis
     plane.promote([plane.slot(tag="support.reply", text="Published")])
     ap = start(plane, str(tmp_path), tags={"device_id": "private-device"})
     try:
+        ap.heartbeat_now()
         ap.prompt("support.reply", display_name="Support reply")
         assert ("registration" in ap.heartbeat_body()) is negotiated
     finally:
@@ -676,6 +677,7 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
 
     ap = start(plane, state_dir, tags=old_tags)
     try:
+        ap.heartbeat_now()
         for index in range(len(slots)):
             tag = "support.reply" if index == 0 else f"prompt.slot{index - 1:02d}"
             assert ap.prompt(tag, display_name=f"Registered {index}").render().text

@@ -28,6 +28,6 @@
     "esbuild": "^0.25.9",
     "postject": "^1.0.0-alpha.6",
     "tsx": "^4.20.3",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }

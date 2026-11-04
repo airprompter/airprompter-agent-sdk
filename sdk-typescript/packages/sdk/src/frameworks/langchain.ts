@@ -1,0 +1,201 @@
+/**
+ * LangChain middleware: one line in `createAgent`, and the agent runs on the
+ * approved prompt and model, with one request counted as one run however many
+ * model calls it makes. This file translates hooks to run calls. It renders
+ * nothing, assigns nothing, and reads no manifest.
+ *
+ * Middleware has no scope that spans its hooks, so each hook finds its run by
+ * the id kept in graph state. Only that id and the run reference enter state,
+ * never prompt text.
+ *
+ * Put `airprompter(...)` last in `middleware`. The list runs outermost first,
+ * so anything listed after it would see the approved text and could send it
+ * to a model the release did not pin.
+ *
+ * @example
+ * ```ts
+ * import { airprompter } from "@airprompter/agent-sdk/frameworks/langchain";
+ *
+ * const agent = createAgent({ model: "openai:gpt-5", tools, middleware: [airprompter(ap, { slots: "support-reply" })] });
+ * await agent.invoke({ messages }, { context: { airprompter: { subject: userId } } }); // the subject decides the arm
+ * ```
+ */
+
+import { ToolInvocationError, SystemMessage, createMiddleware, initChatModel } from "langchain";
+import type { AgentMiddleware } from "langchain";
+import { z } from "zod";
+import { classifyError, classifyResult, normalizeUsage, temperatureOf, topPOf } from "@airprompter/agent-runtime";
+import type { AgentRuntime, Placement, RunInput, RunSession } from "@airprompter/agent-runtime";
+import type { SlotInference } from "@airprompter/agent-core";
+
+export interface AirPrompterMiddlewareOptions {
+  /** The slot this agent runs on. */
+  slots: string;
+  /** Builds the run's input from the agent's context. By default it reads `context.airprompter`. */
+  input?: (context: unknown) => RunInput;
+}
+
+type Approved = Extract<Placement, { kind: "approved" }>;
+type RuntimeLike = { context?: unknown; configurable?: { thread_id?: unknown } };
+type StateLike = { airprompter_run_id?: string };
+type ModelLike = { model?: string; modelName?: string; lc_kwargs?: Record<string, unknown>; _defaultConfig?: Record<string, unknown>; constructor: new (fields: Record<string, unknown>) => unknown };
+
+/** The sealed settings a chat model reads only from its constructor. Passed as `modelSettings`, they never reach the wire. */
+function constructorFields(settings: SlotInference): Record<string, unknown> {
+  const temperature = temperatureOf(settings);
+  const topP = topPOf(settings);
+  return {
+    ...(temperature === undefined ? {} : { temperature }),
+    ...(topP === undefined ? {} : { topP }),
+    ...(settings.maxOutputTokens === undefined ? {} : { maxTokens: settings.maxOutputTokens }),
+  };
+}
+
+function callSettings(settings: SlotInference): Record<string, unknown> {
+  return {
+    ...(settings.stopSequences === undefined ? {} : { stop: [...settings.stopSequences] }),
+    ...(settings.reasoningEffort === undefined ? {} : { reasoningEffort: settings.reasoningEffort }),
+  };
+}
+
+function withoutModel(config: Record<string, unknown>): Record<string, unknown> {
+  const { model: _model, ...defaults } = config;
+  return defaults;
+}
+
+/** The model that runs this placement. The release's model wins, and approved text never runs on another. */
+async function buildModel(model: ModelLike, placed: Approved): Promise<unknown> {
+  const fields = constructorFields(placed.settings);
+  const configured = model._defaultConfig;
+  const callerId = model.model ?? model.modelName ?? configured?.model;
+  if (callerId !== placed.model) return initChatModel(placed.model, fields as never);
+  if (Object.keys(fields).length === 0) return model;
+  // A string-built model keeps its fields in `_defaultConfig`, so rebuilding from `lc_kwargs` would silently drop them.
+  if (configured) return initChatModel(placed.model, { ...withoutModel(configured), ...fields } as never);
+  return new model.constructor({ ...model.lc_kwargs, ...fields });
+}
+
+/** An interrupt or a parent command is control flow on its way up, not a failure. */
+function isBubbleUp(error: unknown): boolean {
+  return (error as { is_bubble_up?: unknown } | null)?.is_bubble_up === true;
+}
+
+function usageOf(message: { usage_metadata?: Record<string, unknown> & { input_token_details?: { cache_read?: unknown } } }) {
+  const usage = message.usage_metadata;
+  if (!usage) return normalizeUsage(undefined);
+  // LangChain counts cached tokens inside input_tokens, as OpenAI does.
+  return normalizeUsage({ usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, input_tokens_details: { cached_tokens: usage.input_token_details?.cache_read } } });
+}
+
+function finishErrorOf(message: { response_metadata?: { finish_reason?: unknown; stop_reason?: unknown } }) {
+  const metadata = message.response_metadata;
+  return classifyResult({ stop_reason: metadata?.finish_reason ?? metadata?.stop_reason });
+}
+
+const contextSchema = z.object({
+  airprompter: z.object({
+    subject: z.string(),
+    tags: z.record(z.string(), z.string()),
+    variables: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  }).partial().optional(),
+});
+
+const stateSchema = z.object({
+  airprompter_run_id: z.string().optional(),
+  airprompter_run_ref: z.string().optional(),
+});
+
+export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOptions): AgentMiddleware {
+  const { slots: slot } = options;
+  const built = new WeakMap<object, Map<string, Promise<unknown>>>();
+  const unresolved = new Set<string>();
+
+  const inputOf = (runtime: RuntimeLike | undefined): RunInput => {
+    const threadId = runtime?.configurable?.thread_id;
+    const conversation = typeof threadId === "string" ? { conversationId: threadId } : {};
+    if (options.input) return { ...conversation, ...options.input(runtime?.context) };
+    return { ...conversation, ...(runtime?.context as { airprompter?: RunInput } | undefined)?.airprompter };
+  };
+
+  const findRun = (state: StateLike, runtime: RuntimeLike | undefined): RunSession => {
+    const current = ap.currentRun();
+    if (current) return current;
+    const { airprompter_run_id: resume } = state;
+    return ap.openRun({ ...inputOf(runtime), ...(resume ? { resume } : {}) });
+  };
+
+  const modelFor = async (model: ModelLike, placed: Approved): Promise<unknown> => {
+    let perPlacement = built.get(model);
+    if (!perPlacement) built.set(model, (perPlacement = new Map()));
+    const key = JSON.stringify([placed.model, placed.settings]);
+    let building = perPlacement.get(key);
+    if (!building) perPlacement.set(key, (building = buildModel(model, placed)));
+    try {
+      return await building;
+    } catch (error) {
+      perPlacement.delete(key);
+      if (!unresolved.has(placed.model)) {
+        unresolved.add(placed.model);
+        ap.log({ event: "run_passthrough", slot, reason: "model_unresolved", model: placed.model, error: (error as Error).name });
+      }
+      return null;
+    }
+  };
+
+  return createMiddleware({
+    name: "AirPrompter",
+    contextSchema,
+    stateSchema,
+    beforeAgent: (_state: unknown, runtime: unknown) => {
+      const run = ap.currentRun() ?? ap.openRun(inputOf(runtime as RuntimeLike));
+      return { airprompter_run_id: run.id };
+    },
+    wrapModelCall: async (request: never, handler: (request: never) => Promise<never>) => {
+      const { state, runtime, model, modelSettings } = request as unknown as { state: StateLike; runtime?: RuntimeLike; model: ModelLike; modelSettings?: Record<string, unknown> };
+      const run = findRun(state, runtime);
+      const placed = await run.place(slot);
+      if (placed.kind === "passthrough") return ap.withRun(run, () => handler(request));
+      const approvedModel = await modelFor(model, placed);
+      if (!approvedModel) return ap.withRun(run, () => handler(request));
+      const override = { ...(request as object), model: approvedModel, systemMessage: new SystemMessage(placed.instructions), modelSettings: { ...modelSettings, ...callSettings(placed.settings) } };
+      const started = Date.now();
+      const latency = () => Math.max(0, Date.now() - started);
+      try {
+        const result = await ap.withRun(run, () => handler(override as never));
+        // With `responseFormat` the handler answers { structuredResponse, messages }.
+        const message = ((result as { messages?: unknown[] }).messages?.[0] ?? result) as Parameters<typeof usageOf>[0] & Parameters<typeof finishErrorOf>[0];
+        const errorClass = finishErrorOf(message);
+        run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), usage: usageOf(message), ...(errorClass ? { errorClass } : {}) });
+        return result;
+      } catch (error) {
+        // No `end` here: an outer retry middleware calls this hook again. A failed run reaches the console through the sweep.
+        if (!isBubbleUp(error)) run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), errorClass: classifyError(error) });
+        throw error;
+      }
+    },
+    wrapToolCall: async (request: never, handler: (request: never) => Promise<never>) => {
+      const { state, runtime, toolCall } = request as unknown as { state: StateLike; runtime?: RuntimeLike; toolCall: ConstructorParameters<typeof ToolInvocationError>[1] };
+      const run = findRun(state, runtime);
+      try {
+        const result = await ap.withRun(run, () => handler(request));
+        run.recordToolCall(slot, { ok: (result as { status?: unknown }).status !== "error" });
+        return result;
+      } catch (error) {
+        // A GraphInterrupt tool re-runs on resume, so it is not counted.
+        if (isBubbleUp(error)) throw error;
+        run.recordToolCall(slot, { ok: false });
+        if (error instanceof ToolInvocationError) throw error;
+        // A plain rethrow here would turn a recoverable tool error fatal. The model sees LangChain's own text.
+        const wrapped = new ToolInvocationError(error, toolCall);
+        wrapped.message = `${error}\n Please fix your mistakes.`;
+        throw wrapped;
+      }
+    },
+    afterAgent: (state: StateLike, runtime: unknown) => {
+      const run = findRun(state, runtime as RuntimeLike);
+      // Inside a scope this agent is nested, and the run belongs to its parent, or to `ap.run`.
+      if (!ap.currentRun()) run.end();
+      return { airprompter_run_ref: run.runRef };
+    },
+  } as never) as unknown as AgentMiddleware;
+}

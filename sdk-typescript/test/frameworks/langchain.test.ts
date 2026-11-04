@@ -26,7 +26,7 @@ const fixture = JSON.parse(readFileSync(new URL("../../../conformance/frameworks
 
 type Turn = { content?: string; toolCalls?: string[]; usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number } }; finish?: string; fail?: number };
 type Request = { url: string; model: string; system: string[]; temperature?: number; top_p?: number; max_tokens?: number; stop?: unknown; messages: Array<{ role: string; content: unknown }> };
-type WindowRow = { tag: string; arm: string; versionId: string; count: number; status: string; errorClass: string | null; tokens: { input: number; output: number; cachedInput?: number } };
+type WindowRow = { tag: string; arm: string; versionId: string; count: number; status: string; errorClass: string | null; usageSource: string; tokens: { input: number; output: number; cachedInput?: number } };
 
 const textOf = (content: unknown) => (Array.isArray(content) ? content.map((block: { text: string }) => block.text).join("") : String(content));
 
@@ -133,25 +133,38 @@ test("a release id with a provider prefix reaches the wire without it", async ()
   await rows();
 });
 
-test("an id no provider claims stays on the caller's route, with sealed settings", async () => {
+test("an id no provider claims runs on the caller's own model or gateway, and otherwise leaves the request alone", async () => {
   for (const id of ["my-llama-3", "anthropic.claude-haiku-4-5-20251001-v1:0"]) {
     const { ap, rows } = await host({ model: id, inference: { temperatureMilli: 200 } });
     const { requests, fetch } = provider([{ content: "ok" }]);
     await createAgent({ model: chatModel(fetch, id), tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask());
-    assert.deepEqual([requests[0]!.model, requests[0]!.temperature], [id, 0.2]);
+    assert.deepEqual([requests[0]!.model, requests[0]!.temperature], [id, 0.2], "the caller already runs this id");
     assert.deepEqual((await rows()).map((row) => row.count), [1]);
   }
+  const gateway = await host({ model: "my-llama-3" });
+  const routed = provider([{ content: "ok" }]);
+  await createAgent({ model: chatModel(routed.fetch, "other", { configuration: { fetch: routed.fetch, baseURL: "https://gateway.test/v1" } }), tools: [], middleware: [airprompter(gateway.ap, { slots: TAG })] }).invoke(ask());
+  assert.equal(routed.requests[0]!.model, "my-llama-3");
+  await gateway.rows();
+  const open = await host({ model: "my-llama-3" });
+  const pub = provider([{ content: "ok" }]);
+  await createAgent({ model: chatModel(pub.fetch, "gpt-5"), tools: [], systemPrompt: "Own.", middleware: [airprompter(open.ap, { slots: TAG })] }).invoke(ask());
+  assert.deepEqual([pub.requests[0]!.model, pub.requests[0]!.system], ["gpt-5", ["Own."]], "the public endpoint has no such model");
+  assert.equal(open.events.filter((event) => event.reason === "model_unresolved").length, 1);
+  assert.deepEqual(await open.rows(), []);
 });
 
-test("an Azure caller never moves to the public endpoint", async () => {
-  const { ap, events, rows } = await host();
-  const { requests, fetch } = provider([{ content: "ok" }]);
-  const azure = new AzureChatOpenAI({ model: "my-deployment", azureOpenAIApiKey: "test-only", azureOpenAIApiInstanceName: "acme", azureOpenAIApiDeploymentName: "my-deployment", azureOpenAIApiVersion: "2024-10-21", maxRetries: 0, configuration: { fetch } });
-  await withEnvironment(fetch, () => createAgent({ model: azure, tools: [], systemPrompt: "Own.", middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask()));
-  assert.deepEqual(requests[0]!.system, ["Own."]);
-  assert.match(requests[0]!.url, /acme\.openai\.azure\.com/);
-  assert.equal(events.filter((event) => event.reason === "model_unresolved").length, 1);
-  assert.deepEqual(await rows(), []);
+test("an Azure caller never moves to the public endpoint, or runs another id on its deployment", async () => {
+  for (const id of ["gpt-5", "my-llama-3", "azure_openai:gpt-5-mini"]) {
+    const { ap, events, rows } = await host({ model: id });
+    const { requests, fetch } = provider([{ content: "ok" }]);
+    const azure = new AzureChatOpenAI({ model: "my-deployment", azureOpenAIApiKey: "test-only", azureOpenAIApiInstanceName: "acme", azureOpenAIApiDeploymentName: "my-deployment", azureOpenAIApiVersion: "2024-10-21", maxRetries: 0, configuration: { fetch } });
+    await withEnvironment(fetch, () => createAgent({ model: azure, tools: [], systemPrompt: "Own.", middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask()));
+    assert.deepEqual(requests[0]!.system, ["Own."], id);
+    assert.match(requests[0]!.url, /acme\.openai\.azure\.com/);
+    assert.equal(events.filter((event) => event.reason === "model_unresolved").length, 1);
+    assert.deepEqual(await rows(), []);
+  }
 });
 
 test("an Anthropic model keeps its own key with none in the environment, and its stop_reason counts", async () => {
@@ -206,7 +219,7 @@ test("an interrupt on the model path is not a failed call", async () => {
   const config = { configurable: { thread_id: "t-model" } };
   await agent.invoke(ask() as never, config as never);
   await agent.invoke(new Command({ resume: "yes" }) as never, config as never);
-  assert.deepEqual((await rows()).map((row) => [row.count, row.status, row.tokens.input]), [[1, "ok", 5]]);
+  assert.deepEqual((await rows()).map((row) => [row.count, row.status, row.usageSource, row.tokens.input]), [[1, "ok", "reported", 5]], "an interrupt recorded as a failed call would leave the usage unavailable");
 });
 
 test("a truncated reply counts as an error on the run", async () => {

@@ -80,6 +80,12 @@ function providerOf(model: ModelLike): string | undefined {
   return (configured.modelProvider as string | undefined) ?? _inferModelProvider(configured.model as string);
 }
 
+/** Whether the caller set its own endpoint, as a gateway does. An id no provider claims can only run there. */
+function hasOwnEndpoint(model: ModelLike): boolean {
+  const fields = (model._defaultConfig ?? model.lc_kwargs ?? {}) as { baseURL?: unknown; baseUrl?: unknown; anthropicApiUrl?: unknown; configuration?: { baseURL?: unknown }; clientOptions?: { baseURL?: unknown } };
+  return Boolean(fields.baseURL ?? fields.baseUrl ?? fields.anthropicApiUrl ?? fields.configuration?.baseURL ?? fields.clientOptions?.baseURL);
+}
+
 /** The model that runs this placement. The release's model wins, and approved text never runs on another. */
 async function buildModel(model: ModelLike, placed: Approved): Promise<unknown> {
   const fields = constructorFields(placed.settings);
@@ -88,16 +94,22 @@ async function buildModel(model: ModelLike, placed: Approved): Promise<unknown> 
   const caller = providerOf(model);
   const sameId = (model.model ?? model.modelName ?? configured?.model) === released.id;
   if (sameId && Object.keys(fields).length === 0) return model;
-  // The same provider, or an id no provider claims, stays on the caller's key and base URL, so a gateway is not bypassed.
-  if (sameId || released.provider === undefined || released.provider === caller) {
+  const keepRoute = () => {
     // A string-built model keeps its fields in `_defaultConfig`, so rebuilding from `lc_kwargs` would silently drop them.
     if (configured) return initChatModel(released.id, { ...withoutModel(configured), ...(caller ? { modelProvider: caller } : {}), ...fields } as never);
     return new model.constructor({ ...model.lc_kwargs, model: released.id, ...fields });
-  }
-  // An Azure deployment is a private route. Moving off it would send the customer's messages to the public endpoint.
+  };
+  if (sameId) return keepRoute();
+  // An Azure deployment is a private route, and it serves only its own model. Moving off it would send the customer's messages to the public endpoint.
   if (caller === "azure_openai") throw new Error("model_unresolved");
+  // The caller's key and base URL stay on its own provider, so a gateway is not bypassed.
+  if (released.provider === caller) return keepRoute();
+  if (released.provider === undefined) {
+    if (hasOwnEndpoint(model)) return keepRoute();
+    throw new Error("model_unresolved");
+  }
   // Another provider takes nothing of the caller's: `_defaultConfig` holds `modelProvider`, and keeping it sent a Claude id down the OpenAI path.
-  return initChatModel(released.id, { ...(released.provider ? { modelProvider: released.provider } : {}), ...fields } as never);
+  return initChatModel(released.id, { modelProvider: released.provider, ...fields } as never);
 }
 
 /** An interrupt or a parent command is control flow on its way up, not a failure. */

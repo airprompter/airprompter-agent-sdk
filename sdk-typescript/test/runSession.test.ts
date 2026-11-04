@@ -398,6 +398,22 @@ test("a swept run's latency stops at its last activity, not after the idle wait"
   await ap.stop();
 });
 
+test("stop() during an open scope keeps the time up to now", async () => {
+  const { plane, clock, start, slotOf } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  const run = ap.openRun();
+  await run.place(TAG);
+  run.recordModelCall(TAG, { model: "gpt", latencyMs: 1 });
+  let finish = () => {};
+  const tool = ap.withRun(run, () => new Promise<void>((resolve) => { finish = resolve; }));
+  clock.ms += 600_000;
+  await ap.stop();
+  finish();
+  await tool;
+  assert.deepEqual((ap.drainMemorySink() as WindowRow[]).filter((row) => row.count > 0).map((row) => row.latencyMs.sum), [600_000]);
+});
+
 test("the spool timer runs the sweep", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const { plane, clock, start, slotOf, rows } = fixture();
@@ -408,8 +424,7 @@ test("the spool timer runs the sweep", async (t) => {
   run.recordModelCall(TAG, { model: "gpt", latencyMs: 1, usage: usage(1, 1) });
   clock.ms += 15 * 60_000;
   t.mock.timers.tick(60_000);
-  assert.notEqual(ap.openRun({ resume: run.id }), run);
-  assert.deepEqual(rows(ap).filter((row) => row.count > 0).map((row) => row.count), [1]);
+  assert.deepEqual(rows(ap).filter((row) => row.count > 0).map((row) => row.count), [1], "no openRun here: only the timer can have swept it");
   await ap.stop();
 });
 

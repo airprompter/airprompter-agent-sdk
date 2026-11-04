@@ -101,9 +101,9 @@ export class Session implements RunSession {
     this.finish(result.errorClass ?? this.lastErrorClass, this.host.now());
   }
 
-  /** The sweep's end. A run's latency stops at its last activity, not after the idle wait. */
+  /** The sweep's end. An idle run's latency stops at its last activity, not after the wait. */
   endIdle(): void {
-    this.finish(this.lastErrorClass, this.lastActiveAt);
+    this.finish(this.lastErrorClass, this.openScopes > 0 ? this.host.now() : this.lastActiveAt);
   }
 
   private finish(errorClass: ErrorClass | null, endedAt: number): void {
@@ -187,14 +187,13 @@ export class Session implements RunSession {
       this.host.stampDisabled(resolver.release.generation, outcome.tag);
       return this.passthrough(slot, "slot_disabled");
     }
-    this.host.registerLabel(slot);
     if (outcome.slot.kind !== "prompt") return this.passthrough(slot, "slot_kind_unsupported");
-    if (this.host.leaseHalted(slot)) return this.passthrough(slot, "lease_expired");
     return this.render(slot, resolver, outcome);
   }
 
   private async render(slot: string, resolver: ReleaseResolver, resolved: Extract<ResolveOutcome, { ok: true }>): Promise<Pin> {
     try {
+      this.host.registerLabel(slot);
       const text = resolver.textOf(resolved.slot);
       const plan = planFill({ tag: slot, variables: resolved.slot.variables, text, values: this.input.variables ?? {}, registry: this.host.variables });
       const filled = await fillAsync(plan, { tag: slot, subject: this.input.subject, versionId: resolved.slot.versionId, arm: resolved.arm }, this.host.variables);

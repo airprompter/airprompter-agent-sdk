@@ -385,6 +385,34 @@ and `ai` releases weekly (`.github/workflows/wrap-latest.yml`,
 `npm run test:wrap-live`); the supported ranges are the package's
 `peerDependencies`.
 
+## LangChain
+
+Add one line to the agent you already have. Your framework, tools and data stay where they are.
+
+```ts
+import { createAgent } from "langchain";
+import { airprompter } from "@airprompter/agent-sdk/frameworks/langchain";
+
+const agent = createAgent({
+  model: "openai:gpt-5",
+  tools,
+  middleware: [airprompter(ap, { slots: "support-reply" })], // last in the list
+});
+
+await agent.invoke({ messages }, { context: { airprompter: { subject: userId, tags: { plan }, variables: { team } } } });
+```
+
+- **What it does.** The system text and model on every provider request are the release's, and the sealed temperature, top-p, output cap and stop sequences go with them. One request is one run, one version, one `count`, with its tokens summed, however many model calls and tools it used.
+- **Keep it last in `middleware`.** The list runs outermost first. Listed before `modelFallbackMiddleware`, the fallback model would receive the approved text. Middleware cannot see its neighbours, so nothing enforces this for you.
+- **Pass a subject.** `context.airprompter.subject` decides the arm. Without one it uses the `thread_id`, then the run's own id, so each request lands on its own. To build the input from your own context, use `input: (context) => ({ subject: context.userId })` and list those keys in `contextSchema: z.object({ userId: z.string() })`, because LangChain hands a middleware only the keys it declares. A `subject` that is not a string is dropped, not refused.
+- **When nothing can be served,** your own prompt and model run, untouched, and nothing is written: nothing promoted, a staged release waiting for an unlock, a disable, or a slot that is not in the release. A release on a model LangChain cannot load does the same and logs `run_passthrough` with `model_unresolved` once.
+- **The release's model wins.** On your provider your key and base URL stay, so a gateway keeps working. An id no provider claims runs only where you set your own base URL, and otherwise gives `model_unresolved`. On another provider, the model is built with `initChatModel` and nothing of yours: it uses that provider's environment key and default endpoint. With no key there, OpenAI fails as a model error at the call, and a provider that checks its key at build gives `model_unresolved`. An Azure deployment never moves to another model id: that is `model_unresolved`, because it would run on the wrong deployment or send your messages to the public endpoint.
+- **A thrown model error** reaches the console after the idle sweep (`runIdleTimeoutMs`, default 15 minutes), because LangChain has no hook after one. A recovered failure, such as one a retry middleware retried, counts as `ok`.
+- **Interrupts.** A resume in the same process is the same run. After a sweep or on another host it is a new run, and it counts again. It keeps its arm only if you pass the same `context` on the resume.
+- **Checkpoints.** AirPrompter writes only a run id and run reference into graph state. What LangChain itself stores in your own checkpoint stays yours. Nothing crosses to AirPrompter.
+
+Inside `ap.run(...)`, the middleware joins that run and `ap.run` ends it. Finish the work inside it, draining a stream there too: anything still going after `ap.run` returns is not part of that run. Waiting for 1.0: several slots in a run, tool counts in the console, output checks on this path, `modelFor`, and Python.
+
 ## Hosted mode (`ManagedAgent`)
 
 Feedback works the same way hosted: keep `result.runRef` beside your own

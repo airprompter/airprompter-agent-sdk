@@ -1,0 +1,22 @@
+{
+  "framework": "langchain",
+  "language": "ts",
+  "frameworkVersion": "1.6.1",
+  "kind": "tool-loop",
+  "release": { "tag": "support-reply", "text": "You answer support tickets for Acme.", "versionId": "ver_a", "model": "gpt-5" },
+  "agent": { "slots": "support-reply" },
+  "input": { "subject": "user-1" },
+  "recorded": {
+    "turns": [
+      { "toolCalls": ["lookup"], "usage": { "prompt_tokens": 100, "completion_tokens": 10 } },
+      { "toolCalls": ["lookup"], "usage": { "prompt_tokens": 110, "completion_tokens": 10 } },
+      { "toolCalls": ["lookup"], "usage": { "prompt_tokens": 120, "completion_tokens": 10 } },
+      { "toolCalls": ["lookup"], "usage": { "prompt_tokens": 130, "completion_tokens": 10 } },
+      { "content": "All done.", "usage": { "prompt_tokens": 140, "completion_tokens": 20 } }
+    ]
+  },
+  "expect": {
+    "calls": { "count": 5, "system": "You answer support tickets for Acme.", "model": "gpt-5" },
+    "rows": [{ "tag": "support-reply", "versionId": "ver_a", "arm": "none", "count": 1, "status": "ok", "tokens": { "input": 600, "output": 60 } }]
+  }
+}

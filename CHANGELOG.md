@@ -10,6 +10,19 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 0.6.0 — 2026-11-04 (protocol 2.0.0)
+
+TypeScript only. The Python SDK stays at 0.5.0 until AIR-2242 brings the same run session to it. No schema, vector or wire byte changed.
+
+### Added
+- `@airprompter/agent-sdk/frameworks/langchain`: `airprompter(ap, { slots })`, middleware for `createAgent`. It runs the agent on the approved prompt and model, and counts one request as one run. The root import never loads LangChain. List it last in `middleware`.
+- A run: `ap.run(input, fn)`, `ap.openRun`, `ap.currentRun` and `ap.withRun`. One run holds one version per slot, a disable applies at the next `place`, and a run with no activity for `runIdleTimeoutMs` (default 15 minutes) ends by itself. A run's calls recorded through `recordModelCall`, as the LangChain middleware does, write one row with `count` 1, the run's total tokens and its wall-clock latency. `ap.prompt` plus `ap.observe` still count per call, inside a run or not, until AIR-2242.
+
+### Changed
+- **`start()` no longer throws `no_verified_release`.** With nothing promoted an agent starts at generation 0, logs `started_without_release` with the control plane's answer, keeps syncing, and takes the first promotion with no restart. Plain `ap.prompt(...).render()` has no prompt to fall back on, so it now throws at the first render instead of at start.
+- **`healthz` at generation 0 is `degraded`, not `failing`**, so a liveness probe does not restart a working agent on a 503.
+- **An absent subject is a fresh id per call, not the instance id.** Before, a small fleet could never reach a 5 % arm, because it split instances, not users. A call with no subject no longer sticks to one arm: pass a subject for that. `subjectKey: "instance"` still splits by instance.
+
 ## 0.5.0 — 2026-10-07 (protocol 2.0.0)
 
 ### Changed

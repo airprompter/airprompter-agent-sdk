@@ -40,6 +40,11 @@
       "types": "./dist/esm/testing.d.ts",
       "import": "./dist/esm/testing.js",
       "require": "./dist/cjs/testing.js"
+    },
+    "./frameworks/langchain": {
+      "types": "./dist/esm/frameworks/langchain.d.ts",
+      "import": "./dist/esm/frameworks/langchain.js",
+      "require": "./dist/cjs/frameworks/langchain.js"
     }
   },
   "files": [
@@ -52,7 +57,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\""
   },
   "airprompter": {
-    "sizeBudgetBytes": 285000
+    "sizeBudgetBytes": 295000
   },
   "publishConfig": {
     "access": "public",
@@ -66,17 +71,29 @@
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.40",
+    "@langchain/core": ">=1.3",
     "ai": ">=5",
-    "openai": ">=4.50"
+    "langchain": ">=1.6",
+    "openai": ">=4.50",
+    "zod": ">=4"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/sdk": {
       "optional": true
     },
+    "@langchain/core": {
+      "optional": true
+    },
     "ai": {
       "optional": true
     },
+    "langchain": {
+      "optional": true
+    },
     "openai": {
+      "optional": true
+    },
+    "zod": {
       "optional": true
     }
   }

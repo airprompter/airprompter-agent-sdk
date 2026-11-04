@@ -11,7 +11,7 @@ here and `vectors/assignment.json` is the test.
 | Name | Source | Bytes hashed |
 |---|---|---|
 | `salt` | `manifest.payload.experiment.salt` — base64url without padding, random per experiment | the **decoded** bytes |
-| `subject` | the value the customer passes (`{ subject: userId }`), falling back to the instance id when absent (then *instances* split, not users, and the console says so) | UTF-8 of the string, no normalisation, no trimming |
+| `subject` | the value the customer passes (`{ subject: userId }`). When absent it is a fresh id per call. The instance id is used only through `subjectKey: "instance"` | UTF-8 of the string, no normalisation, no trimming |
 | `arms` | `manifest.payload.experiment.arms` in manifest order | — |
 
 ## Function

@@ -241,7 +241,7 @@ test("workflows yield steps in order with their texts; telemetry and feedback la
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("offline: with no key the store serves what it last verified; with the store gone, the vendored bundle serves; with neither, start refuses", async () => {
+test("offline: with no key the store serves what it last verified; with the store gone, the vendored bundle serves; with neither, it starts at generation 0", async () => {
   const stateDir = tempDir();
   const plane = new FakeControlPlane(scope);
   plane.promote(triageSlots(plane));
@@ -276,10 +276,15 @@ test("offline: with no key the store serves what it last verified; with the stor
   const expiring = await AirPrompterAgent.start({ ...scope, stateDir: tempDir(), root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "on_invoke" }, vendoredBundle: { bundle: soon }, logger: (e) => (/^vendored_bundle_(expiring_soon|past_not_after)$/.test(String(e.event)) ? expiry.push(e) : undefined) });
   assert.deepEqual(expiry.map((e) => [e.event, e.daysLeft]), [["vendored_bundle_expiring_soon", 10]]);
   await expiring.stop();
-  // A plaintext bundle for another target is refused; nothing at all refuses to start.
+  // A plaintext bundle for another target is refused; with nothing at all it starts, serving nothing.
   const other = createPlaintextBundle({ createdAt: new Date().toISOString(), notAfter: "2027-01-01T00:00:00Z", manifest: plane.manifest!, keySet: plane.root, payloads: [] });
-  await assert.rejects(AirPrompterAgent.start({ ...scope, target: "staging", stateDir: tempDir(), root: { pinned: publicJwkOf(plane.rootKey) }, vendoredBundle: { bundle: other } }), (e: unknown) => e instanceof AgentStartError && e.code === "no_verified_release");
-  await assert.rejects(AirPrompterAgent.start({ ...scope, stateDir: tempDir(), root: { pinned: publicJwkOf(plane.rootKey) } }), (e: unknown) => e instanceof AgentStartError && e.code === "no_verified_release");
+  const refused = await AirPrompterAgent.start({ ...scope, target: "staging", stateDir: tempDir(), root: { pinned: publicJwkOf(plane.rootKey) }, vendoredBundle: { bundle: other } });
+  assert.equal(refused.generation, 0);
+  await refused.stop();
+  const bare = await AirPrompterAgent.start({ ...scope, stateDir: tempDir(), root: { pinned: publicJwkOf(plane.rootKey) } });
+  assert.equal(bare.generation, 0);
+  assert.equal(bare.healthz().status, "degraded");
+  await bare.stop();
   rmSync(fresh, { recursive: true, force: true });
 });
 
@@ -507,7 +512,7 @@ test("a FIRST release staged under unlock_required starts the host: nothing serv
   assert.equal(ap.generation, 0);
   assert.equal(ap.status().applyState, "awaiting_unlock");
   assert.equal(ap.status().stagedGeneration, 1);
-  assert.equal(ap.healthz().status, "failing", "nothing is served yet, and healthz says so");
+  assert.equal(ap.healthz().status, "degraded", "nothing is served yet, and healthz says so");
   assert.throws(() => ap.prompt("support.reply").render({ name: "Ann" }), /generation 1 is staged under unlock_required and waiting for an unlock/);
   await ap.heartbeatNow();
   const beat = plane.heartbeats.at(-1) as { generation: { active: number; staged?: number } };

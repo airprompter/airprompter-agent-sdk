@@ -1,6 +1,7 @@
 /**
- * What a customer reads when start fails or the control plane refuses a call. `no_verified_release` names the control
- * plane's answer (404 nothing promoted, 401 key, 403 code, transport error) instead of "nothing could be fetched";
+ * What a customer reads when nothing could be served or the control plane refuses a call. A start with nothing to
+ * serve carries on, and `started_without_release` names the control plane's answer (404 nothing promoted, 401 key,
+ * 403 code, transport error) instead of "nothing could be fetched";
  * `heartbeat_refused` carries the server's message and validation issues; a wrong `options.sdk` is refused at start,
  * before any network, since the heartbeat schema would refuse every beat after.
  */
@@ -42,28 +43,37 @@ async function startError(input: Parameters<typeof AirPrompterAgent.start>[0]): 
   assert.fail("start succeeded");
 }
 
-test("no_verified_release names the control plane's answer: nothing promoted is a 404 with the fix in the sentence", async () => {
+async function startLog(input: Parameters<typeof AirPrompterAgent.start>[0]): Promise<string> {
+  const events: Array<Record<string, unknown>> = [];
+  const agent = await AirPrompterAgent.start({ ...input, logger: (event) => events.push(event) });
+  assert.equal(agent.generation, 0);
+  await agent.stop();
+  const line = events.find((event) => event.event === "started_without_release");
+  assert.ok(line, "started_without_release was logged");
+  return line.reason as string;
+}
+
+test("started_without_release names the control plane's answer: nothing promoted is a 404 with the fix in the sentence", async () => {
   const plane = new FakeControlPlane(scope);
-  const error = await startError(options(plane));
-  assert.equal(error.code, "no_verified_release");
-  assert.match(error.message, /no release promoted to prod for agt_1 on prod \(HTTP 404\)/);
-  assert.match(error.message, /promote one from the app's board/);
-  assert.match(error.message, /bound to this app and environment/);
+  const reason = await startLog(options(plane));
+  assert.match(reason, /no release promoted to prod for agt_1 on prod \(HTTP 404\)/);
+  assert.match(reason, /promote one from the app's board/);
+  assert.match(reason, /bound to this app and environment/);
 });
 
-test("no_verified_release names a refused key (401) and a forbidden read (403 with the server's code)", async () => {
+test("started_without_release names a refused key (401) and a forbidden read (403 with the server's code)", async () => {
   const plane = new FakeControlPlane(scope);
-  const unauthorized = await startError(options(plane, { apiKey: "apa_prod_not-this-key" }));
-  assert.match(unauthorized.message, /refused this key for agt_1 on prod \(HTTP 401\)/);
-  assert.match(unauthorized.message, /wrong, revoked, or minted for another environment/);
+  const unauthorized = await startLog(options(plane, { apiKey: "apa_prod_not-this-key" }));
+  assert.match(unauthorized, /refused this key for agt_1 on prod \(HTTP 401\)/);
+  assert.match(unauthorized, /wrong, revoked, or minted for another environment/);
 
-  const forbidden = await startError(options(plane, { agentId: "agt_other" }));
-  assert.match(forbidden.message, /forbade the read for agt_other on prod \(HTTP 403 agent_mismatch\)/);
+  const forbidden = await startLog(options(plane, { agentId: "agt_other" }));
+  assert.match(forbidden, /forbade the read for agt_other on prod \(HTTP 403 agent_mismatch\)/);
 });
 
-test("no_verified_release names a transport failure with the base URL and the error", async () => {
+test("started_without_release names a transport failure with the base URL and the error", async () => {
   const plane = new FakeControlPlane(scope);
-  const error = await startError(
+  const reason = await startLog(
     options(plane, {
       baseUrl: "https://api.unreachable.test",
       fetch: async () => {
@@ -71,7 +81,7 @@ test("no_verified_release names a transport failure with the base URL and the er
       },
     }),
   );
-  assert.match(error.message, /api\.unreachable\.test could not be reached: getaddrinfo ENOTFOUND api\.unreachable\.test/);
+  assert.match(reason, /api\.unreachable\.test could not be reached: getaddrinfo ENOTFOUND api\.unreachable\.test/);
 });
 
 test("options.sdk is the reporter's name, checked at start: a customer's app name is refused before any network call", async () => {
@@ -138,7 +148,41 @@ test("S18: the pinned root is scoped to the HOSTED environment, not the app's ta
   assert.equal(agent.prompt("support.reply").render({}).text, "Reply politely.");
   await agent.stop();
   // The same app with the root scoped to its target (the old default) cannot accept the dev root document and never trusts the signing key.
-  const wrong = await startError({ ...options(plane, { ...staging, root: { pinned: publicJwkOf(plane.rootKey), hostedEnvironment: "staging" }, sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/dev/root.json" } }) });
-  assert.equal(wrong.code, "no_verified_release");
-  assert.match(wrong.message, /unknown_signing_key/);
+  const wrong = await startLog({ ...options(plane, { ...staging, root: { pinned: publicJwkOf(plane.rootKey), hostedEnvironment: "staging" }, sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/dev/root.json" } }) });
+  assert.match(wrong, /unknown_signing_key/);
+});
+
+test("nothing promoted now starts: a promotion plus syncNow then serves with no restart", async () => {
+  const plane = new FakeControlPlane(scope);
+  const agent = await AirPrompterAgent.start(options(plane));
+  assert.equal(agent.generation, 0);
+  assert.throws(() => agent.prompt("support.reply").render({}), (error: unknown) => error instanceof AgentStartError && error.code === "no_verified_release");
+  const before = await agent.run({ subject: "ann" }, (run) => run.place("support.reply"));
+  assert.deepEqual(before, { kind: "passthrough", slot: "support.reply", reason: "no_verified_release" });
+
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply politely.", variables: [] })]);
+  await agent.syncNow();
+  assert.equal(agent.generation, 1);
+  assert.equal(agent.prompt("support.reply").render({}).text, "Reply politely.");
+  const after = await agent.run({ subject: "ann" }, (run) => run.place("support.reply"));
+  assert.equal(after.kind === "approved" && after.instructions, "Reply politely.");
+  await agent.stop();
+});
+
+test("unlock_required stays passthrough until unlock()", async () => {
+  const plane = new FakeControlPlane(scope);
+  plane.promote([plane.slot({ tag: "support.reply", text: "Reply politely.", variables: [] })], { applyPolicy: "unlock_required" });
+  const agent = await AirPrompterAgent.start(options(plane));
+  const waiting = await agent.run({ subject: "ann" }, (run) => run.place("support.reply"));
+  assert.deepEqual(waiting, { kind: "passthrough", slot: "support.reply", reason: "awaiting_unlock" });
+  await agent.unlock();
+  const served = await agent.run({ subject: "ann" }, (run) => run.place("support.reply"));
+  assert.equal(served.kind, "approved");
+  await agent.stop();
+});
+
+test("a store whose key cannot be read still throws: starting without a release is not starting without a store", async () => {
+  const plane = new FakeControlPlane(scope);
+  const unavailable = { wrap: async () => { throw new Error("kms down"); }, unwrap: async () => { throw new Error("kms down"); } };
+  await assert.rejects(AirPrompterAgent.start(options(plane, { keyProvider: unavailable as never })), /could not wrap the store key/);
 });

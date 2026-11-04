@@ -54,10 +54,11 @@ doc = ap.healthz()                                   # the document
 The document is the same in both SDKs, with `ok` as the liveness answer
 and `status` as the one degraded middle:
 
-- **failing** (`ok: false`, 503): nothing verified to serve (generation 0);
-  the lease lapsed under `onLeaseExpiry: "halt"` (every render refuses).
-- **degraded** (`ok: true`, 200): the lease lapsed under `degrade` (serving
-  the last verified release); three or more consecutive sync failures; the
+- **failing** (`ok: false`, 503): the lease lapsed under
+  `onLeaseExpiry: "halt"` (every render refuses).
+- **degraded** (`ok: true`, 200): nothing verified to serve (generation 0),
+  so the agent runs its own prompt and a liveness probe must not restart it;
+  the lease lapsed under `degrade` (serving the last verified release); three or more consecutive sync failures; the
   uploader is backing off; a forced downgrade is in force; the telemetry
   daemon that shipped this process's spool has gone stale and nothing here
   uploads instead (`upload_daemon_stale`); the spool is at 80 % of its

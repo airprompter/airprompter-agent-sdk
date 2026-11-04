@@ -160,8 +160,9 @@ test("a compromised store cannot poison a runtime: a forged bundle is refused be
   // Fresh host, forged row first (the fallback branch): refused, and store.json is NOT advanced — the real row still boots.
   const dir = tempDir();
   const events: string[] = [];
-  const poisoned = await AirPrompterAgent.start({ ...scope, stateDir: dir, root: { pinned: publicJwkOf(plane.rootKey) }, fetch: noNetwork, distributionKey, logger: (e) => void events.push(`${e.event}:${e.reason ?? ""}`), vendoredBundle: { bundle: JSON.parse(forged(plane, fleetKey.publicRaw, 999)) } }).catch((e: unknown) => e);
-  assert.ok(poisoned instanceof AgentStartError, "nothing verified: start refuses rather than serving the forgery");
+  const poisoned = await AirPrompterAgent.start({ ...scope, stateDir: dir, root: { pinned: publicJwkOf(plane.rootKey) }, fetch: noNetwork, distributionKey, logger: (e) => void events.push(`${e.event}:${e.reason ?? ""}`), vendoredBundle: { bundle: JSON.parse(forged(plane, fleetKey.publicRaw, 999)) } });
+  assert.equal(poisoned.generation, 0, "nothing verified: it serves nothing rather than the forgery");
+  await poisoned.stop();
   assert.ok(events.some((e) => e.startsWith("vendored_bundle_refused:")), `refused, not 'unusable': ${events.join(",")}`);
   const real = await AirPrompterAgent.start({ ...scope, stateDir: dir, root: { pinned: publicJwkOf(plane.rootKey) }, fetch: noNetwork, distributionKey, vendoredBundle: { bundle: JSON.parse(table.newest()!.bundle) } });
   assert.equal(real.generation, 1, "the legitimate generation-1 row boots on the same store: the forgery left no generation behind");

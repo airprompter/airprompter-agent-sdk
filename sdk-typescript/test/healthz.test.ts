@@ -42,7 +42,8 @@ test("healthzOf: every rule, in order — failing beats degraded, reasons name e
   const ok = at({});
   assert.deepEqual({ ok: ok.ok, status: ok.status, reasons: ok.reasons, generation: ok.generation }, { ok: true, status: "ok", reasons: [], generation: 1 });
   assert.deepEqual(at({ generation: 0 }).reasons, ["no_verified_release"]);
-  assert.equal(at({ generation: 0 }).ok, false);
+  assert.deepEqual({ ok: at({ generation: 0 }).ok, status: at({ generation: 0 }).status }, { ok: true, status: "degraded" }, "generation 0 serves the agent's own prompt");
+  assert.equal(healthzResponse(at({ generation: 0 })).status, 200, "a liveness probe does not restart a working agent");
   assert.deepEqual(at({ leaseExpired: true, onLeaseExpiry: "halt" }), { ...at({ leaseExpired: true, onLeaseExpiry: "halt" }), ok: false, status: "failing", reasons: ["lease_expired_halt"] });
   const degrade = at({ leaseExpired: true, onLeaseExpiry: "degrade" });
   assert.deepEqual({ ok: degrade.ok, status: degrade.status, reasons: degrade.reasons }, { ok: true, status: "degraded", reasons: ["lease_expired_degrade"] });
@@ -61,8 +62,8 @@ test("healthzOf: every rule, in order — failing beats degraded, reasons name e
   assert.deepEqual(at({ spool: { depthSegments: 80, depthBytes: 80 * 1024 * 1024 } }).reasons, ["spool_near_budget"], "80 % of the budget");
   assert.deepEqual(at({ spool: { depthSegments: 79, depthBytes: 79 * 1024 * 1024 } }).reasons, []);
   assert.deepEqual(at({ spool: { depthSegments: 80, depthBytes: 80 * 1024 * 1024 } }, null).reasons, [], "no budget known (a memory sink): no rule");
-  const both = at({ generation: 0, forcedDowngrade: true, consecutiveSyncFailures: 5 });
-  assert.deepEqual({ ok: both.ok, status: both.status, reasons: both.reasons }, { ok: false, status: "failing", reasons: ["no_verified_release", "sync_failing", "forced_downgrade"] }, "failing wins; every reason is listed in rule order");
+  const both = at({ leaseExpired: true, onLeaseExpiry: "halt", forcedDowngrade: true, consecutiveSyncFailures: 5 });
+  assert.deepEqual({ ok: both.ok, status: both.status, reasons: both.reasons }, { ok: false, status: "failing", reasons: ["lease_expired_halt", "sync_failing", "forced_downgrade"] }, "failing wins; every reason is listed in rule order");
   assert.equal(healthzResponse(both).status, 503);
   assert.equal(healthzResponse(ok).status, 200);
   assert.deepEqual(JSON.parse(healthzResponse(ok).body).spool, { depthSegments: 0, depthBytes: 0, budgetBytes: 100 * 1024 * 1024 });

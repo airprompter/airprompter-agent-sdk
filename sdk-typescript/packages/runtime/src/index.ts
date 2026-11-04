@@ -22,7 +22,9 @@
  * ```
  */
 
-export { ReleaseResolver, disabledFrom } from "./release/resolver.js";
+export { ReleaseResolver, disabledFrom, newSubject } from "./release/resolver.js";
+export { RunRegistry, DEFAULT_RUN_IDLE_TIMEOUT_MS } from "./run/index.js";
+export type { AgentRuntime, ModelCallRecord, Placement, RunHost, RunInput, RunSession, ToolCallRecord, UnavailableReason } from "./run/index.js";
 export { VariableSourceRegistry, VariableSourceError, VariableSourceRequiredError, isVariableSourceError, isVariableSourceRequiredError, DEFAULT_SOURCE_TIMEOUT_MS, DEFAULT_SOURCE_MAX_BYTES } from "./variables/sources.js";
 export type { VariableSource, VariableSourceInput, VariableSourceContext, RegisteredSource } from "./variables/sources.js";
 export { planFill, fillSync, fillAsync, unsourced, stricterSources, supplied } from "./variables/fill.js";

@@ -573,7 +573,11 @@ export class AirPrompterAgent implements AgentRuntime {
     this.variables = new VariableSourceRegistry(options.variables);
     this.runs = new RunRegistry({
       release: () => (this.active ? { resolver: this.resolver() } : { unavailable: this.stagedManifest ? "awaiting_unlock" : "no_verified_release" }),
-      tagsFor: (overrides) => (overrides ? copyAudienceTags({ ...this.audienceTags, ...overrides }) : this.audienceTags),
+      tagsFor: (overrides) => {
+        const tags = overrides ? copyAudienceTags({ ...this.audienceTags, ...overrides }) : this.audienceTags;
+        this.rememberAudienceTagKeys(Object.keys(tags));
+        return tags;
+      },
       registerLabel: (tag) => this.registerPromptLabel(tag, this.audiencePromptLabels.get(tag) ?? tag),
       variables: this.variables,
       leaseHalted: (tag) => {

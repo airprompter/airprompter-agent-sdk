@@ -184,5 +184,5 @@ test("unlock_required stays passthrough until unlock()", async () => {
 test("a store whose key cannot be read still throws: starting without a release is not starting without a store", async () => {
   const plane = new FakeControlPlane(scope);
   const unavailable = { wrap: async () => { throw new Error("kms down"); }, unwrap: async () => { throw new Error("kms down"); } };
-  await assert.rejects(AirPrompterAgent.start(options(plane, { keyProvider: unavailable as never })), /could not wrap the store key/);
+  await assert.rejects(AirPrompterAgent.start(options(plane, { keyProvider: unavailable as never })), (error: unknown) => (error as { code?: string }).code === "kek_unavailable");
 });

@@ -362,6 +362,99 @@ test("stop() ends open runs before the windows close", async () => {
   assert.deepEqual(written.map((row) => [row.count, row.tokens.input]), [[1, 3]]);
 });
 
+test("a slot name no release can hold is no_slot, not a throw", async () => {
+  const { plane, start, slotOf } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  assert.deepEqual(await ap.openRun().place("Not A Valid Tag"), { kind: "passthrough", slot: "Not A Valid Tag", reason: "no_slot" });
+  await ap.stop();
+});
+
+test("an ended run is not current, so work left running after it cannot write to a run already counted", async () => {
+  const { plane, start, slotOf } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  const run = ap.openRun();
+  await ap.withRun(run, async () => {
+    assert.equal(ap.currentRun(), run);
+    run.end();
+    assert.equal(ap.currentRun(), undefined);
+  });
+  await ap.stop();
+});
+
+test("a swept run's latency stops at its last activity, not after the idle wait", async () => {
+  const { plane, clock, start, slotOf, rows } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  const run = ap.openRun();
+  await run.place(TAG);
+  clock.ms += 2000;
+  run.recordModelCall(TAG, { model: "gpt", latencyMs: 2000, errorClass: "provider_error" });
+  clock.ms += 15 * 60_000;
+  ap.openRun();
+  assert.deepEqual(rows(ap).filter((row) => row.count > 0).map((row) => row.latencyMs.sum), [2000]);
+  await ap.stop();
+});
+
+test("the spool timer runs the sweep", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const { plane, clock, start, slotOf, rows } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  const run = ap.openRun();
+  await run.place(TAG);
+  run.recordModelCall(TAG, { model: "gpt", latencyMs: 1, usage: usage(1, 1) });
+  clock.ms += 15 * 60_000;
+  t.mock.timers.tick(60_000);
+  assert.notEqual(ap.openRun({ resume: run.id }), run);
+  assert.deepEqual(rows(ap).filter((row) => row.count > 0).map((row) => row.count), [1]);
+  await ap.stop();
+});
+
+test("a tool call keeps a run from looking idle", async () => {
+  const { plane, clock, start, slotOf } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  const run = ap.openRun();
+  await run.place(TAG);
+  clock.ms += 14 * 60_000;
+  run.recordToolCall(TAG, { ok: true });
+  clock.ms += 14 * 60_000;
+  assert.equal(ap.openRun({ resume: run.id }), run);
+  await ap.stop();
+});
+
+test("a lapsed lease under halt stops a first placement and a pinned one", async () => {
+  const { plane, clock, start, slotOf } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")], { leaseSeconds: 60, onLeaseExpiry: "halt" });
+  const ap = await start();
+  const run = ap.openRun();
+  assert.equal((await run.place(TAG)).kind, "approved");
+  clock.ms += 120_000;
+  assert.deepEqual(await run.place(TAG), { kind: "passthrough", slot: TAG, reason: "lease_expired" });
+  assert.deepEqual(await ap.openRun().place(TAG), { kind: "passthrough", slot: TAG, reason: "lease_expired" });
+  await ap.stop();
+});
+
+test("run tags reach the experiment's audience, and their names reach the heartbeat", async () => {
+  const { plane, start, slotOf, experiment } = fixture();
+  const a = slotOf("Version A", "ver_a");
+  const b = slotOf("Version B", "ver_b");
+  plane.promote([a], { protocol: "2.0.0", experiments: [{ ...experiment(a, b, 10_000), audience: { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags", conditions: [{ key: "plan", operator: "is", value: "pro" }] } } }] });
+  const ap = await start();
+  const textOf = async (input: Parameters<typeof ap.openRun>[0]) => {
+    const placed = await ap.openRun(input).place(TAG);
+    return placed.kind === "approved" ? placed.instructions : null;
+  };
+  assert.equal(await textOf({ subject: "ann", tags: { plan: "pro" } }), "Version B");
+  assert.equal(await textOf({ subject: "ann", tags: { plan: "free" } }), "Version A");
+  await ap.heartbeatNow();
+  await ap.heartbeatNow();
+  assert.deepEqual((ap.heartbeatBody() as { registration?: { tagKeys: string[] } }).registration?.tagKeys, ["plan"]);
+  await ap.stop();
+});
+
 test("runRef is undefined until the slot is placed; the id is fixed at open", async () => {
   const { plane, start, slotOf } = fixture();
   plane.promote([slotOf("Version A", "ver_a")]);

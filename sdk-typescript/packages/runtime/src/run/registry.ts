@@ -40,8 +40,10 @@ export class RunRegistry {
     return session;
   }
 
+  /** Only an open run: work a scope left running after `end` must not write to a run that has already been counted. */
   current(): RunSession | undefined {
-    return this.scope.getStore();
+    const session = this.scope.getStore();
+    return session && this.live.get(session.id) === session ? session : undefined;
   }
 
   /** A promise `fn` returns holds the scope until it settles. */
@@ -62,10 +64,10 @@ export class RunRegistry {
 
   sweep(): void {
     const nowMs = this.host.now();
-    for (const session of [...this.live.values()]) if (session.idle(nowMs)) session.end();
+    for (const session of [...this.live.values()]) if (session.idle(nowMs)) session.endIdle();
   }
 
   endAll(): void {
-    for (const session of [...this.live.values()]) session.end();
+    for (const session of [...this.live.values()]) session.endIdle();
   }
 }

@@ -52,7 +52,8 @@ doc = ap.healthz()                                   # the document
 ```
 
 The document is the same in both SDKs, with `ok` as the liveness answer
-and `status` as the one degraded middle:
+and `status` as the one degraded middle. Python 0.5.0 still answers `failing`
+at generation 0 until it takes the TypeScript rule below:
 
 - **failing** (`ok: false`, 503): the lease lapsed under
   `onLeaseExpiry: "halt"` (every render refuses).

@@ -39,7 +39,6 @@ export class Session implements RunSession {
   private readonly pins = new Map<string, Promise<Pin>>();
   private readonly placed = new Map<string, Pin>();
   private readonly totals = new Map<string, SlotTotals>();
-  private readonly stamped = new Set<string>();
   private readonly subject: string;
   private readonly openedAt: number;
   private lastErrorClass: ErrorClass | null = null;
@@ -81,7 +80,6 @@ export class Session implements RunSession {
   }
 
   recordModelCall(slot: string, call: ModelCallRecord): void {
-    if (this.ended) return;
     this.touch();
     const rendered = this.placed.get(slot)?.rendered;
     if (!rendered) return;
@@ -96,14 +94,22 @@ export class Session implements RunSession {
 
   /** Tool counts have no row until protocol 3.0.0. A tool call only keeps the run from looking idle. */
   recordToolCall(_slot: string, _call: ToolCallRecord): void {
-    if (!this.ended) this.touch();
+    this.touch();
   }
 
   end(result: { errorClass?: ErrorClass } = {}): void {
+    this.finish(result.errorClass ?? this.lastErrorClass, this.host.now());
+  }
+
+  /** The sweep's end. A run's latency stops at its last activity, not after the idle wait. */
+  endIdle(): void {
+    this.finish(this.lastErrorClass, this.lastActiveAt);
+  }
+
+  private finish(errorClass: ErrorClass | null, endedAt: number): void {
     if (this.ended) return;
     this.ended = true;
     this.forget(this);
-    const errorClass = result.errorClass ?? this.lastErrorClass;
     const nowMs = this.host.now();
     for (const { rendered, input, cachedInput, output, allReported } of this.totals.values()) {
       this.host.recordRun({
@@ -116,7 +122,7 @@ export class Session implements RunSession {
         model: rendered.model,
         status: errorClass ? "error" : "ok",
         errorClass,
-        latencyMs: Math.max(0, nowMs - this.openedAt),
+        latencyMs: Math.max(0, endedAt - this.openedAt),
         tokens: { input, cachedInput, output },
         usageSource: allReported ? "reported" : "unavailable",
       }, nowMs);
@@ -155,21 +161,14 @@ export class Session implements RunSession {
     if (!("resolver" in release)) return null;
     const disabled = release.resolver.disabled();
     if (disabled.agent || disabled.slots.includes(slot)) {
-      this.stampDisabled(release.resolver, disabled.agent ? null : slot);
+      this.host.stampDisabled(release.resolver.release.generation, disabled.agent ? null : slot);
       return { kind: "passthrough", slot, reason: "slot_disabled" };
     }
+    if (pin.rendered && this.host.leaseHalted(slot)) return { kind: "passthrough", slot, reason: "lease_expired" };
     const arm = pin.rendered?.arm;
     if (!arm || arm === "none") return null;
     const experiment = release.resolver.experimentFor(slot);
     return experiment && disabledArmsFor(disabled, experiment.experimentId).has(arm) ? "replace" : null;
-  }
-
-  private stampDisabled(resolver: ReleaseResolver, tag: string | null): void {
-    const generation = resolver.release.generation;
-    const key = `${generation}\u0000${tag ?? ""}`;
-    if (this.stamped.has(key)) return;
-    this.stamped.add(key);
-    this.host.stampDisabled(generation, tag);
   }
 
   private passthrough(slot: string, reason: UnavailableReason, detail: Record<string, unknown> = {}): Pin {
@@ -182,13 +181,13 @@ export class Session implements RunSession {
     const release = this.host.release();
     if (!("resolver" in release)) return this.passthrough(slot, release.unavailable);
     const { resolver } = release;
-    this.host.registerLabel(slot);
     const outcome = resolver.resolve(slot, this.subject, this.tags());
     if (!outcome.ok) {
       if (outcome.reason === "no_slot") return this.passthrough(slot, "no_slot");
-      this.stampDisabled(resolver, outcome.tag);
+      this.host.stampDisabled(resolver.release.generation, outcome.tag);
       return this.passthrough(slot, "slot_disabled");
     }
+    this.host.registerLabel(slot);
     if (outcome.slot.kind !== "prompt") return this.passthrough(slot, "slot_kind_unsupported");
     if (this.host.leaseHalted(slot)) return this.passthrough(slot, "lease_expired");
     return this.render(slot, resolver, outcome);

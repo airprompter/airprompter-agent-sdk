@@ -22,6 +22,7 @@
  */
 
 import { ToolInvocationError, SystemMessage, createMiddleware, initChatModel } from "langchain";
+import { _inferModelProvider } from "langchain/chat_models/universal";
 import type { AgentMiddleware } from "langchain";
 import { z } from "zod";
 import { classifyError, classifyResult, normalizeUsage, temperatureOf, topPOf } from "@airprompter/agent-runtime";
@@ -33,12 +34,14 @@ export interface AirPrompterMiddlewareOptions {
   slots: string;
   /** Builds the run's input from the agent's context. By default it reads `context.airprompter`. */
   input?: (context: unknown) => RunInput;
+  /** LangChain hands a middleware only the context keys it declares, so `input` sees only the keys listed here. */
+  contextSchema?: { shape: z.ZodRawShape };
 }
 
 type Approved = Extract<Placement, { kind: "approved" }>;
 type RuntimeLike = { context?: unknown; configurable?: { thread_id?: unknown } };
 type StateLike = { airprompter_run_id?: string };
-type ModelLike = { model?: string; modelName?: string; lc_kwargs?: Record<string, unknown>; _defaultConfig?: Record<string, unknown>; constructor: new (fields: Record<string, unknown>) => unknown };
+type ModelLike = { model?: string; modelName?: string; lc_kwargs?: Record<string, unknown>; _defaultConfig?: Record<string, unknown>; _llmType?: () => string; constructor: new (fields: Record<string, unknown>) => unknown };
 
 /** The sealed settings a chat model reads only from its constructor. Passed as `modelSettings`, they never reach the wire. */
 function constructorFields(settings: SlotInference): Record<string, unknown> {
@@ -68,11 +71,20 @@ async function buildModel(model: ModelLike, placed: Approved): Promise<unknown> 
   const fields = constructorFields(placed.settings);
   const configured = model._defaultConfig;
   const callerId = model.model ?? model.modelName ?? configured?.model;
-  if (callerId !== placed.model) return initChatModel(placed.model, fields as never);
-  if (Object.keys(fields).length === 0) return model;
+  if (callerId === placed.model && Object.keys(fields).length === 0) return model;
+  const released = (await initChatModel(placed.model, fields as never)) as unknown as ModelLike;
+  // Another provider takes nothing of the caller's. `_defaultConfig` holds `modelProvider`, and keeping it sent a
+  // Claude id down the OpenAI path. On the same provider the caller's key and base URL stay, so a gateway is not bypassed.
+  if (providerOf(model) !== providerOf(released)) return released;
   // A string-built model keeps its fields in `_defaultConfig`, so rebuilding from `lc_kwargs` would silently drop them.
   if (configured) return initChatModel(placed.model, { ...withoutModel(configured), ...fields } as never);
-  return new model.constructor({ ...model.lc_kwargs, ...fields });
+  return new model.constructor({ ...model.lc_kwargs, model: placed.model, ...fields });
+}
+
+function providerOf(model: ModelLike): string | undefined {
+  const configured = model._defaultConfig;
+  if (!configured) return model._llmType?.();
+  return (configured.modelProvider as string | undefined) ?? _inferModelProvider(configured.model as string);
 }
 
 /** An interrupt or a parent command is control flow on its way up, not a failure. */
@@ -92,13 +104,19 @@ function finishErrorOf(message: { response_metadata?: { finish_reason?: unknown;
   return classifyResult({ stop_reason: metadata?.finish_reason ?? metadata?.stop_reason });
 }
 
-const contextSchema = z.object({
-  airprompter: z.object({
-    subject: z.string(),
-    tags: z.record(z.string(), z.string()),
-    variables: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
-  }).partial().optional(),
-});
+// The field is unknown, because a schema here would reject the caller's request over a bad subject. `softInput` reads it.
+const contextSchema = z.object({ airprompter: z.unknown().optional() });
+
+/** What is usable from `context.airprompter`. A bad field is dropped, and bad tags end at the session's own check. */
+function softInput(value: unknown): RunInput {
+  const input = (typeof value === "object" && value !== null ? value : {}) as { subject?: unknown; tags?: unknown; variables?: unknown };
+  const isRecord = (field: unknown): field is Record<string, never> => typeof field === "object" && field !== null;
+  return {
+    ...(typeof input.subject === "string" ? { subject: input.subject } : {}),
+    ...(isRecord(input.tags) ? { tags: input.tags } : {}),
+    ...(isRecord(input.variables) ? { variables: input.variables } : {}),
+  };
+}
 
 const stateSchema = z.object({
   airprompter_run_id: z.string().optional(),
@@ -114,7 +132,7 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
     const threadId = runtime?.configurable?.thread_id;
     const conversation = typeof threadId === "string" ? { conversationId: threadId } : {};
     if (options.input) return { ...conversation, ...options.input(runtime?.context) };
-    return { ...conversation, ...(runtime?.context as { airprompter?: RunInput } | undefined)?.airprompter };
+    return { ...conversation, ...softInput((runtime?.context as { airprompter?: unknown } | undefined)?.airprompter) };
   };
 
   const findRun = (state: StateLike, runtime: RuntimeLike | undefined): RunSession => {
@@ -144,7 +162,7 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
 
   return createMiddleware({
     name: "AirPrompter",
-    contextSchema,
+    contextSchema: options.contextSchema ? contextSchema.extend(options.contextSchema.shape) : contextSchema,
     stateSchema,
     beforeAgent: (_state: unknown, runtime: unknown) => {
       const run = ap.currentRun() ?? ap.openRun(inputOf(runtime as RuntimeLike));

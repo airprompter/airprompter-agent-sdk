@@ -107,12 +107,60 @@ test("the fixture: five model calls and four tools are one run, with the release
   }
 });
 
-test("a caller's model loses to the release's", async () => {
+test("a caller's model loses to the release's, and on one provider its key and base URL stay, so a gateway is not bypassed", async () => {
   const { ap, rows } = await host();
   const { requests, fetch } = provider([{ content: "ok" }]);
-  await withEnvironment(fetch, () => createAgent({ model: chatModel(fetch, "gpt-4-caller"), tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask()));
+  await createAgent({ model: chatModel(fetch, "gpt-4-caller", { configuration: { fetch, baseURL: "https://gateway.test/v1" } }), tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask());
   assert.deepEqual([requests[0]!.model, requests[0]!.system], ["gpt-5", ["Approved text."]]);
+  assert.match(requests[0]!.url, /^https:\/\/gateway\.test\/v1/);
+  const stringBuilt = provider([{ content: "ok" }]);
+  const model = await initChatModel("openai:gpt-4-caller", { apiKey: "test-only", configuration: { fetch: stringBuilt.fetch, baseURL: "https://gateway.test/v1" } });
+  await createAgent({ model, tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask());
+  assert.deepEqual([stringBuilt.requests[0]!.model, stringBuilt.requests[0]!.url.startsWith("https://gateway.test/v1")], ["gpt-5", true]);
   await rows();
+});
+
+test("a truncated reply counts as an error on the run", async () => {
+  const { ap, rows } = await host();
+  const { fetch } = provider([{ content: "cut off", finish: "length" }]);
+  await createAgent({ model: chatModel(fetch), tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask());
+  assert.deepEqual((await rows()).map((row) => [row.count, row.status, row.errorClass]), [[1, "error", "truncated"]]);
+});
+
+test("with responseFormat the handler's messages hold the usage", async () => {
+  const { ap, rows } = await host();
+  const { fetch } = provider([{ content: "{\"answer\":\"yes\"}", usage: { prompt_tokens: 7, completion_tokens: 3 } }]);
+  const result = await createAgent({ model: chatModel(fetch), tools: [], responseFormat: z.object({ answer: z.string() }), middleware: [airprompter(ap, { slots: TAG })] } as never).invoke(ask() as never);
+  assert.deepEqual((result as { structuredResponse?: unknown }).structuredResponse, { answer: "yes" });
+  assert.deepEqual((await rows()).map((row) => [row.count, row.tokens.input, row.tokens.output]), [[1, 7, 3]]);
+});
+
+test("a bad context never fails the customer's request: a subject that is not a string is dropped", async () => {
+  const { ap, rows } = await host();
+  const { requests, fetch } = provider([{ content: "ok" }]);
+  const agent = createAgent({ model: chatModel(fetch), tools: [], middleware: [airprompter(ap, { slots: TAG })] });
+  await agent.invoke(ask() as never, { context: { airprompter: { subject: 12345, tags: { "bad key!": "x" } } } } as never);
+  assert.deepEqual(requests[0]!.system, ["Approved text."]);
+  assert.deepEqual((await rows()).map((row) => row.count), [1]);
+});
+
+test("a slot name the release could never hold is a passthrough, not a failed request", async () => {
+  const { ap, rows } = await host();
+  const { requests, fetch } = provider([{ content: "ok" }]);
+  await createAgent({ model: chatModel(fetch), tools: [], systemPrompt: "Own.", middleware: [airprompter(ap, { slots: "Support-Reply" })] }).invoke(ask());
+  assert.deepEqual(requests[0]!.system, ["Own."]);
+  assert.deepEqual(await rows(), []);
+});
+
+test("inside ap.run the middleware joins that run: two agents in one request are one count, ended by ap.run", async () => {
+  const { ap, rows } = await host();
+  const { fetch } = provider([{ content: "one", usage: { prompt_tokens: 10, completion_tokens: 1 } }, { content: "two", usage: { prompt_tokens: 20, completion_tokens: 2 } }]);
+  const agent = createAgent({ model: chatModel(fetch), tools: [], middleware: [airprompter(ap, { slots: TAG })] });
+  await ap.run({ subject: "ann" }, async () => {
+    await agent.invoke(ask());
+    await agent.invoke(ask());
+  });
+  assert.deepEqual((await rows()).map((row) => [row.count, row.tokens.input]), [[1, 30]]);
 });
 
 test("stream runs the same path: one run, tokens as invoke", async () => {
@@ -156,13 +204,13 @@ test("context reaches the subject, and thread_id stands in for it", async () => 
   await rows();
 });
 
-test("a custom input function builds the run", async () => {
+test("a custom input function reads the caller's own context", async () => {
   const { ap, plane, rows } = await host({ promote: false });
   plane.promote([plane.slot({ tag: TAG, text: "Hello {{name}}", versionId: "ver_a", model: "gpt-5", variables: [{ name: "name", required: true, trust: "operator" }] })]);
   await ap.syncNow();
   const { requests, fetch } = provider([{ content: "ok" }]);
-  const middleware = airprompter(ap, { slots: TAG, input: () => ({ variables: { name: "Ann" } }) });
-  await createAgent({ model: chatModel(fetch), tools: [], middleware: [middleware] }).invoke(ask());
+  const middleware = airprompter(ap, { slots: TAG, contextSchema: z.object({ userName: z.string() }), input: (context) => ({ variables: { name: (context as { userName: string }).userName } }) });
+  await createAgent({ model: chatModel(fetch), tools: [], middleware: [middleware] }).invoke(ask() as never, { context: { userName: "Ann" } } as never);
   assert.deepEqual(requests[0]!.system, ["Hello Ann"]);
   await rows();
 });
@@ -225,7 +273,7 @@ test("an interrupt then a resume in the same process is one run", async () => {
   assert.deepEqual((await rows()).map((row) => [row.count, row.tokens.input]), [[1, 30]]);
 });
 
-test("a resume after a sweep is a new run on the same subject: it keeps its arm and counts again", async () => {
+test("a resume after a sweep, with the same context, is a new run on the same subject: it keeps its arm and counts again", async () => {
   const { ap, plane, clock, rows } = await host({ promote: false });
   const a = plane.slot({ tag: TAG, text: "Version A", versionId: "ver_a", model: "gpt-5", variables: [] });
   const b = plane.slot({ tag: TAG, text: "Version B", versionId: "ver_b", model: "gpt-5", variables: [] });
@@ -234,14 +282,16 @@ test("a resume after a sweep is a new run on the same subject: it keeps its arm 
     { arm: "candidate", weightBps: 5000, releaseDigest: releaseDigest([b]), overrides: [b] },
   ] }] });
   await ap.syncNow();
-  const { requests, fetch } = provider([{ toolCalls: ["lookup"] }, { content: "done" }]);
-  const agent = createAgent({ model: chatModel(fetch), tools: [lookup], checkpointer: new MemorySaver(), middleware: [humanInTheLoopMiddleware({ interruptOn: { lookup: true } } as never) as never, airprompter(ap, { slots: TAG })] });
-  const config = { configurable: { thread_id: "t2" }, context: { airprompter: { subject: "ann" } } };
-  await agent.invoke(ask() as never, config as never);
-  clock.ms += 15 * 60_000;
-  await agent.invoke(new Command({ resume: { decisions: [{ type: "approve" }] } }) as never, config as never);
-  assert.deepEqual(requests[1]!.system, requests[0]!.system, "the same subject keeps the arm");
-  assert.deepEqual((await rows()).map((row) => row.count), [2], "two runs on one arm");
+  for (let i = 0; i < 8; i += 1) {
+    const { requests, fetch } = provider([{ toolCalls: ["lookup"] }, { content: "done" }]);
+    const agent = createAgent({ model: chatModel(fetch), tools: [lookup], checkpointer: new MemorySaver(), middleware: [humanInTheLoopMiddleware({ interruptOn: { lookup: true } } as never) as never, airprompter(ap, { slots: TAG })] });
+    const config = { configurable: { thread_id: `t-${i}` }, context: { airprompter: { subject: `ann-${i}` } } };
+    await agent.invoke(ask() as never, config as never);
+    clock.ms += 15 * 60_000;
+    await agent.invoke(new Command({ resume: { decisions: [{ type: "approve" }] } }) as never, config as never);
+    assert.deepEqual(requests[1]!.system, requests[0]!.system, "the same subject keeps the arm");
+  }
+  assert.equal((await rows()).reduce((sum, row) => sum + row.count, 0), 16, "each counts twice");
 });
 
 test("a string-built model takes the sealed settings: the constructor's temperature does not win", async () => {

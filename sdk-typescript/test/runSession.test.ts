@@ -363,6 +363,15 @@ test("stop() ends open runs before the windows close", async () => {
   assert.deepEqual(written.map((row) => [row.count, row.tokens.input]), [[1, 3]]);
 });
 
+test("a label the heartbeat cannot carry does not stop a served call", async () => {
+  const { plane, start } = fixture();
+  plane.promote([plane.slot({ tag: "Odd_Tag", text: "Version A", versionId: "ver_a", variables: [] })]);
+  const ap = await start();
+  const placed = await ap.openRun().place("Odd_Tag");
+  assert.equal(placed.kind === "approved" && placed.instructions, "Version A");
+  await ap.stop();
+});
+
 test("a slot name no release can hold is no_slot, not a throw", async () => {
   const { plane, start, slotOf } = fixture();
   plane.promote([slotOf("Version A", "ver_a")]);

@@ -188,12 +188,12 @@ export class Session implements RunSession {
       return this.passthrough(slot, "slot_disabled");
     }
     if (outcome.slot.kind !== "prompt") return this.passthrough(slot, "slot_kind_unsupported");
+    this.registerLabel(slot);
     return this.render(slot, resolver, outcome);
   }
 
   private async render(slot: string, resolver: ReleaseResolver, resolved: Extract<ResolveOutcome, { ok: true }>): Promise<Pin> {
     try {
-      this.host.registerLabel(slot);
       const text = resolver.textOf(resolved.slot);
       const plan = planFill({ tag: slot, variables: resolved.slot.variables, text, values: this.input.variables ?? {}, registry: this.host.variables });
       const filled = await fillAsync(plan, { tag: slot, subject: this.input.subject, versionId: resolved.slot.versionId, arm: resolved.arm }, this.host.variables);
@@ -204,6 +204,15 @@ export class Session implements RunSession {
       };
     } catch (error) {
       return this.passthrough(slot, "variables_unfilled", { error: (error as Error).name });
+    }
+  }
+
+  /** A label is only a display name on the heartbeat: a bad one must not stop a served call. */
+  private registerLabel(slot: string): void {
+    try {
+      this.host.registerLabel(slot);
+    } catch {
+      this.host.log({ event: "run_label_invalid", runId: this.id, slot });
     }
   }
 

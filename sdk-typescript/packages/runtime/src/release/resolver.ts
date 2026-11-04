@@ -22,6 +22,7 @@
  * ```
  */
 
+import { randomBytes } from "node:crypto";
 import { snapshotInference, disabledFrom, matchesAudience, capturedAudienceIds, minuteOf, assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";
 
 export interface Rendered {
@@ -64,7 +65,7 @@ export interface ResolverInput {
   runRefKey: Uint8Array;
   agentId: string;
   target: Target;
-  /** The subject when the experiment is keyed by instance, or the caller gave none. */
+  /** The subject only when the experiment says `subjectKey: "instance"`. */
   instanceId: string;
   nowMs: () => number;
   delimiters?: Delimiters;
@@ -78,6 +79,11 @@ export interface ResolverInput {
 export type ResolveOutcome = ({ ok: true; audienceIds?: readonly string[]; runMinute?: string } & ReleaseSlot) | { ok: false; reason: "disabled" | "no_slot"; tag: string | null };
 
 export { disabledFrom } from "@airprompter/agent-core";
+
+/** An absent subject is a fresh id per call: hashing the instance would split instances, not users. */
+export function newSubject(): string {
+  return randomBytes(16).toString("hex");
+}
 
 export class ReleaseResolver {
   constructor(private readonly input: ResolverInput) {}
@@ -136,7 +142,7 @@ export class ReleaseResolver {
     // S16: the experiment for this slot — its own salt and arms, so two slots split independently.
     const experiment = this.experimentFor(tag);
     if (!experiment || (experiment.audience && !matchesAudience(experiment.audience.selector,tags))) return { ok: true, slot, arm: "none", bucket: null, ...cohort };
-    const subjectValue = experiment.subjectKey === "instance" || subject === undefined ? this.input.instanceId : subject;
+    const subjectValue = experiment.subjectKey === "instance" ? this.input.instanceId : subject ?? newSubject();
     const arms = this.arms(experiment);
     if (!arms) return { ok: false, reason: "disabled", tag };
     const assigned = assignArm({ salt: experiment.salt, subject: subjectValue, arms });

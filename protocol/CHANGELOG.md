@@ -1,5 +1,9 @@
 # Protocol changelog
 
+## Unreleased (text only)
+
+- `assignment-hash.md`: an absent subject is a fresh id per call, and the instance id is used only through `subjectKey: "instance"`. No version change: no schema, vector or wire byte moved.
+
 ## 2.0.0 · One audience contract
 
 - Audience targeting has one capability, `audience`, and one selector shape. Conditions require `is` or `contains` and combine with implicit AND semantics.

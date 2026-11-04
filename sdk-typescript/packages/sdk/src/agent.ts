@@ -2,8 +2,9 @@
  * `AirPrompterAgent` — the runtime a customer application holds.
  *
  * `start()` reads the store before any network and serves immediately from
- * the last verified release (other slot → vendored bundle → refuse to start
- * when nothing verifies); sync runs in the background per mode. `prompt(tag)`
+ * the last verified release (other slot → vendored bundle); with nothing
+ * verified it still starts, at generation 0, and picks up the first release
+ * by itself; sync runs in the background per mode. `prompt(tag)`
  * renders with trust-aware variables and hands back a content-free `runRef`;
  * `workflow(tag)` yields steps in order; `report()` and `feedback()` feed the
  * spool. The render path never reaches AirPrompter; the only network it can
@@ -44,7 +45,8 @@ import { fileKey, type KeyProvider, type StorageProtection } from "@airprompter/
 import { requiredModelsMissing } from "@airprompter/agent-sync";
 import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "@airprompter/agent-sync";
 import { observeCall, type ObserveOptions } from "@airprompter/agent-runtime";
-import { ReleaseResolver, disabledFrom, type Rendered } from "@airprompter/agent-runtime";
+import { ReleaseResolver, disabledFrom, newSubject, type Rendered } from "@airprompter/agent-runtime";
+import { DEFAULT_RUN_IDLE_TIMEOUT_MS, RunRegistry, classifyError, type AgentRuntime, type RunInput, type RunSession } from "@airprompter/agent-runtime";
 import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, unsourced, type FillPlan, type FilledRender, type RenderValues, type VariableSourceInput } from "@airprompter/agent-runtime";
 import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "@airprompter/agent-runtime";
 import { wrapClient, type WrapHooks } from "@airprompter/agent-runtime";
@@ -196,6 +198,8 @@ export interface StartOptions {
   fs?: FsPort;
   random?: () => number;
   logger?: (event: Record<string, unknown>) => void;
+  /** A run with no activity for this long ends by itself. Default 15 minutes. */
+  runIdleTimeoutMs?: number;
   /**
    * T26: who reports on the heartbeat — this SDK by default; the telemetry daemon names itself `airprompterd`, the CLI
    * `airprompter-cli`. It names the *reporting software*, never the customer's app (the heartbeat schema is an enum,
@@ -367,7 +371,8 @@ export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: numbe
   };
   const failing = (reason: string) => raise("failing", reason);
   const degraded = (reason: string) => raise("degraded", reason);
-  if (status.generation <= 0) failing("no_verified_release");
+  // Generation 0 serves the agent's own prompt: a 503 here would have a liveness probe restart a working agent.
+  if (status.generation <= 0) degraded("no_verified_release");
   if (status.leaseExpired && status.onLeaseExpiry === "halt") failing("lease_expired_halt");
   if (status.leaseExpired && status.onLeaseExpiry === "degrade") degraded("lease_expired_degrade");
   if (status.consecutiveSyncFailures >= 3) degraded("sync_failing");
@@ -456,7 +461,7 @@ export function isAgentStartError(error: unknown): error is AgentStartError {
   return errorNamed<AgentStartError["code"]>(error, "AgentStartError");
 }
 
-export class AirPrompterAgent {
+export class AirPrompterAgent implements AgentRuntime {
   private active: LoadedSlot | null = null;
   private source: ReleaseSource = "store";
   private lastSyncMs: number | null = null;
@@ -528,6 +533,7 @@ export class AirPrompterAgent {
   private readonly renders = new RenderRegistry();
   /** The application's variable sources (`start({ variables })`, `ap.variables.provide()`). */
   readonly variables: VariableSourceRegistry;
+  private readonly runs: RunRegistry;
   /** Slot × variable pairs whose stricter-trust line was logged; bounded by declared names, never cleared. */
   private readonly stricterSaid = new Set<string>();
   readonly spool: SpoolWriter;
@@ -565,6 +571,29 @@ export class AirPrompterAgent {
     this.sink = this.directorySink ?? new MemorySink({ instanceId: ownInstanceId }, options.telemetry?.bufferBytes);
     this.spool = new SpoolWriter(this.sink, { instanceId: ownInstanceId, instanceClass: options.telemetry?.instanceClass ?? (serverless ? "ephemeral" : "resident"), sdk: `${SDK_NAME}/${SDK_VERSION}` });
     this.variables = new VariableSourceRegistry(options.variables);
+    this.runs = new RunRegistry({
+      release: () => (this.active ? { resolver: this.resolver() } : { unavailable: this.stagedManifest ? "awaiting_unlock" : "no_verified_release" }),
+      tagsFor: (overrides) => {
+        const tags = overrides ? copyAudienceTags({ ...this.audienceTags, ...overrides }) : this.audienceTags;
+        this.rememberAudienceTagKeys(Object.keys(tags));
+        return tags;
+      },
+      registerLabel: (tag) => this.registerPromptLabel(tag, this.audiencePromptLabels.get(tag) ?? tag),
+      variables: this.variables,
+      leaseHalted: (tag) => {
+        try {
+          this.guardLease(tag);
+          return false;
+        } catch {
+          return true;
+        }
+      },
+      stampDisabled: (generation, tag) => this.stampRefusal("disabled", generation, tag),
+      recordRun: (observation, nowMs) => this.spool.observe(observation, nowMs),
+      log: (event) => this.log(event),
+      now: () => this.nowMs(),
+      idleTimeoutMs: options.runIdleTimeoutMs ?? DEFAULT_RUN_IDLE_TIMEOUT_MS,
+    });
     this.client =
       options.apiKey && options.sync?.mode !== "offline"
         ? new SyncClient({ baseUrl: options.baseUrl ?? "https://api.airprompter.com", agentId: options.agentId, target: options.target, apiKey: options.apiKey, ...(options.fetch ? { fetch: options.fetch } : {}), userAgent: `${SDK_NAME}/${SDK_VERSION}` })
@@ -806,8 +835,8 @@ export class AirPrompterAgent {
       // host with nothing to serve yet — not a host that cannot run. T9 makes the unlock the customer's to give, and a
       // process that refuses to start can never give it: so it starts, heartbeats as generation 0 with the staged
       // generation beside it, keeps syncing, and answers `unlock()`, the window, or the hook. `prompt()` refuses until then.
-      if (!this.stagedManifest) throw new AgentStartError("no_verified_release", `no verified release in the store, no usable vendored bundle, and ${this.describeFetchFailure()}`);
-      this.log({ event: "awaiting_first_unlock", generation: this.stagedManifest.payload.generation });
+      if (this.stagedManifest) this.log({ event: "awaiting_first_unlock", generation: this.stagedManifest.payload.generation });
+      else this.log({ event: "started_without_release", reason: `no verified release in the store, no usable vendored bundle, and ${this.describeFetchFailure()}` });
     }
     if (this.client && (this.options.sync?.mode ?? "resident") === "resident") {
       this.schedule();
@@ -966,6 +995,7 @@ export class AirPrompterAgent {
   private startSpoolTimer(): void {
     if (this.spoolTimer || (this.options.sync?.mode ?? "resident") === "on_invoke") return;
     this.spoolTimer = setInterval(() => {
+      this.runs.sweep();
       this.spool.closeStaleWindows(this.nowMs());
       void this.checkTelemetryDaemon();
     }, 60_000);
@@ -1132,7 +1162,7 @@ export class AirPrompterAgent {
     return this.active;
   }
 
-  private log(event: Record<string, unknown>): void {
+  log(event: Record<string, unknown>): void {
     this.options.logger?.({ sdk: SDK_NAME, agentId: this.options.agentId, target: this.options.target, ...event });
   }
 
@@ -1772,6 +1802,9 @@ export class AirPrompterAgent {
 
   prompt(tag: string, options: { subject?: string; tags?: Readonly<Record<string,string>>; displayName?: string } = {}) {
     this.registerPromptLabel(tag, options.displayName ?? this.audiencePromptLabels.get(tag) ?? tag);
+    // One id for the whole prompt() call, so needs(), variables() and render() read the same arm. A variable source
+    // still gets the caller's own subject.
+    const subject = options.subject ?? newSubject();
     // Snapshot caller-owned selectors now; process tags from setTags() remain live per render.
     const tagOverride = options.tags ? copyAudienceTags(options.tags) : undefined;
 
@@ -1782,7 +1815,7 @@ export class AirPrompterAgent {
       const resolver = this.resolver();
       const localTags = tagOverride ? copyAudienceTags({...this.audienceTags,...tagOverride}) : this.audienceTags;
       this.rememberAudienceTagKeys(Object.keys(localTags));
-      const resolved = this.resolveSlot(tag, options.subject, localTags);
+      const resolved = this.resolveSlot(tag, subject, localTags);
       const text = resolver.textOf(resolved.slot);
       const plan = planFill({ tag, variables: resolved.slot.variables, text, values, registry: this.variables });
       return { resolver, resolved, text, plan };
@@ -1806,8 +1839,8 @@ export class AirPrompterAgent {
     };
     /** The required names a render would still lack after these values and the registered sources — check it at start-up. */
     const localTags = () => tagOverride ? copyAudienceTags({...this.audienceTags,...tagOverride}) : this.audienceTags;
-    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: this.resolveSlot(tag, options.subject, localTags()).slot.variables, values, registry: this.variables });
-    return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, options.subject, localTags()).slot.variables };
+    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: this.resolveSlot(tag, subject, localTags()).slot.variables, values, registry: this.variables });
+    return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, subject, localTags()).slot.variables };
   }
 
   /** Count a render failure against its selected artifact and audience. */
@@ -1866,6 +1899,34 @@ export class AirPrompterAgent {
       return text;
     };
     return { ...workflow, renderStepAsync };
+  }
+
+  /** Open a run, or get the live one named by `resume`. Its slots stay on one version, and it counts once. */
+  openRun(input: RunInput = {}): RunSession {
+    return this.runs.open(input);
+  }
+
+  /** The run this async scope is inside, if any. */
+  currentRun(): RunSession | undefined {
+    return this.runs.current();
+  }
+
+  /** Run `fn` inside a run's scope. A promise it returns holds the scope, so a long tool does not look idle. */
+  withRun<T>(run: RunSession, fn: () => T): T {
+    return this.runs.withRun(run, fn);
+  }
+
+  /** One request as one run: ended here, with the thrown error's class if `fn` rejects. */
+  async run<T>(input: RunInput, fn: (run: RunSession) => T | Promise<T>): Promise<T> {
+    const run = this.openRun(input);
+    try {
+      const result = await this.withRun(run, async () => fn(run));
+      run.end();
+      return result;
+    } catch (error) {
+      run.end({ errorClass: classifyError(error) });
+      throw error;
+    }
   }
 
   /** Content-free measurements for one model call. */
@@ -2167,6 +2228,7 @@ export class AirPrompterAgent {
     // T33: an observation settled by a wrapped client's stream helper lands a few microtasks after the customer's own
     // await; one turn of the event loop lets everything in flight reach the spool before the windows close.
     await new Promise<void>((resolve) => setImmediate(resolve));
+    this.runs.endAll();
     this.spool.closeWindows(this.nowMs());
   }
 

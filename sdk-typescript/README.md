@@ -116,9 +116,13 @@ variable the slot did not declare throws.
    from a database column holds the distribution key, so keep that column
    as private as the key.
 3. With still nothing, one synchronous sync runs — the only time the SDK
-   waits on the network. If that fails too, `start()` throws
-   `AgentStartError("no_verified_release")` whose message names the control
-   plane's answer: a 404 is "no release promoted to `<target>`" (promote one
+   waits on the network. If that fails too, the agent still starts, at
+   generation 0. It logs `started_without_release`, keeps syncing, and takes
+   the first promotion with no restart. Until then a run answers
+   `passthrough`, so your framework's own prompt and model run. Plain
+   `ap.prompt(...).render()` has no prompt to fall back on, so it throws
+   `AgentStartError("no_verified_release")` at the first render. The log line
+   names the control plane's answer: a 404 is "no release promoted to `<target>`" (promote one
    from the app's board, or the key is bound to another app/environment), a
    401 is the key, a 403 carries the server's code, a transport failure
    carries its message and the base URL. Serving an unverified release is

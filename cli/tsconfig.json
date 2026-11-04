@@ -50,6 +50,7 @@
     "../sdk-typescript/test/helpers/*.ts"
   ],
   "exclude": [
-    "../sdk-typescript/packages/datastore-*/**"
+    "../sdk-typescript/packages/datastore-*/**",
+    "../sdk-typescript/packages/sdk/src/frameworks/**"
   ]
 }

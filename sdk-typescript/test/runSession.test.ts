@@ -10,7 +10,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { publicJwkOf, releaseDigest } from "../packages/core/src/protocol/trust.js";
+import { publicJwkOf, releaseDigest, signBytes } from "../packages/core/src/protocol/trust.js";
+import { canonicalBytes } from "../packages/core/src/protocol/canonicalJson.js";
 import { FakeControlPlane } from "../packages/core/src/testing/index.js";
 import type { Directive, Experiment, ManifestSlot } from "../packages/core/src/protocol/types.js";
 import type { ErrorClass } from "../packages/core/src/telemetry/rows.js";
@@ -441,7 +442,12 @@ test("run tags reach the experiment's audience, and their names reach the heartb
   const { plane, start, slotOf, experiment } = fixture();
   const a = slotOf("Version A", "ver_a");
   const b = slotOf("Version B", "ver_b");
-  plane.promote([a], { protocol: "2.0.0", experiments: [{ ...experiment(a, b, 10_000), audience: { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags", conditions: [{ key: "plan", operator: "is", value: "pro" }] } } }] });
+  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, conditions: [{ key: "plan", operator: "is" as const, value: "pro" }] } };
+  const manifest = plane.promote([a], { protocol: "2.0.0", experiments: [{ ...experiment(a, b, 10_000), audience }] });
+  manifest.payload.requiredCapabilities = ["audience"];
+  manifest.payload.observations = [{ ...audience, tag: TAG, observeFrom: "2026-01-01T00:00:00Z" }];
+  manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
+  (plane as unknown as { current: { bytes: Buffer } }).current.bytes = Buffer.from(JSON.stringify(manifest));
   const ap = await start();
   const textOf = async (input: Parameters<typeof ap.openRun>[0]) => {
     const placed = await ap.openRun(input).place(TAG);

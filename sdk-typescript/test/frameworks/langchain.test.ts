@@ -9,8 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ChatOpenAI } from "@langchain/openai";
-import { Command, MemorySaver } from "@langchain/langgraph";
+import { ChatAnthropic } from "@langchain/anthropic";
+import { AzureChatOpenAI, ChatOpenAI } from "@langchain/openai";
+import { Command, MemorySaver, interrupt } from "@langchain/langgraph";
 import { HumanMessage, ToolMessage, createAgent, createMiddleware, humanInTheLoopMiddleware, initChatModel, modelFallbackMiddleware, modelRetryMiddleware, tool } from "langchain";
 import { z } from "zod";
 
@@ -120,6 +121,94 @@ test("a caller's model loses to the release's, and on one provider its key and b
   await rows();
 });
 
+test("a release id with a provider prefix reaches the wire without it", async () => {
+  const { ap, rows } = await host({ model: "openai:gpt-5-mini" });
+  const object = provider([{ content: "ok" }]);
+  await createAgent({ model: chatModel(object.fetch, "gpt-4-caller"), tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask());
+  assert.equal(object.requests[0]!.model, "gpt-5-mini");
+  const stringBuilt = provider([{ content: "ok" }]);
+  const model = await initChatModel("openai:gpt-4-caller", { apiKey: "test-only", configuration: { fetch: stringBuilt.fetch } });
+  await createAgent({ model, tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask());
+  assert.equal(stringBuilt.requests[0]!.model, "gpt-5-mini");
+  await rows();
+});
+
+test("an id no provider claims stays on the caller's route, with sealed settings", async () => {
+  for (const id of ["my-llama-3", "anthropic.claude-haiku-4-5-20251001-v1:0"]) {
+    const { ap, rows } = await host({ model: id, inference: { temperatureMilli: 200 } });
+    const { requests, fetch } = provider([{ content: "ok" }]);
+    await createAgent({ model: chatModel(fetch, id), tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask());
+    assert.deepEqual([requests[0]!.model, requests[0]!.temperature], [id, 0.2]);
+    assert.deepEqual((await rows()).map((row) => row.count), [1]);
+  }
+});
+
+test("an Azure caller never moves to the public endpoint", async () => {
+  const { ap, events, rows } = await host();
+  const { requests, fetch } = provider([{ content: "ok" }]);
+  const azure = new AzureChatOpenAI({ model: "my-deployment", azureOpenAIApiKey: "test-only", azureOpenAIApiInstanceName: "acme", azureOpenAIApiDeploymentName: "my-deployment", azureOpenAIApiVersion: "2024-10-21", maxRetries: 0, configuration: { fetch } });
+  await withEnvironment(fetch, () => createAgent({ model: azure, tools: [], systemPrompt: "Own.", middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask()));
+  assert.deepEqual(requests[0]!.system, ["Own."]);
+  assert.match(requests[0]!.url, /acme\.openai\.azure\.com/);
+  assert.equal(events.filter((event) => event.reason === "model_unresolved").length, 1);
+  assert.deepEqual(await rows(), []);
+});
+
+test("an Anthropic model keeps its own key with none in the environment, and its stop_reason counts", async () => {
+  const { ap, rows } = await host({ model: "claude-sonnet-5" });
+  const seen: Array<string | null> = [];
+  const fetch = (async (_url: unknown, init?: RequestInit) => {
+    seen.push(new Headers(init?.headers).get("x-api-key"));
+    return new Response(JSON.stringify({ id: `m${seen.length}`, type: "message", role: "assistant", model: "claude-sonnet-5", content: [{ type: "text", text: "cut" }], stop_reason: "max_tokens", usage: { input_tokens: 4, output_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as unknown as typeof globalThis.fetch;
+  const model = new ChatAnthropic({ model: "claude-haiku-caller", apiKey: "caller-key", maxRetries: 0, clientOptions: { fetch } });
+  await createAgent({ model, tools: [], middleware: [airprompter(ap, { slots: TAG })] }).invoke(ask());
+  assert.deepEqual(seen, ["caller-key"]);
+  assert.deepEqual((await rows()).map((row) => [row.status, row.errorClass]), [["error", "truncated"]]);
+});
+
+test("a built model is cached per placement: new sealed settings reach the wire", async () => {
+  const { ap, plane, rows } = await host({ inference: { temperatureMilli: 200 } });
+  const { requests, fetch } = provider([{ content: "ok" }]);
+  const agent = createAgent({ model: chatModel(fetch), tools: [], middleware: [airprompter(ap, { slots: TAG })] });
+  await agent.invoke(ask());
+  plane.promote([plane.slot({ tag: TAG, text: "Approved text.", versionId: "ver_b", model: "gpt-5", variables: [], inference: { temperatureMilli: 700 } })]);
+  await ap.syncNow();
+  await agent.invoke(ask());
+  assert.deepEqual(requests.map((request) => request.temperature), [0.2, 0.7]);
+  await rows();
+});
+
+test("bad tool arguments keep LangChain's own message, not wrapped twice", async () => {
+  const strict = tool(async () => "ok", { name: "lookup", description: "look it up", schema: z.object({ order: z.string() }) });
+  const message = async (middleware: unknown[]) => {
+    const { fetch } = provider([{ toolCalls: ["lookup"] }, { content: "sorry" }]);
+    const result = await createAgent({ model: chatModel(fetch), tools: [strict], middleware: middleware as never }).invoke(ask() as never);
+    return (result as { messages: unknown[] }).messages.find((m) => ToolMessage.isInstance(m)) as ToolMessage;
+  };
+  const { ap, rows } = await host();
+  const ours = String((await message([airprompter(ap, { slots: TAG })])).content);
+  const theirs = String((await message([])).content);
+  assert.equal(ours.split("\n")[0], theirs.split("\n")[0]);
+  assert.match(ours, / Please fix the error and try again\.$/);
+  assert.doesNotMatch(ours, /Please fix your mistakes/, "not wrapped a second time");
+  await rows();
+});
+
+test("an interrupt on the model path is not a failed call", async () => {
+  const { ap, rows } = await host();
+  const { fetch } = provider([{ content: "ok", usage: { prompt_tokens: 5, completion_tokens: 1 } }]);
+  const ask_first = createMiddleware({ name: "AskFirst", wrapModelCall: async (request, handler) => {
+    interrupt("approve this call?");
+    return handler(request);
+  } });
+  const agent = createAgent({ model: chatModel(fetch), tools: [], checkpointer: new MemorySaver(), middleware: [airprompter(ap, { slots: TAG }), ask_first] });
+  const config = { configurable: { thread_id: "t-model" } };
+  await agent.invoke(ask() as never, config as never);
+  await agent.invoke(new Command({ resume: "yes" }) as never, config as never);
+  assert.deepEqual((await rows()).map((row) => [row.count, row.status, row.tokens.input]), [[1, "ok", 5]]);
+});
+
 test("a truncated reply counts as an error on the run", async () => {
   const { ap, rows } = await host();
   const { fetch } = provider([{ content: "cut off", finish: "length" }]);
@@ -139,7 +228,7 @@ test("a bad context never fails the customer's request: a subject that is not a 
   const { ap, rows } = await host();
   const { requests, fetch } = provider([{ content: "ok" }]);
   const agent = createAgent({ model: chatModel(fetch), tools: [], middleware: [airprompter(ap, { slots: TAG })] });
-  await agent.invoke(ask() as never, { context: { airprompter: { subject: 12345, tags: { "bad key!": "x" } } } } as never);
+  await agent.invoke(ask() as never, { context: { airprompter: { subject: 12345, tags: { "bad key!": "x" }, variables: { name: { nested: true } } } } } as never);
   assert.deepEqual(requests[0]!.system, ["Approved text."]);
   assert.deepEqual((await rows()).map((row) => row.count), [1]);
 });
@@ -334,7 +423,7 @@ test("a release on another provider leaves the caller's provider behind", async 
 });
 
 test("a model that cannot be built leaves the request untouched, writes nothing and says so once", async () => {
-  const { ap, events, rows } = await host({ model: "no-such-provider-model" });
+  const { ap, events, rows } = await host({ model: "gemini-pro" });
   const { requests, fetch } = provider([{ content: "ok" }]);
   const agent = createAgent({ model: chatModel(fetch, "gpt-5"), tools: [], systemPrompt: "The caller's own prompt.", middleware: [airprompter(ap, { slots: TAG })] });
   await agent.invoke(ask());

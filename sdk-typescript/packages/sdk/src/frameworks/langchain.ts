@@ -22,7 +22,7 @@
  */
 
 import { ToolInvocationError, SystemMessage, createMiddleware, initChatModel } from "langchain";
-import { _inferModelProvider } from "langchain/chat_models/universal";
+import { MODEL_PROVIDER_CONFIG, _inferModelProvider } from "langchain/chat_models/universal";
 import type { AgentMiddleware } from "langchain";
 import { z } from "zod";
 import { classifyError, classifyResult, normalizeUsage, temperatureOf, topPOf } from "@airprompter/agent-runtime";
@@ -66,25 +66,38 @@ function withoutModel(config: Record<string, unknown>): Record<string, unknown> 
   return defaults;
 }
 
-/** The model that runs this placement. The release's model wins, and approved text never runs on another. */
-async function buildModel(model: ModelLike, placed: Approved): Promise<unknown> {
-  const fields = constructorFields(placed.settings);
-  const configured = model._defaultConfig;
-  const callerId = model.model ?? model.modelName ?? configured?.model;
-  if (callerId === placed.model && Object.keys(fields).length === 0) return model;
-  const released = (await initChatModel(placed.model, fields as never)) as unknown as ModelLike;
-  // Another provider takes nothing of the caller's. `_defaultConfig` holds `modelProvider`, and keeping it sent a
-  // Claude id down the OpenAI path. On the same provider the caller's key and base URL stay, so a gateway is not bypassed.
-  if (providerOf(model) !== providerOf(released)) return released;
-  // A string-built model keeps its fields in `_defaultConfig`, so rebuilding from `lc_kwargs` would silently drop them.
-  if (configured) return initChatModel(placed.model, { ...withoutModel(configured), ...fields } as never);
-  return new model.constructor({ ...model.lc_kwargs, model: placed.model, ...fields });
+/** A release id may name its provider, as `initChatModel` reads it. Worked out without building a model, which needs a key. */
+function parseModelId(id: string): { provider: string | undefined; id: string } {
+  const separator = id.indexOf(":");
+  const prefix = id.slice(0, Math.max(separator, 0));
+  if (prefix in MODEL_PROVIDER_CONFIG) return { provider: prefix, id: id.slice(separator + 1) };
+  return { provider: _inferModelProvider(id), id };
 }
 
 function providerOf(model: ModelLike): string | undefined {
   const configured = model._defaultConfig;
   if (!configured) return model._llmType?.();
   return (configured.modelProvider as string | undefined) ?? _inferModelProvider(configured.model as string);
+}
+
+/** The model that runs this placement. The release's model wins, and approved text never runs on another. */
+async function buildModel(model: ModelLike, placed: Approved): Promise<unknown> {
+  const fields = constructorFields(placed.settings);
+  const released = parseModelId(placed.model);
+  const configured = model._defaultConfig;
+  const caller = providerOf(model);
+  const sameId = (model.model ?? model.modelName ?? configured?.model) === released.id;
+  if (sameId && Object.keys(fields).length === 0) return model;
+  // The same provider, or an id no provider claims, stays on the caller's key and base URL, so a gateway is not bypassed.
+  if (sameId || released.provider === undefined || released.provider === caller) {
+    // A string-built model keeps its fields in `_defaultConfig`, so rebuilding from `lc_kwargs` would silently drop them.
+    if (configured) return initChatModel(released.id, { ...withoutModel(configured), ...(caller ? { modelProvider: caller } : {}), ...fields } as never);
+    return new model.constructor({ ...model.lc_kwargs, model: released.id, ...fields });
+  }
+  // An Azure deployment is a private route. Moving off it would send the customer's messages to the public endpoint.
+  if (caller === "azure_openai") throw new Error("model_unresolved");
+  // Another provider takes nothing of the caller's: `_defaultConfig` holds `modelProvider`, and keeping it sent a Claude id down the OpenAI path.
+  return initChatModel(released.id, { ...(released.provider ? { modelProvider: released.provider } : {}), ...fields } as never);
 }
 
 /** An interrupt or a parent command is control flow on its way up, not a failure. */
@@ -111,10 +124,11 @@ const contextSchema = z.object({ airprompter: z.unknown().optional() });
 function softInput(value: unknown): RunInput {
   const input = (typeof value === "object" && value !== null ? value : {}) as { subject?: unknown; tags?: unknown; variables?: unknown };
   const isRecord = (field: unknown): field is Record<string, never> => typeof field === "object" && field !== null;
+  const isValue = ([, field]: [string, unknown]) => field === null || ["string", "number", "boolean"].includes(typeof field);
   return {
     ...(typeof input.subject === "string" ? { subject: input.subject } : {}),
     ...(isRecord(input.tags) ? { tags: input.tags } : {}),
-    ...(isRecord(input.variables) ? { variables: input.variables } : {}),
+    ...(isRecord(input.variables) ? { variables: Object.fromEntries(Object.entries(input.variables).filter(isValue)) } : {}),
   };
 }
 
@@ -202,7 +216,7 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
         // A GraphInterrupt tool re-runs on resume, so it is not counted.
         if (isBubbleUp(error)) throw error;
         run.recordToolCall(slot, { ok: false });
-        if (error instanceof ToolInvocationError) throw error;
+        if (ToolInvocationError.isInstance(error)) throw error;
         // A plain rethrow here would turn a recoverable tool error fatal. The model sees LangChain's own text.
         const wrapped = new ToolInvocationError(error, toolCall);
         wrapped.message = `${error}\n Please fix your mistakes.`;

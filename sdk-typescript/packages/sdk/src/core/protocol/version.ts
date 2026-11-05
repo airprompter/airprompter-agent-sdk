@@ -10,4 +10,4 @@
  */
 export const PROTOCOL_VERSION = "3.0.0";
 /** The package's own version, as the heartbeat and store.json (S8: the writer) record it. Generated; never edit it. */
-export const SDK_VERSION = "0.6.0";
+export const SDK_VERSION = "1.0.0-rc.0";

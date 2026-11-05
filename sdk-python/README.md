@@ -12,7 +12,7 @@ conformance vectors and the same on-disk store as the TypeScript SDK — a
 store one SDK wrote is a store the other (and the `airprompter` CLI) opens.
 
 ```bash
-pip install airprompter-agent            # + [openai] [anthropic] [litellm] [kms] [vault] [keyring]
+pip install "airprompter-agent==1.0.0rc0"   # the 1.0 release candidate; extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
 ```
 
 ## Packages
@@ -21,8 +21,15 @@ One install. Everything below is in the one distribution; you import the part
 you use. The tree mirrors the TypeScript SDK's subpaths.
 
 ```bash
-pip install airprompter-agent
+# With a satellite, pin each one to the same candidate:
+pip install "airprompter-agent==1.0.0rc0" "airprompter-datastore-s3==1.0.0rc0" "airprompter-agent-otel==1.0.0rc0"
 ```
+
+Pin every distribution exactly. Unpinned, `airprompter-agent` installs 0.5.0,
+which cannot read a 3.0.0 manifest, and an unpinned datastore installs 0.5.0,
+which brings the old split packages in beside this one. An exact pin takes the
+candidate without opening prereleases on every dependency, which `--pre` does,
+and `uv pip install` resolves the same pins with no flag.
 
 | Import | Use it when |
 | --- | --- |
@@ -289,7 +296,7 @@ host as a finding instead of hiding it.
 | Provider | `storageProtection` | Extra |
 |---|---|---|
 | `file_key(path)` (default: `store.key` beside the store, 0600) | `file_key` | — |
-| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install airprompter-agent[kms]` |
+| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install "airprompter-agent[kms]==1.0.0rc0"` |
 | `vault(transit_key)` — HashiCorp Vault transit | `vault` | `[vault]` |
 | `os_keystore()` — Keychain / Credential Locker / Secret Service | `os_keystore` | `[keyring]` |
 | `custom_key_provider(wrap=…, unwrap=…)` | `custom` | — |

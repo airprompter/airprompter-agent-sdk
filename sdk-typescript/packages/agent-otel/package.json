@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-otel",
-  "version": "0.6.0",
+  "version": "1.0.0-rc.0",
   "description": "The AirPrompter agent SDK's telemetry spool as an OpenTelemetry exporter: minute windows become OTLP metrics (gen_ai.client.operation.duration, tokens, checks, feedback, refusals) shipped to the collector you already run, with no AirPrompter grant at all. An UploadSink for the uploader in @airprompter/agent-sdk/telemetry, in airprompterd or in-process.",
   "keywords": [
     "airprompter",
@@ -56,9 +56,9 @@
     }
   },
   "peerDependencies": {
-    "@airprompter/agent-sdk": "0.6.0"
+    "@airprompter/agent-sdk": "1.0.0-rc.0"
   },
   "devDependencies": {
-    "@airprompter/agent-sdk": "0.6.0"
+    "@airprompter/agent-sdk": "1.0.0-rc.0"
   }
 }

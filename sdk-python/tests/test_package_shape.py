@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -201,6 +202,16 @@ def test_a_build_with_no_usable_metadata_still_imports(answer):
     assert result.stdout.strip() == "0+unknown"
 
 
+def test_each_distribution_ships_one_top_level_package():
+    spec = importlib.util.spec_from_file_location("build_all", os.path.join(SDK_PY, "tools", "build_all.py"))
+    build_all = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_all)
+    assert build_all.WHEEL_TOP_LEVEL == {"agent": "airprompter_agent", "agent-otel": "airprompter_agent_otel", "datastore-s3": "airprompter_datastore_s3", "datastore-postgres": "airprompter_datastore_postgres", "datastore-redis": "airprompter_datastore_redis"}
+    assert set(build_all.WHEEL_TOP_LEVEL) == set(PACKAGES), "build_all checks every distribution's wheel"
+    for name, top_level in build_all.WHEEL_TOP_LEVEL.items():
+        assert f'packages = ["src/{top_level}"]' in pyproject(name), f"{name} ships {top_level} and nothing else"
+
+
 def test_each_layer_public_list_is_pinned():
     for layer, expected in LAYER_ALL.items():
         module = importlib.import_module(f"airprompter_agent.{layer}")
@@ -224,6 +235,17 @@ def test_each_layer_imports_and_the_exporter_stays_out_of_the_agent():
     result = subprocess.run([sys.executable, "-c", "import sys, airprompter_agent; assert 'airprompter_agent_otel' not in sys.modules"], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert not os.path.exists(os.path.join(SRC, "telemetry", "otel.py"))
+
+
+def test_every_install_line_in_the_readme_pins_the_current_version():
+    # A version bump fails here until the docs follow: an unpinned line installs the old release.
+    version = declared_version(pyproject("agent"))
+    with open(os.path.join(SDK_PY, "README.md"), encoding="utf-8") as f:
+        lines = [line for line in f.read().splitlines() if "pip install" in line and "airprompter-" in line]
+    assert any(f'"airprompter-agent=={version}"' in line for line in lines), f"the README installs airprompter-agent=={version}"
+    for line in lines:
+        for name, pin in re.findall(r"(airprompter-[a-z0-9-]+(?:\[[a-z,]+\])?)(==[^\"\s`]+)?", line):
+            assert pin == f"=={version}", f"{name} is not pinned to {version}: {line}"
 
 
 def test_no_removed_name_is_left_under_sdk_python():

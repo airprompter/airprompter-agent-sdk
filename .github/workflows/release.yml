@@ -11,11 +11,17 @@
 #                          npm token in the repository — trusted publishing
 #                          on npmjs.com must be configured for
 #                          @airprompter/agent-sdk, @airprompter/agent-otel and
-#                          every @airprompter/datastore-* package). npm registers a
+#                          every @airprompter/datastore-* package). A version
+#                          with a prerelease part (X.Y.Z-rc.N) goes out under
+#                          the dist-tag `next`, so `latest` does not move.
+#                          npm registers a
 #                          trusted publisher only on a package that already
 #                          exists: a NEW package's first version is published
-#                          once by hand (`npm publish --access public` from
-#                          the tagged commit, after `npm run build`), then
+#                          once by hand (`npm publish --access public
+#                          --provenance=false`, with `--tag next` for a
+#                          prerelease, from the tagged commit, after `npm run
+#                          build`: publishConfig asks for provenance, which
+#                          only works in CI), then
 #                          its trusted publisher is added, then the tag is
 #                          pushed — this job skips any version already on
 #                          the registry, so the hand-published one is left
@@ -23,9 +29,13 @@
 #   sdk-python/vX.Y.Z      PyPI trusted publishing of the five distributions
 #                          (airprompter-agent, airprompter-agent-otel, and
 #                          airprompter-datastore-s3, -postgres, -redis) from
-#                          one tag; each needs a trusted publisher on PyPI.
+#                          one tag; each needs a trusted publisher on PyPI. A
+#                          prerelease tag may use either form (X.Y.ZrcN or
+#                          X.Y.Z-rc.N); the distributions carry the first.
 #   cli/vX.Y.Z             single-file executables for linux/macos/windows,
-#                          cosign keyless signatures, SBOM, GitHub release.
+#                          cosign keyless signatures, SBOM, GitHub release
+#                          (a pre-release when the tag has a `-` part). Never
+#                          an npm publish: @airprompter/cli is private.
 #   conformance/vX.Y.Z     npm publish of @airprompter/protocol-conformance
 #                          (the harness with the protocol's vectors bundled
 #                          at pack time), with provenance (S14).
@@ -157,17 +167,31 @@ jobs:
           path: sdk-typescript
           format: spdx-json
           output-file: agent-sdk.spdx.json
+      - name: Prerelease or not
+        id: channel
+        # What is being published, never the tag: `sdk-typescript/` has a `-` of its own, and the lockstep check accepts
+        # a PEP 440 tag, which has none.
+        # On its own line: inside `case` a failed read would be an empty version, and an empty version picks `latest`.
+        run: |
+          version=$(node -p "require('./packages/sdk/package.json').version")
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT"; echo "dist-tag=next" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT"; echo "dist-tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+        working-directory: sdk-typescript
       - name: Publish with provenance, the SDK first
         # The SDK first: a satellite's exact peer pin must resolve on the registry before the satellite is published.
         # A version already on the registry is skipped, so a run that failed part-way can be re-run: without it the
         # re-run dies on the first package it already published, and the rest of the version can never go out.
+        env:
+          DIST_TAG: ${{ steps.channel.outputs.dist-tag }}
         run: |
           v=$(node -p "require('./packages/sdk/package.json').version")
           publish() {
             if npm view "$1@$v" version >/dev/null 2>&1; then
               echo "$1@$v is already on the registry; skipped"
             else
-              npm publish --provenance --access public --workspace "$1"
+              npm publish --provenance --access public --tag "$DIST_TAG" --workspace "$1"
             fi
           }
           publish "@airprompter/agent-sdk"
@@ -179,6 +203,7 @@ jobs:
         with:
           files: agent-sdk.spdx.json
           generate_release_notes: true
+          prerelease: ${{ steps.channel.outputs.prerelease }}
 
   pypi:
     name: Publish airprompter-agent, -agent-otel and airprompter-datastore-* (five distributions, one tag)
@@ -204,9 +229,18 @@ jobs:
           python tools/version_lockstep.py --expect "$v"
         working-directory: sdk-python
       - name: CHANGELOG.md describes this version
+        # One heading for both languages, in the npm form: a tag in the PEP 440 form (1.0.0rc0) looks up 1.0.0-rc.0.
         run: |
-          v="${GITHUB_REF_NAME#sdk-python/v}"
+          v=$(printf '%s' "${GITHUB_REF_NAME#sdk-python/v}" | sed -E -e 's/^([0-9.]+)rc([0-9]+)$/\1-rc.\2/' -e 's/^([0-9.]+)b([0-9]+)$/\1-beta.\2/' -e 's/^([0-9.]+)a([0-9]+)$/\1-alpha.\2/')
           grep -Eq "^## ${v//./\\.} — " CHANGELOG.md || { echo "CHANGELOG.md has no '## $v — <date>' entry; write one before tagging"; exit 1; }
+      - name: Prerelease or not
+        id: channel
+        # Either tag form carries a letter; a final version has none. The version, not the tag: `sdk-python/` has letters.
+        run: |
+          case "${GITHUB_REF_NAME#sdk-python/v}" in
+            *[a-z]*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
       - name: SBOM
         uses: anchore/sbom-action@v0
         with:
@@ -223,6 +257,7 @@ jobs:
         with:
           files: airprompter-agent.spdx.json
           generate_release_notes: true
+          prerelease: ${{ steps.channel.outputs.prerelease }}
 
   cli:
     name: Build and sign the CLI
@@ -331,3 +366,5 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+          # `cli/v` has no `-` of its own, so any `-` is the version's: cli/v1.0.0-rc.0 never becomes the latest release.
+          prerelease: ${{ contains(github.ref_name, '-') }}

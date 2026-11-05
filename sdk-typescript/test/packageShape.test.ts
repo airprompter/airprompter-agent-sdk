@@ -230,6 +230,7 @@ test("every package carries one version and SDK_VERSION is it; satellites peer o
   assert.equal(SDK_VERSION, version, "SDK_VERSION is written from packages/sdk/package.json");
   assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, version, "the workspace root moves with the packages");
   const cli = JSON.parse(readFileSync(join(root, "..", "cli", "package.json"), "utf8")) as Manifest;
+  assert.equal(cli.version, version, "the CLI is on the release candidate too");
   assert.equal(cli.private, true, "the CLI ships as signed executables, never on npm");
   assert.deepEqual(manifests.sdk!.dependencies ?? {}, {}, "the SDK has no runtime dependency");
   const peers = manifests.sdk!.peerDependencies ?? {};
@@ -257,6 +258,16 @@ test("every package carries one version and SDK_VERSION is it; satellites peer o
   // builds everywhere but the Dockerfile (S13 found it in CI).
   const dockerfile = readFileSync(join(root, "..", "deploy", "docker", "Dockerfile"), "utf8");
   for (const name of ["sdk", "agent-otel"]) assert.ok(dockerfile.includes(`COPY sdk-typescript/packages/${name}/src sdk-typescript/packages/${name}/src`), `deploy/docker/Dockerfile copies packages/${name}/src`);
+});
+
+test("every install line in the README pins the current version, so a version bump fails here until the docs follow", () => {
+  const version = manifestOf("sdk").version;
+  const lines = readFileSync(join(root, "README.md"), "utf8").split("\n").filter((line) => /\bnpm install\b/.test(line) && line.includes("@airprompter/"));
+  assert.ok(lines.some((line) => line.includes(`@airprompter/agent-sdk@${version}`)), `the README installs @airprompter/agent-sdk@${version}`);
+  for (const line of lines) {
+    assert.match(line, /--save-exact/, `an exact pin: npm's default range matches later candidates: ${line}`);
+    for (const [spec] of line.matchAll(/@airprompter\/[a-z0-9-]+(@[^\s`]*)?/g)) assert.ok(spec.endsWith(`@${version}`), `${spec} is not pinned to ${version}`);
+  }
 });
 
 test("no removed package name is left in the repository, outside the changelogs", () => {

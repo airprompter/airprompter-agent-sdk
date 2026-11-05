@@ -18,11 +18,11 @@ mkdirSync(join(root, "dist"), { recursive: true });
 await build({
   entryPoints: [join(root, "src", "main.ts")],
   bundle: true,
-  // The SDK packages by source (S10): the binary is built from the packages' sources, never from a published dist.
+  // The SDK by source (S10): the binary is built from the packages' sources, never from a published dist. A satellite
+  // the binary bundles imports the SDK by subpath; inside the SDK, imports are relative.
   alias: {
-    "@airprompter/agent-core/testing": join(root, "..", "sdk-typescript", "packages", "core", "src", "testing", "index.ts"),
-    "@airprompter/otel-bridge": join(root, "..", "sdk-typescript", "packages", "otel-bridge", "src", "index.ts"),
-    ...Object.fromEntries(["core", "sync", "runtime", "telemetry", "sdk"].map((name) => [`@airprompter/agent-${name}`, join(root, "..", "sdk-typescript", "packages", name, "src", "index.ts")])),
+    "@airprompter/agent-otel/exporter": join(root, "..", "sdk-typescript", "packages", "agent-otel", "src", "exporter", "index.ts"),
+    ...Object.fromEntries(["core", "sync", "runtime", "telemetry"].map((layer) => [`@airprompter/agent-sdk/${layer}`, join(root, "..", "sdk-typescript", "packages", "sdk", "src", layer, "index.ts")])),
   },
   platform: "node",
   target: "node20",

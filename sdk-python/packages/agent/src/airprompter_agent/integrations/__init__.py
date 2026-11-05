@@ -17,10 +17,10 @@ Example::
 """
 
 from .anthropic import messages_create, messages_create_async
-from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
+from airprompter_agent.runtime import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from .litellm import AirPrompterLiteLLMCallback, litellm_metadata
 from .openai import chat_completion, chat_completion_async, responses_create, responses_create_async
-from airprompter_agent_runtime.wrap import WRAPPED_METHODS, WrapHooks, wrap_client
+from airprompter_agent.runtime import WRAPPED_METHODS, WrapHooks, wrap_client
 
 __all__ = [
     "WRAPPED_METHODS",

@@ -10,13 +10,13 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
-import { applyInference } from "../packages/runtime/src/wrap/inference.js";
-import { applyAiSdkInference } from "../packages/runtime/src/wrap/aiSdk.js";
-import { inferenceDigestInput, releaseDigest } from "../packages/core/src/protocol/trust.js";
-import { GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, runGoldenSet, type GoldenSet } from "../packages/core/src/golden/index.js";
+import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
+import { applyInference } from "../packages/sdk/src/runtime/wrap/inference.js";
+import { applyAiSdkInference } from "../packages/sdk/src/runtime/wrap/aiSdk.js";
+import { inferenceDigestInput, releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
+import { GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, runGoldenSet, type GoldenSet } from "../packages/sdk/src/core/golden/index.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
-import type { SlotInference } from "../packages/core/src/protocol/types.js";
+import type { SlotInference } from "../packages/sdk/src/core/protocol/types.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
 const tempDir = () => mkdtempSync(join(tmpdir(), "ap-inference-"));

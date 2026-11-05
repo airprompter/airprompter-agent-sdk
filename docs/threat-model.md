@@ -64,7 +64,7 @@ A claim that maps to nothing is not a claim we make.
 | Bytes altered in flight are refused | Network attacker | ES256 over the canonical payload; SHA-256 and declared length on every payload; monotonic generation (server rollback is a new generation) | core | `manifest-verify.json` "payload altered after signing", "signature bytes corrupted", "payload bytes that do not hash", "generation below the stored one" |
 | A compromised signing key cannot authorize its successor | Network attacker · Compromised publisher | The SDK pins an offline **root**; root metadata lists the signing keys with expiry; rotation is signed by root; a key absent from current root metadata is unverified | core | `manifest-verify.json` root cases (stranger, targets-key-as-root, altered, expired, rotation) |
 | An offline update file cannot be relabelled to another agent or target | Network attacker | `.apbundle` HPKE with AAD `agentId|target`; decryption under another label fails | core (`.apbundle`) · cli | `sdk-typescript/test/hpke.test.ts`; `cli/test/cli.test.ts` "another target" |
-| Telemetry carries no prompt text, output, or end-user identifier | Hostile insider (what we can read) | The window schema has no field for content; the ingest drops unknown fields; feedback is numbers, booleans and declared enums only; golden runs and judgements report counts only | core (row schemas) · telemetry · otel-bridge | `protocol/vectors/spool.json`, `feedback.json`; `sdk-typescript/test/golden.test.ts` "never the output"; `spool-format.md` "What must never be in the spool" |
+| Telemetry carries no prompt text, output, or end-user identifier | Hostile insider (what we can read) | The window schema has no field for content; the ingest drops unknown fields; feedback is numbers, booleans and declared enums only; golden runs and judgements report counts only | core (row schemas) · telemetry · agent-otel | `protocol/vectors/spool.json`, `feedback.json`; `sdk-typescript/test/golden.test.ts` "never the output"; `spool-format.md` "What must never be in the spool" |
 | Only the customer client decides what is ever loaded; AirPrompter's side is convenience, never authority | Compromised publisher · Network position · Hostile insider | The four rules above (pinned root; the policy pin; the closed reduction set; the pointer that never extends trust), plus the vendored bundle a host may be told to trust over any network source | core · sync · runtime · sdk | the four claims' vectors above; `sdk-typescript/test/vendored.test.ts`, `sdk-python/tests/test_vendored.py` |
 | **We do not defend against process-level access on the host** | Process-level access | Nothing. The process that renders holds the plaintext; a debugger, a core dump, or a same-user process reads it | — | — (`SECURITY.md`, this page, the one-pager) |
 | **We do not hide prompts from AirPrompter** | Hostile insider | Nothing. AirPrompter is the system of record for the prompt text | — | — (`SECURITY.md`, this page, the one-pager) |
@@ -72,19 +72,19 @@ A claim that maps to nothing is not a claim we make.
 
 ## Where each claim lives (the package map, S10)
 
-Six npm packages and five PyPI distributions, released in lockstep, with
-one direction (core → clients → facade) that is linted. A claim's
-mechanism and its vector live in the package that implements it; the
-`Package` column above names it.
+One package per language, its layers reached by subpath, with one direction
+(core → sync, runtime, telemetry → the agent) that is linted. A claim's
+mechanism and its vector live in the layer that implements it; the `Package`
+column above names it.
 
-| Package (npm · PyPI) | Holds | Claims |
+| Import (TypeScript · Python) | Holds | Claims |
 |---|---|---|
-| `@airprompter/agent-core` · `airprompter-agent-core` | The protocol with no I/O: canonical JSON, the trust chain (root metadata, manifests, countersign, M1–M14), assignment and the ramp walk, the render, output checks, `.apbundle`, the telemetry row schemas, the control-plane client, the port interfaces, the CI kit (`/testing`) | key scope; signatures and hashes; root rotation; countersign; the closed directive set; the ramp maths; the relabel refusal; the row schemas |
-| `@airprompter/agent-sync` · `airprompter-agent-sync` | The encrypted slot store and `store.json` (the policy pin lives here), the apply policy and its windows, the key providers, the sync loop, the customer's datastore | encryption at rest; the KEK boundary; the policy pin; staging under `unlock_required` |
-| `@airprompter/agent-runtime` · `airprompter-agent-runtime` | Rendering and assigning over a release the host already holds (`BundleRelease`, `ReleaseResolver`), the provider wrappers, the hosted-execution client | the ramp walked on the host's clock; `disable` honoured at render |
-| `@airprompter/agent-telemetry` · `airprompter-agent-telemetry` | The content-free spool, the uploader and its sinks | the lapsed grant refused; content-free telemetry |
-| `@airprompter/otel-bridge` · (`airprompter_agent_telemetry.otel`) | The spool as OTLP metrics to the customer's collector, no grant | content-free telemetry (a closed attribute set) |
-| `@airprompter/agent-sdk` · `airprompter-agent` | The facade: the loop, the lease, the heartbeat, the pointer, healthz | lease expiry; the pointer rule; the loop that stages and never activates on its own |
+| `@airprompter/agent-sdk/core` · `airprompter_agent.core` | The protocol with no I/O: canonical JSON, the trust chain (root metadata, manifests, countersign, M1–M14), assignment and the ramp walk, the render, output checks, `.apbundle`, the telemetry row schemas, the control-plane client, the port interfaces, the CI kit (`/testing`) | key scope; signatures and hashes; root rotation; countersign; the closed directive set; the ramp maths; the relabel refusal; the row schemas |
+| `@airprompter/agent-sdk/sync` · `airprompter_agent.sync` | The encrypted slot store and `store.json` (the policy pin lives here), the apply policy and its windows, the key providers, the sync loop, the customer's datastore | encryption at rest; the KEK boundary; the policy pin; staging under `unlock_required` |
+| `@airprompter/agent-sdk/runtime` · `airprompter_agent.runtime` | Rendering and assigning over a release the host already holds (`BundleRelease`, `ReleaseResolver`), the provider wrappers, the hosted-execution client | the ramp walked on the host's clock; `disable` honoured at render |
+| `@airprompter/agent-sdk/telemetry` · `airprompter_agent.telemetry` | The content-free spool, the uploader and its sinks | the lapsed grant refused; content-free telemetry |
+| `@airprompter/agent-otel/exporter` · `airprompter_agent_otel.exporter` | The spool as OTLP metrics to the customer's collector, no grant | content-free telemetry (a closed attribute set) |
+| `@airprompter/agent-sdk` · `airprompter_agent` | The agent: the loop, the lease, the heartbeat, the pointer, healthz | lease expiry; the pointer rule; the loop that stages and never activates on its own |
 | the `airprompter` CLI and `airprompterd` | Operators: pull, verify, apply, unlock, policy, doctor; the telemetry daemon (ships the spool, serves no release, holds no store) | the operator's acts (unlock, policy set) that the design reserves to the host |
 
 ## What the docs may not say

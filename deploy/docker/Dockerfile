@@ -10,11 +10,7 @@
 FROM node:24-bookworm-slim AS build
 WORKDIR /src
 COPY protocol/VERSION protocol/VERSION
-COPY sdk-typescript/packages/core/src sdk-typescript/packages/core/src
-COPY sdk-typescript/packages/sync/src sdk-typescript/packages/sync/src
-COPY sdk-typescript/packages/runtime/src sdk-typescript/packages/runtime/src
-COPY sdk-typescript/packages/telemetry/src sdk-typescript/packages/telemetry/src
-COPY sdk-typescript/packages/otel-bridge/src sdk-typescript/packages/otel-bridge/src
+COPY sdk-typescript/packages/agent-otel/src sdk-typescript/packages/agent-otel/src
 COPY sdk-typescript/packages/sdk/src sdk-typescript/packages/sdk/src
 COPY sdk-typescript/test/helpers sdk-typescript/test/helpers
 COPY cli/package.json cli/package-lock.json cli/tsconfig.json cli/

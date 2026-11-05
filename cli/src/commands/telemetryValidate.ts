@@ -21,8 +21,8 @@
 import { readFileSync, statSync } from "node:fs";
 import { basename } from "node:path";
 
-import { SEGMENT_MAX_BYTES } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
-import { SEGMENT_NAME, inspectSegment } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
+import { SEGMENT_MAX_BYTES } from "../../../sdk-typescript/packages/sdk/src/telemetry/spool/writer.js";
+import { SEGMENT_NAME, inspectSegment } from "../../../sdk-typescript/packages/sdk/src/telemetry/uploader.js";
 import { COMMON_OPTIONS, flag, helpFor, parse, str, type OptionSpec } from "../args.js";
 import { EXIT, Output, usage, type Context } from "../io.js";
 

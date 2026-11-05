@@ -1,7 +1,7 @@
 // The TypeScript SDK through the harness's adapter contract (ADAPTER.md):
-// `@airprompter/agent-core` for the protocol, `@airprompter/agent-telemetry`
-// for the spool, `@airprompter/otel-bridge` for the OTLP mapping — from the
-// built dist, so this adapter runs on plain Node after `node
+// `@airprompter/agent-sdk/core` for the protocol, `/telemetry` for the spool,
+// `@airprompter/agent-otel/exporter` for the OTLP mapping — from the built
+// dist, so this adapter runs on plain Node after `node
 // sdk-typescript/scripts/build.mjs`. What `run.mjs` proves for the reference,
 // this proves for the packages a customer installs.
 //
@@ -13,11 +13,11 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // A file URL, not a path: Windows's `D:\…` is not an import specifier.
-const dist = (pkg) => pathToFileURL(join(here, "..", "..", "sdk-typescript", "packages", pkg, "dist", "esm", "index.js")).href;
+const dist = (pkg, subpath) => pathToFileURL(join(here, "..", "..", "sdk-typescript", "packages", pkg, "dist", "esm", subpath, "index.js")).href;
 
-const core = await import(dist("core"));
-const telemetry = await import(dist("telemetry"));
-const bridge = await import(dist("otel-bridge"));
+const core = await import(dist("sdk", "core"));
+const telemetry = await import(dist("sdk", "telemetry"));
+const exporter = await import(dist("agent-otel", "exporter"));
 
 /** A refusal the protocol names travels as `{ reason }`. */
 const refusing = (fn) => (args) => {
@@ -94,7 +94,7 @@ export const ops = {
   patternRefusal: ({ pattern }) => ({ refusal: core.patternRefusal(pattern) ?? null }),
   checksRefusals: ({ checks }) => ({ refusals: core.checksRefusals(checks) }),
   projectChecks: ({ checks }) => ({ projected: core.projectChecks(checks) }),
-  spoolRowsToOtlp: ({ rows, resource, sdkVersion }) => ({ request: bridge.spoolRowsToOtlp(rows, { resource, ...(sdkVersion ? { sdkVersion } : {}) }) }),
+  spoolRowsToOtlp: ({ rows, resource, sdkVersion }) => ({ request: exporter.spoolRowsToOtlp(rows, { resource, ...(sdkVersion ? { sdkVersion } : {}) }) }),
 };
 
 export default ops;

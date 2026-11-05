@@ -18,9 +18,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
-import { epochMinute, segmentName, type SpoolRow } from "../packages/telemetry/src/spool/writer.js";
-import { backoffDelayMs, inspectSegment, multipartBody, postSegment, SEGMENT_NAME, SpoolUploader, UPLOAD_BACKOFF_CAP_MS, validateSpoolRow, type GrantDecision, type UploadGrant } from "../packages/telemetry/src/uploader.js";
+import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
+import { epochMinute, segmentName, type SpoolRow } from "../packages/sdk/src/telemetry/spool/writer.js";
+import { backoffDelayMs, inspectSegment, multipartBody, postSegment, SEGMENT_NAME, SpoolUploader, UPLOAD_BACKOFF_CAP_MS, validateSpoolRow, type GrantDecision, type UploadGrant } from "../packages/sdk/src/telemetry/uploader.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));

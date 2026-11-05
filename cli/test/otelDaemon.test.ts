@@ -15,9 +15,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js";
-import { createPlaintextBundle } from "../../sdk-typescript/packages/core/src/bundle/apbundle.js";
-import { publicJwkOf } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
-import { SlotStore } from "../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { createPlaintextBundle } from "../../sdk-typescript/packages/sdk/src/core/bundle/apbundle.js";
+import { publicJwkOf } from "../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
+import { SlotStore } from "../../sdk-typescript/packages/sdk/src/sync/store/slotStore.js";
 import { FakeControlPlane } from "../../sdk-typescript/test/helpers/controlPlane.js";
 
 const cliRoot = join(import.meta.dirname, "..");

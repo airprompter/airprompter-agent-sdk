@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 
-import { mintRunRef, newRunId, parseRunRef, type RunRefFacts } from "../packages/core/src/render/runRef.js";
-import { MissingVariableError, UnknownVariableError, renderTemplate, xmlDelimiters } from "../packages/core/src/render/template.js";
+import { mintRunRef, newRunId, parseRunRef, type RunRefFacts } from "../packages/sdk/src/core/render/runRef.js";
+import { MissingVariableError, UnknownVariableError, renderTemplate, xmlDelimiters } from "../packages/sdk/src/core/render/template.js";
 
 const variables = [
   { name: "team", required: true, trust: "operator" as const },

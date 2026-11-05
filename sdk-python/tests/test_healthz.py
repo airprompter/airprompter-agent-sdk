@@ -12,8 +12,8 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent, healthz_of, healthz_response
 from airprompter_agent.agent import SyncOptions, TelemetryOptions
-from airprompter_agent_core._util import iso_ms
-from airprompter_agent_core.protocol.trust import public_jwk_of
+from airprompter_agent.core._util import iso_ms
+from airprompter_agent.core.protocol.trust import public_jwk_of
 
 from .control_plane import FakeControlPlane
 

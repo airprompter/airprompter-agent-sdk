@@ -16,7 +16,7 @@
  * @example
  * ```ts
  * import { createClient } from "redis";
- * import { kvReleaseDatastore } from "@airprompter/agent-sdk";
+ * import { kvReleaseDatastore } from "@airprompter/agent-sdk/sync";
  * import { redisKvStore, fromNodeRedis } from "@airprompter/datastore-redis";
  *
  * const client = await createClient({ url: process.env.REDIS_URL }).connect();
@@ -24,7 +24,7 @@
  * ```
  */
 
-import type { KvEntry, KvPutCondition, KvStore } from "@airprompter/agent-sync";
+import type { KvEntry, KvPutCondition, KvStore } from "@airprompter/agent-sdk/sync";
 
 /** Send one command, e.g. `["HMGET", key, "value", "version"]`; resolve with the reply as the client decodes it. */
 export type RedisCommand = (args: string[]) => Promise<unknown>;

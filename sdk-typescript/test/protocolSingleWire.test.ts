@@ -17,12 +17,12 @@ import test from "node:test";
 
 import { Ajv2020 } from "ajv/dist/2020.js";
 
-import { SUPPORTED_CAPABILITIES } from "../packages/core/src/protocol/capabilities.js";
-import { canonicalBytes } from "../packages/core/src/protocol/canonicalJson.js";
+import { SUPPORTED_CAPABILITIES } from "../packages/sdk/src/core/protocol/capabilities.js";
+import { canonicalBytes } from "../packages/sdk/src/core/protocol/canonicalJson.js";
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { keyThumbprint, publicJwkOf, signBytes, SUPPORTED_PROTOCOL_MAJORS, verifyManifest } from "../packages/core/src/protocol/trust.js";
-import type { Manifest, ManifestPayload } from "../packages/core/src/protocol/types.js";
-import { PROTOCOL_VERSION } from "../packages/core/src/protocol/version.js";
+import { keyThumbprint, publicJwkOf, signBytes, SUPPORTED_PROTOCOL_MAJORS, verifyManifest } from "../packages/sdk/src/core/protocol/trust.js";
+import type { Manifest, ManifestPayload } from "../packages/sdk/src/core/protocol/types.js";
+import { PROTOCOL_VERSION } from "../packages/sdk/src/core/protocol/version.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_wire", target: "prod" };

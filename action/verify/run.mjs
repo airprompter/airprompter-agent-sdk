@@ -59,6 +59,9 @@ async function download(url) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+/** A CLI release to download: `cli/vX.Y.Z`, or a candidate such as `cli/v1.0.0-rc.0`; the `cli/` and `v` are optional. */
+export const CLI_RELEASE_VERSION = /^(cli\/)?v?\d+\.\d+\.\d+(-(alpha|beta|rc)\.\d+)?$/;
+
 /** The executable for this runner from the `cli/vX.Y.Z` release: checksum always, Sigstore by default. */
 export async function fetchBinary({ version, verifySignature, dir }) {
   const tag = version.startsWith("cli/v") ? version : `cli/v${version.replace(/^v/, "")}`;
@@ -125,7 +128,7 @@ export async function main(env = process.env) {
   if (binary) binary = resolve(binary);
   else {
     const version = input("VERSION") || (env.ACTION_REF ?? "");
-    if (!version || !/^(cli\/)?v?\d+\.\d+\.\d+$/.test(version)) throw new Error(`version: a cli/vX.Y.Z release tag is needed (got "${version || "nothing"}"); use the action at a release tag, set version:, or pass binary:`);
+    if (!version || !CLI_RELEASE_VERSION.test(version)) throw new Error(`version: a cli/vX.Y.Z release tag is needed (got "${version || "nothing"}"); use the action at a release tag, set version:, or pass binary:`);
     const fetched = await fetchBinary({ version, verifySignature: truthy(input("VERIFY_SIGNATURE", "true")), dir: join(env.RUNNER_TEMP ?? tmpdir(), "airprompter-verify-action") });
     binary = fetched.binary;
     provenance = `${fetched.asset} from release ${fetched.tag}, SHA-256 checked${fetched.signatureVerified ? ", Sigstore verified" : ""}`;

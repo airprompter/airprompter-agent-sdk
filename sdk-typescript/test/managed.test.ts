@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { ManagedAgent, ManagedRunError, parseSse, subjectHash } from "../packages/sdk/src/index.js";
+import { subjectHash } from "../packages/sdk/src/core/index.js";
+import { ManagedAgent, ManagedRunError, parseSse } from "../packages/sdk/src/runtime/index.js";
 
 const SALT = Buffer.from("0123456789abcdef0123456789abcdef").toString("base64url");
 

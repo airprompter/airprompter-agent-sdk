@@ -8,7 +8,7 @@ hash tag (``{namespace}``), so a cluster keeps them in one slot. Redis 6.2 or la
 Example::
 
     import redis
-    from airprompter_agent import kv_release_datastore
+    from airprompter_agent.sync import kv_release_datastore
     from airprompter_datastore_redis import redis_kv_store
 
     releases = kv_release_datastore(redis_kv_store(client=redis.Redis.from_url(os.environ["REDIS_URL"])))
@@ -19,7 +19,8 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from airprompter_agent_sync.store.kv_store import KvEntry, check_condition
+from airprompter_agent.sync import KvEntry
+from airprompter_agent.core._util import check_condition
 
 __all__ = ["RedisKvStore", "redis_kv_store"]
 

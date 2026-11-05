@@ -16,10 +16,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { createPlaintextBundle } from "../packages/core/src/bundle/apbundle.js";
-import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
-import type { Bundle } from "../packages/core/src/protocol/types.js";
-import { FakeControlPlane } from "../packages/core/src/testing/index.js";
+import { createPlaintextBundle } from "../packages/sdk/src/core/bundle/apbundle.js";
+import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
+import type { Bundle } from "../packages/sdk/src/core/protocol/types.js";
+import { FakeControlPlane } from "../packages/sdk/src/core/testing/index.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_vendored", target: "prod" as const };
 

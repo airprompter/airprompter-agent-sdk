@@ -20,8 +20,8 @@ import pytest
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
-from airprompter_agent_core._util import b64url_decode
-from airprompter_agent_core.protocol import (
+from airprompter_agent.core._util import b64url_decode
+from airprompter_agent.core.protocol import (
     UNDEFINED,
     AssignmentError,
     CanonicalJsonError,
@@ -35,10 +35,10 @@ from airprompter_agent_core.protocol import (
     verify_manifest,
     verify_root_metadata,
 )
-from airprompter_agent_core.protocol.assignment import frozen_experiment, servable_experiments, servable_slots
-from airprompter_agent_core.protocol.trust import carried_payloads, optional_payloads, referenced_payloads
-from airprompter_agent_core.render.run_ref import RUN_REF_MAX_ENTRIES, RUN_REF_MAX_TOKEN_LENGTH, RUN_REF_READ_MAX_ENTRIES, RUN_REF_READ_MAX_TOKEN_LENGTH, RunRefFacts, mint_run_ref, parse_run_ref, run_ref_key_from
-from airprompter_agent_runtime.release.resolver import disabled_from
+from airprompter_agent.core.protocol.assignment import frozen_experiment, servable_experiments, servable_slots
+from airprompter_agent.core.protocol.trust import carried_payloads, optional_payloads, referenced_payloads
+from airprompter_agent.core.render.run_ref import RUN_REF_MAX_ENTRIES, RUN_REF_MAX_TOKEN_LENGTH, RUN_REF_READ_MAX_ENTRIES, RUN_REF_READ_MAX_TOKEN_LENGTH, RunRefFacts, mint_run_ref, parse_run_ref, run_ref_key_from
+from airprompter_agent.runtime.release.resolver import disabled_from
 
 VECTORS = os.path.join(os.path.dirname(__file__), "..", "..", "protocol", "vectors")
 
@@ -233,7 +233,7 @@ def test_examples_digest_reproduces():
 
 def test_variable_default_and_source_are_digest_bound_only_when_present():
     """Parity with the reference and TypeScript — a null is unset; a default or a source changes the digest."""
-    from airprompter_agent_core.protocol.trust import release_digest
+    from airprompter_agent.core.protocol.trust import release_digest
 
     slot = {"tag": "a", "kind": "prompt", "artifactId": "prm_1", "versionId": "v1", "versionOrdinal": 1, "contentHash": "sha256:" + "a" * 64, "byteLength": 1, "model": "gpt-5", "variables": [{"name": "tone", "required": False, "trust": "operator"}]}
     plain = release_digest([slot])
@@ -249,8 +249,8 @@ def test_a_slots_requires_is_in_the_release_digest_when_present():
 
 
 def test_audience_vectors():
-    from airprompter_agent_core import matches_audience, valid_audience_selector
-    from airprompter_agent_core.protocol.assignment import valid_audience_instant, valid_audience_key, valid_audience_label
+    from airprompter_agent.core import matches_audience, valid_audience_selector
+    from airprompter_agent.core.protocol.assignment import valid_audience_instant, valid_audience_key, valid_audience_label
     for case in vector("audiences.json")["cases"]:
         assert valid_audience_selector(case["selector"]) == case["valid"], case["name"]
         assert matches_audience(case["selector"], case["tags"]) == case["matches"], case["name"]

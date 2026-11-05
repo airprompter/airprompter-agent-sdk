@@ -15,15 +15,15 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent, AgentStartError, RenderRefusedError } from "../packages/sdk/src/agent.js";
-import { createEncryptedBundle, createPlaintextBundle } from "../packages/core/src/bundle/apbundle.js";
-import { generateX25519KeyPair } from "../packages/core/src/bundle/hpke.js";
-import { keyThumbprint, publicJwkOf, referencedPayloads, releaseDigest } from "../packages/core/src/protocol/trust.js";
-import type { ManifestSlot } from "../packages/core/src/protocol/types.js";
-import { requiredModelsMissing } from "../packages/sync/src/sync/loop.js";
-import { PROTOCOL_VERSION } from "../packages/core/src/protocol/version.js";
-import { MissingVariableError } from "../packages/core/src/render/template.js";
-import { mintRunRef, newRunId, parseRunRef, type RunRefEntry, type RunRefFacts } from "../packages/core/src/render/runRef.js";
-import type { WindowRow } from "../packages/telemetry/src/spool/writer.js";
+import { createEncryptedBundle, createPlaintextBundle } from "../packages/sdk/src/core/bundle/apbundle.js";
+import { generateX25519KeyPair } from "../packages/sdk/src/core/bundle/hpke.js";
+import { keyThumbprint, publicJwkOf, referencedPayloads, releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
+import type { ManifestSlot } from "../packages/sdk/src/core/protocol/types.js";
+import { requiredModelsMissing } from "../packages/sdk/src/sync/sync/loop.js";
+import { PROTOCOL_VERSION } from "../packages/sdk/src/core/protocol/version.js";
+import { MissingVariableError } from "../packages/sdk/src/core/render/template.js";
+import { mintRunRef, newRunId, parseRunRef, type RunRefEntry, type RunRefFacts } from "../packages/sdk/src/core/render/runRef.js";
+import type { WindowRow } from "../packages/sdk/src/telemetry/spool/writer.js";
 import { FakeControlPlane, newKey } from "./helpers/controlPlane.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
@@ -505,8 +505,8 @@ test("a FIRST release staged under unlock_required starts the host: nothing serv
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-import { signBytes } from "../packages/core/src/protocol/trust.js";
-import { canonicalBytes } from "../packages/core/src/protocol/canonicalJson.js";
+import { signBytes } from "../packages/sdk/src/core/protocol/trust.js";
+import { canonicalBytes } from "../packages/sdk/src/core/protocol/canonicalJson.js";
 
 test("broadcast targeting: one device, mutable local tags, names-only heartbeat and late frozen feedback", async () => {
   const stateDir = tempDir();
@@ -765,8 +765,8 @@ test("audience registration evicts stale names, keeps active names, and serves o
   }
 });
 
-import { RenderRegistry, withAttribution, currentAttribution } from "../packages/runtime/src/wrap/attribution.js";
-import { validAudienceInstant } from "../packages/core/src/protocol/assignment.js";
+import { RenderRegistry, withAttribution, currentAttribution } from "../packages/sdk/src/runtime/wrap/attribution.js";
+import { validAudienceInstant } from "../packages/sdk/src/core/protocol/assignment.js";
 test("identical text never guesses different captured cohorts; explicit attribution remains available", () => {
   const registry=new RenderRegistry(2);
   const a={tag:"support.reply",artifactId:"prm_1",versionId:"ver_a",arm:"control",model:"gpt-5",audienceIds:["aud_AAAAAAAAAAAAAAAAAAAAAA"],runMinute:"2026-09-12T14:03:00Z"};

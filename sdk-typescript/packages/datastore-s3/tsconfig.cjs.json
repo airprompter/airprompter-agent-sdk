@@ -9,11 +9,8 @@
     "verbatimModuleSyntax": false,
     "baseUrl": ".",
     "paths": {
-      "@airprompter/agent-core/testing": [
-        "../core/dist/esm/testing/index.d.ts"
-      ],
-      "@airprompter/agent-*": [
-        "../*/dist/esm/index.d.ts"
+      "@airprompter/agent-sdk/*": [
+        "../sdk/dist/esm/*/index.d.ts"
       ]
     }
   },

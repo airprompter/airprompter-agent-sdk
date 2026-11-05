@@ -19,9 +19,9 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
-import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "../../sdk-typescript/packages/core/src/golden/index.js";
-import { servableExperiments, servableSlots } from "../../sdk-typescript/packages/core/src/protocol/assignment.js";
-import type { Manifest, ManifestSlot } from "../../sdk-typescript/packages/core/src/protocol/types.js";
+import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "../../sdk-typescript/packages/sdk/src/core/golden/index.js";
+import { servableExperiments, servableSlots } from "../../sdk-typescript/packages/sdk/src/core/protocol/assignment.js";
+import type { Manifest, ManifestSlot } from "../../sdk-typescript/packages/sdk/src/core/protocol/types.js";
 import type { OptionSpec } from "./args.js";
 import { Output, usage } from "./io.js";
 

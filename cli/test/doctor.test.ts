@@ -12,10 +12,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js";
-import { publicJwkOf } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
-import { SlotStore } from "../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { nodeFs } from "../../sdk-typescript/packages/core/src/ports/node.js";
-import { writeDaemonDiscovery } from "../../sdk-typescript/packages/telemetry/src/spool/manifest.js";
+import { publicJwkOf } from "../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
+import { SlotStore } from "../../sdk-typescript/packages/sdk/src/sync/store/slotStore.js";
+import { nodeFs } from "../../sdk-typescript/packages/sdk/src/core/ports/node.js";
+import { writeDaemonDiscovery } from "../../sdk-typescript/packages/sdk/src/telemetry/spool/manifest.js";
 import { FakeControlPlane } from "../../sdk-typescript/test/helpers/controlPlane.js";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";

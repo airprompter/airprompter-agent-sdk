@@ -13,16 +13,16 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
-from airprompter_agent_core import PROTOCOL_VERSION
-from airprompter_agent_core.protocol.assignment import matches_audience, servable_experiments, servable_overrides, servable_slots, valid_audience_instant, valid_audience_manifest, valid_audience_minute, valid_audience_selector
-from airprompter_agent_core.protocol.canonical_json import canonical_bytes
-from airprompter_agent_core.protocol.capabilities import SUPPORTED_CAPABILITIES
-from airprompter_agent_core.protocol.trust import SUPPORTED_PROTOCOL_MAJORS, experiment_conflict, key_thumbprint, sign_bytes, trusted_root_from_pinned_key, verify_manifest
-from airprompter_agent_runtime.release.resolver import disabled_from
-from airprompter_agent_core._util import iso_ms, now_ms
+from airprompter_agent.core import PROTOCOL_VERSION
+from airprompter_agent.core.protocol.assignment import matches_audience, servable_experiments, servable_overrides, servable_slots, valid_audience_instant, valid_audience_manifest, valid_audience_minute, valid_audience_selector
+from airprompter_agent.core.protocol.canonical_json import canonical_bytes
+from airprompter_agent.core.protocol.capabilities import SUPPORTED_CAPABILITIES
+from airprompter_agent.core.protocol.trust import SUPPORTED_PROTOCOL_MAJORS, experiment_conflict, key_thumbprint, sign_bytes, trusted_root_from_pinned_key, verify_manifest
+from airprompter_agent.runtime.release.resolver import disabled_from
+from airprompter_agent.core._util import iso_ms, now_ms
 
-from airprompter_agent_core.ports import OS_FS
-from airprompter_agent_telemetry.spool.manifest import write_segment_manifest
+from airprompter_agent.core.ports import OS_FS
+from airprompter_agent.telemetry.spool.manifest import write_segment_manifest
 
 from .control_plane import FakeControlPlane
 
@@ -250,7 +250,7 @@ def test_the_older_shapes_fail_the_manifest_schema_and_a_heartbeat_with_no_capab
 def test_a_heartbeat_this_sdk_builds_validates(tmp_path):
     from airprompter_agent import AirPrompterAgent
     from airprompter_agent.agent import SyncOptions
-    from airprompter_agent_core.protocol.trust import public_jwk_of
+    from airprompter_agent.core.protocol.trust import public_jwk_of
 
     plane = FakeControlPlane(SCOPE)
     plane.promote([plane.slot(tag="support.reply", text="Reply")])

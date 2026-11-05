@@ -10,11 +10,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { publicJwkOf, releaseDigest, signBytes } from "../packages/core/src/protocol/trust.js";
-import { canonicalBytes } from "../packages/core/src/protocol/canonicalJson.js";
-import { FakeControlPlane } from "../packages/core/src/testing/index.js";
-import type { Directive, Experiment, ManifestSlot } from "../packages/core/src/protocol/types.js";
-import type { ErrorClass } from "../packages/core/src/telemetry/rows.js";
+import { publicJwkOf, releaseDigest, signBytes } from "../packages/sdk/src/core/protocol/trust.js";
+import { canonicalBytes } from "../packages/sdk/src/core/protocol/canonicalJson.js";
+import { FakeControlPlane } from "../packages/sdk/src/core/testing/index.js";
+import type { Directive, Experiment, ManifestSlot } from "../packages/sdk/src/core/protocol/types.js";
+import type { ErrorClass } from "../packages/sdk/src/core/telemetry/rows.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_run", target: "prod" as const };
 const TAG = "support.reply";

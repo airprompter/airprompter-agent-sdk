@@ -17,7 +17,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js";
-import type { P256PublicJwk } from "../../sdk-typescript/packages/core/src/protocol/types.js";
+import type { P256PublicJwk } from "../../sdk-typescript/packages/sdk/src/core/protocol/types.js";
 import { parsePromptFile, parseVariables, readDevRelease, tagFromPath, DEV_API_KEY } from "../src/commands/dev.js";
 
 const cliRoot = join(import.meta.dirname, "..");

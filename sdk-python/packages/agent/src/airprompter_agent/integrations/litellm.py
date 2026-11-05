@@ -28,10 +28,10 @@ import datetime as dt
 from typing import Any, Mapping, Optional
 
 from ..agent import AirPrompterAgent, Rendered, WorkflowStep
-from airprompter_agent_core.render.run_ref import parse_run_ref
-from airprompter_agent_telemetry.spool.writer import Observation
-from airprompter_agent_runtime.inference import apply_inference
-from airprompter_agent_runtime.observe import classify_error, classify_result, normalize_usage
+from airprompter_agent.core import parse_run_ref
+from airprompter_agent.telemetry import Observation
+from airprompter_agent.runtime import apply_inference
+from airprompter_agent.runtime import classify_error, classify_result, normalize_usage
 
 try:  # pragma: no cover - exercised only when litellm is installed
     from litellm.integrations.custom_logger import CustomLogger as _Base  # type: ignore[import-not-found]

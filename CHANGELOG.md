@@ -1,6 +1,6 @@
 # Changelog
 
-The SDKs and the CLI, by version. The nine npm packages and the eight Python
+The SDKs and the CLI, by version. The five npm packages and the five Python
 distributions move in lockstep: one version number, released together by
 tag (`sdk-typescript/vX.Y.Z`, `sdk-python/vX.Y.Z`). The wire protocol has
 its own version and its own [changelog](protocol/CHANGELOG.md); each SDK
@@ -10,7 +10,41 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+## 1.0.0-rc.0 — 2026-11-04 (protocol 3.0.0, Python 1.0.0rc0)
+
+The release candidate for 1.0.0, published beside `latest`: `npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.0`, `pip install "airprompter-agent==1.0.0rc0"`. Pin every package to the candidate, satellites included: an unpinned datastore installs the 0.x release, which brings the old split packages in beside the SDK. npm's default range, `^1.0.0-rc.0`, also matches later candidates, and a later candidate removes `ap.wrap`. pip's `--pre` opens prereleases on every dependency; `uv pip install` resolves the same pins with no flag. The CLI candidate is the GitHub pre-release `cli/v1.0.0-rc.0`; `@airprompter/cli` stays off npm. This is the version a dev environment on protocol 3.0.0 installs until 1.0.0.
+
 Both SDKs speak protocol 3.0.0 and no other. See the [protocol changelog](protocol/CHANGELOG.md) for the wire.
+
+### Known gaps
+- **`RunSession` reports `modelCalls: 1` and `agentRun: 1` on every slot** (TypeScript), however many model calls a run makes. A later candidate records what the run did.
+
+### One package per language
+- **Breaking: install one package.** `@airprompter/agent-core`, `-sync`, `-runtime` and `-telemetry` are folded into `@airprompter/agent-sdk`, and `airprompter-agent-core`, `-sync`, `-runtime` and `-telemetry` into `airprompter-agent`. Nothing new is published under the old names.
+
+  | Before | Now |
+  | --- | --- |
+  | `@airprompter/agent-core` | `@airprompter/agent-sdk/core` |
+  | `@airprompter/agent-core/testing` | `@airprompter/agent-sdk/testing` |
+  | `@airprompter/agent-sync` | `@airprompter/agent-sdk/sync` |
+  | `@airprompter/agent-runtime` | `@airprompter/agent-sdk/runtime` |
+  | `@airprompter/agent-telemetry` | `@airprompter/agent-sdk/telemetry` |
+  | `@airprompter/otel-bridge` | `@airprompter/agent-otel/exporter` |
+  | `airprompter_agent_core` | `airprompter_agent.core` |
+  | `airprompter_agent_sync` | `airprompter_agent.sync` |
+  | `airprompter_agent_runtime` | `airprompter_agent.runtime` |
+  | `airprompter_agent_telemetry` | `airprompter_agent.telemetry` |
+  | `airprompter_agent_telemetry.otel` | `airprompter_agent_otel.exporter` (distribution `airprompter-agent-otel`) |
+
+- **Breaking: the TypeScript root exports a list, not everything.** `@airprompter/agent-sdk` exports `AirPrompterAgent`, its option and result types, and the hosted client. Every other name moved to its subpath: `import { publicJwkOf } from "@airprompter/agent-sdk/core"`.
+- **`@airprompter/agent-otel` and the `@airprompter/datastore-*` packages take the SDK as a peer** at the same version, so an application holds one copy. The Python satellites pin `airprompter-agent` exactly.
+- **Python extras moved to the one distribution:** `kms`, `vault`, `keyring`, `openai`, `anthropic`, `litellm`.
+- **`httpx` is bounded below 1.0** (`>=0.27,<1`) in `airprompter-agent` and `airprompter-agent-otel`: its 1.0 prereleases take no `timeout` on `Client`, and `start()` needs it.
+- **`SDK_VERSION` has one source per language:** written from `packages/sdk/package.json` at build, read from the installed distribution's metadata in Python (`0+unknown` when the source runs with no metadata beside it).
+- **The import lint in both languages holds a layer to another layer's package,** never a module inside it.
+- `version-lockstep.mjs` and `version_lockstep.py` read a prerelease in either form, `1.0.0-rc.0` or `1.0.0rc0`.
+- `release.yml` publishes a prerelease under the npm dist-tag `next` and marks its GitHub release a pre-release.
+- `tag-release.yml` and the verify action accept a prerelease tag such as `cli/v1.0.0-rc.0`. Conformance and protocol tags stay final-only.
 
 ### Added
 - `runRefSecret` and `runRefPreviousSecrets` on `start()` (Python: `run_ref_secret`, `run_ref_previous_secrets`). A run reference now works on any instance of an agent and target; the key derives from the secret, else the Agent key.

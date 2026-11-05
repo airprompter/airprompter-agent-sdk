@@ -12,9 +12,9 @@ It is a **cross-package contract** (S8): the `airprompter` CLI (`apply`,
 reads and writes it, and the two deploy on different days. (Before 0.3.0
 the release-serving `airprompterd` wrote it too; a store it wrote still
 opens, `writer.name: "airprompterd"`. The 0.3.0 daemon ships telemetry only
-and never opens a store: `daemon.md`.) Once the SDK ships as separate packages
-(`@airprompter/agent-core` reads, `airprompter` writes) the format is the
-seam between them, so it carries a version and a rule.
+and never opens a store: `daemon.md`.) The SDK and the CLI ship separately
+(`@airprompter/agent-sdk/core` reads, `airprompter` writes), so the format is
+the seam between them and carries a version and a rule.
 
 Status: **format 2** (`schemas/store.schema.json`; examples
 `examples/store.v1.json`, `examples/store.v2.json`).

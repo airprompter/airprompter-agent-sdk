@@ -16,10 +16,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent, RenderRefusedError } from "../packages/sdk/src/agent.js";
-import { AssignmentError, assignArm, effectiveArms, rampWeightsAt, validateRamp } from "../packages/core/src/protocol/assignment.js";
-import { publicJwkOf, releaseDigest, verifyManifest } from "../packages/core/src/protocol/trust.js";
-import type { Directive, Manifest, RampStep } from "../packages/core/src/protocol/types.js";
-import { FakeControlPlane } from "../packages/core/src/testing/index.js";
+import { AssignmentError, assignArm, effectiveArms, rampWeightsAt, validateRamp } from "../packages/sdk/src/core/protocol/assignment.js";
+import { publicJwkOf, releaseDigest, verifyManifest } from "../packages/sdk/src/core/protocol/trust.js";
+import type { Directive, Manifest, RampStep } from "../packages/sdk/src/core/protocol/types.js";
+import { FakeControlPlane } from "../packages/sdk/src/core/testing/index.js";
 
 const vectors = JSON.parse(readFileSync(new URL("../../protocol/vectors/ramp.json", import.meta.url), "utf8")) as {
   cases: Array<{ name: string; now?: string; salt: string; arms: Array<{ arm: string; weightBps: number }>; ramp: RampStep[]; directives: Directive[]; hosts?: Record<"hostA" | "hostB", { now: string; weightBps: number[] }>; expected: { weightBps?: number[]; assignments: Array<{ subject: string; bucket: number; arm?: string; hostA?: string; hostB?: string }>; disagreements?: number } }>;

@@ -15,13 +15,13 @@ from datetime import datetime, timezone
 import pytest
 
 from airprompter_agent.agent import AgentStartError, AirPrompterAgent
-from airprompter_agent_core.bundle.apbundle import create_encrypted_bundle
-from airprompter_agent_core._util import b64url_encode
-from airprompter_agent_core.bundle.apbundle import DistributionKey
-from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
-from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_core.protocol.trust import public_jwk_of, release_digest, trusted_root_from_pinned_key
-from airprompter_agent_sync import next_pull_delay_ms, pull_bundle
+from airprompter_agent.core.bundle.apbundle import create_encrypted_bundle
+from airprompter_agent.core._util import b64url_encode
+from airprompter_agent.core.bundle.apbundle import DistributionKey
+from airprompter_agent.core.bundle.hpke import generate_x25519_key_pair
+from airprompter_agent.core.control.client import SyncClient
+from airprompter_agent.core.protocol.trust import public_jwk_of, release_digest, trusted_root_from_pinned_key
+from airprompter_agent.sync import next_pull_delay_ms, pull_bundle
 
 from .control_plane import FakeControlPlane
 

@@ -13,8 +13,8 @@ release goes live, calls the model, and reports content-free measurements.
 Nothing in AirPrompter can open a connection to you, read your end-user
 content, or make bytes live on a locked runtime.
 
-> Status: **protocol 2.0.0** (`protocol/v2.0.0`) and **SDK 0.5.0**.
-> One SDK release publishes nine lockstep npm packages and eight lockstep
+> Status: **protocol 3.0.0** (`protocol/v3.0.0`) and **SDK 1.0.0-rc.0**, the release candidate for 1.0.0.
+> One SDK release publishes five lockstep npm packages and five lockstep
 > PyPI distributions through the repository release workflow.
 
 ## Layout
@@ -22,8 +22,8 @@ content, or make bytes live on a locked runtime.
 | Path | What it is |
 |---|---|
 | [`protocol/`](protocol/) | The wire contract: JSON Schemas for manifests, bundles, key-sets, directives and telemetry windows; the **spool format** any instrumentation can write; the assignment-hash specification; conformance vectors; OpenAPI for the customer routes. Versioned independently of the SDKs. |
-| [`sdk-typescript/`](sdk-typescript/) | Five packages for Node 20+, one version, released in lockstep: `@airprompter/agent-core` (the protocol, pure), `-sync` (pull, the encrypted A/B slot store, the apply policy, the daemon client), `-runtime` (render and assign over a release you hold, the provider wrappers, hosted mode), `-telemetry` (the spool and its uploader), and `@airprompter/agent-sdk` (the facade, `AirPrompterAgent`). Optional beside them: `@airprompter/otel-bridge`, and `@airprompter/datastore-s3`, `-postgres`, `-redis` — your own datastore carrying releases to your runtimes ([docs/datastore.md](docs/datastore.md)). Install what you use. |
-| [`sdk-python/`](sdk-python/) | The same five for Python 3.10+: `airprompter-agent-core`, `-sync`, `-runtime`, `-telemetry` and `airprompter-agent`, plus the optional `airprompter-datastore-s3`, `-postgres` and `-redis` (the same tables, keys and objects as the TypeScript adapters). Same protocol, same conformance vectors; wrappers for the `openai`, `anthropic` and LiteLLM clients. |
+| [`sdk-typescript/`](sdk-typescript/) | One package for Node 20+, `@airprompter/agent-sdk`: the agent (`AirPrompterAgent`) at the root and its parts behind subpaths, `/core` (the protocol, pure), `/sync` (pull, the encrypted A/B slot store, the apply policy, the daemon client), `/runtime` (render and assign over a release you hold, the provider wrappers), `/telemetry` (the spool and its uploader), `/testing` (the CI kit) and `/frameworks/langchain`. Optional beside it, one version, each taking the SDK as a peer: `@airprompter/agent-otel`, and `@airprompter/datastore-s3`, `-postgres`, `-redis` — your own datastore carrying releases to your runtimes ([docs/datastore.md](docs/datastore.md)). |
+| [`sdk-python/`](sdk-python/) | The same for Python 3.10+: one distribution, `airprompter-agent`, with `airprompter_agent.core`, `.sync`, `.runtime` and `.telemetry`, plus the optional `airprompter-agent-otel` and `airprompter-datastore-s3`, `-postgres` and `-redis` (the same tables, keys and objects as the TypeScript adapters). Same protocol, same conformance vectors; wrappers for the `openai`, `anthropic` and LiteLLM clients. |
 | [`protocol/compatible-endpoints.md`](protocol/compatible-endpoints.md) | Hosted mode without any SDK of ours: the OpenAI and Anthropic SDKs pointed at `…/v1/agents/{agentId}/{openai\|anthropic}` with `model: "slot:<tag>"` — the mapping, what is refused, the answer shapes. |
 | [`cli/`](cli/) | `airprompter` — `pull`, `verify`, `apply`, `status`, `diff`, `unlock`, `rollback`, `keygen`, `export-telemetry`, `import-telemetry`, `login` + `import` (your prompts become reviewable versions), `dev` (a directory served as a registry: live sync while you edit, and the conformance target), and `airprompter daemon` (`airprompterd`). Shipped as signed single-file executables for macOS, Linux and Windows. |
 | [`conformance/`](conformance/) | Runner that executes `protocol/vectors` against every SDK, and `live.mjs` — the same schemas and trust chain over HTTP against a running registry (`airprompter dev`, Hangar, or the hosted service). The hosted service runs the same vectors. |

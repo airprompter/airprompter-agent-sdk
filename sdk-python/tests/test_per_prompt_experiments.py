@@ -15,8 +15,8 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import SyncOptions
-from airprompter_agent_core.protocol.assignment import assign_arm
-from airprompter_agent_core.protocol.trust import experiment_conflict, public_jwk_of, release_digest, verify_manifest
+from airprompter_agent.core.protocol.assignment import assign_arm
+from airprompter_agent.core.protocol.trust import experiment_conflict, public_jwk_of, release_digest, verify_manifest
 
 from .control_plane import FakeControlPlane
 

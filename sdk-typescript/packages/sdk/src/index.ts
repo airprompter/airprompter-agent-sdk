@@ -1,12 +1,14 @@
 /**
- * `@airprompter/agent-sdk` — one install, today's `AirPrompterAgent`: the
- * facade over `@airprompter/agent-core`, `-sync`, `-runtime` and
- * `-telemetry` (exact-pinned siblings, one version), with every public name
- * of those packages re-exported so a customer who installs only this one
- * sees the whole surface (S10). A customer who wants less installs the
- * sibling directly: the runtime alone renders and assigns over a bundle,
- * the sync package alone pulls and verifies in CI, the telemetry package
- * alone writes the spool from their own instrumentation.
+ * `@airprompter/agent-sdk`: one install. The root is `AirPrompterAgent`, its
+ * option and result types, and the hosted client. Everything else is reached
+ * through a subpath, so each name has one home and a customer who wants less
+ * imports less: `/core` is the protocol with no I/O, `/sync` pulls and holds
+ * releases, `/runtime` renders and assigns over a release you hold, `/telemetry`
+ * writes the spool and uploads it, `/testing` is the CI kit, and
+ * `/frameworks/<name>` is an adapter with its framework as an optional peer.
+ *
+ * Every name is listed: a star export here would make every addition to a layer
+ * public by accident. `test/packageShape.test.ts` pins this list and the exports map.
  *
  * @example
  * ```ts
@@ -20,9 +22,8 @@
  */
 
 export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION, PROTOCOL_VERSION, VENDORED_BUNDLE_EXPIRY_WARNING_DAYS, healthzOf, healthzResponse } from "./agent.js";
-export type { AgentStatus, Healthz, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange, SpoolReport, HeartbeatSdkName, BundleOutcome, HydrateOutcome, DatastoreStatus } from "./agent.js";
+export type { AgentRampStatus, AgentStatus, Healthz, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange, SpoolReport, TelemetryPlacement, HeartbeatSdkName, BundleOutcome, HydrateOutcome, DatastoreStatus } from "./agent.js";
 
-export * from "@airprompter/agent-core";
-export * from "@airprompter/agent-sync";
-export * from "@airprompter/agent-runtime";
-export * from "@airprompter/agent-telemetry";
+// The hosted client: the README's quick start for running with no release on the host.
+export { ManagedAgent, ManagedRunError, isManagedRunError } from "./runtime/index.js";
+export type { ManagedStartOptions, ManagedRunOptions, ManagedRunResult, ManagedRunStream } from "./runtime/index.js";

@@ -12,10 +12,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { assignArm } from "../packages/core/src/protocol/assignment.js";
-import { publicJwkOf, releaseDigest, verifyManifest } from "../packages/core/src/protocol/trust.js";
-import { experimentConflict, type Experiment, type Manifest, type ManifestPayload } from "../packages/core/src/protocol/types.js";
-import { FakeControlPlane } from "../packages/core/src/testing/index.js";
+import { assignArm } from "../packages/sdk/src/core/protocol/assignment.js";
+import { publicJwkOf, releaseDigest, verifyManifest } from "../packages/sdk/src/core/protocol/trust.js";
+import { experimentConflict, type Experiment, type Manifest, type ManifestPayload } from "../packages/sdk/src/core/protocol/types.js";
+import { FakeControlPlane } from "../packages/sdk/src/core/testing/index.js";
 
 const vectors = JSON.parse(readFileSync(new URL("../../protocol/vectors/assignment.json", import.meta.url), "utf8")) as {
   perTag: {

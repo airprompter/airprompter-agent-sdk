@@ -8,6 +8,10 @@
 # ref sets exactly as a push does; the dispatch also runs its dry-run job,
 # which publishes nothing.
 #
+# A prerelease tag (X.Y.Z-rc.N) is accepted for the SDKs and the CLI, whose release
+# jobs send it to a prerelease channel. Conformance and protocol stay final-only:
+# the conformance job has no such channel, so a prerelease would land on `latest`.
+#
 # The same workflow deletes a stale branch when `delete_branch` is given; it
 # refuses the default branch.
 
@@ -63,7 +67,7 @@ jobs:
           if [ -n "$TAGS" ]; then
             [ -n "$SHA" ] || { echo "tags need a sha"; exit 1; }
             for tag in $TAGS; do
-              [[ "$tag" =~ ^(sdk-typescript|sdk-python|cli|conformance|protocol)/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+              [[ "$tag" =~ ^((sdk-typescript|sdk-python|cli)/v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?|(conformance|protocol)/v[0-9]+\.[0-9]+\.[0-9]+)$ ]] \
                 || { echo "Not a release tag: $tag"; exit 1; }
               if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
                 echo "$tag already exists"; exit 1

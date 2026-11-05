@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/datastore-redis",
-  "version": "0.6.0",
+  "version": "1.0.0-rc.0",
   "description": "The AirPrompter release datastore over Redis or Valkey: a KvStore with atomic Lua conditional writes and a sorted-set index, for kvReleaseDatastore. Bring your own client (redis, ioredis).",
   "keywords": [
     "airprompter",
@@ -47,11 +47,14 @@
   "airprompter": {
     "sizeBudgetBytes": 30000
   },
-  "dependencies": {
-    "@airprompter/agent-sync": "0.6.0"
-  },
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "peerDependencies": {
+    "@airprompter/agent-sdk": "1.0.0-rc.0"
+  },
+  "devDependencies": {
+    "@airprompter/agent-sdk": "1.0.0-rc.0"
   }
 }

@@ -21,11 +21,11 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import SyncOptions
-from airprompter_agent_core._util import instant
-from airprompter_agent_core.protocol.trust import public_jwk_of, release_digest
-from airprompter_agent_core.render.template import MissingVariableError, UnknownVariableError, placeholders_of, render_template
-from airprompter_agent_runtime.managed import ManagedAgent
-from airprompter_agent_runtime.variables import (
+from airprompter_agent.core._util import instant
+from airprompter_agent.core.protocol.trust import public_jwk_of, release_digest
+from airprompter_agent.core.render.template import MissingVariableError, UnknownVariableError, placeholders_of, render_template
+from airprompter_agent.runtime.managed import ManagedAgent
+from airprompter_agent.runtime.variables import (
     VariableSource,
     VariableSourceContext,
     VariableSourceError,

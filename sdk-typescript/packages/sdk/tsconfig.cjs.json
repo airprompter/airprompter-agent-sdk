@@ -6,16 +6,7 @@
     "module": "CommonJS",
     "moduleResolution": "Node10",
     "declaration": false,
-    "verbatimModuleSyntax": false,
-    "baseUrl": ".",
-    "paths": {
-      "@airprompter/agent-core/testing": [
-        "../core/dist/esm/testing/index.d.ts"
-      ],
-      "@airprompter/agent-*": [
-        "../*/dist/esm/index.d.ts"
-      ]
-    }
+    "verbatimModuleSyntax": false
   },
   "include": [
     "src/**/*.ts"

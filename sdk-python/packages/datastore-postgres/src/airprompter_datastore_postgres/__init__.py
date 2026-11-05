@@ -8,7 +8,7 @@ escaped ``LIKE`` over a ``text_pattern_ops`` index for ``list``. Postgres 11 or 
 Example::
 
     import psycopg
-    from airprompter_agent import kv_release_datastore
+    from airprompter_agent.sync import kv_release_datastore
     from airprompter_datastore_postgres import postgres_kv_store
 
     kv = postgres_kv_store(connection=psycopg.connect(os.environ["DATABASE_URL"], autocommit=True))
@@ -23,7 +23,8 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional, Sequence
 
-from airprompter_agent_sync.store.kv_store import KvEntry, check_condition
+from airprompter_agent.sync import KvEntry
+from airprompter_agent.core._util import check_condition
 
 __all__ = ["PostgresKvStore", "postgres_kv_schema", "postgres_kv_store"]
 

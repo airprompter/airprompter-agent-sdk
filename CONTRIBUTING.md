@@ -17,7 +17,7 @@ what a change needs to land.
   you wrote the change or have the right to submit it under this project's
   BSD-3-Clause licence. No CLA.
 - **Never commit a key, a token, or prompt text from a real workspace.**
-  Fixtures use the fakes in `sdk-typescript/packages/core/src/testing/` and
+  Fixtures use the fakes in `sdk-typescript/packages/sdk/src/core/testing/` and
   `sdk-python/tests/control_plane.py`.
 
 ## Set up
@@ -59,9 +59,9 @@ expects.
 - One version across every package in a language (`sdk-typescript/scripts/version-lockstep.mjs`,
   `sdk-python/tools/version_lockstep.py`). Never bump one package alone.
 - TypeScript: `exactOptionalPropertyTypes`, no default exports, no side
-  effects at import in `agent-core`. Layer rules are linted (`npm run lint:imports`):
-  core imports nothing of ours; sync, runtime and telemetry import core only;
-  the facade imports all four.
+  effects at import in `core`. Layer rules are linted (`npm run lint:imports`):
+  core imports nothing of ours; sync, runtime and telemetry import core only,
+  through its barrel; `agent.ts` and `frameworks/` import those.
 - Python: no third-party dependency beyond `httpx` and `cryptography`; the
   provider packages stay optional extras.
 - Nothing the SDK does may fail the customer's model call, and nothing it

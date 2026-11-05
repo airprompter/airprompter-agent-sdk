@@ -52,10 +52,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-import type { ManifestPayload, ManifestSlot, P256PrivateJwk, SlotVariable, Target } from "../../../sdk-typescript/packages/core/src/protocol/types.js";
-import { sha256Prefixed } from "../../../sdk-typescript/packages/core/src/protocol/canonicalJson.js";
-import { publicJwkOf } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
-import { FakeControlPlane, serveOverHttp } from "../../../sdk-typescript/packages/core/src/testing/controlPlane.js";
+import type { ManifestPayload, ManifestSlot, P256PrivateJwk, SlotVariable, Target } from "../../../sdk-typescript/packages/sdk/src/core/protocol/types.js";
+import { sha256Prefixed } from "../../../sdk-typescript/packages/sdk/src/core/protocol/canonicalJson.js";
+import { publicJwkOf } from "../../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
+import { FakeControlPlane, serveOverHttp } from "../../../sdk-typescript/packages/sdk/src/core/testing/controlPlane.js";
 
 import { COMMON_OPTIONS, TARGET, TARGET_USAGE, flag, helpFor, parse, str, type OptionSpec } from "../args.js";
 import { EXIT, Output, usage, type Context } from "../io.js";

@@ -1,0 +1,28 @@
+/**
+ * `@airprompter/agent-sdk/telemetry`: the content-free spool and its uploader:
+ * minute windows written as append-only segments (or held in memory on a
+ * serverless host), the host budget, and the direct-to-object-store upload
+ * under a grant. Builds on the row schemas in `@airprompter/agent-sdk/core`
+ * and never imports the sync or the runtime layer: a customer's own
+ * instrumentation can write the spool with this subpath alone.
+ *
+ * @example
+ * ```ts
+ * import { DirectorySink, SpoolWriter } from "@airprompter/agent-sdk/telemetry";
+ *
+ * const writer = new SpoolWriter(new DirectorySink(dir, instanceId), { instanceId, instanceClass: "resident", sdk: "my-service/1.4.0" });
+ * writer.observe({ tag: "support.triage", versionId, arm: "none", model: "gpt-5", status: "ok", latencyMs: 412, tokens: { input: 120, output: 40 } }, Date.now());
+ * writer.closeWindows(Date.now()); // at shutdown: the open minute becomes window rows in a closed segment
+ * ```
+ */
+
+export { SpoolWriter, DirectorySink, MemorySink, SegmentPlanner, segmentName, SEGMENT_MAX_BYTES, HOST_SPOOL_BUDGET_BYTES, SERVERLESS_BUFFER_BYTES } from "./spool/writer.js";
+export type { SpoolSink, SinkFaults, DirectorySinkOptions, SegmentManifestSource } from "./spool/writer.js";
+export { SPOOL_MANIFEST_FORMAT, DAEMON_DISCOVERY_FORMAT, MANIFEST_GRACE_MS, DAEMON_DISCOVERY_MAX_AGE_MS, DAEMON_DISCOVERY_REFRESH_MS, DAEMON_DISCOVERY_FILE, MANIFEST_SUFFIX, MANIFEST_NAME, manifestNameOf, segmentNameOfManifest, sha256Hex, writeSegmentManifest, readSegmentManifest, daemonDiscoveryPath, readDaemonDiscovery, writeDaemonDiscovery, removeDaemonDiscovery } from "./spool/manifest.js";
+export type { SegmentManifest, DaemonDiscovery, DiscoveryResult } from "./spool/manifest.js";
+export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "../core/index.js";
+export type { Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "../core/index.js";
+export type { UploadSink, UploadSegment, UploadOutcome } from "../core/index.js";
+
+export { SpoolUploader, airprompterUploadSink, validateSpoolRow, inspectSegment, postSegment, multipartBody, backoffDelayMs, UPLOAD_BACKOFF_BASE_MS, UPLOAD_BACKOFF_CAP_MS, GRANT_REFRESH_MARGIN_MS, LAST_UPLOAD_MARKER, QUARANTINE_CAP_BYTES, QUARANTINE_RETENTION_MS, EXPORTED_CAP_BYTES, OPEN_SEGMENT_RECLAIM_MS, SEGMENT_NAME, OPEN_SEGMENT_NAME } from "./uploader.js";
+export type { UploadGrant, GrantDecision, UploaderOptions, UploaderStatus, PassResult, PostOutcome, RowVerdict, SegmentInspection } from "./uploader.js";

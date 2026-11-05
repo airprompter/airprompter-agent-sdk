@@ -1,4 +1,4 @@
-"""airprompter-agent — run prompts and workflows approved in AirPrompter on your own systems.
+"""airprompter-agent: run prompts and workflows approved in AirPrompter on your own systems.
 
 ::
 
@@ -38,13 +38,13 @@ from .agent import (
     healthz_of,
     healthz_response,
 )
-from airprompter_agent_sync.apply.window import UpdateWindow, WindowState, is_known_time_zone, parse_window, validate_window, window_state
-from airprompter_agent_core.golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, GoldenCaseResult, GoldenInvocation, GoldenReport, GoldenSetError, golden_reports_meet, parse_golden_set, pass_bps_of, run_golden_set
-from airprompter_agent_core.judge import JUDGE_RUBRICS, PROTECTION_CRITERIA, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
-from airprompter_agent_core.bundle.apbundle import APBUNDLE_INFO, BundleError, DistributionKey, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle
-from airprompter_agent_core.bundle.hpke import X25519KeyPair, generate_x25519_key_pair, x25519_private_key_from_raw, x25519_public_key_from_raw
-from airprompter_agent_runtime.managed import MANAGED_REFUSAL_CODES, MANAGED_SDK_USER_AGENT, ManagedAgent, ManagedRunError, ManagedRunResult, ManagedRunStream, ManagedWorkflow, parse_sse
-from airprompter_agent_core.protocol import (
+from airprompter_agent.sync import UpdateWindow, WindowState, is_known_time_zone, parse_window, validate_window, window_state
+from airprompter_agent.core import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, GoldenCaseResult, GoldenInvocation, GoldenReport, GoldenSetError, golden_reports_meet, parse_golden_set, pass_bps_of, run_golden_set
+from airprompter_agent.core import JUDGE_RUBRICS, PROTECTION_CRITERIA, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
+from airprompter_agent.core import APBUNDLE_INFO, BundleError, DistributionKey, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle
+from airprompter_agent.core import X25519KeyPair, generate_x25519_key_pair, x25519_private_key_from_raw, x25519_public_key_from_raw
+from airprompter_agent.runtime import MANAGED_REFUSAL_CODES, MANAGED_SDK_USER_AGENT, ManagedAgent, ManagedRunError, ManagedRunResult, ManagedRunStream, ManagedWorkflow, parse_sse
+from airprompter_agent.core import (
     ASSIGNMENT_MODULUS,
     UNDEFINED,
     Assignment,
@@ -73,10 +73,10 @@ from airprompter_agent_core.protocol import (
     verify_manifest,
     verify_root_metadata,
 )
-from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id, parse_run_ref, run_ref_key_from
-from airprompter_agent_core.render.template import Delimiters, MissingVariableError, UnknownVariableError, default_of, placeholders_of, render_template, xml_delimiters
-from airprompter_agent_core.telemetry.feedback import NormalizedFeedback, normalize_feedback
-from airprompter_agent_telemetry.spool.writer import (
+from airprompter_agent.core import RunRefFacts, mint_run_ref, new_run_id, parse_run_ref, run_ref_key_from
+from airprompter_agent.core import Delimiters, MissingVariableError, UnknownVariableError, default_of, placeholders_of, render_template, xml_delimiters
+from airprompter_agent.core import NormalizedFeedback, normalize_feedback
+from airprompter_agent.telemetry import (
     ERROR_CLASSES,
     HOST_SPOOL_BUDGET_BYTES,
     LATENCY_BUCKET_EDGES_MS,
@@ -94,19 +94,19 @@ from airprompter_agent_telemetry.spool.writer import (
     minute_of,
     segment_name,
 )
-from airprompter_agent_sync.store.key_provider import KeyProvider, custom_key_provider, file_key, kms, os_keystore, unwrap_with_raw_key, vault, wrap_with_raw_key
-from airprompter_agent_sync.store.payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
-from airprompter_agent_sync.store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
-from airprompter_agent_sync.store.release_datastore import DatastoreRollbackResult, HydrationPlan, KvReleaseDatastore, MemoryReleaseDatastore, ReleaseControl, ReleaseDatastore, ReleaseKey, StoredReleaseRow, clear_datastore_rollback, kv_release_datastore, prune_datastore, resolve_hydration, rollback_datastore, rollout_of
-from airprompter_agent_sync.store.kv_store import FileKvStore, KvEntry, KvStore, KvStoreReport, MemoryKvStore, check_kv_store
-from airprompter_agent_sync.store.datastore_records import DATASTORE_FORMAT, DatastoreRecordError, datastore_keys, decode_datastore_record, encode_datastore_record
-from airprompter_agent_sync.sync.pull_to_datastore import PullToDatastoreResult, pull_to_datastore
-from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_sync.sync.loop import SyncPassOutput, jittered_delay_ms, sync_once
-from airprompter_agent_core.checks import CHECK_BOUNDS, check_refusal, checks_refusals, estimate_tokens, evaluate_check, evaluate_checks, output_text_of, pattern_refusal, project_checks, validate_json_schema, value_at_path
-from airprompter_agent_runtime.inference import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
-from airprompter_agent_runtime.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
-from airprompter_agent_runtime.variables import (
+from airprompter_agent.sync import KeyProvider, custom_key_provider, file_key, kms, os_keystore, unwrap_with_raw_key, vault, wrap_with_raw_key
+from airprompter_agent.sync import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
+from airprompter_agent.sync import LoadedSlot, SlotStore, StoreError, StoreHooks
+from airprompter_agent.sync import DatastoreRollbackResult, HydrationPlan, KvReleaseDatastore, MemoryReleaseDatastore, ReleaseControl, ReleaseDatastore, ReleaseKey, StoredReleaseRow, clear_datastore_rollback, kv_release_datastore, prune_datastore, resolve_hydration, rollback_datastore, rollout_of
+from airprompter_agent.sync import FileKvStore, KvEntry, KvStore, KvStoreReport, MemoryKvStore, check_kv_store
+from airprompter_agent.sync import DATASTORE_FORMAT, DatastoreRecordError, datastore_keys, decode_datastore_record, encode_datastore_record
+from airprompter_agent.sync import PullToDatastoreResult, pull_to_datastore
+from airprompter_agent.core import SyncClient
+from airprompter_agent.sync import SyncPassOutput, jittered_delay_ms, sync_once
+from airprompter_agent.core import CHECK_BOUNDS, check_refusal, checks_refusals, estimate_tokens, evaluate_check, evaluate_checks, output_text_of, pattern_refusal, project_checks, validate_json_schema, value_at_path
+from airprompter_agent.runtime import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
+from airprompter_agent.runtime import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
+from airprompter_agent.runtime import (
     DEFAULT_SOURCE_MAX_BYTES,
     DEFAULT_SOURCE_TIMEOUT_SECONDS,
     Filled,
@@ -129,12 +129,12 @@ from airprompter_agent_runtime.variables import (
     supplied,
     unsourced,
 )
-from airprompter_agent_telemetry.uploader import GrantDecision, PassResult, SpoolUploader, UploadGrant, backoff_delay_ms, inspect_segment, post_segment, validate_spool_row
+from airprompter_agent.telemetry import GrantDecision, PassResult, SpoolUploader, UploadGrant, backoff_delay_ms, inspect_segment, post_segment, validate_spool_row
 
-# S10: the seam between the packages and the runtime over it, for a customer who holds a release and wants no store.
-from airprompter_agent_core.release.bundle_release import BundleRelease, BundleReleaseRefused
-from airprompter_agent_core.release.reader import LoadedRelease, ReleaseReader, ReleaseSlot
-from airprompter_agent_runtime.release.resolver import Disabled, ReleaseResolver, ResolveOutcome, disabled_from
+# S10: the seam between the layers and the runtime over it, for a customer who holds a release and wants no store.
+from airprompter_agent.core import BundleRelease, BundleReleaseRefused
+from airprompter_agent.core import LoadedRelease, ReleaseReader, ReleaseSlot
+from airprompter_agent.runtime import Disabled, ReleaseResolver, ResolveOutcome, disabled_from
 
 __version__ = SDK_VERSION
 
@@ -283,12 +283,10 @@ __all__ = [
     "WriterIdentity",
     "X25519KeyPair",
     "agent",
-    "apply",
     "arm_for_bucket",
     "assign_arm",
     "backoff_delay_ms",
     "bucket_from_hash",
-    "bundle",
     "bundle_payload_bytes",
     "canonical_bytes",
     "canonical_json",
@@ -323,7 +321,6 @@ __all__ = [
     "key_thumbprint",
     "kms",
     "latency_bucket_index",
-    "managed",
     "mint_run_ref",
     "new_run_id",
     "minute_of",
@@ -347,20 +344,16 @@ __all__ = [
     "payload_aad",
     "post_segment",
     "project_checks",
-    "protocol",
     "public_jwk_of",
     "referenced_payloads",
     "release_digest",
     "release_digest_input",
-    "render",
     "render_template",
     "rubric_from_prompt",
     "run_golden_set",
     "segment_name",
     "sha256_prefixed",
     "sign_bytes",
-    "spool",
-    "store",
     "subject_hash",
     "sync",
     "sync_once",

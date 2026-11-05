@@ -1,29 +1,35 @@
 #!/usr/bin/env node
-// The package direction (S10): core → clients → sdk → binary.
+// The layer direction inside the one package, and the rule for what sits beside it.
 //
-//   layer 0  @airprompter/agent-core        imports nothing of ours
-//   layer 1  agent-sync, agent-runtime,     import core only — never each other
-//            agent-telemetry
-//   layer 2  @airprompter/agent-sdk         imports core and the clients
-//   layer 3  cli/src (the binary)           imports any package
+//   layer 0  sdk/src/core                  imports nothing of ours
+//   layer 1  sdk/src/sync, runtime,        import core only, never each other
+//            telemetry
+//   layer 2  sdk/src/*.ts (the agent),     import the layers below, never each other
+//            sdk/src/frameworks
+//   beside   agent-otel, datastore-*       import `@airprompter/agent-sdk/<layer>`
+//   binary   cli/src                       imports any source, by path
 //
-// A package reaches a sibling only through the sibling's barrel
-// (`@airprompter/agent-<name>` or `@airprompter/agent-core/testing`), never by
-// a relative path into its src — so what a package exports is what a package
-// can depend on. The binary and the tests import sources by path on purpose
-// (they bundle and they test internals); their direction is still checked.
+// A file reaches another layer only through that layer's barrel
+// (`../core/index.js`), never a deeper path, so what a layer exports is what
+// another layer can depend on. The one other barrel is `core/testing/index.js`,
+// and only the `./testing` entry may use it. The binary and the tests import
+// sources by path on purpose (they bundle and they test internals); only the
+// binary's edges are recorded.
 //
 // Exit 1 with every offending line; `--json` prints the edges instead.
+//
+//   $ node scripts/lint-imports.mjs             # from sdk-typescript/
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "..");
-// The datastore adapters (T40) sit beside the facade: they implement the sync package's KvStore and nothing imports them.
-const LAYER = { core: 0, sync: 1, runtime: 1, telemetry: 1, "otel-bridge": 1, "datastore-s3": 2, "datastore-postgres": 2, "datastore-redis": 2, sdk: 2 };
-const PACKAGES = Object.keys(LAYER);
+const sdkSrc = join(root, "packages", "sdk", "src");
+const LAYER = { core: 0, sync: 1, runtime: 1, telemetry: 1, agent: 2, frameworks: 2 };
+const SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"];
+const SUBPATH = /^@airprompter\/agent-sdk\/(core|sync|runtime|telemetry)$/;
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -47,70 +53,98 @@ function specifiersOf(file) {
   return out;
 }
 
-/** Which of our packages a specifier names, and how. */
-function targetOf(spec, fromFile) {
-  const barrel = /^@airprompter\/agent-([a-z]+)(\/testing)?$/.exec(spec);
-  if (barrel) return { pkg: barrel[1], via: "barrel" };
-  if (spec === "@airprompter/otel-bridge") return { pkg: "otel-bridge", via: "barrel" };
-  const adapter = /^@airprompter\/(datastore-[a-z0-9]+)$/.exec(spec);
-  if (adapter) return { pkg: adapter[1], via: "barrel" };
-  if (spec.startsWith("@airprompter/")) return { pkg: null, via: "unknown-barrel" };
-  if (spec.startsWith(".")) {
-    const abs = resolve(fromFile, "..", spec);
-    const rel = relative(root, abs).split(sep).join("/");
-    const m = /^packages\/([a-z0-9-]+)\/src\//.exec(rel);
-    if (m) return { pkg: m[1], via: "relative" };
-    return { pkg: null, via: "outside" };
-  }
-  return { pkg: null, via: "external" };
+const posix = (path) => path.split(sep).join("/");
+
+/** The layer a path under `packages/sdk/src` belongs to; a file directly under `src` is the agent. */
+function layerOf(path) {
+  const rel = posix(relative(sdkSrc, path));
+  const slash = rel.indexOf("/");
+  return slash === -1 ? "agent" : rel.slice(0, slash);
 }
+
+const insideSdk = (path) => !posix(relative(sdkSrc, path)).startsWith("..");
 
 const offenders = [];
 const edges = [];
 
-for (const pkg of PACKAGES) {
-  for (const file of walk(join(root, "packages", pkg, "src"))) {
-    const shown = relative(root, file);
-    for (const { spec, line } of specifiersOf(file)) {
-      const target = targetOf(spec, file);
-      if (target.via === "external") continue;
-      if (target.via === "unknown-barrel") {
-        offenders.push(`${shown}:${line}: ${spec} is not one of our packages`);
-        continue;
-      }
-      if (target.via === "outside") {
-        offenders.push(`${shown}:${line}: ${spec} leaves the packages tree`);
-        continue;
-      }
-      if (target.pkg === pkg) {
-        if (target.via === "barrel") offenders.push(`${shown}:${line}: a package imports itself through its own barrel (${spec}); use a relative path`);
-        continue;
-      }
-      edges.push([pkg, target.pkg]);
-      if (target.via === "relative") {
-        offenders.push(`${shown}:${line}: reaches into ${target.pkg} by path (${spec}); import ${target.pkg === "otel-bridge" ? "@airprompter/otel-bridge" : `@airprompter/agent-${target.pkg}`}`);
-        continue;
-      }
-      if (!(target.pkg in LAYER)) {
-        offenders.push(`${shown}:${line}: ${spec} is not a package`);
-        continue;
-      }
-      if (LAYER[target.pkg] >= LAYER[pkg]) {
-        offenders.push(`${shown}:${line}: ${pkg} (layer ${LAYER[pkg]}) may not import ${target.pkg} (layer ${LAYER[target.pkg]}) — the direction is core → clients → sdk`);
-      }
+function lintSdkFile(file) {
+  const shown = relative(root, file);
+  const layer = layerOf(file);
+  if (!(layer in LAYER)) {
+    offenders.push(`${shown}: packages/sdk/src/${layer} is not a layer; add it to LAYER or move the file`);
+    return;
+  }
+  for (const { spec, line } of specifiersOf(file)) {
+    if (spec.startsWith("@airprompter/")) {
+      offenders.push(`${shown}:${line}: the package imports ${spec} by name; use a relative path through the layer's barrel`);
+      continue;
+    }
+    if (!spec.startsWith(".")) continue;
+    const target = resolve(dirname(file), spec);
+    if (!insideSdk(target)) {
+      offenders.push(`${shown}:${line}: ${spec} leaves packages/sdk/src`);
+      continue;
+    }
+    const into = layerOf(target);
+    if (into === layer) continue;
+    edges.push([layer, into]);
+    const rel = posix(relative(sdkSrc, target)).replace(/\.(js|ts)$/, "");
+    const barrel = rel === `${into}/index` || (rel === "core/testing/index" && posix(relative(sdkSrc, file)) === "testing.ts");
+    if (!barrel) {
+      offenders.push(`${shown}:${line}: reaches into ${into} by path (${spec}); import ${into}'s barrel`);
+      continue;
+    }
+    if (!(into in LAYER)) {
+      offenders.push(`${shown}:${line}: ${spec} is not a layer`);
+      continue;
+    }
+    if (LAYER[into] >= LAYER[layer]) {
+      offenders.push(`${shown}:${line}: ${layer} (layer ${LAYER[layer]}) may not import ${into} (layer ${LAYER[into]}); the direction is core → sync, runtime, telemetry → agent, frameworks`);
     }
   }
 }
 
-// The binary: cli/src imports the packages by path (it bundles them); any package is below it.
+function lintSatellite(name) {
+  const src = join(root, "packages", name, "src");
+  for (const file of walk(src)) {
+    const shown = relative(root, file);
+    for (const { spec, line } of specifiersOf(file)) {
+      if (spec.startsWith(".")) {
+        if (posix(relative(src, resolve(dirname(file), spec))).startsWith("..")) offenders.push(`${shown}:${line}: ${spec} leaves ${name}`);
+        continue;
+      }
+      if (!spec.startsWith("@airprompter/")) continue;
+      const subpath = SUBPATH.exec(spec);
+      if (!subpath) {
+        offenders.push(`${shown}:${line}: ${spec}: a satellite imports only @airprompter/agent-sdk/{core,sync,runtime,telemetry}`);
+        continue;
+      }
+      edges.push([name, subpath[1]]);
+    }
+  }
+}
+
+for (const file of walk(sdkSrc)) lintSdkFile(file);
+for (const name of SATELLITES) lintSatellite(name);
+
+// The binary: cli/src imports sources by path (it bundles them); every layer is below it.
 const cliSrc = resolve(root, "..", "cli", "src");
 try {
   for (const file of walk(cliSrc)) {
     const shown = relative(resolve(root, ".."), file);
     for (const { spec, line } of specifiersOf(file)) {
-      const target = targetOf(spec, file);
-      if (target.via === "barrel") offenders.push(`${shown}:${line}: the binary bundles sources by path; ${spec} would resolve at run time`);
-      if (target.pkg) edges.push(["cli", target.pkg]);
+      if (spec.startsWith("@airprompter/")) {
+        offenders.push(`${shown}:${line}: the binary bundles sources by path; ${spec} would resolve at run time`);
+        continue;
+      }
+      if (!spec.startsWith(".")) continue;
+      const target = resolve(dirname(file), spec);
+      if (insideSdk(target)) {
+        edges.push(["cli", layerOf(target)]);
+        continue;
+      }
+      const satellite = /^packages\/([a-z0-9-]+)\/src\//.exec(posix(relative(root, target)));
+      if (satellite) edges.push(["cli", satellite[1]]);
     }
   }
 } catch (error) {
@@ -119,11 +153,11 @@ try {
 
 if (process.argv.includes("--json")) {
   const unique = [...new Set(edges.map((e) => e.join("→")))].sort();
-  console.log(JSON.stringify({ layers: LAYER, edges: unique }, null, 2));
+  console.log(JSON.stringify({ layers: LAYER, satellites: SATELLITES, edges: unique }, null, 2));
 }
 if (offenders.length) {
-  console.error("lint-imports: the package direction is core → clients → sdk → binary; these lines break it:");
+  console.error("lint-imports: the direction is core → sync, runtime, telemetry → agent, frameworks → binary; these lines break it:");
   for (const line of offenders) console.error("  " + line);
   process.exit(1);
 }
-console.log(`lint-imports: ok (${edges.length} cross-package imports, all downward and through barrels)`);
+console.log(`lint-imports: ok (${edges.length} imports between layers, all downward and through barrels)`);

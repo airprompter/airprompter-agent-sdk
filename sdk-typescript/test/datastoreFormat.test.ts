@@ -12,9 +12,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { checkKvStore, fsKvStore, MemoryKvStore } from "../packages/sync/src/store/kvStore.js";
-import { datastoreKeys, decodeDatastoreRecord, encodeDatastoreRecord, isDatastoreRecordError, type DatastoreRecord } from "../packages/sync/src/store/datastoreRecords.js";
-import { KvReleaseDatastore, rollbackDatastore, pruneDatastore, resolveHydration, type ReleaseKey, type StoredReleaseRow } from "../packages/sync/src/store/releaseDatastore.js";
+import { checkKvStore, fsKvStore, MemoryKvStore } from "../packages/sdk/src/sync/store/kvStore.js";
+import { datastoreKeys, decodeDatastoreRecord, encodeDatastoreRecord, isDatastoreRecordError, type DatastoreRecord } from "../packages/sdk/src/sync/store/datastoreRecords.js";
+import { KvReleaseDatastore, rollbackDatastore, pruneDatastore, resolveHydration, type ReleaseKey, type StoredReleaseRow } from "../packages/sdk/src/sync/store/releaseDatastore.js";
 
 const vectors = JSON.parse(readFileSync(new URL("../../protocol/vectors/datastore.json", import.meta.url), "utf8")) as {
   keys: Array<{ name: string; prefix: string; key: ReleaseKey; generation: number; expect: Record<string, string> }>;

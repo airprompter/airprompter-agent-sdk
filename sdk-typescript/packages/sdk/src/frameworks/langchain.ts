@@ -25,9 +25,9 @@ import { ToolInvocationError, SystemMessage, createMiddleware, initChatModel } f
 import { MODEL_PROVIDER_CONFIG, _inferModelProvider } from "langchain/chat_models/universal";
 import type { AgentMiddleware } from "langchain";
 import { z } from "zod";
-import { classifyError, classifyResult, normalizeUsage, temperatureOf, topPOf } from "@airprompter/agent-runtime";
-import type { AgentRuntime, Placement, RunInput, RunSession } from "@airprompter/agent-runtime";
-import type { SlotInference } from "@airprompter/agent-core";
+import { classifyError, classifyResult, normalizeUsage, temperatureOf, topPOf } from "../runtime/index.js";
+import type { AgentRuntime, Placement, RunInput, RunSession } from "../runtime/index.js";
+import type { SlotInference } from "../core/index.js";
 
 export interface AirPrompterMiddlewareOptions {
   /** The slot this agent runs on. */

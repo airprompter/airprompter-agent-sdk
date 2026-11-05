@@ -11,8 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { customKeyProvider, fileKey, unwrapWithRawKey, wrapWithRawKey } from "../packages/sync/src/store/keyProvider.js";
-import { SlotStore, StoreError } from "../packages/sync/src/store/slotStore.js";
+import { customKeyProvider, fileKey, unwrapWithRawKey, wrapWithRawKey } from "../packages/sdk/src/sync/store/keyProvider.js";
+import { SlotStore, StoreError } from "../packages/sdk/src/sync/store/slotStore.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const NOW = () => new Date().toISOString();
@@ -173,8 +173,8 @@ test("KEK rotation re-wraps the DEK: payloads stay readable, nothing is re-encry
 });
 
 test("the file key provider goes through the filesystem port, so a store on a memory filesystem keeps its key there too", async () => {
-  const { MemoryFs } = await import("../packages/core/src/testing/memoryFs.js");
-  const { fileKey } = await import("../packages/sync/src/store/keyProvider.js");
+  const { MemoryFs } = await import("../packages/sdk/src/core/testing/memoryFs.js");
+  const { fileKey } = await import("../packages/sdk/src/sync/store/keyProvider.js");
   const fs = new MemoryFs();
   const provider = fileKey("/keys/store.key", fs);
   const wrapped = await provider.wrap(new Uint8Array(32).fill(7));

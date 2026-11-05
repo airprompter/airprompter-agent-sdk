@@ -11,35 +11,53 @@ Node 20+, ESM and CJS, no runtime dependencies beyond `node:crypto`.
 
 ## Packages
 
-Install what you use. The SDK is five packages released in lockstep
-(one version; the facade exact-pins its siblings), in the shape of the AWS
-SDK v3: a customer takes the syncing, or the runtime, or the telemetry,
-without the others.
+One install. Everything below is in the one package; you import the part you
+use, and a part you do not import is not loaded.
 
-| Package | Install it alone when | Depends on |
-| --- | --- | --- |
-| `@airprompter/agent-core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane HTTP client, the port interfaces. Nothing here opens a file, a socket or a timer at import. | — |
-| `@airprompter/agent-sync` | Your CI pulls and verifies releases (`syncOnce`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). | core |
-| `@airprompter/agent-runtime` | Your application renders and assigns over a release **it already holds** — a bundle you loaded, a release from the store or a datastore row — with no store or network of its own (`BundleRelease` + `ReleaseResolver`); the provider wrappers (`wrapClient`, `aiSdkMiddleware`, `observeCall`); the hosted-execution client (`ManagedAgent`). | core |
-| `@airprompter/agent-telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). | core |
-| `@airprompter/otel-bridge` | Your OpenTelemetry collector takes the windows instead of AirPrompter (`otlpUploadSink`, `spoolRowsToOtlp`): OTLP/HTTP metrics, no grant, no Agent key. Optional; the facade never pulls it in. | core |
-| `@airprompter/agent-sdk` | One install with today's `AirPrompterAgent`: the facade over the four, every public name re-exported. | the four above |
+```bash
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.0   # the 1.0 release candidate
+# With a satellite, pin each one to the same candidate:
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.0 @airprompter/datastore-s3@1.0.0-rc.0 @airprompter/agent-otel@1.0.0-rc.0
+```
 
-The direction is fixed and linted: core imports nothing of ours; the
-three clients import core and never each other; the facade imports the
-clients; the `airprompter` binary is built from the packages' sources.
-`scripts/lint-imports.mjs` refuses an upward import or a relative path
-into a sibling (a sibling is reached only through its barrel), and
-`test/packageSplit.test.ts` pins the edge set, proves two copies of a
-package in one lockfile agree (an error, a release and a sink from one
-copy are recognised by the other — never `instanceof`), and holds each
-package under its size budget (`airprompter.sizeBudgetBytes` in its
-`package.json`).
+Pin every package exactly. An unpinned datastore installs 0.6.0, which brings
+the old split packages in beside this one. npm's default range,
+`^1.0.0-rc.0`, also matches later candidates, and a later candidate removes
+`ap.wrap`.
+
+| Import | Use it when |
+| --- | --- |
+| `@airprompter/agent-sdk` | `AirPrompterAgent`, its option and result types, and the hosted client (`ManagedAgent`). Everything else is reached through a subpath. |
+| `@airprompter/agent-sdk/core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane HTTP client, the port interfaces. Nothing here opens a file, a socket or a timer at import. |
+| `@airprompter/agent-sdk/sync` | Your CI pulls and verifies releases (`syncOnce`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). |
+| `@airprompter/agent-sdk/runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `/core` + `ReleaseResolver`); the provider wrappers (`wrapClient`, `aiSdkMiddleware`, `observeCall`). |
+| `@airprompter/agent-sdk/telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
+| `@airprompter/agent-sdk/testing` | The kit a customer's CI imports: `FakeControlPlane`, `MemoryFs`, `FakeClock`. Never loaded by the runtime. |
+| `@airprompter/agent-sdk/frameworks/langchain` | Middleware for LangChain's `createAgent`. `langchain`, `@langchain/core` and `zod` are optional peers: install them to use this subpath, and no other subpath loads them. |
+
+Beside it, separate packages only where a dependency footprint earns one. Each
+takes `@airprompter/agent-sdk` as a peer at the same version, so an application
+never holds a second copy:
+
+| Package | Use it when |
+| --- | --- |
+| `@airprompter/agent-otel/exporter` | Your OpenTelemetry collector takes the windows instead of AirPrompter (`otlpUploadSink`, `spoolRowsToOtlp`): OTLP/HTTP metrics, no grant, no Agent key. Renamed from the earlier OpenTelemetry package. |
+| `@airprompter/datastore-s3`, `-postgres`, `-redis` | Your own datastore carries releases to your runtimes ([docs/datastore.md](../docs/datastore.md)). |
+
+The direction is fixed and linted: `core` imports nothing of ours; `sync`,
+`runtime` and `telemetry` import `core` and never each other; `agent.ts` and
+`frameworks/` import those; the `airprompter` binary is built from the sources.
+`scripts/lint-imports.mjs` refuses an upward import or a path past a layer's
+barrel (`../core/index.js`), and `test/packageShape.test.ts` pins the edge set
+and the exports map, proves two copies in one lockfile agree (an error, a
+release and a sink from one copy are recognised by the other, never
+`instanceof`), and holds each subpath under its size budget
+(`airprompter.sizeBudgetBytes` in `package.json`).
 
 ```ts
 // The runtime alone, over a bundle committed beside the code: no store, no daemon, no network.
-import { BundleRelease, trustedRootFromPinnedKey } from "@airprompter/agent-core";
-import { ReleaseResolver } from "@airprompter/agent-runtime";
+import { BundleRelease, trustedRootFromPinnedKey } from "@airprompter/agent-sdk/core";
+import { ReleaseResolver } from "@airprompter/agent-sdk/runtime";
 
 const root = trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: PINNED_ROOT_JWK });
 const loaded = BundleRelease.load({ bundle: JSON.parse(readFileSync("release.apbundle", "utf8")), root, scope, now: new Date().toISOString() });
@@ -351,7 +369,7 @@ temperature goes and top-p does not (`one_sampling_parameter`), and neither
 goes beside a `thinking` block the call site set (`thinking`). The AI SDK
 middleware applies the same rules through `transformParams`. Instrumentation
 that calls a provider itself uses `applyInference(kind, params, inference,
-{ model })` (exported from `@airprompter/agent-runtime` and the facade); a
+{ model })` (exported from `@airprompter/agent-sdk/runtime`); a
 golden-set `invoke` receives `inference` so the activation gate samples as
 production does.
 
@@ -450,20 +468,20 @@ writes the same catalogue for build steps.
 | Module | What it holds |
 | --- | --- |
 | `packages/sdk/src/agent.ts` | `AirPrompterAgent`: start/boot fallback chain, `prompt().render()`, `workflow()`, `report()`, `feedback()`, `unlock()`, `rollback()`, `status()`, `invoke()` — the facade that wires the four packages below |
-| `packages/core/src/protocol/` | Wire types, canonical JSON + SHA-256, the trust chain (RFC 7638 thumbprints, ES256/P1363, root metadata R1–R5, manifest M1–M14), sticky assignment and the ramp walk, workflow step order |
-| `packages/core/src/release/` | `LoadedRelease` / `ReleaseReader` — the seam between the packages — and `BundleRelease`, a bundle the customer loads verified into one |
-| `packages/core/src/bundle/` | `.apbundle` v1: HPKE X25519 / HKDF-SHA256 / AES-256-GCM (RFC 9180 vectors), AAD `agentId|target` so a bundle cannot be relabelled |
-| `packages/core/src/render/` | `{{name}}` substitution with trust-aware fencing; `runRef` (HMAC, content-free) |
-| `packages/core/src/checks/`, `golden/`, `judge/` | Declared output checks; golden sets (`runGoldenSet`: render → invoke → evaluate → count, the threshold); `ap.judge()`'s rubrics and prompt |
-| `packages/core/src/telemetry/` | The row schemas (`window`, `refusal`, `dropped`), latency buckets, the feedback catalogue normaliser — pure, so the spool writer and the wrappers build on them without importing each other |
-| `packages/core/src/control/` | `SyncClient`: edge pointer, manifest with ETag, payloads by hash, heartbeat, upload grants — the one HTTP client, shared by sync and telemetry |
-| `packages/core/src/protocol/ports.ts`, `ports/` | The seams to the world: `FsPort`, `ClockPort`, `FetchPort` (pure types) and the Node implementations. The spool, the store and the uploader reach the filesystem only through `FsPort`; the spool never throws on the request path (`faults` counts what it could not keep, a `dropped` row says it) |
-| `packages/core/src/testing/` (`@airprompter/agent-core/testing`) | The kit a customer's CI imports: `MemoryFs` (a filesystem that fills, fails and loses files), `FakeClock` (advances, skews), `FakeControlPlane` (signed manifests, refusals, lease, an expiring upload grant). Never loaded by the runtime |
-| `packages/sync/src/store/` | `SlotStore`: two slots, stage → fsync → activate, AAD `agentId target generation contentHash` per payload, anti-rollback counter outside the slots, DEK wrapped by a `KeyProvider` (file key default; custom / KMS via `customKeyProvider`) |
-| `packages/sync/src/sync/`, `apply/` | `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `pullToDatastore`, the apply policy's update windows |
-| `packages/runtime/src/release/` | `ReleaseResolver`: which slot a subject gets under which arm (the plan walked on this host's clock, a retreat honoured), the rendered text with its run reference — over any `LoadedRelease` |
-| `packages/runtime/src/wrap/`, `observe.ts`, `managed/` | `ap.wrap()`: the client proxy and stream taps (`client.ts`), attribution by scope or rendered text (`attribution.ts`), the AI SDK middleware (`aiSdk.ts`); `observeCall` (usage off the provider's answer, the closed error set); `ManagedAgent` (hosted mode) |
-| `packages/telemetry/src/spool/`, `uploader.ts` | Minute windows per dimension set, segment naming and rotation (`SegmentPlanner`), `DirectorySink` (0600, `.open` until fsync + rename, crash recovery, a manifest per closed segment) and `MemorySink`; `SpoolUploader` (grant, budget, quarantine, manifests, the marker); `spool/manifest.ts` (the daemon's `daemon.json` and the segment manifest) |
+| `packages/sdk/src/core/protocol/` | Wire types, canonical JSON + SHA-256, the trust chain (RFC 7638 thumbprints, ES256/P1363, root metadata R1–R5, manifest M1–M14), sticky assignment and the ramp walk, workflow step order |
+| `packages/sdk/src/core/release/` | `LoadedRelease` / `ReleaseReader` — the seam between the layers — and `BundleRelease`, a bundle the customer loads verified into one |
+| `packages/sdk/src/core/bundle/` | `.apbundle` v1: HPKE X25519 / HKDF-SHA256 / AES-256-GCM (RFC 9180 vectors), AAD `agentId|target` so a bundle cannot be relabelled |
+| `packages/sdk/src/core/render/` | `{{name}}` substitution with trust-aware fencing; `runRef` (HMAC, content-free) |
+| `packages/sdk/src/core/checks/`, `golden/`, `judge/` | Declared output checks; golden sets (`runGoldenSet`: render → invoke → evaluate → count, the threshold); `ap.judge()`'s rubrics and prompt |
+| `packages/sdk/src/core/telemetry/` | The row schemas (`window`, `refusal`, `dropped`), latency buckets, the feedback catalogue normaliser — pure, so the spool writer and the wrappers build on them without importing each other |
+| `packages/sdk/src/core/control/` | `SyncClient`: edge pointer, manifest with ETag, payloads by hash, heartbeat, upload grants — the one HTTP client, shared by sync and telemetry |
+| `packages/sdk/src/core/protocol/ports.ts`, `ports/` | The seams to the world: `FsPort`, `ClockPort`, `FetchPort` (pure types) and the Node implementations. The spool, the store and the uploader reach the filesystem only through `FsPort`; the spool never throws on the request path (`faults` counts what it could not keep, a `dropped` row says it) |
+| `packages/sdk/src/core/testing/` (`@airprompter/agent-sdk/testing`) | The kit a customer's CI imports: `MemoryFs` (a filesystem that fills, fails and loses files), `FakeClock` (advances, skews), `FakeControlPlane` (signed manifests, refusals, lease, an expiring upload grant). Never loaded by the runtime |
+| `packages/sdk/src/sync/store/` | `SlotStore`: two slots, stage → fsync → activate, AAD `agentId target generation contentHash` per payload, anti-rollback counter outside the slots, DEK wrapped by a `KeyProvider` (file key default; custom / KMS via `customKeyProvider`) |
+| `packages/sdk/src/sync/sync/`, `apply/` | `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `pullToDatastore`, the apply policy's update windows |
+| `packages/sdk/src/runtime/release/` | `ReleaseResolver`: which slot a subject gets under which arm (the plan walked on this host's clock, a retreat honoured), the rendered text with its run reference — over any `LoadedRelease` |
+| `packages/sdk/src/runtime/wrap/`, `observe.ts`, `managed/` | `ap.wrap()`: the client proxy and stream taps (`client.ts`), attribution by scope or rendered text (`attribution.ts`), the AI SDK middleware (`aiSdk.ts`); `observeCall` (usage off the provider's answer, the closed error set); `ManagedAgent` (hosted mode) |
+| `packages/sdk/src/telemetry/spool/`, `uploader.ts` | Minute windows per dimension set, segment naming and rotation (`SegmentPlanner`), `DirectorySink` (0600, `.open` until fsync + rename, crash recovery, a manifest per closed segment) and `MemorySink`; `SpoolUploader` (grant, budget, quarantine, manifests, the marker); `spool/manifest.ts` (the daemon's `daemon.json` and the segment manifest) |
 
 Every file in `protocol/vectors/` runs through these modules in `test/`;
 the table under **Packages** says which suite exercises which vector.
@@ -481,7 +499,7 @@ the pointer's silence and `unchanged` for the origin's.
 
 ### Error identity is data, never the class
 
-A lockfile can hold two copies of this package (a sibling package pinning a
+A lockfile can hold two copies of this package (a satellite resolved to a
 different patch; a bundler duplicating a chunk), and an error thrown by one
 copy is not `instanceof` the class from the other. Every SDK error therefore
 sets `name` and carries a `code`, and the guards read those: `isStoreError`,
@@ -505,11 +523,11 @@ the rule on every source file, the CLI's included.
 ## Building
 
 ```
-npm ci                 # the workspace: five packages linked
-npm run build          # every package in dependency order: dist/esm + dist/cjs
-npm run typecheck      # the whole tree as one program (siblings resolve to source)
+npm ci                 # the workspace: the SDK, agent-otel and the three datastores, linked
+npm run build          # the SDK, then the satellites: dist/esm + dist/cjs
+npm run typecheck      # the whole tree as one program (subpaths resolve to source)
 npm test               # lint-imports, then node:test over test/**
-npm run size           # each package against its size budget
+npm run size           # each subpath and satellite against its size budget
 ```
 
 Optional key providers ship as separate packages:

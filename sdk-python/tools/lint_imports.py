@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
-"""The package direction (S10): core → clients → agent.
+"""The layer direction inside the one distribution, and the rule for what sits beside it.
 
-  layer 0  airprompter_agent_core        imports nothing of ours
-  layer 1  airprompter_agent_sync,       import core only — never each other
-           airprompter_agent_runtime,
-           airprompter_agent_telemetry
-  layer 2  airprompter_agent (facade)    imports core and the clients
+  layer 0  airprompter_agent.core        imports nothing of ours
+  layer 1  airprompter_agent.sync,       import core only, never each other
+           airprompter_agent.runtime,
+           airprompter_agent.telemetry
+  layer 2  airprompter_agent (the agent  imports the layers below
+           and its integrations)
+  beside   airprompter_agent_otel,       import ``airprompter_agent.<layer>``
+           airprompter_datastore_*
 
-A package reaches a sibling only by its absolute name (``from airprompter_agent_core... import``); a relative import
-may only point inside the package it is written in (Python cannot do otherwise, but a ``from ...x`` that climbs past
-the package root is caught here rather than at import time). Exit 1 with every offending line; ``--json`` prints the
-edges instead.
+A file reaches another layer only through that layer's package (``from airprompter_agent.core import x``), never one of
+its modules (``from airprompter_agent.core.protocol.trust import x``), so what a layer exports is what another layer can
+depend on. Inside a layer anything goes. The one module named past a layer is ``airprompter_agent.core._util``: small
+shared helpers, internal, on no layer's public list. ``airprompter_agent.core.testing`` is the tests' barrel, and the
+package does not import it. Exit 1 with every offending line; ``--json`` prints the edges instead.
+
+Usage::
+
+    $ python tools/lint_imports.py             # from sdk-python/
 """
 
 from __future__ import annotations
@@ -21,54 +29,93 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / "packages"
-DIST = {"core": "airprompter_agent_core", "sync": "airprompter_agent_sync", "runtime": "airprompter_agent_runtime", "telemetry": "airprompter_agent_telemetry", "agent": "airprompter_agent", "datastore-s3": "airprompter_datastore_s3", "datastore-postgres": "airprompter_datastore_postgres", "datastore-redis": "airprompter_datastore_redis"}
-# The datastore adapters (T40) sit beside the facade: they implement sync's KvStore and nothing imports them.
-LAYER = {"core": 0, "sync": 1, "runtime": 1, "telemetry": 1, "agent": 2, "datastore-s3": 2, "datastore-postgres": 2, "datastore-redis": 2}
-BY_MODULE = {v: k for k, v in DIST.items()}
+PACKAGE = "airprompter_agent"
+LAYERS = {"core": 0, "sync": 1, "runtime": 1, "telemetry": 1, "agent": 2}
+SATELLITES = {"agent-otel": "airprompter_agent_otel", "datastore-s3": "airprompter_datastore_s3", "datastore-postgres": "airprompter_datastore_postgres", "datastore-redis": "airprompter_datastore_redis"}
+OURS = {PACKAGE, *SATELLITES.values()}
+ALLOWED_INTERNAL = {"airprompter_agent.core._util"}
 
 
-def package_of(module: str) -> str | None:
-    head = module.split(".")[0]
-    return BY_MODULE.get(head)
+def layer_of_file(relative: Path) -> str:
+    """The layer a file under ``airprompter_agent/`` belongs to; the top level and ``integrations`` are the agent."""
+    head = relative.parts[0]
+    return head if len(relative.parts) > 1 and head in LAYERS else "agent"
+
+
+def target_of(module: str) -> tuple[str | None, bool]:
+    """The layer a module names (``None`` when it is not ours) and whether it stops at the layer's package."""
+    parts = module.split(".")
+    if parts[0] != PACKAGE:
+        return (parts[0] if parts[0] in OURS else None), True
+    if len(parts) == 1:
+        return "agent", True
+    if parts[1] in LAYERS:
+        return parts[1], len(parts) == 2 or module in ALLOWED_INTERNAL
+    return "agent", False
+
+
+def absolute_of(node: ast.ImportFrom, path_parts: tuple[str, ...]) -> str:
+    """A relative import as the absolute module it names. ``path_parts`` is the importing module's package."""
+    if not node.level:
+        return node.module or ""
+    base = path_parts[: len(path_parts) - node.level + 1]
+    return ".".join([*base, *([node.module] if node.module else [])])
+
+
+def imported_modules(tree: ast.AST, package: tuple[str, ...]) -> list[tuple[int, str]]:
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            found.append((node.lineno, absolute_of(node, package)))
+        elif isinstance(node, ast.Import):
+            found.extend((node.lineno, alias.name) for alias in node.names)
+    return found
 
 
 def main() -> int:
     offenders: list[str] = []
     edges: set[str] = set()
-    for name, dist in DIST.items():
-        src = ROOT / name / "src" / dist
-        for path in sorted(src.rglob("*.py")):
+    src = ROOT / "agent" / "src" / PACKAGE
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        shown = path.relative_to(ROOT.parent)
+        relative = path.relative_to(src)
+        layer = layer_of_file(relative)
+        package = (PACKAGE, *relative.parts[:-1])
+        for line, module in imported_modules(tree, package):
+            if module.split(".")[0] in OURS and module.split(".")[0] != PACKAGE:
+                offenders.append(f"{shown}:{line}: the package imports {module}; a satellite sits beside it, never under it")
+                continue
+            target, whole = target_of(module)
+            if target is None or target == layer:
+                continue
+            edges.add(f"{layer}→{target}")
+            if not whole:
+                offenders.append(f"{shown}:{line}: reaches into {target} by path ({module}); import airprompter_agent.{target}")
+                continue
+            if LAYERS[target] >= LAYERS[layer]:
+                offenders.append(f"{shown}:{line}: {layer} (layer {LAYERS[layer]}) may not import {target} (layer {LAYERS[target]}); the direction is core → sync, runtime, telemetry → agent")
+    for name, module_name in SATELLITES.items():
+        root = ROOT / name / "src" / module_name
+        for path in sorted(root.rglob("*.py")):
             tree = ast.parse(path.read_text(), filename=str(path))
             shown = path.relative_to(ROOT.parent)
-            depth = len(path.relative_to(src).parts) - 1  # packages above the module, inside the dist
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom):
-                    if node.level:
-                        if node.level > depth + 1:
-                            offenders.append(f"{shown}:{node.lineno}: a relative import climbs out of {dist}")
-                        continue
-                    target = package_of(node.module or "")
-                elif isinstance(node, ast.Import):
-                    target = None
-                    for alias in node.names:
-                        t = package_of(alias.name)
-                        if t:
-                            target = t
-                else:
+            for line, module in imported_modules(tree, (module_name, *path.relative_to(root).parts[:-1])):
+                target, whole = target_of(module)
+                if target is None or target == module_name:
                     continue
-                if target is None or target == name:
+                if target == "agent" or not whole or target not in LAYERS:
+                    offenders.append(f"{shown}:{line}: {module}: a satellite imports only airprompter_agent.{{core,sync,runtime,telemetry}}")
                     continue
                 edges.add(f"{name}→{target}")
-                if LAYER[target] >= LAYER[name]:
-                    offenders.append(f"{shown}:{node.lineno}: {name} (layer {LAYER[name]}) may not import {target} (layer {LAYER[target]}) — the direction is core → clients → agent")
     if "--json" in sys.argv:
-        print(json.dumps({"layers": LAYER, "edges": sorted(edges)}, indent=2))
+        print(json.dumps({"layers": LAYERS, "satellites": list(SATELLITES), "edges": sorted(edges)}, indent=2))
     if offenders:
-        print("lint_imports: the package direction is core → clients → agent; these lines break it:", file=sys.stderr)
+        print("lint_imports: the direction is core → sync, runtime, telemetry → agent; these lines break it:", file=sys.stderr)
         for line in offenders:
             print("  " + line, file=sys.stderr)
         return 1
-    print(f"lint_imports: ok ({len(edges)} package edges, all downward)")
+    print(f"lint_imports: ok ({len(edges)} edges between layers, all downward and through barrels)")
     return 0
 
 

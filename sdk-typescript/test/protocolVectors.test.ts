@@ -3,14 +3,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { carriedPayloads, optionalPayloads, releaseDigest as digestOf } from "../packages/core/src/protocol/trust.js";
+import { carriedPayloads, optionalPayloads, releaseDigest as digestOf } from "../packages/sdk/src/core/protocol/trust.js";
 
-import { assignArm, AssignmentError, orderedSteps, StepError } from "../packages/core/src/protocol/assignment.js";
-import { canonicalJson, CanonicalJsonError, sha256Prefixed } from "../packages/core/src/protocol/canonicalJson.js";
-import { referencedPayloads, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../packages/core/src/protocol/trust.js";
-import { disabledFrom, frozenExperiment, servableExperiments, servableSlots } from "../packages/core/src/protocol/assignment.js";
-import { mintRunRef, parseRunRef, runRefKeyFrom, RUN_REF_MAX_ENTRIES, RUN_REF_MAX_TOKEN_LENGTH, RUN_REF_READ_MAX_ENTRIES, RUN_REF_READ_MAX_TOKEN_LENGTH } from "../packages/core/src/render/runRef.js";
-import { checksRefusals, evaluateChecks, patternRefusal, projectChecks, type DeclaredCheck } from "../packages/core/src/checks/index.js";
+import { assignArm, AssignmentError, orderedSteps, StepError } from "../packages/sdk/src/core/protocol/assignment.js";
+import { canonicalJson, CanonicalJsonError, sha256Prefixed } from "../packages/sdk/src/core/protocol/canonicalJson.js";
+import { referencedPayloads, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../packages/sdk/src/core/protocol/trust.js";
+import { disabledFrom, frozenExperiment, servableExperiments, servableSlots } from "../packages/sdk/src/core/protocol/assignment.js";
+import { mintRunRef, parseRunRef, runRefKeyFrom, RUN_REF_MAX_ENTRIES, RUN_REF_MAX_TOKEN_LENGTH, RUN_REF_READ_MAX_ENTRIES, RUN_REF_READ_MAX_TOKEN_LENGTH } from "../packages/sdk/src/core/render/runRef.js";
+import { checksRefusals, evaluateChecks, patternRefusal, projectChecks, type DeclaredCheck } from "../packages/sdk/src/core/checks/index.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));
 
@@ -173,7 +173,7 @@ test("a slot's requires is in the release digest when present", () => {
 });
 
 // One shared input corpus proves exact matching and refusal parity across languages.
-import { matchesAudience, validAudienceSelector, validAudienceKey, validAudienceLabel, validAudienceInstant } from "../packages/core/src/protocol/assignment.js";
+import { matchesAudience, validAudienceSelector, validAudienceKey, validAudienceLabel, validAudienceInstant } from "../packages/sdk/src/core/protocol/assignment.js";
 test("audiences.json: exact local audience predicates", () => {
   for (const c of vector("audiences.json").cases) {
     assert.equal(validAudienceSelector(c.selector), c.valid, c.name);

@@ -16,9 +16,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
-import { SlotStore } from "../packages/sync/src/store/slotStore.js";
-import { FakeControlPlane } from "../packages/core/src/testing/index.js";
+import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
+import { SlotStore } from "../packages/sdk/src/sync/store/slotStore.js";
+import { FakeControlPlane } from "../packages/sdk/src/core/testing/index.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_upload", target: "prod" as const };
 const T0 = Date.parse("2026-09-13T12:00:00Z");

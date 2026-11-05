@@ -11,6 +11,7 @@
  */
 
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +31,7 @@ import { manifestNameOf, writeDaemonDiscovery, writeSegmentManifest } from "../.
 import { epochMinute, segmentName } from "../../sdk-typescript/packages/telemetry/src/spool/writer.js";
 import type { RootMetadata } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import { FakeControlPlane, serveOverHttp } from "../../sdk-typescript/test/helpers/controlPlane.js";
+import { minimalReport } from "../src/commands/daemon.js";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";
 
@@ -70,7 +72,7 @@ function capture(work: string, env: Record<string, string> = {}): { ctx: Context
 
 function windowLine(instanceId: string, minuteMs: number): string {
   const minute = new Date(Math.floor(minuteMs / 60_000) * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
-  return `${JSON.stringify({ type: "window", v: 1, minute, instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 4, output: 2 }, sdk: "agent-sdk-ts/0.3.0" })}\n`;
+  return `${JSON.stringify({ type: "window", v: 4, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 4, output: 2 }, sdk: "agent-sdk-ts/0.3.0" })}\n`;
 }
 
 test("the telemetry daemon: publishes daemon.json and no store; ships two writers' segments under their own grants and reports; quarantines a mismatch; a clean stop hands the upload back", { skip }, async () => {
@@ -112,7 +114,7 @@ test("the telemetry daemon: publishes daemon.json and no store; ships two writer
 
     for (const sdk of [a, b]) {
       const r = sdk.prompt("support.reply").render({ name: "Ada" });
-      sdk.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 });
+      sdk.report({ tag: r.tag, artifactId: r.artifactId, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 });
       sdk.spool.closeWindows(Date.now());
     }
     // Two strangers: a segment that no longer matches its manifest, and another agent's. (A segment lands before its
@@ -204,4 +206,24 @@ test("the release-serving flags are refused by name: --root, --edge-pointer-url,
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+});
+
+test("the fallback report for a segment with no manifest passes the heartbeat schema, and a manifest's report requires what the heartbeat does, minus spool", () => {
+  // The conformance package's own ajv: CI installs it before this suite (test/dev.test.ts).
+  const require = createRequire(join(cliRoot, "..", "conformance", "package.json"));
+  const { Ajv2020 } = require("ajv/dist/2020.js");
+  const addFormats = require("ajv-formats").default ?? require("ajv-formats");
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  addFormats(ajv);
+  const schemas = join(cliRoot, "..", "protocol", "schemas");
+  const documents = Object.fromEntries(readdirSync(schemas).filter((name) => name.endsWith(".schema.json")).map((name) => [name.replace(".schema.json", ""), JSON.parse(readFileSync(join(schemas, name), "utf8"))]));
+  for (const document of Object.values(documents)) ajv.addSchema(document);
+  const request = ajv.getSchema(`${documents.heartbeat.$id}#/$defs/request`);
+  const spool = { depthSegments: 1, depthBytes: 10, droppedSegments: 0, quarantinedSegments: 0 };
+  assert.equal(request({ ...minimalReport("i-reclaimedAAAAAA", Date.now()), spool }), true, JSON.stringify(request.errors));
+  const heartbeatRequired: string[] = documents.heartbeat.$defs.request.required;
+  const reportRequired: string[] = documents["spool-manifest"].properties.report.required;
+  assert.deepEqual([...reportRequired].sort(), heartbeatRequired.filter((name) => name !== "spool").sort());
+  const report = ajv.getSchema(`${documents["spool-manifest"].$id}#/properties/report`);
+  assert.equal(report(minimalReport("i-reclaimedAAAAAA", Date.now())), true, JSON.stringify(report.errors));
 });

@@ -20,7 +20,7 @@ from airprompter_agent_core._util import b64url_encode
 from airprompter_agent_core.bundle.apbundle import DistributionKey
 from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
 from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key
+from airprompter_agent_core.protocol.trust import public_jwk_of, release_digest, trusted_root_from_pinned_key
 from airprompter_agent_sync import next_pull_delay_ms, pull_bundle
 
 from .control_plane import FakeControlPlane
@@ -84,7 +84,7 @@ def test_puller_store_apply_bundle_dial_refuse_restart():
         assert b.prompt("support.reply").render(name="Ann").text == "Reply politely to Ann."
 
         candidate = plane.slot(tag="support.reply", text="Reply warmly to {{name}}.", variables=[{"name": "name", "required": False, "trust": "operator"}], version_id="ver_2")
-        plane.promote([control], experiment={"experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 5000, "releaseDigest": "sha256:" + "0" * 64, "overrides": []}, {"arm": "candidate", "weightBps": 5000, "releaseDigest": "sha256:" + "1" * 64, "overrides": [candidate]}]})
+        plane.promote([control], experiments=[{"tag": control["tag"], "experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 5000, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 5000, "releaseDigest": "sha256:" + "1" * 64, "overrides": [candidate]}]}])
         assert pull() == 2
         changes: list[int] = []
         a.on_change(lambda change: changes.append(change.generation) if change.generation is not None else None)

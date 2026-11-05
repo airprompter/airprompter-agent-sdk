@@ -115,7 +115,7 @@ cases.append({
     "salt": SALT,
     "arms": [{"arm": a, "weightBps": w} for a, w in zip(ARMS, arms_weights)],
     "ramp": ramp,
-    "directives": [{"kind": "disable", "scope": "arm", "arm": "candidate", "issuedAt": "2026-09-14T05:30:00Z", "reason": "p95 regressed"}],
+    "directives": [{"kind": "disable", "scope": "arm", "arm": "candidate", "experimentId": "exp_ramp", "issuedAt": "2026-09-14T05:30:00Z", "reason": "p95 regressed"}],
     "expected": {"weightBps": weights, "assignments": [{"subject": s, "bucket": bucket(SALT, s), "arm": arm_for(bucket(SALT, s), ARMS, weights, {"candidate"})} for s in subjects[:8]]},
     "note": "a reduction: it lands without an unlock (S4's pushable set) and needs no new plan",
 })
@@ -125,7 +125,7 @@ cases.append({
     "salt": SALT,
     "arms": [{"arm": a, "weightBps": w} for a, w in zip(ARMS, arms_weights)],
     "ramp": ramp,
-    "directives": [{"kind": "disable", "scope": "arm", "arm": "shadow", "issuedAt": "2026-09-14T05:30:00Z"}],
+    "directives": [{"kind": "disable", "scope": "arm", "arm": "shadow", "experimentId": "exp_ramp", "issuedAt": "2026-09-14T05:30:00Z"}],
     "expected": {"weightBps": weights, "assignments": [{"subject": s, "bucket": bucket(SALT, s), "arm": arm_for(bucket(SALT, s), ARMS, weights, set())} for s in subjects[:4]]},
     "note": "an unknown arm is not an unknown directive kind: the manifest verifies and the directive is ignored",
 })

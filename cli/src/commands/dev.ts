@@ -12,12 +12,12 @@
  * (`support/Triage.md` → `support.triage`). Front matter may name `model:`,
  * `variables:` (comma-separated; `name!` is required, `name?` is end-user
  * text, `name=some default` gives an optional operator variable its default
- * (0.3.4; a default holds no comma), `name~` marks it as filled by the
+ * (a default holds no comma), `name~` marks it as filled by the
  * application's own source (`source: runtime`) — the markers go in that
  * order, `name!~` and `name~=default`; without the line every
  * `{{placeholder}}` is an optional operator variable), `version:`. An optional `release.json` beside them carries the
- * manifest's `applyPolicy`, `leaseSeconds`, `onLeaseExpiry`, `unlockWindow`,
- * `experiment` and `directives`.
+ * manifest's `applyPolicy`, `leaseSeconds`, `unlockWindow`, `experiments` and
+ * `directives`.
  *
  * The rules:
  * - **Every save is a generation.** The directory is watched; a change that
@@ -57,7 +57,7 @@ import { sha256Prefixed } from "../../../sdk-typescript/packages/core/src/protoc
 import { publicJwkOf } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
 import { FakeControlPlane, serveOverHttp } from "../../../sdk-typescript/packages/core/src/testing/controlPlane.js";
 
-import { COMMON_OPTIONS, flag, helpFor, parse, str, type OptionSpec } from "../args.js";
+import { COMMON_OPTIONS, TARGET, TARGET_USAGE, flag, helpFor, parse, str, type OptionSpec } from "../args.js";
 import { EXIT, Output, usage, type Context } from "../io.js";
 import { CLI_VERSION, PROTOCOL_VERSION } from "../version.js";
 
@@ -67,7 +67,7 @@ export const DEV_DIR = ".airprompter-dev";
 export const DEV_OPTIONS: OptionSpec = {
   org: { type: "string", default: "org_dev", help: "Organization id the manifests carry" },
   agent: { type: "string", default: "agt_dev", help: "Agent id the manifests carry" },
-  environment: { type: "string", default: "dev", help: "Target: dev, staging or prod (the dev root is scoped to it)" },
+  environment: { type: "string", default: "dev", help: "Target: a lowercase slug such as dev, qa or prod" },
   host: { type: "string", default: "127.0.0.1", help: "Listen address (loopback unless you say otherwise)" },
   port: { type: "string", default: "4180", help: "Listen port (0 picks a free one)" },
   "apply-policy": { type: "string", help: "The manifest's apply policy: auto (default) or unlock_required (every generation waits for airprompter unlock on each host)" },
@@ -90,7 +90,7 @@ export interface DevSlotSpec {
 
 export interface DevRelease {
   slots: DevSlotSpec[];
-  options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "directives" | "onLeaseExpiry" | "unlockWindow">>;
+  options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiments" | "directives" | "unlockWindow">>;
   requireCountersign: boolean;
   /** What the release amounts to: a change here is a generation, nothing else is. */
   fingerprint: string;
@@ -106,7 +106,7 @@ const VARIABLE_NAME = /^[a-zA-Z0-9_.-]{1,64}$/;
 
 /**
  * `name!` required operator text, `name?` end-user text (fenced), `name` optional operator text; `name=default` an
- * optional operator variable with its default (0.3.4), `name~` one the application fills from its own source
+ * optional operator variable with its default, `name~` one the application fills from its own source
  * (`source: runtime`), `name~=default` both. The markers go in one order — `name!~`, `name?~`, then `=default` —
  * and the name is checked against the protocol's grammar, so `name~!` is an error rather than a variable called
  * `name~`. A default on a required or end-user variable is refused here, as the control plane refuses it; so is an
@@ -257,7 +257,7 @@ export async function dev(argv: string[], ctx: Context): Promise<number> {
   if (!dir) throw usage("dev takes the directory to serve: airprompter dev ./prompts");
   if (!existsSync(dir) || !statSync(dir).isDirectory()) throw usage(`${dir} is not a directory`);
   const target = str(parsed, "environment") ?? "dev";
-  if (target !== "dev" && target !== "staging" && target !== "prod") throw usage("--environment must be dev, staging or prod");
+  if (!TARGET.test(target)) throw usage(TARGET_USAGE);
   const applyPolicy = str(parsed, "apply-policy");
   if (applyPolicy !== undefined && applyPolicy !== "auto" && applyPolicy !== "unlock_required") throw usage("--apply-policy must be auto or unlock_required");
   const leaseSeconds = str(parsed, "lease-seconds") !== undefined ? Number(str(parsed, "lease-seconds")) : undefined;

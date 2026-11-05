@@ -59,9 +59,9 @@ this order, and stop at the first that answers:
 1. **the call site's value** — the caller knows more than a source;
 2. **a registered source** — consulted only for a declared variable that is
    *required or present in the text* and that the call site did not pass;
-3. **the declared default** (protocol 0.3.4) — an optional `operator`
+3. **the declared default** — an optional `operator`
    variable may carry one (`airprompter dev` front matter today; AirPrompter's
-   Slots › Variables editor with the service's 0.3.4 release); the render uses
+   Slots › Variables editor); the render uses
    it when nothing above answered. A required or end-user variable never has
    one (the schema refuses it);
 4. **nothing** — a required variable is then `MissingVariableError` (the
@@ -149,7 +149,7 @@ Declarations only, no payload read. Names only, never values.
 - **Managed mode** (`ManagedAgent`, the hosted `/run` route) runs in your process, so `ManagedAgent.start({ variables })`
   (Python: `ManagedAgent.start(variables=...)`; that client is synchronous throughout, so its sources must be plain
   callables — a coroutine function is refused by name) fills required declared variables, and any marked
-  `source: runtime` (0.3.4), before the run is posted, and `agent.needs(tag, values)` answers the same question. The
+  `source: runtime`, before the run is posted, and `agent.needs(tag, values)` answers the same question. The
   catalogue names declarations, not text, so "used in the text" cannot be known there: required and `source: runtime`
   ones are filled, other optional ones are not; the context a source sees carries `versionId: null` and `arm: null` (the run route
   resolves them). A hosted run fences by the slot's declaration alone, so an `end_user` source for a variable the slot
@@ -161,19 +161,18 @@ Declarations only, no payload read. Names only, never values.
 - **Fleet runtimes and vendored bundles**: sources are in-process registration and do not care where the release came
   from.
 
-## What the protocol now carries, and what the service will do with it (protocol 0.3.4)
+## What the protocol carries, and what the service does with it
 
-A slot's variable declarations are sealed into the release: `name`, `required`, `trust`, and from protocol 0.3.4
+A slot's variable declarations are sealed into the release: `name`, `required`, `trust`,
 `default` (optional operator variables only; never empty) and `source: caller | runtime` — a statement of who is
 expected to fill the variable. In managed mode a `source: runtime` variable is filled from your registered source
 before the run is posted, required or not (the catalogue has no text to scan). Every runtime's heartbeat carries
-`catalog.variables` — the names `ap.variables.names()` answers, never a value, an empty list when there are none —
-once the release it serves was sealed at 0.3.4 (an older service refuses a key it does not know, so the SDK waits
-for that signal). A process whose telemetry the host's `airprompterd` ships is reported the same way: the daemon
+`catalog.variables` — the names `ap.variables.names()` answers, never a value, an empty list when there are none.
+A process whose telemetry the host's `airprompterd` ships is reported the same way: the daemon
 sends that process's own heartbeat report from its segment manifests, `catalog.variables` included
 (`../protocol/daemon.md`).
 
-What lands with the service's 0.3.4 release, not yet live: the Slots › Variables editor for these fields; a seal
+What the service does with them: the Slots › Variables editor for these fields; a seal
 that refuses a version whose text uses a placeholder the slot does not declare (`variable_undeclared`, so a runtime
 never renders a literal `{{name}}`); a warning when a `source: runtime` variable is filled by no live instance
 ("uncovered on 0 of 4 instances", before the promotion, not after); and the hosted run route applying defaults.

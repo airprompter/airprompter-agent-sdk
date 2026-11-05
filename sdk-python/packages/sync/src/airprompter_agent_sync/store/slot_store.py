@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional
@@ -31,9 +32,11 @@ from typing import Any, Callable, Mapping, Optional
 from airprompter_agent_core import SDK_VERSION
 from airprompter_agent_core._util import b64url_decode, b64url_encode, fsync_dir, iso_ms, now_ms, random_id
 from airprompter_agent_core.protocol.canonical_json import sha256_prefixed
-from airprompter_agent_core.protocol.trust import Verdict, referenced_payloads, verify_manifest
+from airprompter_agent_core.protocol.trust import Verdict, optional_payloads, referenced_payloads, verify_manifest
 from .key_provider import KeyProvider
 from .payload_crypto import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
+
+CONTENT_HASH = re.compile(r"sha256:[0-9a-f]{64}")
 
 SlotName = str  # "A" | "B"
 
@@ -187,6 +190,10 @@ class SlotStore:
         generation = manifest["payload"]["generation"]
         if generation < self._file["generation"] and not force:
             raise StoreError("generation_rollback", f"generation {generation} is below the stored {self._file['generation']}")
+        # Every entry, referenced or not: a name is a path here, and bytes kept for a later SDK must be the bytes the manifest signed.
+        for content_hash, data in payloads.items():
+            if not CONTENT_HASH.fullmatch(content_hash) or sha256_prefixed(data) != content_hash:
+                raise StoreError("slot_corrupt", "a payload entry does not hash to its name", "payload_hash_mismatch")
         for content_hash, byte_length in referenced_payloads(manifest["payload"]).items():
             data = payloads.get(content_hash)
             if data is None:
@@ -290,9 +297,14 @@ class SlotStore:
         if expect_generation is not None and generation != expect_generation:
             raise StoreError("slot_corrupt", f"slot {slot} holds generation {generation}, store.json expects {expect_generation}", "generation_rollback")
         payloads: dict[str, bytes] = {}
+        optional = optional_payloads(manifest["payload"])
         for content_hash in referenced_payloads(manifest["payload"]):
             path = os.path.join(self.dir, "slots", slot, "payloads", f"{content_hash.replace(':', '-')}.enc")
             if not os.path.exists(path):
+                # What only a `requires` entry names and is not here is absent, not a failure (M9): the next sync fetches it.
+                # Nothing else is excused: a tampered or undecryptable payload is corrupt.
+                if content_hash in optional:
+                    continue
                 raise StoreError("slot_corrupt", f"payload {content_hash} missing", "payload_missing")
             with open(path, "rb") as f:
                 sealed = f.read()
@@ -302,12 +314,12 @@ class SlotStore:
                 raise StoreError("slot_corrupt", f"payload {content_hash} does not decrypt for this slot", "payload_hash_mismatch") from error
         scope = {"organizationId": manifest["payload"]["organizationId"], "agentId": self._file["agentId"], "target": self._file["target"]}
         # A stored slot is checked against itself, not the store's counter: the counter is the anti-rollback for NEW manifests.
-        verdict: Verdict = verify_manifest(manifest=manifest, root=trusted, now=now, scope=scope, stored_generation=0, payloads=payloads, countersign_root=countersign_root, require_countersign=require_countersign)
+        verdict: Verdict = verify_manifest(manifest=manifest, root=trusted, now=now, scope=scope, stored_generation=0, payloads=payloads, countersign_root=countersign_root, require_countersign=require_countersign, absent_requires=True)
         if not verdict.ok:
             # Expired root: the bytes are still the last verified release; report and serve (D39). Everything else is corrupt.
             if verdict.reason == "root_expired":
                 relaxed_root = {**trusted, "signed": {**trusted["signed"], "expires": "9999-12-31T23:59:59Z"}}
-                relaxed = verify_manifest(manifest=manifest, root=relaxed_root, now=now, scope=scope, stored_generation=0, payloads=payloads)
+                relaxed = verify_manifest(manifest=manifest, root=relaxed_root, now=now, scope=scope, stored_generation=0, payloads=payloads, absent_requires=True)
                 if relaxed.ok:
                     return LoadedSlot(slot, manifest, generation, relaxed.signing_key_id or "", payloads)
             raise StoreError("slot_corrupt", f"slot {slot} failed verification: {verdict.reason}", verdict.reason)

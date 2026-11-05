@@ -26,7 +26,7 @@ def stable(value):
 
 
 def window_key(row):
-    return json.dumps([row["minute"], row["tag"], row.get("artifactId"), row["versionId"], row["arm"], row["model"], row["status"], row.get("errorClass"), row.get("audienceIds"), row.get("outcomeRunMinute")])
+    return json.dumps([row["minute"], row["tag"], row.get("artifactId"), row["versionId"], row["arm"], row["model"], row["status"], row.get("errorClass"), row.get("audienceIds"), row.get("outcomeRunMinute"), row.get("step")])
 
 
 def main(path: str) -> int:
@@ -48,18 +48,22 @@ def main(path: str) -> int:
         for event in case["events"]:
             if event["kind"] == "observe":
                 o = event["observation"]
-                writer.observe(tag=o["tag"], artifact_id=o.get("artifactId"), version_id=o["versionId"], arm=o.get("arm", "none"), model=o["model"], status=o.get("status", "ok"), error_class=o.get("errorClass"), usage_source=o.get("usageSource", "reported"), audience_ids=tuple(o["audienceIds"]) if "audienceIds" in o else None, run_minute=o.get("runMinute"), latency_ms=o["latencyMs"], tokens=o.get("tokens"), checks=o.get("checks"), outcomes=o.get("outcomes"), at=event["at"])
+                writer.observe(tool_calls=o.get("toolCalls"), step=o.get("step"), tag=o["tag"], artifact_id=o.get("artifactId"), version_id=o["versionId"], arm=o.get("arm", "none"), model=o["model"], status=o.get("status", "ok"), error_class=o.get("errorClass"), usage_source=o.get("usageSource", "reported"), audience_ids=tuple(o["audienceIds"]) if "audienceIds" in o else None, latency_ms=o["latencyMs"], tokens=o.get("tokens"), checks=o.get("checks"), outcomes=o.get("outcomes"), at=event["at"])
+            elif event["kind"] == "recordRun":
+                writer.record_run(event["run"], event["at"])
+            elif event["kind"] == "recordStep":
+                writer.record_step(event["step"], event["at"])
             elif event["kind"] == "feedback":
                 f = event["feedback"]
                 writer.feedback(tag=f["tag"], artifact_id=f.get("artifactId"), version_id=f["versionId"], arm=f.get("arm", "none"), model=f["model"], audience_ids=tuple(f["audienceIds"]) if "audienceIds" in f else None, outcome_run_minute=f.get("outcomeRunMinute"), outcomes=f["outcomes"], at=event["at"])
             elif event["kind"] == "close":
                 writer.close(event["at"])
         got = sorted((stable(r) for r in writer.emitted), key=window_key)
-        expected = sorted((stable(r) for r in case["expectedWindows"]), key=window_key)
+        expected = sorted((stable(r) for r in [*case["expectedWindows"], *case["expectedSteps"]]), key=window_key)
         assert got == expected, f"windows {case['name']}:\n  got      {json.dumps(got)}\n  expected {json.dumps(expected)}"
     for case in sp["invalidArtifactIds"]:
         try:
-            SpoolWriter(instance_id="i-invalid").observe(tag="a.b", artifact_id=case["artifactId"], version_id="v1", model="m", latency_ms=1, at=0)
+            SpoolWriter(instance_id="i-invalid").observe(tag="a.b", artifact_id=case.get("artifactId"), version_id="v1", model="m", latency_ms=1, at=0)
             raise AssertionError(f"{case['name']} artifact identity accepted")
         except ValueError as error:
             assert str(error) == case["reason"]
@@ -70,7 +74,11 @@ def main(path: str) -> int:
         for event in case["events"]:
             if event["kind"] == "observe":
                 o = event["observation"]
-                writer.observe(tag=o["tag"], artifact_id=o.get("artifactId"), version_id=o["versionId"], arm=o.get("arm", "none"), model=o["model"], status=o.get("status", "ok"), error_class=o.get("errorClass"), audience_ids=tuple(o["audienceIds"]) if "audienceIds" in o else None, run_minute=o.get("runMinute"), latency_ms=o["latencyMs"], tokens=o.get("tokens"), checks=o.get("checks"), at=event["at"])
+                writer.observe(tool_calls=o.get("toolCalls"), step=o.get("step"), tag=o["tag"], artifact_id=o.get("artifactId"), version_id=o["versionId"], arm=o.get("arm", "none"), model=o["model"], status=o.get("status", "ok"), error_class=o.get("errorClass"), audience_ids=tuple(o["audienceIds"]) if "audienceIds" in o else None, latency_ms=o["latencyMs"], tokens=o.get("tokens"), checks=o.get("checks"), at=event["at"])
+            elif event["kind"] == "recordRun":
+                writer.record_run(event["run"], event["at"])
+            elif event["kind"] == "recordStep":
+                writer.record_step(event["step"], event["at"])
             elif event["kind"] == "feedback":
                 f = event["feedback"]
                 writer.feedback(tag=f["tag"], artifact_id=f.get("artifactId"), version_id=f["versionId"], arm=f.get("arm", "none"), model=f["model"], audience_ids=tuple(f["audienceIds"]) if "audienceIds" in f else None, outcome_run_minute=f.get("outcomeRunMinute"), outcomes=f["outcomes"], at=event["at"])

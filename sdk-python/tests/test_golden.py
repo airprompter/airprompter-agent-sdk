@@ -124,7 +124,7 @@ def test_stage_runs_the_set_before_deciding(state_dir):
     ap.stop()
     windows = [r for r in ap.drain_memory_sink() if r["type"] == "window"]
     by_version = {w["versionId"]: w.get("outcomes", {}).get("goldenPass") for w in windows}
-    assert by_version == {"ver_1": {"n": 3, "sum": 2}, "ver_3": {"n": 6, "sum": 6}}
+    assert by_version == {"ver_1": {"n": 3, "sum": 2, "sumSq": 2}, "ver_3": {"n": 6, "sum": 6, "sumSq": 6}}
     assert all(w["count"] == 0 for w in windows)
     assert "guarantee" not in json.dumps(windows)
 
@@ -154,7 +154,7 @@ def test_judge_files_only_the_score(state_dir):
     ap.stop()
     windows = [r for r in ap.drain_memory_sink() if r["type"] == "window"]
     assert len(windows) == 1
-    assert windows[0]["outcomes"] == {"judgeScore": {"n": 3, "sum": 2.0}, "flagged": {"n": 4, "sum": 1}}
+    assert windows[0]["outcomes"] == {"judgeScore": {"n": 3, "sum": 2, "sumSq": 1.5}, "flagged": {"n": 4, "sum": 1, "sumSq": 1}}
     assert "shipping" not in json.dumps(windows)
 
 

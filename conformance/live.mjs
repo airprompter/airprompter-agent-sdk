@@ -67,7 +67,7 @@ addFormats(ajv);
 const schemaDir = join(protocolDir, "schemas");
 for (const file of readdirSync(schemaDir).filter((f) => f.endsWith(".schema.json")).sort()) ajv.addSchema(readJson(join(schemaDir, file)));
 const validate = (name, value) => {
-  const fn = ajv.getSchema(`https://airprompter.com/protocol/0.2/${name}`);
+  const fn = ajv.getSchema(`https://airprompter.com/protocol/3/${name}`);
   if (!fn) throw new Error(`no schema ${name}`);
   return fn(value) ? null : ajv.errorsText(fn.errors, { separator: "; " });
 };
@@ -178,7 +178,7 @@ if (manifest) {
     for (const step of slot.steps ?? []) referenced.add(step.contentHash);
     if (slot.goldenSet) referenced.add(slot.goldenSet.contentHash);
   }
-  for (const arm of manifest.payload.experiment?.arms ?? []) for (const override of arm.overrides) referenced.add(override.contentHash);
+  for (const experiment of manifest.payload.experiments ?? []) for (const arm of experiment.arms) for (const override of arm.overrides) referenced.add(override.contentHash);
   for (const contentHash of referenced) {
     const url = `${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/payloads/${contentHash}`;
     try {

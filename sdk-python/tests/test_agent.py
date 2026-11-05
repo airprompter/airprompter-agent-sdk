@@ -23,7 +23,8 @@ from airprompter_agent.agent import AgentStartError, AirPrompterAgent, RenderRef
 from airprompter_agent_core.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle
 from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
 from airprompter_agent_core.protocol.trust import key_thumbprint, public_jwk_of, release_digest
-from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
+from airprompter_agent_core.protocol import PROTOCOL_VERSION, referenced_payloads
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id, parse_run_ref
 from airprompter_agent_core.render.template import MissingVariableError, UnknownVariableError
 from airprompter_agent_sync.sync.loop import required_models_missing
 from airprompter_agent_core._util import b64url_encode
@@ -66,41 +67,34 @@ def state_dir():
     shutil.rmtree(path, ignore_errors=True)
 
 
-def test_artifact_aware_run_ref_facts_are_an_atomic_pair():
+def test_run_ref_facts_round_trip_and_every_entry_field_is_checked_at_mint_and_at_parse():
     key = bytes(32)
-    facts = RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id="prm_1", model="gpt-5")
-    assert parse_run_ref(mint_run_ref(facts, key), key) == facts
-    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id="prm_1"), key)
-    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id=123, model="gpt-5"), key)
-    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id="prm_😀", model="gpt-5"), key)
-    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, artifact_id="prm_1", model="gpt·5"), key)
-    for field in ("agent_id", "target", "tag", "version_id", "arm"):
-        values = facts.__dict__ | {field: f"{getattr(facts, field)}·extra"}
+    entry = {"tag": "support.reply", "artifactId": "prm_1", "versionId": "ver_1", "model": "gpt-5", "arm": "none", "bucket": None, "runMinute": "2026-09-12T14:03:00Z"}
+    facts = RunRefFacts("agt_1", "prod", new_run_id(), [entry])
+    assert len(facts.run_id) == 22
+    assert parse_run_ref(mint_run_ref(facts, key), key).to_wire() == facts.to_wire()
+    boundary = RunRefFacts("agt_1", "prod", facts.run_id, [{**entry, "bucket": 9999}])
+    assert parse_run_ref(mint_run_ref(boundary, key), key).to_wire() == boundary.to_wire()
+    for change in ({"model": None}, {"artifactId": 123}, {"artifactId": "prm_😀"}, {"model": "gpt 5"}, {"tag": ""}, {"versionId": ""}, {"arm": ""}, {"runMinute": "2026-09-12T14:03:10Z"}, {"audienceIds": ["raw-device"]}, {"bucket": float("nan")}, {"bucket": float("inf")}, {"bucket": 1.5}, {"bucket": -1}, {"bucket": 10000}, {"bucket": True}):
         with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-            mint_run_ref(RunRefFacts(**values), key)
-    boundary = RunRefFacts(**(facts.__dict__ | {"generation": 9007199254740991, "bucket": 9999}))
-    assert parse_run_ref(mint_run_ref(boundary, key), key) == boundary
-    for generation in (float("nan"), float("inf"), 1.5, 0, -1, 9007199254740992, True):
+            mint_run_ref(RunRefFacts("agt_1", "prod", facts.run_id, [{**entry, **change}]), key)
+    without_bucket = {name: value for name, value in entry.items() if name != "bucket"}
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", facts.run_id, [without_bucket]), key)
+    for field in ("agent_id", "target", "run_id"):
         with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-            mint_run_ref(RunRefFacts(**(facts.__dict__ | {"generation": generation})), key)
-    for bucket in (float("nan"), float("inf"), 1.5, -1, 10000, True):
-        with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-            mint_run_ref(RunRefFacts(**(facts.__dict__ | {"bucket": bucket})), key)
+            mint_run_ref(RunRefFacts(**(facts.__dict__ | {field: ""})), key)
+
     def signed(body):
         mac = b64url_encode(hmac.new(key, body.encode(), hashlib.sha256).digest())[:22]
         return f"{b64url_encode(body.encode())}.{mac}"
-    for generation in ("0", "01", "+1", "1.5", "nan", "inf", "9007199254740992"):
-        assert parse_run_ref(signed(f"agt_1·prod·support.reply·ver_1·none·{generation}·-"), key) is None
-    for bucket in ("-1", "00", "+1", "1.5", "nan", "inf", "10000"):
-        assert parse_run_ref(signed(f"agt_1·prod·support.reply·ver_1·none·1·{bucket}"), key) is None
-    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",), artifact_id="prm_1", model="gpt-5"), key)
-    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
-        mint_run_ref(RunRefFacts("agt_1", "prod", "support.reply", "ver_1", "none", 1, None, run_minute="2026-09-12T14:03:00Z"), key)
+
+    assert parse_run_ref(signed(json.dumps(["agt_1", "prod", "run_1", [entry]])), key) is not None, "the helper signs what the reader accepts"
+    for body in ("{}", "not json", '["agt_1","prod","run_1"]', '["agt_1","prod","run_1",{}]', json.dumps(["agt_1", "prod", "run_1", [{**entry, "bucket": 10000}]]), json.dumps(["agt_1", "prod", "", [entry]]), "agt_1·prod·support.reply·ver_1·none·1·-", '["agt_1","prod","run_1",[],NaN]'):
+        assert parse_run_ref(signed(body), key) is None, body
+    invalid_utf8 = b"\xff\xfe"
+    assert parse_run_ref(f"{b64url_encode(invalid_utf8)}.{b64url_encode(hmac.new(key, invalid_utf8, hashlib.sha256).digest())[:22]}", key) is None, "invalid UTF-8 is a None, never a raise"
+    assert parse_run_ref("é.AAAAAAAAAAAAAAAAAAAAAA", key) is None
 
 
 def test_first_start_pulls_verifies_serves(state_dir):
@@ -188,15 +182,10 @@ def test_unknown_key_refused_keeps_serving(state_dir):
 
 
 def test_workflows_telemetry_feedback_spool(state_dir):
-    from airprompter_agent_core.protocol import canonical_bytes, sign_bytes
     plane = FakeControlPlane(SCOPE)
     wf = plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Summarise {{doc}}"}, {"text": "Translate to {{lang}}"}], variables=[{"name": "doc", "required": True, "trust": "end_user"}, {"name": "lang", "required": True, "trust": "operator"}])
     audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "all"}}
-    manifest = plane.promote([wf, *triage_slots(plane)], protocol="2.0.0")
-    manifest["payload"]["requiredCapabilities"] = ["audience"]
-    manifest["payload"]["observations"] = [{**audience, "tag": wf["tag"], "observeFrom": "2026-09-12T14:00:00Z"}]
-    manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
-    plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
+    plane.promote([wf, *triage_slots(plane)], observations=[{**audience, "tag": wf["tag"], "observeFrom": "2026-09-12T14:00:00Z"}])
     clock = {"ms": instant("2026-09-12T14:03:10Z")}
     ap = start(plane, state_dir, now=lambda: clock["ms"])
     flow = ap.workflow("docs.flow")
@@ -212,7 +201,7 @@ def test_workflows_telemetry_feedback_spool(state_dir):
     assert ap.feedback(rendered.run_ref, thumbs="up", rating=4, freeText="should be dropped", accepted=True) is True
     assert ap.feedback("forged.token", rating=5) is False
     clock["ms"] += 60_000
-    ap.report(tag="support.reply", version_id="ver_support.reply_1", arm="none", model="gpt-5", status="ok", latency_ms=5)
+    ap.report(tag="support.reply", artifact_id="art_1", version_id="ver_support.reply_1", arm="none", model="gpt-5", status="ok", latency_ms=5)
     ap.stop()
     spool_dir = os.path.join(state_dir, "airprompter", "agt_1", "prod", "spool", "telemetry")
     segments = [n for n in os.listdir(spool_dir) if n.startswith("seg-") and n.endswith(".ndjson")]
@@ -226,7 +215,7 @@ def test_workflows_telemetry_feedback_spool(state_dir):
     assert triage_ok["latencyMs"]["sum"] == 2013
     assert triage_ok["latencyMs"]["buckets"][10] == 1 and triage_ok["latencyMs"]["buckets"][11] == 1
     assert triage_ok["checks"] == {"passed": 1, "failed": 0}
-    assert triage_ok["outcomes"] == {"thumbs": {"n": 1, "sum": 1}, "rating": {"n": 1, "sum": 4}, "accepted": {"n": 1, "sum": 1}}
+    assert triage_ok["outcomes"] == {"thumbs": {"n": 1, "sum": 1, "sumSq": 1}, "rating": {"n": 1, "sum": 4, "sumSq": 16}, "accepted": {"n": 1, "sum": 1, "sumSq": 1}}
     assert "outcomeRunMinute" not in triage_ok, "same-minute feedback merges into the observed row"
     timeout = next(r for r in rows if r["type"] == "window" and r.get("errorClass") == "provider_timeout")
     assert timeout["count"] == 1 and timeout["latencyMs"]["buckets"][15] == 1
@@ -257,7 +246,7 @@ def test_offline_store_then_vendored_bundle_then_refuse(state_dir):
         from_bundle = AirPrompterAgent.start(**KW, state_dir=fresh, root={"pinned": public_jwk_of(plane.root_key)}, sync={"mode": "on_invoke"}, vendored_bundle=VendoredBundle(bundle, DistributionKey(distribution.private_key, distribution.public_raw)))
         assert from_bundle.status().source == "vendored_bundle" and from_bundle.status().apply_state == "vendored_fallback"
         assert from_bundle.prompt("support.reply").render(name="Bo").text == "Reply politely to Bo."
-        from_bundle.invoke(lambda: from_bundle.report(tag="support.reply", version_id="v", arm="none", model="gpt-5", status="ok", latency_ms=3))
+        from_bundle.invoke(lambda: from_bundle.report(tag="support.reply", artifact_id="art_1", version_id="v", arm="none", model="gpt-5", status="ok", latency_ms=3))
         assert len(from_bundle.drain_memory_sink()) == 1
         from_bundle.stop()
         # T16: a vendored bundle inside the platform's 30-day warning logs how long it has left.
@@ -281,7 +270,7 @@ def test_experiment_arms_sticky_and_run_ref_carries_arm(state_dir):
     plane = FakeControlPlane(SCOPE)
     control = plane.slot(tag="support.reply", text="control", version_id="ver_c")
     candidate = plane.slot(tag="support.reply", text="candidate", version_id="ver_x")
-    plane.promote([control], experiment={"experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 5000, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 5000, "releaseDigest": release_digest([candidate]), "overrides": [candidate]}]})
+    plane.promote([control], experiments=[{"tag": control["tag"], "experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 5000, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 5000, "releaseDigest": release_digest([candidate]), "overrides": [candidate]}]}])
     ap = start(plane, state_dir)
     seen = {}
     for subject in [f"user-{i}" for i in range(1, 9)]:
@@ -290,8 +279,8 @@ def test_experiment_arms_sticky_and_run_ref_carries_arm(state_dir):
         assert first.arm == again.arm, "sticky"
         assert first.text == ("candidate" if first.arm == "candidate" else "control")
         seen[subject] = first.arm
-        facts = parse_run_ref(first.run_ref, ap._run_ref_key)
-        assert facts is not None and facts.arm == first.arm and facts.bucket is not None and 0 <= facts.bucket < 10000
+        facts = parse_run_ref(first.run_ref, ap._run_ref_key).entries[0]
+        assert facts["arm"] == first.arm and facts["bucket"] is not None and 0 <= facts["bucket"] < 10000
     assert len(set(seen.values())) == 2, "eight subjects split across both arms"
     ap.stop()
 
@@ -325,7 +314,7 @@ def test_disable_directive_stamps_one_refusal(state_dir):
     assert [(r["reason"], r["generation"], r["tag"]) for r in refusals] == [("disabled", 2, "support.reply"), ("disabled", 3, None)], "one row per condition, not per render"
 
 
-def test_lease_counts_from_last_contact_degrade_and_halt(state_dir):
+def test_lease_counts_from_last_contact_and_a_lapsed_lease_keeps_serving(state_dir):
     plane = FakeControlPlane(SCOPE)
     triage, reply = triage_slots(plane)
     plane.promote([triage, reply], lease_seconds=600)
@@ -340,33 +329,12 @@ def test_lease_counts_from_last_contact_degrade_and_halt(state_dir):
     assert ap.status().lease_expires_at == lease_at_start, "a pointer 304 does not move the lease"
     ap.heartbeat_now()  # the authenticated answer does
     assert ap.status().lease_expires_at == iso_ms(clock["ms"] + 600_000)
-    assert ap.status().on_lease_expiry == "degrade"
     clock["ms"] += 601_000
     assert ap.status().lease_expired is True
-    assert ap.prompt("support.reply").render().text == "Reply politely to .", "degrade: keeps serving"
+    assert ap.prompt("support.reply").render().text == "Reply politely to .", "a lapsed lease keeps serving"
     ap.prompt("support.reply").render()
     ap.stop()
     assert [r["reason"] for r in ap.drain_memory_sink() if r["type"] == "refusal"] == ["lease_expired"], "stamped once"
-
-    halt_plane = FakeControlPlane(SCOPE)
-    t2, r2 = triage_slots(halt_plane)
-    halt_plane.promote([t2, r2], lease_seconds=60, on_lease_expiry="halt")
-    halt_dir = tempfile.mkdtemp(prefix="ap-agent-halt-")
-    try:
-        halt = start(halt_plane, halt_dir, now=lambda: clock["ms"])
-        time.sleep(0.3)  # let the boot heartbeat land before the clock moves
-        clock["ms"] += 61_000
-        with pytest.raises(RenderRefusedError) as lapsed:
-            halt.prompt("support.reply").render()
-        assert lapsed.value.reason == "lease_expired"
-        halt.sync_now()  # the pointer's 304 is not contact (S3): still halted
-        with pytest.raises(RenderRefusedError):
-            halt.prompt("support.reply").render()
-        halt.heartbeat_now()  # the origin's authenticated answer is
-        assert halt.prompt("support.reply").render().text == "Reply politely to ."
-        halt.stop()
-    finally:
-        shutil.rmtree(halt_dir, ignore_errors=True)
 
 
 def test_staged_release_survives_restart_never_serves_as_fallback(state_dir):
@@ -418,7 +386,7 @@ def test_first_release_staged_under_unlock_required_starts_the_host(state_dir):
     assert staged == [1]
     assert ap.generation == 0
     assert ap.status().apply_state == "awaiting_unlock" and ap.status().staged_generation == 1
-    assert ap.healthz()["status"] == "failing"
+    assert ap.healthz()["status"] == "degraded"
     with pytest.raises(AgentStartError, match="generation 1 is staged under unlock_required and waiting for an unlock"):
         ap.prompt("support.reply").render(name="Ann")
     ap.heartbeat_now()
@@ -437,7 +405,7 @@ def test_feedback_on_candidate_arm_lands_on_that_model(state_dir):
     plane = FakeControlPlane(SCOPE)
     control = plane.slot(tag="support.reply", text="control", version_id="ver_c")
     candidate = plane.slot(tag="support.reply", text="candidate", version_id="ver_x", model="gpt-5")
-    plane.promote([control], experiment={"experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 5000, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 5000, "releaseDigest": release_digest([candidate]), "overrides": [candidate]}]})
+    plane.promote([control], experiments=[{"tag": control["tag"], "experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 5000, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 5000, "releaseDigest": release_digest([candidate]), "overrides": [candidate]}]}])
     ap = start(plane, state_dir, telemetry={"sink": "memory"})
     i = 1
     rendered = ap.prompt("support.reply", subject=f"user-{i}").render()
@@ -452,7 +420,7 @@ def test_feedback_on_candidate_arm_lands_on_that_model(state_dir):
     ap.stop()
     windows = [r for r in ap.drain_memory_sink() if r["type"] == "window"]
     assert len(windows) == 1 and windows[0]["model"] == "gpt-5-mini" and windows[0]["count"] == 1
-    assert windows[0]["outcomes"] == {"rating": {"n": 1, "sum": 5}}
+    assert windows[0]["outcomes"] == {"rating": {"n": 1, "sum": 5, "sumSq": 25}}
 
 
 def test_context_manager_stops(state_dir):
@@ -560,17 +528,12 @@ def test_s18_pinned_root_is_scoped_to_the_hosted_environment_not_the_target(stat
 
 
 def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
-    from airprompter_agent_core.protocol import canonical_bytes, sign_bytes
     plane = FakeControlPlane(SCOPE)
     base = plane.slot(tag="support.reply", text="Published", version_id="ver_base")
     candidate = plane.slot(tag="support.reply", text="Candidate {{candidate_value}}", version_id="ver_candidate", variables=[{"name":"candidate_value","required":True,"trust":"operator"}])
     candidate["outputChecks"] = [{"kind":"enum","name":"category","path":"category","values":["ok"]}]
-    audience = {"audienceId":"aud_AAAAAAAAAAAAAAAAAAAAAA", "selector":{"mode":"tags","conditions":[{"key":"device_id","operator":"is","value":"private-device-042"}]}}
-    manifest = plane.promote([base], protocol="2.0.0", experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
-    manifest["payload"]["requiredCapabilities"] = ["audience"]
-    manifest["payload"]["observations"] = [{**audience,"tag":base["tag"],"observeFrom":"2026-09-12T14:00:00Z"}]
-    manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
-    plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
+    audience = {"audienceId":"aud_AAAAAAAAAAAAAAAAAAAAAA", "selector":{"mode":"when","when":{"key":"device_id","is":"private-device-042"}}}
+    plane.promote([base], observations=[{**audience,"tag":base["tag"],"observeFrom":"2026-09-12T14:00:00Z"}], experiments=[{"tag":base["tag"],"experimentId":"exp_1","salt":"AAECAwQFBgcICQoLDA0ODw","subjectKey":"instance","audience":audience,"arms":[{"arm":"control","weightBps":0,"releaseDigest":release_digest([base]),"overrides":[]},{"arm":"candidate","weightBps":10000,"releaseDigest":release_digest([candidate]),"overrides":[candidate]}]}])
     clock = [instant("2026-09-12T14:03:10Z")]
     ap = start(plane,state_dir,now=lambda:clock[0],tags={"device_id":"private-device-042","region":"secret-west"})
     try:
@@ -591,7 +554,7 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
         with ap.attribute(step):
             assert current_attribution().artifact_id == rendered.artifact_id and current_attribution().audience_ids == rendered.audience_ids and current_attribution().run_minute == rendered.run_minute
         heartbeat = ap.heartbeat_body()
-        assert heartbeat["protocol"] == "2.0.0" and heartbeat["capabilities"] == ["audience"]
+        assert heartbeat["protocol"] == PROTOCOL_VERSION and heartbeat["capabilities"] == []
         assert heartbeat["registration"]["tagKeys"] == ["device_id","region"]
         assert "private-device-042" not in json.dumps(heartbeat) and "secret-west" not in json.dumps(heartbeat)
         ap.set_tags({"device_id":"private-device-043"})
@@ -611,15 +574,15 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
         if name.endswith(".ndjson"):
             with open(os.path.join(path,name)) as f: rows.extend(json.loads(line) for line in f if line.strip())
     feedback = next(r for r in rows if r.get("outcomes",{}).get("thumbs"))
-    assert feedback["v"] == 3 and feedback["artifactId"] == candidate["artifactId"] and feedback["count"] == 0 and feedback["versionId"] == "ver_candidate"
+    assert feedback["v"] == 4 and feedback["artifactId"] == candidate["artifactId"] and feedback["count"] == 0 and feedback["versionId"] == "ver_candidate"
     assert feedback["outcomeRunMinute"] == "2026-09-12T14:03:00Z" and feedback["audienceIds"] == [audience["audienceId"]]
     measured = next(r for r in rows if r.get("checks"))
-    assert measured["v"] == 3 and measured["artifactId"] == candidate["artifactId"] and measured["count"] == 1 and measured["audienceIds"] == [audience["audienceId"]]
+    assert measured["v"] == 4 and measured["artifactId"] == candidate["artifactId"] and measured["count"] == 1 and measured["audienceIds"] == [audience["audienceId"]]
     assert measured["checks"] == {"passed":2,"failed":0}
 
 
 
-def test_audience_registration_stays_bounded_after_capability_negotiation_without_limiting_prompt_serving(state_dir):
+def test_audience_registration_stays_bounded_without_limiting_prompt_serving(state_dir):
     plane = FakeControlPlane(SCOPE)
     slots = [plane.slot(tag="support.reply", text="Text 0")] + [plane.slot(tag=f"prompt.slot{i:02d}", text=f"Text {i}") for i in range(1, 33)]
     plane.promote(slots)
@@ -630,8 +593,9 @@ def test_audience_registration_stays_bounded_after_capability_negotiation_withou
             tag = "support.reply" if index == 0 else f"prompt.slot{index:02d}"
             assert ap.prompt(tag, display_name=f"Prompt {index}").render().text == f"Text {index}"
         first_heartbeat = plane.heartbeats[0]
-        assert first_heartbeat["protocol"] == "2.0.0" and first_heartbeat["capabilities"] == ["audience"]
-        assert "registration" not in first_heartbeat
+        assert first_heartbeat["protocol"] == PROTOCOL_VERSION and first_heartbeat["capabilities"] == []
+        assert first_heartbeat["runCounters"] == {"passthrough": {}}
+        assert "registration" in first_heartbeat, "registration rides every heartbeat"
         registration = ap.heartbeat_body()["registration"]
         assert len(registration["prompts"]) == 32
         assert any(entry["tag"] == "prompt.slot32" for entry in registration["prompts"])
@@ -641,39 +605,13 @@ def test_audience_registration_stays_bounded_after_capability_negotiation_withou
         ap.stop()
 
 
-@pytest.mark.parametrize(("capabilities", "negotiated"), [
-    ("audience", False),
-    (["audience", "audience"], False),
-    (["audience", "Bad-Capability"], False),
-    (["future_feature"], False),
-    (["future_feature", "audience"], True),
-])
-def test_only_a_well_formed_authenticated_capability_echo_unlocks_audience_registration(tmp_path, capabilities, negotiated):
-    plane = FakeControlPlane(SCOPE)
-    plane.heartbeat_capabilities = capabilities
-    plane.promote([plane.slot(tag="support.reply", text="Published")])
-    ap = start(plane, str(tmp_path), tags={"device_id": "private-device"})
-    try:
-        ap.heartbeat_now()
-        ap.prompt("support.reply", display_name="Support reply")
-        assert ("registration" in ap.heartbeat_body()) is negotiated
-    finally:
-        ap.stop()
-
-
 def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_offline(state_dir):
-    from airprompter_agent_core.protocol import canonical_bytes, sign_bytes
-
     plane = FakeControlPlane(SCOPE)
     old_tags = {f"old_key_{index:02d}": f"private_value_{index}" for index in range(64)}
     base = plane.slot(tag="support.reply", text="Published")
     slots = [base] + [plane.slot(tag=f"prompt.slot{index:02d}", text=f"Prompt {index}") for index in range(32)]
-    audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "tags", "conditions": [{"key": "new_key", "operator": "is", "value": "new_value"}]}}
-    manifest = plane.promote(slots, protocol="2.0.0")
-    manifest["payload"]["requiredCapabilities"] = ["audience"]
-    manifest["payload"]["observations"] = [{**audience, "tag": base["tag"], "observeFrom": "2026-09-12T14:00:00Z"}]
-    manifest["signatures"][0]["sig"] = sign_bytes(canonical_bytes(manifest["payload"]), plane.signing_key)
-    plane._current["bytes"] = json.dumps(manifest).encode("utf-8")
+    audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "when", "when": {"key": "new_key", "is": "new_value"}}}
+    plane.promote(slots, observations=[{**audience, "tag": base["tag"], "observeFrom": "2026-09-12T14:00:00Z"}])
 
     ap = start(plane, state_dir, tags=old_tags)
     try:
@@ -710,7 +648,6 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
     try:
         assert offline.prompt("support.reply").render().audience_ids == (audience["audienceId"],)
         heartbeat = offline.heartbeat_body()
-        assert "registration" not in heartbeat  # no authenticated capability echo while offline
         assert "new_value" not in json.dumps(heartbeat)
     finally:
         offline.stop()
@@ -744,3 +681,130 @@ def test_ambiguous_cohort_text_requires_scope():
     registry.register("repeated prompt text",first)
     registry.register("repeated prompt text",second)
     assert registry.match(["repeated prompt text"]) == second
+
+
+def test_a_run_ref_minted_on_one_store_parses_on_another_with_the_same_secret_and_feedback_lands():
+    plane = FakeControlPlane(SCOPE)
+    plane.promote(triage_slots(plane))
+    dirs = [tempfile.mkdtemp(prefix="ap-agent-shared-") for _ in range(2)]
+    a, b = (start(plane, directory, run_ref_secret="shared-fleet-secret") for directory in dirs)
+    try:
+        assert b.feedback(a.prompt("support.reply").render().run_ref, thumbs="up") is True, "the second store reads the first store's ref"
+    finally:
+        a.stop()
+        b.stop()
+        for directory in dirs:
+            shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_instances_holding_one_agent_key_share_run_references_with_no_new_setting():
+    plane = FakeControlPlane(SCOPE)
+    plane.promote(triage_slots(plane))
+    dirs = [tempfile.mkdtemp(prefix="ap-agent-shared-") for _ in range(2)]
+    a, b = (start(plane, directory) for directory in dirs)
+    try:
+        assert b.feedback(a.prompt("support.reply").render().run_ref, thumbs="down") is True
+    finally:
+        a.stop()
+        b.stop()
+        for directory in dirs:
+            shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_a_ref_minted_under_a_previous_secret_lands_and_with_no_shared_secret_it_fails_and_the_store_scoped_key_is_logged():
+    plane = FakeControlPlane(SCOPE)
+    plane.promote(triage_slots(plane))
+    dirs = [tempfile.mkdtemp(prefix="ap-agent-rotate-") for _ in range(3)]
+    events = []
+    before = start(plane, dirs[0], run_ref_secret="old-secret")
+    rotated = start(plane, dirs[1], run_ref_secret="new-secret", run_ref_previous_secrets=["old-secret"])
+    start(plane, dirs[2]).stop()  # a store to serve: offline, with no key and no secret
+    lonely = AirPrompterAgent.start(**KW, state_dir=dirs[2], root={"pinned": public_jwk_of(plane.root_key)}, sync=SyncOptions(mode="offline"), logger=events.append)
+    try:
+        old = before.prompt("support.reply").render().run_ref
+        assert rotated.feedback(old, thumbs="up") is True, "the previous key is tried"
+        assert lonely.feedback(old, thumbs="up") is False, "no shared secret, no feedback"
+        assert len([e for e in events if e["event"] == "run_ref_key_store_scoped"]) == 1, "said once"
+        assert before.feedback(rotated.prompt("support.reply").render().run_ref, thumbs="up") is False, "minting uses the current key"
+    finally:
+        for ap in (before, rotated, lonely):
+            ap.stop()
+        for directory in dirs:
+            shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_feedback_on_a_ref_with_no_entries_answers_false(state_dir):
+    plane = FakeControlPlane(SCOPE)
+    plane.promote(triage_slots(plane))
+    ap = start(plane, state_dir)
+    try:
+        run_ref = mint_run_ref(RunRefFacts(SCOPE["agentId"], SCOPE["target"], new_run_id(), []), ap._run_ref_key)
+        assert ap.feedback(run_ref, thumbs="up") is False
+    finally:
+        ap.stop()
+
+
+def test_a_slot_with_an_unmet_requires_is_absent_and_the_rest_loads_and_a_disable_applies(state_dir):
+    plane = FakeControlPlane(SCOPE)
+    triage, reply = triage_slots(plane)
+    rubric = {**plane.slot(tag="support.rubric", text="never fetched", model="not-here", variables=[{"name": "needed", "required": True, "trust": "operator"}]), "kind": "rubric", "requires": ["rubric_slots"], "contentHash": "sha256:" + "e" * 64, "goldenSet": {"setId": "gs", "cases": 1, "contentHash": "sha256:" + "f" * 64, "byteLength": 1, "minPassBps": 10000}, "modelRequired": True}
+    experiment = {"experimentId": "exp_rubric", "tag": "support.rubric", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 9000, "releaseDigest": "sha256:" + "0" * 64, "overrides": []}, {"arm": "candidate", "weightBps": 1000, "releaseDigest": "sha256:" + "1" * 64, "overrides": [rubric]}]}
+    manifest = plane.promote([triage, reply, rubric], experiments=[experiment], observations=[{"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.rubric", "selector": "not validated", "observeFrom": "not validated"}], directives=[{"kind": "disable", "scope": "slot", "tag": "support.reply", "issuedAt": "2026-09-12T10:00:00Z"}, {"kind": "disable", "scope": "arm", "arm": "candidate", "experimentId": "exp_rubric", "issuedAt": "2026-09-12T10:00:00Z"}])
+    assert rubric["contentHash"] not in referenced_payloads(manifest["payload"]), "its payload is not fetched"
+    assert "not-here" not in required_models_missing(manifest["payload"], ["gpt-5"]), "a skipped slot's required model refuses nothing"
+    ap = start(plane, state_dir, models=[triage["model"], reply["model"]])
+    try:
+        assert ap.generation == 1, "the release loads"
+        assert ap.prompt("support.triage").render(team="a", ticket="b").text, "other slots serve"
+        with pytest.raises(KeyError, match="no slot support.rubric"):
+            ap.prompt("support.rubric").render()
+        with pytest.raises(RenderRefusedError):
+            ap.prompt("support.reply").render()
+        status = ap.status()
+        assert status.ramps == [], "its experiment is ignored"
+        assert not any(entry["tag"] == "support.rubric" for entry in status.variables["unsourced"])
+        assert ap.golden(invoke=lambda *_: "never") == [], "the golden run skips it"
+    finally:
+        ap.stop()
+
+
+def test_attribute_on_a_workflow_step_and_report_with_step_write_the_slot_tag_in_tag_and_the_step_id_in_step(state_dir):
+    plane = FakeControlPlane(SCOPE)
+    plane.promote([plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Step one"}])])
+    ap = start(plane, state_dir, telemetry={"sink": "memory"})
+    try:
+        flow = ap.workflow("docs.flow")
+        step_one = flow.steps[0]
+        with ap.attribute(step_one):
+            inner = ap.attribution_for({})
+        assert (inner.tag, inner.step, inner.arm) == ("docs.flow", "docs.flow#1", "none")
+        ap.observe(inner, lambda: {"usage": {"input_tokens": 3, "output_tokens": 2}}, tool_calls={"calls": 3, "errors": 0})
+        ap.report(tag="docs.flow", step="docs.flow#1", artifact_id=step_one.artifact_id, version_id=step_one.version_id, arm="none", model=step_one.model, status="ok", latency_ms=5, tool_calls={"calls": 2, "errors": 1})
+        ap.spool.close_windows(ap._now_ms())
+        rows = ap.drain_memory_sink()
+        window = next(row for row in rows if row["type"] == "window")
+        assert window["tag"] == "docs.flow"
+        assert "step" not in window, "a window row never carries step"
+        assert window["count"] == 2
+        assert window["tools"] == {"calls": 5, "errors": 1}
+        assert [(row["tag"], row["step"], row["modelCalls"]) for row in rows if row["type"] == "step"] == [("docs.flow", "docs.flow#1", 2)]
+        assert ap.feedback(step_one.run_ref, thumbs="up") is True, "a step's ref names the slot tag too"
+    finally:
+        ap.stop()
+
+
+def test_a_step_output_does_not_run_the_slots_declared_checks(state_dir):
+    plane = FakeControlPlane(SCOPE)
+    slot = plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Step one"}])
+    slot["outputChecks"] = [{"kind": "enum", "name": "category", "path": "category", "values": ["ok"]}]
+    plane.promote([slot])
+    ap = start(plane, state_dir, telemetry={"sink": "memory"})
+    try:
+        step = ap.workflow("docs.flow").steps[0]
+        ap.observe(step, lambda: {"content": [{"type": "text", "text": '{"category":"nope"}'}], "usage": {"input_tokens": 1, "output_tokens": 1}})
+        assert ap.checks(step, '{"category":"nope"}') == {"passed": 0, "failed": 0, "results": []}
+        ap.spool.close_windows(ap._now_ms())
+        window = next(row for row in ap.drain_memory_sink() if row["type"] == "window")
+        assert "checks" not in window, "the slot's checks judge the slot's output, not a step's"
+    finally:
+        ap.stop()

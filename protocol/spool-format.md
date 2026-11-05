@@ -85,9 +85,8 @@ default above (`daemon.md` › What an SDK does).
   writer's. Eight workers on one host are eight instances in the fleet
   view, write eight segment series into one spool, and their same-minute
   windows keep distinct keys at ingest (a shared id would replace one
-  worker's window with another's). The `runRef` key is derived from the
-  **store's** id, so a run reference minted by one worker parses in any
-  other on the host.
+  worker's window with another's). A run reference parses on any instance
+  of the agent and target: see **Run reference** below.
 - Serverless hosts keep a **256 KiB** memory buffer instead of a directory
   and flush at invocation end; past the buffer the oldest rows are evicted
   and one `dropped` row (rows counted as `segments`) closes the flush.
@@ -102,67 +101,127 @@ default above (`daemon.md` › What an SDK does).
   fault vector the SDKs run over a filesystem that fills
   (`sdk-typescript/test/spoolFaults.test.ts`, `sdk-python/tests/test_spool_faults.py`).
 
+## Readers
+
+A reader of 3.x ignores what it does not know. An uploader strips unknown fields, nested ones too, and serialises the line again, so no field it cannot vouch for leaves the host. It skips a row of an unknown `type` or `v`, or a `status` outside its row type's list, line by line, and counts those lines in one `dropped` row: `lines` holds the count and `segments` stays 0, because a line is not a segment. The row schemas are a writer's contract: a reader accepts any slug of 32 characters in `errorClass`, `usageSource` and `reason`. A member of the other row form is a crossed row and corrupt: `step` on a window row, or `tokensSq`, `count`, `outcomes` or `checks` on a step row. Only corruption quarantines a segment: a line that is not JSON, a row from another instance, or a known row whose fields do not fit.
+
+A field that changes a row's identity bumps `v`; a measure keeps it.
+
+Writers hold their side and produce only what the validator takes. Counts are non-negative integers, a total that would not be finite is skipped, and an observation whose tag, arm, model, version, status, usage source or error class does not fit is dropped and logged.
+
 ## Row types
 
-Every row has `type` and `v` (row schema version). Unknown fields are
-dropped at ingest; unknown row types are quarantined.
+Every row has `type` and `v` (row schema version). What a reader does with a
+field or a row it does not know is under Readers.
 
 ### `window` — one minute of one dimension set
 
+`count` means **runs**. A run is one user request to an agent, however many model and tool calls it took. A row has one of two forms, told apart by `count`, and it is never a step:
+
+| Form | Told apart by | `count` | `latencyMs` | Carries |
+| -- | -- | -- | -- | -- |
+| Run row | `count` above 0 | runs | run wall-clock; bucket total equals `count` | tokens totals for the run, `modelCalls`, `agentRun`, `tools`, `tokensSq`, `outcomes[*].sumSq`, `checks` |
+| Feedback-only row | `count: 0` with `outcomeRunMinute` | 0 | all zero | outcomes only; every measure zero; no `tokensSq` |
+
 ```json
-{"type":"window","v":1,
+{"type":"window","v":4,"artifactId":"prm_8b2f…",
  "minute":"2026-09-11T14:03:00Z",
  "instanceId":"i-7f3a…","instanceClass":"resident",
  "tag":"support.triage","versionId":"pv_…","arm":"candidate",
  "model":"claude-haiku-4-5","status":"ok","errorClass":null,
  "usageSource":"reported",
- "count":412,
- "latencyMs":{"buckets":[0,0,3,41,188,150,27,3,0,0,0,0,0,0,0,0],"sum":617384},
+ "count":412,"modelCalls":1236,"agentRun":412,
+ "tools":{"calls":188,"errors":3},
+ "latencyMs":{"buckets":[0,0,3,41,188,150,27,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"sum":617384},
  "tokens":{"input":493200,"cachedInput":329600,"output":103000},
+ "tokensSq":{"input":6100000,"cachedInput":2700000,"output":270000,"inputOutput":1270000,"inputCached":3900000,"cachedOutput":870000},
  "checks":{"passed":405,"failed":7},
- "outcomes":{"accepted":{"n":388,"sum":362},"rating":{"n":41,"sum":171}},
- "sdk":"agent-sdk-ts/0.1.0"}
+ "outcomes":{"accepted":{"n":388,"sum":362,"sumSq":362},"rating":{"n":41,"sum":171,"sumSq":761}},
+ "sdk":"agent-sdk-ts/1.0.0"}
 ```
 
 - `latencyMs.buckets` are counts against the **fixed edges** in
-  `schemas/latency-buckets.json` (16 log-spaced edges, 1 ms → 65 s) so
+  `schemas/latency-buckets.json` (23 edges, 1 ms → one hour) so
   percentiles merge across instances: a value lands in the first bucket
   whose edge is `>=` it; anything above the last edge lands in the last
   bucket. `latencyMs.sum` is the total of the observed values, each
   rounded half up and floored at 0.
-- `count` is the number of runs observed in the minute. Feedback
-  (`outcomes`) filed against a run rides on that run's `status: ok` window
-  when it is filed in the run minute and **never** adds to `count` or
-  `latencyMs`. The writer omits `outcomeRunMinute` when it equals the row's
-  `minute`, so feedback filed before the observation still merges with that
-  observation. Delayed feedback keeps the original `outcomeRunMinute` and
-  can therefore produce a `count: 0` row in its later filing minute.
-  Version 2 and 3 writers must not create a feedback-only row without that
-  authenticated run minute; without it, feedback may attach only to an
-  already measured matching run in the writer's open minute. Writers refuse
-  malformed calendar minutes, a run minute on a legacy v1 row, and audience
-  identifiers outside the opaque `aud_…` grammar before creating a row.
-  Measurements use the minute in which they complete; `runMinute` on an
-  SDK observation is attribution for feedback and never reopens a sealed
-  measurement minute under the same ingest key.
-- Row version 1 is the legacy dimension set. Version 2 adds
-  `audienceIds` and optional `outcomeRunMinute`. Version 3 requires the
-  immutable Team prompt `artifactId` and may also carry those audience
-  fields. `artifactId` keeps two prompts that use the same per-prompt
-  `versionId` in separate series and uses the manifest's canonical ASCII
-  identifier grammar (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`). These identifiers are control-plane
+- `tag` is always the slot tag. A run adds to the open window for its key
+  and lands in the minute it ended; `count: 1` is what one run adds, and rows
+  with one key sum.
+- `agentRun` counts this row's runs that are the first slot of their run. A
+  two-slot run writes two run rows, each `count: 1`, and `agentRun: 1` on the
+  first only, so an agent-wide total counts it once. A one-call run has 1.
+- `tools` holds tool calls and how many failed. No tool name ever travels.
+- `tokensSq` holds the second moments of each run's token totals, summed over
+  runs: `input`, `cachedInput` and `output` squared, and the products
+  `inputOutput`, `inputCached` and `cachedOutput`, where `inputOutput` is
+  Σ inᵢ·outᵢ over runs `i`, never over model calls. With these a consumer
+  computes the variance of any weighted token total, including the covariance
+  terms. Each entry of `outcomes` carries `sumSq` beside `n` and `sum`, so the
+  variance of an outcome is sumSq/n − (sum/n)².
+- `status` is `ok`, `error`, `refused` or `interrupted`. `interrupted` counts
+  as a run, not as an error.
+- `recordRun` is the only thing that raises `count`. Feedback (`outcomes`)
+  and checks filed against a run ride on that run's `status: ok` window when
+  filed in the run minute and **never** add to `count` or `latencyMs`. The
+  writer omits `outcomeRunMinute` when it equals the row's `minute`, so
+  feedback filed before the run still merges with it. Delayed feedback keeps
+  the original `outcomeRunMinute` and can therefore produce a `count: 0` row
+  in its later filing minute. Writers must not create a feedback-only row
+  without that authenticated run minute; without it, feedback may attach only
+  to an already measured matching run in the writer's open minute. Writers
+  refuse malformed calendar minutes and audience identifiers outside the
+  opaque `aud_…` grammar before creating a row. Measurements use the minute in
+  which they complete; `runMinute` on an SDK observation is attribution for
+  feedback and never reopens a sealed measurement minute under the same
+  ingest key.
+- `artifactId` keeps two prompts that use the same per-prompt `versionId` in
+  separate series and uses the manifest's canonical ASCII identifier grammar
+  (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`). These identifiers are control-plane
   identities; local tag values and user or device identifiers never enter
   a row.
 - `errorClass` is the closed enum in `schemas/telemetry-window.schema.json`:
   `render_missing_variable, context_length_exceeded, output_schema_invalid,
   truncated, content_filter, provider_error, provider_timeout,
-  provider_rate_limited`. Nothing after the model returns is an error class.
+  provider_rate_limited, model_unresolved`. `model_unresolved` marks a release
+  whose model cannot run on this host. Nothing after the model returns is an
+  error class.
 - `outcomes` carries only declared signal names from the feedback catalogue
-  (`schemas/feedback-signals.schema.json`), each as `{n, sum}`.
+  (`schemas/feedback-signals.schema.json`), each as `{n, sum, sumSq}`.
 - Rows for the same key `(instanceId, minute, tag, artifactId, versionId,
   arm, model, status, errorClass, audienceIds, outcomeRunMinute)`
   **replace** each other at ingest (SET semantics), so
   a replayed segment is a no-op.
+
+### `step` — one step of a run in one minute
+
+A step is its own row type, never a window row with `count: 0`, so no fold over windows can count one.
+
+```json
+{"type":"step","v":1,"artifactId":"prm_8b2f…",
+ "minute":"2026-09-11T14:03:00Z",
+ "instanceId":"i-7f3a…","instanceClass":"resident",
+ "tag":"docs.flow","versionId":"pv_…","arm":"none","model":"gpt-5",
+ "step":"docs.flow#2","status":"ok","errorClass":null,
+ "usageSource":"reported","modelCalls":2,
+ "latencyMs":{"buckets":[0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0],"sum":812},
+ "tokens":{"input":300,"output":70},
+ "tools":{"calls":1,"errors":0},
+ "sdk":"agent-sdk-ts/1.0.0"}
+```
+
+- `step` is an opaque string, `^[^\u0000-\u001f\u007f]{1,64}$`: a
+  `<slotTag>#<ordinal>` step id, or a framework node or agent name. No framework
+  concept reaches the wire. `STEP_BOUNDS` are the only two caps, 64 characters
+  and 32 names per run; a name past either is written as `other`. A run session
+  applies them per run, and the writer holds them per run dimensions within the
+  open minute.
+- `latencyMs` holds each model call's latency, so its bucket total equals
+  `modelCalls`. `status` is `ok` or `error`.
+- There is no `count`, no moments, no outcomes and no checks. OpenTelemetry
+  exports skip step rows.
+- The open key is the run dimensions plus `step`, `status` and `errorClass`.
 
 ### `refusal` — a control-plane refusal (rare, content-free)
 
@@ -201,8 +260,8 @@ exists, so an OTLP exporter is a renaming, not a redesign:
 ## What must never be in the spool
 
 Prompt text, model output, end-user identifiers, stack traces, application
-error messages. The schema has no field for them; the ingest processor
-drops unknown fields and quarantines unknown rows. Writers that need to
+error messages. The schema has no field for them, and a reader strips an
+unknown field before it leaves the host. Writers that need to
 correlate to their own traces use the `runRef` on their side — it never
 enters a window.
 
@@ -267,8 +326,7 @@ reported with the platform's `retryAfterSeconds` and nothing is uploaded.
    `(tag, artifactId, versionId, arm, model, status, errorClass,
    audienceIds, outcomeRunMinute)` — the `tag`, `artifactId`, `versionId`
    and `arm` come from the release you rendered (or from the authenticated
-   `runRef` the compatible endpoint returned). Legacy rows omit dimensions
-   introduced by later row versions.
+   `runRef` the compatible endpoint returned).
 3. At minute end write the row to the open segment, `fsync`, close per the
    rules above.
 
@@ -281,3 +339,25 @@ implementation; `conformance/spool.mjs` is the independent one CI runs;
 and in Python (~100 lines each, the filesystem rules included) that the
 conformance runner drives through the same vectors — start from one of
 those.
+
+## Run reference
+
+`runRef` is a compact, content-free token a customer keeps beside their own trace to attach feedback later.
+
+- **Body:** `JSON.stringify([agentId, target, runId, entries])`, UTF-8. **Token:** `base64url(body).mac`, where `mac` is the first 22 characters of the base64url HMAC-SHA256 of the body.
+- **Entries:** one per slot the run used, so a one-slot run is a list of one. Each holds `tag`, `artifactId`, `versionId`, `model`, `arm`, `bucket` (null with no experiment), `runMinute` and optional `audienceIds`. Tags are unique. `feedback` reads only the token, because the release may have moved by then.
+- **`runId`:** 22 base64url characters from 16 random bytes. It is fixed: a token that grows cannot be the run's identity.
+- **Bounds:** minting stops at 8 entries and 12,288 characters (eight worst-case entries are about 9,700). Reading accepts 32 entries and 40,960 characters, so a later minor can raise minting. A token above the minting bounds can be read but not re-minted.
+- **Readers are tolerant.** A body element past the fourth lands in `extra`, unknown keys on an entry stay on the entry, and both survive a re-mint, so a host can grow a ref a later SDK wrote.
+- A ref with no entries parses, and `feedback` on it returns `false`.
+- A hosted run's ref is a different token, for one hosted run of one slot, and is never parsed by the SDK.
+
+**Key.** `runRefKeyFrom(secret, agentId, target)` is HMAC-SHA256(`secret`, `"airprompter runRef v1\0" + agentId + "\0" + target`). The secret is `runRefSecret`, else the Agent key, so instances of one agent and target share it with no new setting, and a ref minted on one pod parses on another.
+
+A host with neither (offline, or a datastore runtime holding only a distribution key) falls back to its store's id. That key works on that one store only, and the SDK logs `run_ref_key_store_scoped` once. Setting `runRefSecret` fixes it.
+
+**Rotation.** `runRefPreviousSecrets` lists older secrets. Minting uses the current key; parsing tries the current one, then each previous one, so feedback on a ref minted before a rotation still lands.
+
+## Run counters
+
+A run that passes through serves the agent's own prompt and writes no row, because there is no version to attribute. The heartbeat carries it instead: `runCounters.passthrough` is an open map of cumulative counts since the process started, so a retried heartbeat cannot double count. Keys match `^[a-z][a-z0-9_]{0,63}$`: `no_verified_release`, `awaiting_unlock`, `slot_disabled`, `no_slot`, `slot_kind_unsupported`, `model_unresolved`, `variables_unfilled`, `unmapped_step` and `slot_not_in_release`. New reasons need no schema change.

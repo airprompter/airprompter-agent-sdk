@@ -8,7 +8,7 @@ says *what* would be refused and why; the facade decides what to record.
 
 Example::
 
-    resolver = ReleaseResolver(release=reader.current(), run_ref_key=store_key, agent_id="agt_1", target="prod", instance_id="host-1", now_ms=clock.now_ms)
+    resolver = ReleaseResolver(release=reader.current(), run_ref_key=run_ref_key, agent_id="agt_1", target="prod", instance_id="host-1", now_ms=clock.now_ms)
     outcome = resolver.resolve("support.reply", subject="user-42")   # the arm is sticky per subject; the ramp is read on now_ms
     if not outcome.ok:
         record(outcome.reason)                                       # "disabled" | "no_slot" — the facade writes the refusal row
@@ -21,12 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
-from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, ordered_steps
+from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, frozen_experiment, ordered_steps, servable_experiments, servable_slots
 from airprompter_agent_core.protocol.assignment import matches_audience, captured_audience_ids
+from airprompter_agent_core.protocol.trust import slot_hashes
 from airprompter_agent_core.telemetry.rows import minute_of
-from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of
 from airprompter_agent_core.release.reader import LoadedRelease, ReleaseSlot
-from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id
 from airprompter_agent_core.render.template import render_template
 
 
@@ -48,7 +48,7 @@ class Rendered:
     generation: int
     run_ref: str
     tag: str
-    #: 0.3.1: how the model is called for this slot, as the version declared it — the wrappers apply it.
+    #: How the model is called for this slot, as the version declared it: the wrappers apply it.
     inference: Optional[Mapping[str, Any]] = None
     audience_ids: Optional[tuple[str, ...]] = None
     run_minute: Optional[str] = None
@@ -62,7 +62,7 @@ class WorkflowStep:
     artifact_id: str
     text: str
     run_ref: str
-    #: 0.3.2: how the model is called for this step, as its prompt version declared it — the wrappers apply it.
+    #: How the model is called for this step, as its prompt version declared it: the wrappers apply it.
     inference: Optional[Mapping[str, Any]] = None
     #: The workflow's pinned model (every step runs on it); the settings above are for it.
     model: Optional[str] = None
@@ -82,19 +82,16 @@ class Workflow:
 class Disabled:
     agent: bool = False
     slots: list[str] = field(default_factory=list)
-    #: Arm names disabled by directives that name no experiment (the legacy single experiment).
-    arms: list[str] = field(default_factory=list)
-    #: S16: arm names disabled per experiment id; a directive without an id counts for every experiment.
+    #: S16: arm names disabled per experiment id.
     arms_by_experiment: dict[str, list[str]] = field(default_factory=dict)
 
-    def arms_for(self, experiment_id: str) -> set[str]:
-        """S16: the arms disabled for one experiment — those named with its id, plus any named without one."""
-        return {*self.arms, *self.arms_by_experiment.get(experiment_id, [])}
+    def arms_for(self, experiment_id: Any) -> set[str]:
+        """S16: the arms disabled for one experiment."""
+        return set(self.arms_by_experiment.get(experiment_id, [])) if isinstance(experiment_id, str) else set()
 
     def as_dict(self) -> dict[str, Any]:
         """The heartbeat's shape: agent / slots / arms, every disabled arm name flattened."""
-        flat = [*self.arms, *[arm for arms in self.arms_by_experiment.values() for arm in arms]]
-        return {"agent": self.agent, "slots": list(self.slots), "arms": flat}
+        return {"agent": self.agent, "slots": list(self.slots), "arms": [arm for arms in self.arms_by_experiment.values() for arm in arms]}
 
 
 @dataclass(frozen=True)
@@ -109,9 +106,8 @@ class ResolveOutcome:
 
 
 def disabled_from(directives: Sequence[Mapping[str, Any]]) -> Disabled:
-    """What ``disable`` directives say, as data."""
+    """What ``disable`` directives say, as data. An arm-scoped disable always names its experiment (M15)."""
     slots: list[str] = []
-    arms: list[str] = []
     arms_by_experiment: dict[str, list[str]] = {}
     agent = False
     for directive in directives:
@@ -119,14 +115,17 @@ def disabled_from(directives: Sequence[Mapping[str, Any]]) -> Disabled:
             continue
         if directive.get("scope") == "agent":
             agent = True
-        elif directive.get("scope") == "arm" and directive.get("arm"):
-            if directive.get("experimentId"):
-                arms_by_experiment.setdefault(str(directive["experimentId"]), []).append(str(directive["arm"]))
-            else:
-                arms.append(str(directive["arm"]))
+        elif directive.get("scope") == "arm":
+            if directive.get("arm") and isinstance(directive.get("experimentId"), str):
+                arms_by_experiment.setdefault(directive["experimentId"], []).append(str(directive["arm"]))
         elif directive.get("tag"):
             slots.append(str(directive["tag"]))
-    return Disabled(agent=agent, slots=slots, arms=arms, arms_by_experiment=arms_by_experiment)
+    return Disabled(agent=agent, slots=slots, arms_by_experiment=arms_by_experiment)
+
+
+def _entry(*, tag: str, artifact_id: str, version_id: str, model: str, arm: str, bucket: Optional[int], run_minute: str, audience_ids: Optional[Sequence[str]]) -> dict[str, Any]:
+    """One run reference entry, in the key order the TypeScript SDK writes, so a token is the same bytes in both."""
+    return {"tag": tag, "artifactId": artifact_id, "versionId": version_id, "model": model, "arm": arm, "bucket": bucket, "runMinute": run_minute, **({"audienceIds": list(audience_ids)} if audience_ids is not None else {})}
 
 
 @dataclass(frozen=True)
@@ -175,17 +174,21 @@ class ReleaseResolver:
         return disabled_from(self.directives())
 
     def experiments(self) -> list[Mapping[str, Any]]:
-        """S16: every experiment this release carries — one per slot, or the legacy single one."""
-        return experiments_of(self._payload)
+        """S16: every experiment this host acts on: one per slot it can serve."""
+        return servable_experiments(self._payload)
+
+    def frozen(self, tag: str, tags: Mapping[str, str]) -> bool:
+        """A run this experiment would decide, with every arm disabled: refused, on a host that sits the experiment out too."""
+        return frozen_experiment(self._payload, self.disabled().arms_for, tag, tags)
 
     def experiment_for(self, tag: str) -> Mapping[str, Any] | None:
-        """S16: the experiment that decides a slot, by tag — the entry naming it, else the legacy single one, else None."""
-        return experiment_for_tag(self._payload, tag)
+        """S16: the experiment that decides a slot, by tag, else None."""
+        return next((experiment for experiment in self.experiments() if experiment["tag"] == tag), None)
 
     def arms(self, experiment_or_tag: Mapping[str, Any] | str | None = None) -> list[dict[str, Any]] | None:
         """S9: an experiment's arms as they stand now — the signed plan walked on this host's clock, then any disabled
         arm's share handed to the control. None when there is no such experiment, or when every arm is disabled (a
-        freeze for that slot). Without an argument: the legacy single experiment, or the first of ``experiments[]``."""
+        freeze for that slot). Without an argument: the first of ``experiments[]``."""
         if isinstance(experiment_or_tag, str):
             experiment = self.experiment_for(experiment_or_tag)
         elif experiment_or_tag is not None:
@@ -195,25 +198,38 @@ class ReleaseResolver:
             experiment = listed[0] if listed else None
         if not experiment:
             return None
-        disabled = self.disabled().arms_for(str(experiment.get("experimentId")))
+        disabled = self.disabled().arms_for(experiment.get("experimentId"))
         return effective_arms(arms=experiment["arms"], ramp=experiment.get("ramp"), disabled_arms=disabled, now_ms=self._now_ms())
 
     def resolve(self, tag: str, subject: Optional[str] = None, tags: Optional[Mapping[str,str]] = None) -> ResolveOutcome:
         """The slot a subject gets for a tag, or why not. Refusals are data: the facade records them."""
         payload = self._payload
         local_tags = self._tags() if tags is None else tags
-        now = self._now_ms()
-        cohort = {"run_minute": minute_of(now), **({"audience_ids": captured_audience_ids(payload["observations"], tag, local_tags, now)} if "observations" in payload else {})}
         disabled = self.disabled()
         if disabled.agent:
             return ResolveOutcome(False, reason="disabled", tag=None)
         if tag in disabled.slots:
             return ResolveOutcome(False, reason="disabled", tag=tag)
-        slot = next((entry for entry in payload["slots"] if entry["tag"] == tag), None)
-        if slot is None:
+
+        def present(entry: Mapping[str, Any]) -> bool:
+            # A slot carrying `requires` is here only with every payload it names: main, steps and golden set (trust-chain.md M9).
+            if "requires" not in entry:
+                return True
+            hashes = slot_hashes(entry)
+            return len(hashes) > 0 and all(content_hash in self.release.payloads for content_hash in hashes)
+
+        slot = next((entry for entry in servable_slots(payload) if entry.get("tag") == tag), None)
+        if slot is None or not present(slot):
             return ResolveOutcome(False, reason="no_slot", tag=tag)
+        now = self._now_ms()
+        cohort = {"run_minute": minute_of(now), **({"audience_ids": captured_audience_ids(payload["observations"], tag, local_tags, now)} if "observations" in payload else {})}
         # S16: the experiment for this slot — its own salt and arms, so two slots split independently.
         experiment = self.experiment_for(tag)
+        if self.frozen(tag, local_tags):
+            return ResolveOutcome(False, reason="disabled", tag=tag)
+        # An own-tag override this release does not hold: sit out before assignment, so control runs here keep no candidate share.
+        if experiment and any(entry["tag"] == tag and not present(entry) for arm in experiment["arms"] for entry in arm.get("overrides", [])):
+            return ResolveOutcome(True, AudienceReleaseSlot(slot, "none", None, **cohort))
         if not experiment or (experiment.get("audience") and not matches_audience(experiment["audience"]["selector"],local_tags)):
             return ResolveOutcome(True, AudienceReleaseSlot(slot, "none", None, **cohort))
         subject_value = self._instance_id if experiment.get("subjectKey") == "instance" or subject is None else subject
@@ -239,8 +255,9 @@ class ReleaseResolver:
         generation = self.release.generation
         rendered_text = self.render_text(tag=slot["tag"], text=self.text_of(slot) if text is None else text, variables=slot.get("variables", []), values=values or {}, fenced=fenced)
         run_minute = getattr(resolved, "run_minute", None) or minute_of(self._now_ms())
-        facts = RunRefFacts(self._agent_id, self._target, slot["tag"], slot["versionId"], resolved.arm, generation, resolved.bucket, getattr(resolved,"audience_ids",None), run_minute, slot["artifactId"], slot["model"])
-        return Rendered(text=rendered_text, model=slot["model"], version_id=slot["versionId"], artifact_id=slot["artifactId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")), audience_ids=facts.audience_ids, run_minute=facts.run_minute)
+        audience_ids = getattr(resolved, "audience_ids", None)
+        facts = RunRefFacts(self._agent_id, self._target, new_run_id(), (_entry(tag=slot["tag"], artifact_id=slot["artifactId"], version_id=slot["versionId"], model=slot["model"], arm=resolved.arm, bucket=resolved.bucket, run_minute=run_minute, audience_ids=audience_ids),))
+        return Rendered(text=rendered_text, model=slot["model"], version_id=slot["versionId"], artifact_id=slot["artifactId"], arm=resolved.arm, generation=generation, run_ref=mint_run_ref(facts, self._run_ref_key), tag=slot["tag"], inference=copy_inference(slot.get("inference")), audience_ids=audience_ids, run_minute=run_minute)
 
     def render_text(self, *, tag: str, text: str, variables: Sequence[Mapping[str, Any]], values: Mapping[str, Any], fenced: Optional[Iterable[str]] = None) -> str:
         """The one render path: a prompt's text or a workflow step's, with the slot's declarations and this
@@ -255,8 +272,10 @@ class ReleaseResolver:
         slot = resolved.slot
         if slot.get("kind") != "workflow" or not slot.get("steps"):
             raise ValueError(f"{slot['tag']} is not a workflow slot")
-        generation = self.release.generation
         run_minute = getattr(resolved, "run_minute", None) or minute_of(self._now_ms())
+        audience_ids = getattr(resolved, "audience_ids", None)
+        # One ref per step, one entry each, sharing one run id. The entry's tag is the slot's: rows never carry a step in ``tag``.
+        run_id = new_run_id()
         steps = [
             WorkflowStep(
                 step_id=step["stepId"],
@@ -264,8 +283,8 @@ class ReleaseResolver:
                 version_id=step["promptVersionId"],
                 artifact_id=step["promptArtifactId"],
                 text=(self.release.payloads.get(step["contentHash"]) or b"").decode("utf-8"),
-                run_ref=mint_run_ref(RunRefFacts(self._agent_id, self._target, step["stepId"], step["promptVersionId"], resolved.arm, generation, resolved.bucket, getattr(resolved,"audience_ids",None), run_minute, step["promptArtifactId"], slot["model"]), self._run_ref_key),
-                audience_ids=getattr(resolved,"audience_ids",None), run_minute=run_minute,
+                run_ref=mint_run_ref(RunRefFacts(self._agent_id, self._target, run_id, (_entry(tag=slot["tag"], artifact_id=step["promptArtifactId"], version_id=step["promptVersionId"], model=slot["model"], arm=resolved.arm, bucket=resolved.bucket, run_minute=run_minute, audience_ids=audience_ids),)), self._run_ref_key),
+                audience_ids=audience_ids, run_minute=run_minute,
                 inference=copy_inference(step.get("inference")),
                 model=slot["model"],
             )

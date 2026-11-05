@@ -57,10 +57,10 @@ test("a malformed plan refuses the manifest whole at verification (M14), before 
   const control = plane.slot({ tag: "support.reply", text: "Reply A to {{name}}", versionId: "a", variables: [{ name: "name", required: false, trust: "operator" }] });
   const candidate = plane.slot({ tag: "support.reply", text: "Reply B to {{name}}", versionId: "b", variables: [{ name: "name", required: false, trust: "operator" }] });
   const experiment = { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request" as const, arms: [{ arm: "control", weightBps: 10000, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 0, releaseDigest: releaseDigest([candidate]), overrides: [candidate] }] };
-  const good: Manifest = plane.promote([control], { experiment: { ...experiment, ramp: [{ notBefore: "2026-09-14T02:00:00Z", weightBps: [9500, 500] }, { notBefore: "2026-09-14T03:00:00Z", weightBps: [7500, 2500] }] } });
+  const good: Manifest = plane.promote([control], { experiments: [{ tag: control.tag, ...experiment, ramp: [{ notBefore: "2026-09-14T02:00:00Z", weightBps: [9500, 500] }, { notBefore: "2026-09-14T03:00:00Z", weightBps: [7500, 2500] }] }] });
   const scope = { organizationId: "org_1", agentId: "agt_ramp", target: "prod" as const };
   assert.equal(verifyManifest({ manifest: good, root: plane.root, now: "2026-09-13T00:00:00Z", scope, storedGeneration: 0, payloads: null }).ok, true);
-  const bad: Manifest = plane.promote([control], { experiment: { ...experiment, ramp: [{ notBefore: "2026-09-14T02:00:00Z", weightBps: [9500, 500] }, { notBefore: "2026-09-14T02:20:00Z", weightBps: [7500, 2500] }] } });
+  const bad: Manifest = plane.promote([control], { experiments: [{ tag: control.tag, ...experiment, ramp: [{ notBefore: "2026-09-14T02:00:00Z", weightBps: [9500, 500] }, { notBefore: "2026-09-14T02:20:00Z", weightBps: [7500, 2500] }] }] });
   assert.deepEqual(verifyManifest({ manifest: bad, root: plane.root, now: "2026-09-13T00:00:00Z", scope, storedGeneration: 0, payloads: null }), { ok: false, reason: "ramp_invalid" });
 });
 
@@ -79,7 +79,7 @@ test("the runtime walks the plan on its own clock with no check-in, the customer
   const ap = await AirPrompterAgent.start({ ...scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/prod/root.json" }, fetch: plane.fetch(), now: () => clock, telemetry: { sink: "memory" }, logger: (e) => events.push(e) });
   try {
     // The console writes the plan into ONE generation, under unlock_required; the customer unlocks it once.
-    plane.promote([control], { applyPolicy: "unlock_required", experiment });
+    plane.promote([control], { applyPolicy: "unlock_required", experiments: [{ tag: control.tag, ...experiment }] });
     await ap.syncNow();
     assert.equal(ap.status().lastSyncOutcome, "staged");
     assert.deepEqual(await ap.unlock(), { generation: 2 });
@@ -110,7 +110,7 @@ test("the runtime walks the plan on its own clock with no check-in, the customer
 
     // The retreat: the cloud pushes disable scope:"arm" on the candidate — a reduction, so it lands on this unlock_required
     // host without an unlock (the standing directives of a verified manifest, S3/S4) and everyone is back on the control.
-    plane.promote([control], { applyPolicy: "unlock_required", experiment, directives: [{ kind: "disable", scope: "arm", arm: "candidate", issuedAt: "2026-09-14T06:00:00Z", reason: "p95 regressed" }] });
+    plane.promote([control], { applyPolicy: "unlock_required", experiments: [{ tag: control.tag, ...experiment }], directives: [{ kind: "disable", scope: "arm", arm: "candidate", experimentId: experiment.experimentId, issuedAt: "2026-09-14T06:00:00Z", reason: "p95 regressed" }] });
     await ap.syncNow();
     assert.equal(ap.status().lastSyncOutcome, "staged", "the new generation itself waits, as every release does");
     assert.equal(ap.generation, 2);
@@ -121,7 +121,7 @@ test("the runtime walks the plan on its own clock with no check-in, the customer
     assert.deepEqual((ap.heartbeatBody().disabled as { arms?: string[] }).arms, ["candidate"], "the fleet view sees the retreat");
     assert.ok(events.some((e) => e.event === "disabled_by_directive" && Array.isArray(e.arms) && (e.arms as string[]).includes("candidate")));
     // Every arm disabled is a Freeze for the tag.
-    plane.promote([control], { applyPolicy: "unlock_required", experiment, directives: [{ kind: "disable", scope: "arm", arm: "candidate", issuedAt: "2026-09-14T06:00:00Z" }, { kind: "disable", scope: "arm", arm: "control", issuedAt: "2026-09-14T06:00:00Z" }] });
+    plane.promote([control], { applyPolicy: "unlock_required", experiments: [{ tag: control.tag, ...experiment }], directives: [{ kind: "disable", scope: "arm", arm: "candidate", experimentId: experiment.experimentId, issuedAt: "2026-09-14T06:00:00Z" }, { kind: "disable", scope: "arm", arm: "control", experimentId: experiment.experimentId, issuedAt: "2026-09-14T06:00:00Z" }] });
     await ap.syncNow();
     assert.throws(() => ap.prompt("support.reply", { subject: "user-1" }).render({ name: "x" }), (e: unknown) => e instanceof RenderRefusedError && e.reason === "disabled");
   } finally {

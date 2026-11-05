@@ -111,7 +111,7 @@ export async function status(argv: string[], ctx: Context): Promise<number> {
         out.set(label, { slot, verified: true, ...summary, leaseExpiresAtFromIssue: leaseFromIssue });
         out.line(`${label}: slot ${slot}, generation ${summary.generation}, release ${summary.releaseDigest}, ${summary.slots} slots, policy ${summary.applyPolicy}, signed by ${loaded.signingKeyId}`);
         if (label === "active") {
-          out.line(`lease: ${summary.leaseSeconds}s from the last contact (issued ${summary.issuedAt}; from issue it ${instant(leaseFromIssue) <= now ? "lapsed" : "lapses"} ${leaseFromIssue}) → ${summary.onLeaseExpiry}`);
+          out.line(`lease: ${summary.leaseSeconds}s from the last contact (issued ${summary.issuedAt}; from issue it ${instant(leaseFromIssue) <= now ? "lapsed" : "lapses"} ${leaseFromIssue}); a lapsed lease reports stale and keeps serving`);
           if (summary.directives.length) out.line(`directives: ${summary.directives.map((d) => `${d.kind}${d.scope ? ` ${d.scope}` : ""}${d.tag ? ` ${d.tag}` : ""}`).join(", ")}`);
         }
       } catch (error) {

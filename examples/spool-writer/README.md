@@ -14,11 +14,12 @@ lines each, no dependencies, the same vectors the SDKs pass:
 
 Both implement, from `protocol/spool-format.md`:
 
-- one `window` row per minute per `(tag, artifactId, versionId, arm, model, status, errorClass, audienceIds, outcomeRunMinute)`, with later dimensions omitted by legacy row versions;
-- latency into the 16 fixed bucket edges (`protocol/schemas/latency-buckets.json`) plus the rounded sum;
+- one `window` row per minute per `(tag, artifactId, versionId, arm, model, status, errorClass, audienceIds, outcomeRunMinute)`, where `count` means runs, `modelCalls`, `agentRun` and `tools` add per run, and `tokensSq` holds the second moments of each run's token totals;
+- `step` rows beside the windows, never in them, with a name past either `STEP_BOUNDS` cap written as `other`;
+- latency into the 23 fixed bucket edges (`protocol/schemas/latency-buckets.json`) plus the rounded sum;
 - tokens as uncached input, cached input and output — split OpenAI's `cached_tokens` out of `prompt_tokens` yourself (the SDKs' `normalizeUsage` shows how);
-- `checks` counters and feedback `outcomes` (`{n, sum}` per declared signal name; booleans as 1/0) that ride on the `ok` window and never add to `count`;
-- audience- or artifact-aware feedback without an authenticated `outcomeRunMinute` attaches only to an already measured matching run in the open minute, so a standalone writer never emits an invalid zero-run v2/v3 row;
+- `checks` counters and feedback `outcomes` (`{n, sum, sumSq}` per declared signal name; booleans as 1/0) that ride on the `ok` window and never add to `count`;
+- feedback without an authenticated `outcomeRunMinute` attaches only to an already measured matching run in the open minute, so a standalone writer never emits an invalid zero-run row;
 - segment naming `seg-<instanceId>-<epochMinute>-<n>.ndjson`, written as `.open`, `fsync`, then renamed; a new segment on a new minute or when a line would push past 1 MiB; a sealed segment is never reopened.
 
 ```js

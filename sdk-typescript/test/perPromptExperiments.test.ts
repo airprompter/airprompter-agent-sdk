@@ -14,7 +14,7 @@ import test from "node:test";
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
 import { assignArm } from "../packages/core/src/protocol/assignment.js";
 import { publicJwkOf, releaseDigest, verifyManifest } from "../packages/core/src/protocol/trust.js";
-import { experimentConflict, experimentForTag, experimentsOf, type Experiment, type Manifest, type ManifestPayload } from "../packages/core/src/protocol/types.js";
+import { experimentConflict, type Experiment, type Manifest, type ManifestPayload } from "../packages/core/src/protocol/types.js";
 import { FakeControlPlane } from "../packages/core/src/testing/index.js";
 
 const vectors = JSON.parse(readFileSync(new URL("../../protocol/vectors/assignment.json", import.meta.url), "utf8")) as {
@@ -29,7 +29,7 @@ test("the protocol's perTag vectors: each experiment assigns on its own salt; a 
   for (const c of vectors.perTag.cases) {
     const payload = { experiments: c.experiments.map((e) => ({ ...e, subjectKey: "request" as const, arms: e.arms.map((a) => ({ ...a, releaseDigest: `sha256:${"0".repeat(64)}` as const, overrides: [] })) })) };
     for (const tag of c.tags) {
-      const experiment = experimentForTag(payload, tag);
+      const experiment = payload.experiments.find((entry) => entry.tag === tag);
       const expected = c.expected[tag]!;
       if (!experiment) {
         assert.deepEqual({ experimentId: null, bucket: null, arm: "none" }, expected, `${c.name}: ${tag}`);
@@ -39,10 +39,10 @@ test("the protocol's perTag vectors: each experiment assigns on its own salt; a 
       assert.deepEqual({ experimentId: experiment.experimentId, bucket: assigned.bucket, arm: assigned.arm.arm }, expected, `${c.name}: ${tag}`);
     }
   }
-  assert.deepEqual(vectors.perTag.refused.map((r) => r.reason), ["experiment_conflict", "experiment_conflict", "experiment_conflict"]);
+  assert.deepEqual(vectors.perTag.refused.map((r) => r.reason), ["experiment_conflict", "experiment_conflict"]);
 });
 
-test("M15: the conflicts are refused whole at verification; a legacy single experiment still verifies", () => {
+test("M15: the conflicts are refused whole at verification", () => {
   const scope = { organizationId: "org_1", agentId: "agt_pp", target: "prod" as const };
   const plane = new FakeControlPlane(scope);
   const triage = plane.slot({ tag: "support.triage", text: "Triage A", versionId: "a", variables: [] });
@@ -50,15 +50,10 @@ test("M15: the conflicts are refused whole at verification; a legacy single expe
   const triageB = plane.slot({ tag: "support.triage", text: "Triage B", versionId: "b", variables: [] });
   const base = releaseDigest([triage, reply]);
   const exp = (experimentId: string, tag: string, overrides: typeof triageB[] = []): Experiment => ({ experimentId, tag, salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 9000, releaseDigest: base, overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: releaseDigest([triageB, reply]), overrides }] });
-  const untagged = (experiment: Experiment): Experiment => {
-    const { tag: _tag, ...rest } = experiment;
-    return rest;
-  };
   const verify = (manifest: Manifest) => verifyManifest({ manifest, root: plane.root, now: new Date().toISOString(), scope, storedGeneration: 0, payloads: null, countersignRoot: null, requireCountersign: false });
   const conflict = (patch: Partial<ManifestPayload>) => experimentConflict({ ...plane.promote([triage, reply], { generation: 1 }).payload, ...patch });
 
   assert.equal(conflict({ experiments: [exp("exp_a", "support.triage", [triageB]), exp("exp_b", "support.reply")] }), null);
-  assert.equal(conflict({ experiment: untagged(exp("exp_legacy", "x")), experiments: [exp("exp_b", "support.reply")] }), "experiment_conflict", "both keys");
   assert.equal(conflict({ experiments: [exp("exp_a", "support.triage"), exp("exp_b", "support.triage")] }), "experiment_conflict", "a slot twice");
   assert.equal(conflict({ experiments: [exp("exp_a", "support.triage", [reply])] }), "experiment_conflict", "an override for another slot");
   assert.equal(conflict({ experiments: [exp("exp_a", "docs.missing")] }), "experiment_conflict", "a slot the release does not carry");
@@ -69,11 +64,6 @@ test("M15: the conflicts are refused whole at verification; a legacy single expe
   assert.equal(verify(good).ok, true);
   const bad = plane.promote([triage, reply], { experiments: [exp("exp_a", "support.triage"), exp("exp_b", "support.triage")] });
   assert.deepEqual(verify(bad), { ok: false, reason: "experiment_conflict" });
-  // 0.2's shape: one experiment, no tag, every slot it overrides splits.
-  const legacy = plane.promote([triage, reply], { experiment: untagged(exp("exp_legacy", "support.triage", [triageB])) });
-  assert.equal(verify(legacy).ok, true);
-  assert.equal(experimentsOf(legacy.payload).length, 1);
-  assert.equal(experimentForTag(legacy.payload, "support.reply")?.experimentId, "exp_legacy", "the legacy split decides every slot");
 });
 
 test("two prompts split independently, a candidate may be another prompt under the same key, and an arm disable retreats one experiment only", async () => {

@@ -33,7 +33,7 @@ import { join } from "node:path";
 
 import { sha256Prefixed } from "@airprompter/agent-core";
 import { SDK_VERSION } from "@airprompter/agent-core";
-import { referencedPayloads, verifyManifest, type Verdict } from "@airprompter/agent-core";
+import { optionalPayloads, referencedPayloads, verifyManifest, type Verdict } from "@airprompter/agent-core";
 import type { ApplyPolicy, Manifest, RefusalCode, RootMetadata, Target } from "@airprompter/agent-core";
 import type { KeyProvider, StorageProtection } from "./keyProvider.js";
 import { decryptPayload, encryptPayload, isPayloadDecryptError, payloadAad } from "./payloadCrypto.js";
@@ -117,6 +117,7 @@ export function isStoreError(error: unknown): error is StoreError {
   return errorNamed<StoreErrorCode>(error, "StoreError");
 }
 
+const CONTENT_HASH = /^sha256:[0-9a-f]{64}$/;
 const otherSlot = (slot: SlotName): SlotName => (slot === "A" ? "B" : "A");
 /** The SDK's own name and version, recorded as the writer unless the host (the daemon) names itself. */
 const DEFAULT_WRITER = { name: "agent-sdk-typescript", version: SDK_VERSION };
@@ -284,6 +285,10 @@ export class SlotStore {
     if (generation < this.file.generation && !input.force) {
       throw new StoreError("generation_rollback", `generation ${generation} is below the stored ${this.file.generation}`);
     }
+    // Every entry, referenced or not: a name is a path here, and bytes kept for a later SDK must be the bytes the manifest signed.
+    for (const [hash, bytes] of input.payloads) {
+      if (!CONTENT_HASH.test(hash) || sha256Prefixed(bytes) !== hash) throw new StoreError("slot_corrupt", "a payload entry does not hash to its name", "payload_hash_mismatch");
+    }
     for (const [hash, byteLength] of referencedPayloads(input.manifest.payload)) {
       const bytes = input.payloads.get(hash);
       if (!bytes) throw new StoreError("slot_corrupt", `payload ${hash} missing from the stage set`, "payload_missing");
@@ -372,9 +377,15 @@ export class SlotStore {
       throw new StoreError("slot_corrupt", `slot ${slot} holds generation ${generation}, store.json expects ${input.expectGeneration}`, "generation_rollback");
     }
     const payloads = new Map<string, Buffer>();
+    // A payload only a `requires` slot names may be missing: that slot is absent, and the next sync fetches it (M9).
+    // Nothing else is excused: a tampered or undecryptable payload is corrupt.
+    const optional = optionalPayloads(manifest.payload);
     for (const hash of referencedPayloads(manifest.payload).keys()) {
       const path = join(this.dir, "slots", slot, "payloads", `${hash.replace(":", "-")}.enc`);
-      if (!this.fs.exists(path)) throw new StoreError("slot_corrupt", `payload ${hash} missing`, "payload_missing");
+      if (!this.fs.exists(path)) {
+        if (optional.has(hash)) continue;
+        throw new StoreError("slot_corrupt", `payload ${hash} missing`, "payload_missing");
+      }
       try {
         payloads.set(hash, decryptPayload(this.dek, Buffer.from(this.fs.readFile(path)), payloadAad({ agentId: this.file.agentId, target: this.file.target, generation, contentHash: hash })));
       } catch (error) {
@@ -390,13 +401,14 @@ export class SlotStore {
       // A stored slot is checked against itself, not the store's counter: the counter is the anti-rollback for NEW manifests.
       storedGeneration: 0,
       payloads,
+      absentRequires: true,
       countersignRoot: input.countersignRoot ?? null,
       ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}),
     });
     if (!verdict.ok) {
       // Expired root: the bytes are still the last verified release; report and serve (D39). Everything else is corrupt.
       if (verdict.reason === "root_expired") {
-        const relaxed = verifyManifest({ manifest, root: { ...root, signed: { ...root.signed, expires: "9999-12-31T23:59:59Z" } }, now: input.now, scope: { organizationId: manifest.payload.organizationId, agentId: this.file.agentId, target: this.file.target }, storedGeneration: 0, payloads });
+        const relaxed = verifyManifest({ manifest, root: { ...root, signed: { ...root.signed, expires: "9999-12-31T23:59:59Z" } }, now: input.now, scope: { organizationId: manifest.payload.organizationId, agentId: this.file.agentId, target: this.file.target }, storedGeneration: 0, payloads, absentRequires: true });
         if (relaxed.ok) return { slot, manifest, generation, signingKeyId: relaxed.signingKeyId, payloads };
       }
       throw new StoreError("slot_corrupt", `slot ${slot} failed verification: ${verdict.reason}`, verdict.reason);

@@ -18,7 +18,7 @@ import pytest
 
 from airprompter_agent_core._util import b64url_encode, instant, iso_ms
 from airprompter_agent_core.bundle.apbundle import create_plaintext_bundle
-from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key
+from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key, release_digest
 from airprompter_agent_core.release.bundle_release import BundleRelease, BundleReleaseRefused
 from airprompter_agent_runtime.release.resolver import ReleaseResolver
 
@@ -63,8 +63,7 @@ def test_runtime_alone_renders_and_assigns_over_a_bundle_and_refuses_what_the_ch
     plane = FakeControlPlane(SCOPE)
     control = plane.slot(tag="support.reply", text="Reply A to {{name}}", version_id="v1", variables=[{"name": "name", "required": True, "trust": "operator"}])
     candidate = plane.slot(tag="support.reply", text="Reply B to {{name}}", version_id="v2", variables=[{"name": "name", "required": True, "trust": "operator"}])
-    digest = "sha256:" + "0" * 64
-    plane.promote([control], experiment={"experimentId": "exp_1", "salt": "c2FsdHNhbHRzYWx0c2FsdHNhbHQ", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 5000, "releaseDigest": digest, "overrides": []}, {"arm": "candidate", "weightBps": 5000, "releaseDigest": "sha256:" + "1" * 64, "overrides": [candidate]}]})
+    plane.promote([control], experiments=[{"tag": control["tag"], "experimentId": "exp_1", "salt": "c2FsdHNhbHRzYWx0c2FsdHNhbHQ", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 5000, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 5000, "releaseDigest": "sha256:" + "1" * 64, "overrides": [candidate]}]}])
     bundle = bundle_of(plane)
     loaded = BundleRelease.load(bundle=bundle, root=pinned(plane), scope=SCOPE, now=NOW)
     assert loaded.kind == "bundle"
@@ -101,8 +100,8 @@ def test_runtime_walks_the_ramp_vectors_over_a_bundle_release_with_no_facade():
         plane = FakeControlPlane(SCOPE)
         control = plane.slot(tag="support.reply", text="A", version_id="v1", variables=[])
         candidate = plane.slot(tag="support.reply", text="B", version_id="v2", variables=[])
-        arms = [{"arm": a["arm"], "weightBps": a["weightBps"], "releaseDigest": "sha256:" + "0" * 64, "overrides": [candidate] if a["arm"] == "candidate" else []} for a in case["arms"]]
-        plane.promote([control], experiment={"experimentId": "exp_ramp", "salt": case["salt"], "subjectKey": "request", "arms": arms, "ramp": case["ramp"]}, directives=[{**d, "issuedAt": d.get("issuedAt", "2026-09-14T00:00:00Z")} for d in case["directives"]])
+        arms = [{"arm": a["arm"], "weightBps": a["weightBps"], "releaseDigest": release_digest([control]), "overrides": [candidate] if a["arm"] == "candidate" else []} for a in case["arms"]]
+        plane.promote([control], experiments=[{"tag": control["tag"], "experimentId": "exp_ramp", "salt": case["salt"], "subjectKey": "request", "arms": arms, "ramp": case["ramp"]}], directives=[{**d, "issuedAt": d.get("issuedAt", "2026-09-14T00:00:00Z")} for d in case["directives"]])
         loaded = BundleRelease.load(bundle=bundle_of(plane), root=pinned(plane), scope=SCOPE, now=NOW)
 
         def at(now: str, field: str) -> None:

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AirPrompter Agent routes (customer-v1)
-  version: 0.3.4
+  version: 3.0.0
   summary: The routes an agent runtime calls. Pull only; the control plane never opens a connection to you.
   description: |
     Every route is called by the customer's runtime over outbound HTTPS with an
@@ -60,7 +60,7 @@ paths:
         concurrency cap and refused with `429` above it. Idle runtimes should
         poll the edge pointer and call this only when the generation moved:
         every answer (`200` and `304`) names it in `x-agent-edge-pointer-url`
-        (0.3.3; the heartbeat carries the same `edgePointerUrl`), so a puller
+        (the heartbeat carries the same `edgePointerUrl`), so a puller
         that never heartbeats learns it from its first pull. A deployment
         without an edge omits the header.
       parameters:
@@ -94,7 +94,7 @@ paths:
                 type: integer
                 minimum: 1
             x-agent-edge-pointer-url:
-              description: "0.3.3: the target's edge pointer (`generation.json` behind the CDN) — poll this, not the route, while idle. Omitted on a deployment without an edge."
+              description: "the target's edge pointer (`generation.json` behind the CDN) — poll this, not the route, while idle. Omitted on a deployment without an edge."
               schema:
                 type: string
                 format: uri
@@ -772,13 +772,12 @@ components:
     RunSlots:
       type: object
       additionalProperties: false
-      required: [agentId, target, generation, releaseDigest, slots, experiment]
+      required: [agentId, target, generation, releaseDigest, slots]
       properties:
         agentId:
           $ref: "schemas/manifest.schema.json#/$defs/identifier"
         target:
-          type: string
-          enum: [dev, staging, prod]
+          $ref: "schemas/manifest.schema.json#/$defs/target"
         generation:
           type: integer
           minimum: 1
@@ -802,8 +801,16 @@ components:
               tag:
                 $ref: "schemas/manifest.schema.json#/$defs/slotTag"
               kind:
+                description: "`prompt` or `workflow`, or another kind on a slot with `requires`."
                 type: string
-                enum: [prompt, workflow]
+              requires:
+                description: Capabilities this slot needs. An SDK missing one treats the slot as absent (capabilities.md).
+                type: array
+                minItems: 1
+                maxItems: 16
+                uniqueItems: true
+                items:
+                  $ref: "schemas/manifest.schema.json#/$defs/capability"
               model:
                 $ref: "schemas/manifest.schema.json#/$defs/modelId"
               variables:
@@ -817,19 +824,19 @@ components:
                     required: { type: boolean }
                     trust: { type: string }
                     default:
-                      description: "0.3.4: the text an optional operator variable renders when the caller passes nothing for it (the run route applies it once the service speaks 0.3.4)."
+                      description: "the text an optional operator variable renders when the caller passes nothing for it."
                       type: string
                       minLength: 1
                       maxLength: 4096
                     source:
-                      description: "0.3.4: who the author expects to fill it (caller | runtime); a hint."
+                      description: "who the author expects to fill it (caller | runtime); a hint."
                       type: string
                       enum: [caller, runtime]
               inference:
-                description: "0.3.1: how the model is called for the slot, as the release sealed it — what a hosted run uses; the caller's own values are ignored."
+                description: "how the model is called for the slot, as the release sealed it — what a hosted run uses; the caller's own values are ignored."
                 $ref: "schemas/manifest.schema.json#/$defs/inference"
               steps:
-                description: "Workflow slots list their step ids in order (0.3.2: each with its own settings when it has any); prompt slots carry null."
+                description: "Workflow slots list their step ids in order (each with its own settings when it has any); prompt slots carry null."
                 type: array
                 nullable: true
                 items:
@@ -840,20 +847,8 @@ components:
                     stepId: { type: string }
                     inference:
                       $ref: "schemas/manifest.schema.json#/$defs/inference"
-        experiment:
-          description: The running experiment, or null; the salt is what `subjectHash` is computed with.
-          type: object
-          nullable: true
-          additionalProperties: false
-          required: [salt, subjectKey, arms]
-          properties:
-            salt: { type: string, pattern: "^[A-Za-z0-9_-]{22,86}$" }
-            subjectKey: { type: string, enum: [request, instance] }
-            arms:
-              type: array
-              items: { type: string }
         experiments:
-          description: Every active per-slot experiment; the legacy single experiment remains in `experiment`.
+          description: Every active per-slot experiment; a salt is what `subjectHash` is computed with.
           type: array
           maxItems: 32
           items:
@@ -863,8 +858,7 @@ components:
             properties:
               experimentId: { $ref: "schemas/manifest.schema.json#/$defs/identifier" }
               tag:
-                allOf: [{ $ref: "schemas/manifest.schema.json#/$defs/slotTag" }]
-                nullable: true
+                $ref: "schemas/manifest.schema.json#/$defs/slotTag"
               salt: { type: string, pattern: "^[A-Za-z0-9_-]{22,86}$" }
               subjectKey: { type: string, enum: [request, instance] }
               arms:

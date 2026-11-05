@@ -35,10 +35,15 @@ outputChecks[{ kind, name, …the kind's own members }]   (only when present; ch
 variables[{ name, required, trust, default (only when present), source (only when present) }],
 goldenSet{ setId, cases, contentHash, byteLength, minPassBps }   (only when present; golden-sets.md),
 inference{ maxOutputTokens, reasoningEffort, stopSequences, temperatureMilli, topPBps }   (only when present; each key only when set),
+requires   (only when present; trust-chain.md › Slots a reader cannot serve),
 steps[{ stepId, ordinal, promptArtifactId, promptVersionId, contentHash, byteLength, inference{…} }]   (workflow pins only; a step's inference as above)
 ```
 
-`inference` (0.3.1 on a slot, 0.3.2 on a workflow step) is projected only
+A minor adding a member that changes what runs lists it here, only when present. An unlisted member is covered by the manifest signature, not by the digest, so not by a countersignature or an unlock.
+
+An open slot (one carrying `requires`, which a reader may not fully understand) projects the listed members it has, each only when present. `variables`, `artifactId` and the rest are simply absent from its projection when the slot has none, and members outside the list are not in it. `tag`, `kind` and `requires` are always there. A reader that cannot serve the slot never recomputes the digest; this is what makes the writer's number reproducible by any tool that does.
+
+`inference` is projected only
 when the pin carries the block, and only its known keys, each only when
 set: a runtime that meets a key it does not know drops it from the
 projection, so a future key changes the digest of the releases that use it

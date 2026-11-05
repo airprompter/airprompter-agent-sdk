@@ -26,5 +26,7 @@
       "depthSegments": 3,
       "depthBytes": 41210
     }
-  }
+  },
+  "code": "schema_invalid",
+  "at": "/format"
 }

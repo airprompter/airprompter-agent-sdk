@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.2/heartbeat.schema.json",
+  "$id": "https://airprompter.com/protocol/3/heartbeat.schema.json",
   "title": "AirPrompter heartbeat",
   "description": "One route, one Lambda (D41): an instance reports its state and receives the presigned S3 upload grant for its spool (§9.1). Telemetry bytes never pass through this route. Everything here is content-free by schema: no prompt text, no outputs, no end-user identifiers.",
   "$defs": {
@@ -10,6 +10,8 @@
       "required": [
         "protocol",
         "instanceId",
+        "instanceClass",
+        "heartbeatIntervalSeconds",
         "sdk",
         "syncMode",
         "generation",
@@ -17,7 +19,10 @@
         "storageProtection",
         "catalog",
         "lease",
-        "spool"
+        "spool",
+        "unlockRequestsSeen",
+        "disabled",
+        "applyPolicy"
       ],
       "properties": {
         "protocol": {
@@ -29,7 +34,7 @@
           "pattern": "^[A-Za-z0-9_-]{16,64}$"
         },
         "instanceClass": {
-          "description": "resident: a long-lived process; ephemeral: a serverless invocation or a CI job. Defaults to resident (D57).",
+          "description": "resident: a long-lived process; ephemeral: a serverless invocation or a CI job (D57).",
           "type": "string",
           "enum": [
             "resident",
@@ -52,12 +57,8 @@
           "properties": {
             "name": {
               "type": "string",
-              "enum": [
-                "agent-sdk-typescript",
-                "agent-sdk-python",
-                "airprompter-cli",
-                "airprompterd"
-              ]
+              "pattern": "^[a-z][a-z0-9-]{0,63}$",
+              "description": "The reporting software, as a slug. The SDKs send agent-sdk-typescript, agent-sdk-python, airprompter-cli or airprompterd."
             },
             "version": {
               "type": "string",
@@ -217,7 +218,8 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "models"
+            "models",
+            "variables"
           ],
           "properties": {
             "models": {
@@ -229,7 +231,7 @@
               }
             },
             "variables": {
-              "description": "0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) — names only, never values. The seal warns when a pin declares a `source: runtime` variable no live instance can fill.",
+              "description": "the variable names this instance can fill from the application's own sources (docs/variables.md) — names only, never values. The seal warns when a pin declares a `source: runtime` variable no live instance can fill.",
               "type": "array",
               "maxItems": 256,
               "uniqueItems": true,
@@ -349,16 +351,12 @@
           }
         },
         "capabilities": {
+          "description": "The values of SUPPORTED_CAPABILITIES this SDK implements (capabilities.md). A service warns at promote when a fleet cannot read a release. 3.0.0 SDKs send an empty list.",
           "type": "array",
-          "minItems": 1,
-          "maxItems": 16,
+          "maxItems": 32,
           "uniqueItems": true,
           "items": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9_]{0,63}$"
-          },
-          "contains": {
-            "const": "audience"
+            "$ref": "manifest.schema.json#/$defs/capability"
           }
         },
         "registration": {
@@ -406,90 +404,33 @@
               }
             }
           }
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "protocol": {
-                "const": "2.0.0"
-              }
-            },
-            "required": [
-              "protocol"
-            ],
-            "type": "object"
-          },
-          "then": {
-            "required": [
-              "capabilities"
-            ],
-            "type": "object"
-          }
         },
-        {
-          "if": {
-            "required": [
-              "capabilities"
-            ],
-            "type": "object"
-          },
-          "then": {
-            "properties": {
-              "protocol": {
-                "const": "2.0.0"
-              },
-              "capabilities": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 16,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
-                },
-                "contains": {
-                  "const": "audience"
+        "runCounters": {
+          "description": "Cumulative since the process started, so a retried heartbeat cannot double count. `passthrough` counts runs that wrote no row, by reason (spool-format.md › Run counters). A later minor may add a counter; a value is a count or a map of counts, never free text.",
+          "type": "object",
+          "allOf": [
+            {
+              "$ref": "#/$defs/counterMap"
+            }
+          ],
+          "required": [
+            "passthrough"
+          ],
+          "properties": {
+            "passthrough": {
+              "type": "object",
+              "additionalProperties": false,
+              "maxProperties": 64,
+              "patternProperties": {
+                "^[a-z][a-z0-9_]{0,63}$": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
-            },
-            "type": "object"
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "registration"
-            ],
-            "type": "object"
-          },
-          "then": {
-            "required": [
-              "capabilities"
-            ],
-            "properties": {
-              "protocol": {
-                "const": "2.0.0"
-              },
-              "capabilities": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 16,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
-                },
-                "contains": {
-                  "const": "audience"
-                }
-              }
-            },
-            "type": "object"
+            }
           }
         }
-      ]
+      }
     },
     "uploadGrant": {
       "description": "A presigned S3 POST policy minted by the grant issuer (§9.1). The policy pins the key prefix, the content-length range, the content type, server-side encryption and the grant id; it expires within 15 minutes.",
@@ -587,69 +528,27 @@
           "description": "The environment's current generation as the origin knows it (S3). A runtime whose edge pointer says less skips the pointer on its next pass and fetches the signed manifest directly: the pointer can be stale or pinned, and it never extends trust.",
           "type": "integer",
           "minimum": 0
-        },
-        "protocol": {
-          "$ref": "manifest.schema.json#/$defs/protocolVersion"
-        },
-        "capabilities": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 16,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9_]{0,63}$"
-          },
-          "contains": {
-            "const": "audience"
-          }
         }
+      }
+    },
+    "counterMap": {
+      "description": "Counters by name: a non-negative integer, or a map of the same. A name is an identifier, as the manifest mints it.",
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
       },
-      "allOf": [
-        {
-          "if": {
-            "anyOf": [
-              {
-                "required": [
-                  "capabilities"
-                ],
-                "type": "object"
-              },
-              {
-                "required": [
-                  "protocol"
-                ],
-                "type": "object"
-              }
-            ]
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0
           },
-          "then": {
-            "required": [
-              "protocol",
-              "capabilities"
-            ],
-            "properties": {
-              "protocol": {
-                "const": "2.0.0"
-              },
-              "capabilities": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 16,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
-                },
-                "contains": {
-                  "const": "audience"
-                }
-              }
-            },
-            "type": "object"
+          {
+            "$ref": "#/$defs/counterMap"
           }
-        }
-      ]
+        ]
+      }
     }
   }
 }

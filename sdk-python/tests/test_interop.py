@@ -1,8 +1,8 @@
 """Cross-language interop: a store the TypeScript SDK wrote (file key, an
 encrypted A slot, a closed spool segment) opens in this SDK — the same
 KEK wrap, the same payload AAD, the same manifest verification, the same
-segment names — and a ``run_ref`` minted there parses here with the same
-per-store key derivation. Runs when ``node`` and the TypeScript SDK's
+segment names — and a ``run_ref`` minted there parses here under the same
+store-scoped key. Runs when ``node`` and the TypeScript SDK's
 dev dependencies are present (CI installs them; locally it skips otherwise).
 """
 
@@ -42,14 +42,14 @@ def test_store_written_by_typescript_opens_here():
         try:
             assert ap.generation == expected["generation"]
             assert ap.instance_id != expected["instanceId"], "S6: the process's id is its own, never the store's"
-            assert ap._run_ref_key == hmac.new(expected["instanceId"].encode("utf-8"), b"runRef", hashlib.sha256).digest(), "the runRef key is the store's, shared by every process on the host"
+            assert ap._run_ref_key == hmac.new(expected["instanceId"].encode("utf-8"), b"runRef", hashlib.sha256).digest(), "with no secret the runRef key is the store's, shared by every process on the host"
             assert ap.status().signing_key_id == expected["signingKeyId"]
             assert ap.status().storage_protection == "file_key"
             assert ap.manifest["payload"]["releaseDigest"] == expected["releaseDigest"]
             assert ap.prompt("support.triage").render(team="Billing", ticket="x").text == expected["texts"]["support.triage"].replace("{{team}}", "Billing").replace("{{ticket}}", "<ticket>x</ticket>")
             assert ap.prompt("support.reply").render(name="Bo").text == "Reply politely to Bo."
             facts = parse_run_ref(expected["runRef"], ap._run_ref_key)
-            assert facts is not None and facts.tag == "support.triage" and facts.generation == 1, "a run_ref minted by TypeScript parses under the Python-derived key"
+            assert facts is not None and [entry["tag"] for entry in facts.entries] == ["support.triage"], "a run_ref minted by TypeScript parses under the Python-derived key"
             assert ap.feedback(expected["runRef"], thumbs="up") is True
             spool_dir = os.path.join(state_dir, "airprompter", "agt_1", "prod", "spool", "telemetry")
             segments = sorted(n for n in os.listdir(spool_dir) if n.startswith("seg-") and n.endswith(".ndjson"))

@@ -19,7 +19,7 @@ import test from "node:test";
 import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type WindowRow } from "../packages/telemetry/src/spool/writer.js";
 import { classifyError, classifyResult, normalizeUsage, observeCall } from "../packages/runtime/src/observe.js";
 
-const target = { tag: "support.triage", versionId: "ver_1", arm: "none", model: "gpt-5" };
+const target = { tag: "support.triage", artifactId: "art_1", versionId: "ver_1", arm: "none", model: "gpt-5" };
 
 test("usage: OpenAI (cached split out of prompt_tokens), Anthropic, Bedrock Converse, nested response shapes, and none", () => {
   assert.deepEqual(normalizeUsage({ usage: { prompt_tokens: 500, completion_tokens: 90, prompt_tokens_details: { cached_tokens: 300 } } }), { input: 200, cachedInput: 300, output: 90, source: "reported" });
@@ -86,7 +86,7 @@ test("the serverless buffer: past its budget the oldest rows go and one dropped 
   const writer = new SpoolWriter(sink, { instanceId: "i-7f3aQx9kLmN2pQ", instanceClass: "ephemeral", sdk: "agent-sdk-ts/0.1.0" });
   let now = Date.parse("2026-09-12T14:03:00Z");
   // Twenty distinct dimension sets a minute → twenty windows of ~300 bytes: well past 2 KiB.
-  for (let i = 0; i < 20; i += 1) writer.observe({ tag: `slot.${i}`, versionId: "v", arm: "none", model: "m", status: "ok", latencyMs: 10 + i, tokens: { input: 1, output: 1 } }, now);
+  for (let i = 0; i < 20; i += 1) writer.observe({ tag: `slot.${i}`, artifactId: "art_1", versionId: "v", arm: "none", model: "m", status: "ok", latencyMs: 10 + i, tokens: { input: 1, output: 1 } }, now);
   now += 60_000;
   writer.closeWindows(now);
   const rows = sink.drain(now) as SpoolRow[];
@@ -100,7 +100,7 @@ test("the serverless buffer: past its budget the oldest rows go and one dropped 
   assert.deepEqual(sink.drain(now), [], "drained, and the loss is not reported twice");
   const roomy = new MemorySink({ instanceId: "i-7f3aQx9kLmN2pQ" });
   const w2 = new SpoolWriter(roomy, { instanceId: "i-7f3aQx9kLmN2pQ", instanceClass: "ephemeral", sdk: "agent-sdk-ts/0.1.0" });
-  for (let i = 0; i < 20; i += 1) w2.observe({ tag: `slot.${i}`, versionId: "v", arm: "none", model: "m", status: "ok", latencyMs: 10, tokens: { input: 1, output: 1 } }, now);
+  for (let i = 0; i < 20; i += 1) w2.observe({ tag: `slot.${i}`, artifactId: "art_1", versionId: "v", arm: "none", model: "m", status: "ok", latencyMs: 10, tokens: { input: 1, output: 1 } }, now);
   w2.closeWindows(now + 60_000);
   assert.equal(roomy.drain().filter((r) => r.type === "dropped").length, 0);
 });
@@ -113,7 +113,7 @@ test("the host spool: past its budget the oldest closed segments are evicted and
     let now = Date.parse("2026-09-12T14:03:00Z");
     // Six minutes, one ~300-byte window each: the third close crosses 1.5 KiB and the oldest segments go.
     for (let minute = 0; minute < 6; minute += 1) {
-      writer.observe({ tag: "support.triage", versionId: "v", arm: "none", model: "m", status: "ok", latencyMs: 100, tokens: { input: 10, output: 5 } }, now);
+      writer.observe({ tag: "support.triage", artifactId: "art_1", versionId: "v", arm: "none", model: "m", status: "ok", latencyMs: 100, tokens: { input: 10, output: 5 } }, now);
       now += 60_000;
       writer.closeWindows(now);
     }

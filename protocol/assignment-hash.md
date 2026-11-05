@@ -10,9 +10,9 @@ here and `vectors/assignment.json` is the test.
 
 | Name | Source | Bytes hashed |
 |---|---|---|
-| `salt` | `manifest.payload.experiment.salt` — base64url without padding, random per experiment | the **decoded** bytes |
+| `salt` | `manifest.payload.experiments[].salt` — base64url without padding, random per experiment | the **decoded** bytes |
 | `subject` | the value the customer passes (`{ subject: userId }`). When absent it is a fresh id per call. The instance id is used only through `subjectKey: "instance"` | UTF-8 of the string, no normalisation, no trimming |
-| `arms` | `manifest.payload.experiment.arms` in manifest order | — |
+| `arms` | `manifest.payload.experiments[].arms` in manifest order | — |
 
 ## Function
 
@@ -89,15 +89,12 @@ and every refused plan.
 
 ## Per-prompt experiments (S16)
 
-Protocol 0.3 lets a manifest carry **one experiment per slot** —
-`payload.experiments[]`, each entry naming its `tag` — instead of the single
-`payload.experiment` that applied to every slot its arms overrode. The
-function above does not change; what changes is *which* salt and arms a
-render uses:
+A manifest carries **one experiment per slot**: `payload.experiments[]`, each
+entry naming its `tag`. A render uses that entry's salt and arms:
 
 ```
 experiment(tag) = the entry of experiments[] whose tag == tag
-                  (else the legacy experiment, if any; else none)
+                  (else none)
 arm(tag, subject) = assign(experiment(tag).salt, subject, experiment(tag).arms)
 ```
 
@@ -113,17 +110,12 @@ arm(tag, subject) = assign(experiment(tag).salt, subject, experiment(tag).arms)
 * The ramp plan, the retreat and `disable scope: "arm"` are per experiment;
   an arm-scoped disable names its `experimentId`, since arm names repeat
   across experiments.
-* `experiment` and `experiments[]` never travel together, a slot is never in
-  two experiments, and an override never names another experiment's slot:
-  any of these is `experiment_conflict` (trust-chain M15), refused whole
-  before a payload is fetched.
-* The legacy single `experiment` is still read (0.2 manifests verify
-  unchanged) and is still written while a fleet has not reported protocol
-  0.3 — the control plane reads the heartbeat's `protocol` before it writes
-  the array.
+* A slot is never in two experiments, and an override never names another
+  experiment's slot: either is `experiment_conflict` (trust-chain M15), refused
+  whole before a payload is fetched.
 
 `vectors/assignment.json › perTag` holds the cases: one subject across two
-experiments (each arm from its own salt, a third slot `none`) and the three
+experiments (each arm from its own salt, a third slot `none`) and the two
 refused shapes.
 
 ## Vectors

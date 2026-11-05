@@ -21,5 +21,7 @@
     "pollSeconds": 30,
     "edgePointerUrl": "https://edge.airprompter.com/g/BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU/generation.json",
     "latestGeneration": 42
-  }
+  },
+  "code": "schema_invalid",
+  "at": "/uploadGrant/maxObjectBytes"
 }

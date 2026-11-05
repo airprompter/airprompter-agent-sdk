@@ -25,7 +25,7 @@ const WRITER = "i-offlineAAAAAAA";
 const OTHER = "i-offlineBBBBBBB";
 
 function windowRow(instanceId: string, minute: string): SpoolRow {
-  return { type: "window", v: 1, minute, instanceId, instanceClass: "resident", tag: "support.triage", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
+  return { type: "window", v: 4, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag: "support.triage", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
 }
 
 function harness(plane: FakeControlPlane, work: string) {
@@ -53,7 +53,7 @@ test("export packs the closed segments and moves them aside; import heartbeats p
   const a0 = write(WRITER, T0, 0, [JSON.stringify(windowRow(WRITER, "2026-09-12T14:03:00Z"))]);
   const a1 = write(WRITER, T0 + 60_000, 0, [JSON.stringify(windowRow(WRITER, "2026-09-12T14:04:00Z"))]);
   const b0 = write(OTHER, T0, 0, [JSON.stringify(windowRow(OTHER, "2026-09-12T14:03:00Z"))]);
-  const junk = write("i-junkCCCCCCCCCC", T0, 0, ["not json", JSON.stringify({ type: "window", v: 1, prompt: "You are a helpful assistant" })]);
+  const junk = write("i-junkCCCCCCCCCC", T0, 0, ["not json", JSON.stringify({ type: "window", v: 4, prompt: "You are a helpful assistant" })]);
   writeFileSync(join(spool, `${segmentName(WRITER, epochMinute(T0 + 120_000), 0)}.open`), "{}\n");
 
   const h = harness(plane, work);

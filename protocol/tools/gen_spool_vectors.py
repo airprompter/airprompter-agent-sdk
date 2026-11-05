@@ -2,13 +2,17 @@
 
 Written from the prose in spool-format.md and the schemas, not from any
 SDK: latency bucket edges, minute formatting, segment naming, rotation at
-the minute boundary and 1 MiB, minute-window aggregation (feedback rides
-on a run's window without counting as a run), and the feedback catalogue
-normalisation. Two implementations agreeing on these files is the point. Usage::
+the minute boundary and 1 MiB, minute-window aggregation (`count` means
+runs, feedback rides on a run's window without counting as one, a step is a
+row of its own), the feedback catalogue normalisation and the run reference
+format. Two implementations agreeing on these files is the point. Usage::
 
     python3 protocol/tools/gen_spool_vectors.py protocol/vectors
 """
+import base64
 import datetime as dt
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -22,6 +26,19 @@ SEGMENT_MAX_BYTES = 1024 * 1024
 OUTCOME_NAME = re.compile(r"^[a-z][a-zA-Z0-9]{0,31}$")
 OUTCOME_MINUTE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z$")
 ARTIFACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+STEP_BOUNDS = {"maxLength": 64, "maxPerRun": 32}
+
+def count_of(value):
+    """A count a row may carry: a non-negative integer, whatever a caller handed in."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return 0
+    return min(9007199254740991, max(0, int(value)))
+
+def rounded_ms(value):
+    return max(0, int(math.floor(value + 0.5))) if math.isfinite(value) else 0
+
+def valid_step(value):
+    return isinstance(value, str) and 1 <= len(value) <= STEP_BOUNDS["maxLength"] and not re.search("[\\x00-\\x1f\\x7f]", value)
 
 def valid_outcome_run_minute(value):
     if not isinstance(value, str) or not OUTCOME_MINUTE.fullmatch(value) or value.startswith("0000-"):
@@ -36,7 +53,7 @@ def valid_audience_ids(value):
     return isinstance(value, (list, tuple)) and len(value) <= 8 and all(isinstance(item, str) and re.fullmatch(r"aud_[A-Za-z0-9_-]{22}", item) and (index == 0 or value[index - 1] < item) for index, item in enumerate(value))
 
 def has_valid_outcome(outcomes):
-    return any(OUTCOME_NAME.fullmatch(name) and (isinstance(value, bool) or isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)) for name, value in outcomes.items())
+    return any(OUTCOME_NAME.fullmatch(name) and (isinstance(value, bool) or isinstance(value, (int, float)) and math.isfinite(value * value)) for name, value in outcomes.items())
 
 # ----------------------------------------------------------------------------- pure functions
 
@@ -85,65 +102,144 @@ class Aggregator:
     def __init__(self, instance_id: str, instance_class: str, sdk: str):
         self.identity = (instance_id, instance_class, sdk)
         self.open = {}
+        self.open_steps = {}
+        self.step_names = {}
         self.open_minute = None
         self.emitted = []
+        self.emitted_steps = []
 
-    def _window(self, at: int, tag, version_id, arm, model, status, error_class, usage_source, *, artifact_id=None, audience_ids=None, outcome_run_minute=None, run_minute=None):
+    def _turn_minute(self, at: int) -> str:
         minute = minute_of(at)
-        if artifact_id is not None and (not isinstance(artifact_id, str) or not ARTIFACT_ID.fullmatch(artifact_id)):
-            raise ValueError("telemetry_artifact_id_invalid")
-        if audience_ids is not None and not valid_audience_ids(audience_ids):
-            raise ValueError("telemetry_audience_ids_invalid")
-        if outcome_run_minute is not None and ((artifact_id is None and audience_ids is None) or not valid_outcome_run_minute(outcome_run_minute) or outcome_run_minute > minute):
-            raise ValueError("telemetry_outcome_run_minute_invalid")
         if self.open_minute is not None and self.open_minute != minute:
             self.close(at)
         self.open_minute = minute
+        return minute
+
+    @staticmethod
+    def _check(at: int, artifact_id, audience_ids, outcome_run_minute=None):
+        if not isinstance(artifact_id, str) or not ARTIFACT_ID.fullmatch(artifact_id):
+            raise ValueError("telemetry_artifact_id_invalid")
+        if audience_ids is not None and not valid_audience_ids(audience_ids):
+            raise ValueError("telemetry_audience_ids_invalid")
+        if outcome_run_minute is not None and (not valid_outcome_run_minute(outcome_run_minute) or outcome_run_minute > minute_of(at)):
+            raise ValueError("telemetry_outcome_run_minute_invalid")
+
+    def _window(self, at: int, tag, version_id, arm, model, status, error_class, usage_source, *, artifact_id=None, audience_ids=None, outcome_run_minute=None):
+        self._check(at, artifact_id, audience_ids, outcome_run_minute)
+        minute = self._turn_minute(at)
         outcome_key = None if outcome_run_minute == minute else outcome_run_minute
         key = (tag, artifact_id, version_id, arm, model, status, error_class, tuple(audience_ids) if audience_ids is not None else None, outcome_key)
         row = self.open.get(key)
         if row is None:
             row = {
-                "type": "window", "v": 3 if artifact_id is not None else 2 if audience_ids is not None else 1, "minute": minute,
+                "type": "window", "v": 4, "artifactId": artifact_id, "minute": minute,
                 "instanceId": self.identity[0], "instanceClass": self.identity[1],
                 "tag": tag, "versionId": version_id, "arm": arm, "model": model, "status": status,
                 "errorClass": error_class, "usageSource": usage_source or "reported", "count": 0,
+                "modelCalls": 0, "agentRun": 0, "tools": {"calls": 0, "errors": 0},
                 "latencyMs": {"buckets": [0] * len(EDGES), "sum": 0}, "tokens": {"input": 0, "output": 0},
                 "sdk": self.identity[2],
             }
-            if artifact_id is not None: row["artifactId"] = artifact_id
             if audience_ids is not None: row["audienceIds"] = list(audience_ids)
             if outcome_run_minute is not None: row["outcomeRunMinute"] = outcome_run_minute
             self.open[key] = row
         return row
 
-    def observe(self, at: int, o: dict):
-        row = self._window(at, o["tag"], o["versionId"], o["arm"], o["model"], o["status"], o.get("errorClass"), o.get("usageSource"), artifact_id=o.get("artifactId"), audience_ids=o.get("audienceIds"), run_minute=o.get("runMinute"))
+    def record_run(self, at: int, r: dict):
+        """One run's totals: the only place `count` rises. Moments are over the run's totals, never per model call."""
+        d = r["dimensions"]
+        row = self._window(at, d["tag"], d["versionId"], d["arm"], d["model"], r["status"], r.get("errorClass"), r.get("usageSource"), artifact_id=d.get("artifactId"), audience_ids=d.get("audienceIds"))
         if row.get("outcomeRunMinute") == row["minute"]:
             row.pop("outcomeRunMinute")
         row["count"] += 1
-        row["latencyMs"]["buckets"][bucket_index(o["latencyMs"])] += 1
-        row["latencyMs"]["sum"] += max(0, int(math.floor(o["latencyMs"] + 0.5)))  # half up, as the format says
-        tokens = o.get("tokens") or {}
-        row["tokens"]["input"] += tokens.get("input", 0)
-        row["tokens"]["output"] += tokens.get("output", 0)
-        if tokens.get("cachedInput"):
-            row["tokens"]["cachedInput"] = row["tokens"].get("cachedInput", 0) + tokens["cachedInput"]
-        if "checks" in o:
+        row["agentRun"] += r["agentRun"]
+        row["modelCalls"] += count_of(r["modelCalls"])
+        row["tools"]["calls"] += count_of(r["tools"]["calls"])
+        row["tools"]["errors"] += count_of(r["tools"]["errors"])
+        row["latencyMs"]["buckets"][bucket_index(r["latencyMs"])] += 1
+        row["latencyMs"]["sum"] += rounded_ms(r["latencyMs"])  # half up, as the format says
+        t = {k: count_of(v) for k, v in r["tokens"].items()}
+        row["tokens"]["input"] += t["input"]
+        row["tokens"]["output"] += t["output"]
+        if t["cachedInput"]:
+            row["tokens"]["cachedInput"] = row["tokens"].get("cachedInput", 0) + t["cachedInput"]
+        sq = row.setdefault("tokensSq", {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0})
+        sq["input"] += t["input"] ** 2
+        sq["cachedInput"] += t["cachedInput"] ** 2
+        sq["output"] += t["output"] ** 2
+        sq["inputOutput"] += t["input"] * t["output"]
+        sq["inputCached"] += t["input"] * t["cachedInput"]
+        sq["cachedOutput"] += t["cachedInput"] * t["output"]
+        if "checks" in r:
             checks = row.setdefault("checks", {"passed": 0, "failed": 0})
-            checks["passed"] += o["checks"].get("passed", 0)
-            checks["failed"] += o["checks"].get("failed", 0)
+            checks["passed"] += r["checks"]["passed"]
+            checks["failed"] += r["checks"]["failed"]
+        return row
+
+    def record_step(self, at: int, r: dict):
+        """One step's totals: a row of its own; no window changes. The cap holds per run dimensions within the open minute."""
+        d = r["dimensions"]
+        self._check(at, d.get("artifactId"), d.get("audienceIds"))
+        minute = self._turn_minute(at)
+        dimension_key = (d["tag"], d["artifactId"], d["versionId"], d["arm"], d["model"], tuple(d["audienceIds"]) if "audienceIds" in d else None)
+        names = self.step_names.setdefault(dimension_key, set())
+        step = r["step"] if valid_step(r["step"]) else "other"
+        if step != "other" and step not in names:
+            if len(names) >= STEP_BOUNDS["maxPerRun"]:
+                step = "other"
+            else:
+                names.add(step)
+        key = (dimension_key, step, r["status"], r.get("errorClass"))
+        row = self.open_steps.get(key)
+        if row is None:
+            row = {
+                "type": "step", "v": 1, "artifactId": d["artifactId"], "minute": minute,
+                "instanceId": self.identity[0], "instanceClass": self.identity[1],
+                "tag": d["tag"], "versionId": d["versionId"], "arm": d["arm"], "model": d["model"], "step": step, "status": r["status"],
+                "errorClass": r.get("errorClass"), "usageSource": r.get("usageSource") or "reported", "modelCalls": 0,
+                "latencyMs": {"buckets": [0] * len(EDGES), "sum": 0}, "tokens": {"input": 0, "output": 0}, "tools": {"calls": 0, "errors": 0},
+                "sdk": self.identity[2],
+            }
+            if "audienceIds" in d: row["audienceIds"] = list(d["audienceIds"])
+            self.open_steps[key] = row
+        for index, count in enumerate(r["latency"]["buckets"]):
+            row["latencyMs"]["buckets"][index] += count_of(count)
+            row["modelCalls"] += count_of(count)  # the histogram counts the model calls: the validator holds the two equal
+        row["latencyMs"]["sum"] += rounded_ms(r["latency"]["sum"])
+        tokens = {k: count_of(v) for k, v in r["tokens"].items()}
+        row["tokens"]["input"] += tokens["input"]
+        row["tokens"]["output"] += tokens["output"]
+        if tokens["cachedInput"]:
+            row["tokens"]["cachedInput"] = row["tokens"].get("cachedInput", 0) + tokens["cachedInput"]
+        row["tools"]["calls"] += count_of(r["tools"]["calls"])
+        row["tools"]["errors"] += count_of(r["tools"]["errors"])
+
+    def observe(self, at: int, o: dict):
+        """A one-call run: one run row, and a step row only when the observation names a step."""
+        tokens = {"input": (o.get("tokens") or {}).get("input", 0), "cachedInput": (o.get("tokens") or {}).get("cachedInput", 0), "output": (o.get("tokens") or {}).get("output", 0)}
+        tools = {"calls": (o.get("toolCalls") or {}).get("calls", 0), "errors": (o.get("toolCalls") or {}).get("errors", 0)}
+        slot_tag = o["tag"]
+        step = o.get("step")
+        dimensions = {**{k: o[k] for k in ("artifactId", "versionId", "arm", "model", "audienceIds") if k in o}, "tag": slot_tag}
+        run = {"dimensions": dimensions, "status": o["status"], "errorClass": o.get("errorClass"), "usageSource": o.get("usageSource"), "agentRun": 1, "modelCalls": 1, "latencyMs": o["latencyMs"], "tokens": tokens, "tools": tools}
+        if "checks" in o:
+            run["checks"] = {"passed": o["checks"].get("passed", 0), "failed": o["checks"].get("failed", 0)}
+        row = self.record_run(at, run)
         if "outcomes" in o:
             merge_outcomes(row, o["outcomes"])
+        if step is not None:
+            buckets = [0] * len(EDGES)
+            buckets[bucket_index(o["latencyMs"])] = 1
+            self.record_step(at, {"dimensions": dimensions, "step": step, "status": "ok" if o["status"] == "ok" else "error", "errorClass": o.get("errorClass"), "usageSource": o.get("usageSource"), "modelCalls": 1, "latency": {"buckets": buckets, "sum": rounded_ms(o["latencyMs"])}, "tokens": tokens, "tools": tools})
 
     def outcomes(self, at: int, f: dict):
-        if not has_valid_outcome(f["outcomes"]):
+        if not has_valid_outcome(f["outcomes"]) or "artifactId" not in f:
             return
         if "audienceIds" in f and not valid_audience_ids(f["audienceIds"]):
             return
-        if "outcomeRunMinute" in f and (("artifactId" not in f and "audienceIds" not in f) or not valid_outcome_run_minute(f["outcomeRunMinute"]) or f["outcomeRunMinute"] > minute_of(at)):
+        if "outcomeRunMinute" in f and (not valid_outcome_run_minute(f["outcomeRunMinute"]) or f["outcomeRunMinute"] > minute_of(at)):
             return
-        if ("audienceIds" in f or "artifactId" in f) and "outcomeRunMinute" not in f:
+        if "outcomeRunMinute" not in f:
             minute = minute_of(at)
             if self.open_minute != minute:
                 return
@@ -157,11 +253,13 @@ class Aggregator:
 
     def close(self, at: int):
         self.emitted.extend(self.open.values())
+        self.emitted_steps.extend(self.open_steps.values())
         self.open = {}
+        self.open_steps = {}
+        self.step_names = {}
         self.open_minute = None
 
 def merge_outcomes(row: dict, outcomes: dict):
-    target = row.setdefault("outcomes", {})
     for name, value in outcomes.items():
         if not OUTCOME_NAME.match(name):
             continue
@@ -169,8 +267,11 @@ def merge_outcomes(row: dict, outcomes: dict):
             value = 1 if value else 0
         elif not isinstance(value, (int, float)) or value != value or value in (float("inf"), float("-inf")):
             continue
-        current = target.get(name, {"n": 0, "sum": 0})
-        target[name] = {"n": current["n"] + 1, "sum": current["sum"] + value}
+        current = row.get("outcomes", {}).get(name, {"n": 0, "sum": 0, "sumSq": 0})
+        merged = {"n": current["n"] + 1, "sum": current["sum"] + value, "sumSq": current["sumSq"] + value * value}
+        if not math.isfinite(merged["sum"]) or not math.isfinite(merged["sumSq"]):
+            continue  # a total that serialises as null would cost the whole segment
+        row.setdefault("outcomes", {})[name] = merged
 
 # Feedback catalogue (feedback-signals.schema.json) → window outcomes.
 BOOLEAN_SIGNALS = ["flagged", "accepted", "edited", "regenerated", "copied", "followUp", "escalated", "abandoned", "corrected", "resolved", "reopened", "converted", "refunded", "slaMet"]
@@ -240,7 +341,7 @@ INSTANCE = "i-7f3aQx9kLmN2pQ"
 SDK = "agent-sdk-ts/0.1.0"
 
 def spool_vectors():
-    buckets = [{"latencyMs": ms, "bucket": bucket_index(ms)} for ms in [0, 0.4, 1, 1.5, 2, 3, 4, 5, 8, 16, 17, 32, 64, 128, 129, 256, 512, 513, 812, 1024, 1025, 1201, 2048, 4096, 8192, 8193, 16384, 16385, 30000, 65536, 65537, 600000]]
+    buckets = [{"latencyMs": ms, "bucket": bucket_index(ms)} for ms in [0, 0.4, 1, 1.5, 2, 3, 4, 5, 8, 16, 17, 32, 64, 128, 129, 256, 512, 513, 812, 1024, 1025, 1201, 2048, 4096, 8192, 8193, 16384, 16385, 30000, 32768, 32769, 65536, 65537, 131072, 200000, 262144, 262145, 524288, 600000, 1048576, 2097152, 2097153, 3600000, 3600001, 7200000]]
     minutes = [
         {"name": "ten seconds into the minute", "epochMs": T0, "minute": minute_of(T0), "epochMinute": epoch_minute(T0)},
         {"name": "exactly on the minute", "epochMs": T0 - 10000, "minute": minute_of(T0 - 10000), "epochMinute": epoch_minute(T0 - 10000)},
@@ -285,16 +386,30 @@ def spool_vectors():
             kind = event["kind"]
             if kind == "observe":
                 agg.observe(event["at"], event["observation"])
+            elif kind == "recordRun":
+                agg.record_run(event["at"], event["run"])
+            elif kind == "recordStep":
+                agg.record_step(event["at"], event["step"])
             elif kind == "feedback":
                 agg.outcomes(event["at"], event["feedback"])
             elif kind == "refusal":
                 refusals.append({"type": "refusal", "v": 1, "at": iso_of(event["at"]), "instanceId": INSTANCE, "reason": event["reason"], "generation": event["generation"], "tag": event.get("tag")})
             elif kind == "close":
                 agg.close(event["at"])
-        return {"name": name, "note": note, "instanceId": INSTANCE, "instanceClass": instance_class, "sdk": SDK, "events": events, "expectedWindows": agg.emitted, "expectedRefusals": refusals}
+        return {"name": name, "note": note, "instanceId": INSTANCE, "instanceClass": instance_class, "sdk": SDK, "events": events, "expectedWindows": agg.emitted, "expectedSteps": agg.emitted_steps, "expectedRefusals": refusals}
 
-    triage = {"tag": "support.triage", "versionId": "ver_triage_7", "arm": "none", "model": "claude-haiku-4-5"}
+    triage = {"tag": "support.triage", "artifactId": "prm_support_triage", "versionId": "ver_triage_7", "arm": "none", "model": "claude-haiku-4-5"}
     ok = lambda **k: {**triage, "status": "ok", **k}
+    # What a run session hands the writer at `end`: one run's totals, however many calls it made.
+    dims = {k: triage[k] for k in ("tag", "artifactId", "versionId", "arm", "model")}
+    reply = {"tag": "support.reply", "artifactId": "prm_support_reply", "versionId": "ver_reply_3", "arm": "candidate", "model": "gpt-5"}
+    def run(dimensions=dims, *, status="ok", error_class=None, usage="reported", agent_run=1, model_calls=1, latency=1000, tokens=(0, 0, 0), tools=(0, 0)):
+        return {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage, "agentRun": agent_run, "modelCalls": model_calls, "latencyMs": latency, "tokens": {"input": tokens[0], "cachedInput": tokens[1], "output": tokens[2]}, "tools": {"calls": tools[0], "errors": tools[1]}}
+    def step(name, dimensions=dims, *, status="ok", error_class=None, usage="reported", latencies=(100,), tokens=(0, 0, 0), tools=(0, 0)):
+        histogram = [0] * len(EDGES)
+        for ms in latencies:
+            histogram[bucket_index(ms)] += 1
+        return {"dimensions": dimensions, "step": name, "status": status, "errorClass": error_class, "usageSource": usage, "modelCalls": len(latencies), "latency": {"buckets": histogram, "sum": sum(latencies)}, "tokens": {"input": tokens[0], "cachedInput": tokens[1], "output": tokens[2]}, "tools": {"calls": tools[0], "errors": tools[1]}}
     window_cases = [
         windows("two runs and feedback on one window", "feedback merges outcomes into the runs' window (status ok) and never adds to count or latency", [
             {"kind": "observe", "at": T0, "observation": ok(latencyMs=812, tokens={"input": 400, "output": 90, "cachedInput": 100}, checks={"passed": 1})},
@@ -312,35 +427,35 @@ def spool_vectors():
             {"kind": "observe", "at": T0 + 6, "observation": ok(latencyMs=9, usageSource="estimated")},
             {"kind": "close", "at": T0 + 10},
         ]),
-        windows("prompt artifacts split otherwise equal versions", "artifactId is a v3 dimension: two Team prompts that both have version 1 never merge after a slot changes prompts", [
+        windows("prompt artifacts split otherwise equal versions", "artifactId is a dimension: two Team prompts that both have version 1 never merge after a slot changes prompts", [
             {"kind": "observe", "at": T0, "observation": ok(artifactId="prm_support_alpha", versionId="ver_1", latencyMs=10)},
             {"kind": "observe", "at": T0 + 1, "observation": ok(artifactId="prm_support_beta", versionId="ver_1", latencyMs=20)},
             {"kind": "close", "at": T0 + 2},
         ]),
-        windows("artifact-aware delayed feedback", "v3 delayed feedback keeps the stable prompt identity and original run minute without requiring an observed audience", [
+        windows("artifact-aware delayed feedback", "delayed feedback keeps the stable prompt identity and original run minute without requiring an observed audience", [
             {"kind": "feedback", "at": T0 + 60000, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
             {"kind": "close", "at": T0 + 60001},
         ]),
-        windows("artifact feedback in its run minute merges", "an authenticated run minute equal to the filing minute is normalized onto the observed v3 window, including when feedback arrives first", [
+        windows("artifact feedback in its run minute merges", "an authenticated run minute equal to the filing minute is normalized onto the observed window, including when feedback arrives first", [
             {"kind": "feedback", "at": T0, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
             {"kind": "observe", "at": T0 + 1, "observation": ok(artifactId="prm_support_alpha", latencyMs=10)},
             {"kind": "close", "at": T0 + 2},
         ]),
-        windows("unattributed v2 and v3 feedback is ignored", "audience- or artifact-aware feedback cannot create a zero-run row without an authenticated outcomeRunMinute", [
+        windows("unattributed feedback is ignored", "feedback cannot create a zero-run row without an authenticated outcomeRunMinute", [
             {"kind": "feedback", "at": T0, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomes": {"thumbs": True}}},
             {"kind": "feedback", "at": T0 + 1, "feedback": {**triage, "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "outcomes": {"thumbs": False}}},
             {"kind": "close", "at": T0 + 2},
         ]),
-        windows("invalid outcome attribution is ignored", "writers refuse malformed or impossible run minutes, a run minute on legacy v1, and non-opaque audience ids before a row is created", [
+        windows("invalid outcome attribution is ignored", "writers refuse malformed or impossible run minutes, feedback with no artifact, and non-opaque audience ids before a row is created", [
             {"kind": "feedback", "at": T0, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": "not-a-minute", "outcomes": {"thumbs": True}}},
             {"kind": "feedback", "at": T0 + 1, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": "2026-02-30T14:03:00Z", "outcomes": {"thumbs": True}}},
-            {"kind": "feedback", "at": T0 + 2, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
+            {"kind": "feedback", "at": T0 + 2, "feedback": {k: v for k, v in {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}.items() if k != "artifactId"}},
             {"kind": "feedback", "at": T0 + 3, "feedback": {**triage, "artifactId": "prm_support_alpha", "audienceIds": ["raw-device-value"], "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
             {"kind": "feedback", "at": T0 + 4, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": minute_of(T0 + 60000), "outcomes": {"thumbs": True}}},
             {"kind": "feedback", "at": T0 + 5, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomeRunMinute": minute_of(T0), "outcomes": {"Bad-Name": 1}}},
             {"kind": "close", "at": T0 + 6},
         ]),
-        windows("same-minute v2 and v3 feedback finds measured runs", "without outcomeRunMinute, audience- or artifact-aware feedback may attach only to an already measured matching run in the open minute", [
+        windows("same-minute feedback finds measured runs", "without outcomeRunMinute, feedback may attach only to an already measured matching run in the open minute", [
             {"kind": "observe", "at": T0, "observation": ok(artifactId="prm_support_alpha", latencyMs=10)},
             {"kind": "feedback", "at": T0 + 1, "feedback": {**triage, "artifactId": "prm_support_alpha", "outcomes": {"thumbs": True}}},
             {"kind": "observe", "at": T0 + 2, "observation": ok(audienceIds=["aud_AAAAAAAAAAAAAAAAAAAAAA"], latencyMs=20)},
@@ -365,9 +480,9 @@ def spool_vectors():
             {"kind": "feedback", "at": T0 + 2, "feedback": {**triage, "outcomes": {"accepted": True, "editDistanceRatio": 0.25}}},
             {"kind": "close", "at": T0 + 3},
         ]),
-        windows("feedback before any run opens the window", "feedback alone yields a window with count 0 (it is not a run); usageSource defaults to reported", [
-            {"kind": "feedback", "at": T0, "feedback": {**triage, "outcomes": {"thumbs": False}}},
-            {"kind": "close", "at": T0 + 1},
+        windows("feedback before any run opens the window", "feedback on a run from an earlier minute yields a window with count 0 (it is not a run), no moments and every measure zero; usageSource defaults to reported", [
+            {"kind": "feedback", "at": T0 + 60000, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": False, "rating": 4}}},
+            {"kind": "close", "at": T0 + 60001},
         ]),
         windows("latency edges and the sum", "each bucket counts ≤ its edge; sum is the rounded, non-negative total", [
             {"kind": "observe", "at": T0, "observation": ok(latencyMs=1)},
@@ -389,22 +504,195 @@ def spool_vectors():
             {"kind": "observe", "at": T0 + 70, "observation": ok(latencyMs=60, tokens={"input": 10, "output": 5})},
             {"kind": "close", "at": T0 + 130},
         ], instance_class="ephemeral"),
+        windows("five model calls and two tool calls in one run", "count 1, agentRun 1, modelCalls 5, and tokensSq over the run's totals, not per call", [
+            {"kind": "recordRun", "at": T0, "run": run(model_calls=5, latency=4200, tokens=(1000, 200, 300), tools=(2, 0))},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("correlated tokens: every moment is its own number", "input and output rise together, so a dropped product term cannot pass: the three squares and three products are each summed over runs", [
+            {"kind": "recordRun", "at": T0, "run": run(latency=100, tokens=(10, 3, 20))},
+            {"kind": "recordRun", "at": T0 + 1, "run": run(latency=200, tokens=(100, 7, 210))},
+            {"kind": "recordRun", "at": T0 + 2, "run": run(latency=300, tokens=(1000, 11, 1900))},
+            {"kind": "feedback", "at": T0 + 3, "feedback": {**triage, "outcomes": {"rating": 3}}},
+            {"kind": "feedback", "at": T0 + 4, "feedback": {**triage, "outcomes": {"rating": 5, "judgeScore": 0.25}}},
+            {"kind": "close", "at": T0 + 5},
+        ]),
+        windows("two slots in one run", "two run rows, each count 1; agentRun 1 on the first only, so an agent-wide total counts the run once", [
+            {"kind": "recordRun", "at": T0, "run": run(agent_run=1, model_calls=2, latency=900, tokens=(40, 0, 10))},
+            {"kind": "recordRun", "at": T0, "run": run(reply, agent_run=0, model_calls=1, latency=900, tokens=(20, 0, 5), tools=(1, 1))},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("two recordRun calls for one run on one key", "agentRun 1 then 0 on the same dimensions: count rises by 2, agentRun by 1", [
+            {"kind": "recordRun", "at": T0, "run": run(agent_run=1, latency=10)},
+            {"kind": "recordRun", "at": T0 + 1, "run": run(agent_run=0, latency=10)},
+            {"kind": "close", "at": T0 + 2},
+        ]),
+        windows("workflow slot, three steps inside a run", "one tag; three type step rows, each with its own step id in step and the slot tag in tag; one run row; step rows add nothing to the window", [
+            {"kind": "recordStep", "at": T0, "step": step("docs.flow#1", dims, latencies=(300, 400), tokens=(50, 0, 20), tools=(1, 0))},
+            {"kind": "recordStep", "at": T0 + 1, "step": step("docs.flow#2", dims, latencies=(500,), tokens=(30, 10, 10), tools=(2, 1))},
+            {"kind": "recordStep", "at": T0 + 2, "step": step("docs.flow#3", dims, status="error", error_class="provider_timeout", latencies=(30000,), usage="unavailable")},
+            {"kind": "recordRun", "at": T0 + 3, "run": run(status="error", error_class="provider_timeout", model_calls=4, latency=31000, tokens=(80, 10, 30), tools=(3, 1))},
+            {"kind": "close", "at": T0 + 4},
+        ]),
+        windows("one-call run", "observe writes a run row and no step row", [
+            {"kind": "observe", "at": T0, "observation": ok(latencyMs=812, tokens={"input": 400, "output": 90}, toolCalls={"calls": 1, "errors": 0})},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("a step reported outside a run", "observe with step: one run row, count 1, and one step row with the same totals; tag stays the slot's", [
+            {"kind": "observe", "at": T0, "observation": ok(latencyMs=812, tokens={"input": 400, "cachedInput": 50, "output": 90}, toolCalls={"calls": 2, "errors": 1}, step="docs.flow#2")},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("step name past maxPerRun", "32 distinct names stand; the 33rd and 34th are written as other, and a name already seen keeps its row", [
+            *[{"kind": "recordStep", "at": T0, "step": step(f"node-{i}", dims)} for i in range(1, 35)],
+            {"kind": "recordStep", "at": T0, "step": step("node-1", dims)},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("step name past maxLength", "a name of 65 characters, an empty name and a control character are each written as other; 64 characters stand", [
+            {"kind": "recordStep", "at": T0, "step": step("n" * 64, dims)},
+            {"kind": "recordStep", "at": T0, "step": step("n" * 65, dims)},
+            {"kind": "recordStep", "at": T0, "step": step("", dims)},
+            {"kind": "recordStep", "at": T0, "step": step("bad\u0007name", dims)},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("interrupted", "an idle end counts one run on its own row, and it is not an error", [
+            {"kind": "recordRun", "at": T0, "run": run(status="interrupted", latency=900000)},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("model_unresolved is an error run", "a release whose model cannot run here is an error row a gate can see", [
+            {"kind": "recordRun", "at": T0, "run": run(status="error", error_class="model_unresolved", model_calls=0, latency=0, usage="unavailable")},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("whatever a caller hands in, a writer writes counts", "tool and token counts clamp to non-negative integers, so a row always passes the validator", [
+            {"kind": "observe", "at": T0, "observation": ok(latencyMs=10, tokens={"input": 2.7, "cachedInput": -3, "output": 4}, toolCalls={"calls": 1.5, "errors": -1})},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("a step's latency sum is rounded", "half up, as a run's is; the histogram counts the model calls", [
+            {"kind": "recordStep", "at": T0, "step": {**step("docs.flow#1", dims, latencies=(4,)), "modelCalls": 7, "latency": {"buckets": step("x", dims, latencies=(4,))["latency"]["buckets"], "sum": 12.5}}},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("a total that would not be finite is skipped", "1e200 squared overflows: that signal is skipped on this row and the others land", [
+            {"kind": "observe", "at": T0, "observation": ok(latencyMs=10, outcomes={"score": 1e200, "accepted": True})},
+            {"kind": "close", "at": T0 + 1},
+        ]),
+        windows("an outcome that cannot be written makes no row", "a feedback-only row with nothing in it would not pass the validator", [
+            {"kind": "feedback", "at": T0 + 60000, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"score": 1e200}}},
+            {"kind": "close", "at": T0 + 60001},
+        ]),
+        windows("a long run stays below the last bucket", "a 200-second run lands in the 262,144 ms bucket, so p95 does not saturate", [
+            {"kind": "recordRun", "at": T0, "run": run(latency=200000)},
+            {"kind": "close", "at": T0 + 1},
+        ]),
     ]
     return {
         "protocol": PROTOCOL,
-        "description": "Spool writer conformance (spool-format.md): latency bucket index, minute formatting, segment naming, rotation, and minute-window aggregation. Windows compare as sets (order of emission is not significant).",
+        "description": "Spool writer conformance (spool-format.md): latency bucket index, minute formatting, segment naming, rotation, and minute-window aggregation. `count` means runs. Rows compare as sets (order of emission is not significant).",
         "segmentMaxBytes": SEGMENT_MAX_BYTES,
+        "stepBounds": STEP_BOUNDS,
         "latencyBuckets": {"edges": EDGES, "cases": buckets},
         "minutes": minutes,
         "segmentNames": names,
         "rotation": rotations,
         "invalidArtifactIds": [
+            {"name": "absent", "reason": "telemetry_artifact_id_invalid"},
             {"name": "empty", "artifactId": "", "reason": "telemetry_artifact_id_invalid"},
             {"name": "unicode", "artifactId": "prm_😀", "reason": "telemetry_artifact_id_invalid"},
             {"name": "slash", "artifactId": "prm/support", "reason": "telemetry_artifact_id_invalid"},
             {"name": "leading punctuation", "artifactId": "_prm_support", "reason": "telemetry_artifact_id_invalid"},
         ],
         "windows": window_cases,
+        "tolerance": tolerance_cases(),
+    }
+
+def tolerance_cases():
+    """What a reader does with rows a later 3.x wrote. Expected answers are written here by hand."""
+    aggregator = Aggregator(INSTANCE, "resident", SDK)
+    aggregator.observe(T0, {"tag": "support.triage", "artifactId": "prm_support_triage", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "latencyMs": 10})
+    aggregator.close(T0)
+    run = aggregator.emitted[0]
+    text = lambda row: json.dumps(row, separators=(",", ":"), ensure_ascii=False)
+    later_type = {"type": "trace", "v": 1, "instanceId": INSTANCE, "body": "from a later minor"}
+    later_v = {**run, "v": 5, "somethingNew": 1}
+    with_fields = {**run, "laterField": "gone", "tokens": {**run["tokens"], "laterToken": 3}, "tools": {**run["tools"], "names": ["never"]}}
+    at = "2026-09-12T14:03:10Z"
+    dropped = lambda *lines: {"type": "dropped", "v": 1, "at": at, "instanceId": INSTANCE, "segments": 0, "lines": len(lines), "bytes": sum(len(line.encode("utf-8")) + 1 for line in lines)}
+    case = lambda name, lines, rows, invalid=(), skipped=(), stripped=(): {"name": name, "instanceId": INSTANCE, "nowMs": T0, "lines": lines, "expected": {"rows": rows, "invalid": list(invalid), "skipped": list(skipped), "stripped": list(stripped)}}
+    return [
+        case("a clean row passes", [text(run)], [run]),
+        case("unknown fields are stripped, nested ones too, and never leave the host", [text(with_fields)], [run], stripped=[{"line": 1, "field": "laterField"}, {"line": 1, "field": "tools.names"}, {"line": 1, "field": "tokens.laterToken"}]),
+        case("an unknown row type is skipped and counted", [text(run), text(later_type)], [run, dropped(text(later_type))], skipped=[{"line": 2, "reason": "unknown_type"}]),
+        case("an unknown version is skipped and counted", [text(later_v), text(run)], [run, dropped(text(later_v))], skipped=[{"line": 1, "reason": "v"}]),
+        case("a later error class is taken", [text({**run, "status": "error", "errorClass": "guardrail_tripped"})], [{**run, "status": "error", "errorClass": "guardrail_tripped"}]),
+        case("a later status is skipped and counted: a closed list per row type", [text({**run, "status": "paused"}), text(run)], [run, dropped(text({**run, "status": "paused"}))], skipped=[{"line": 1, "reason": "status"}]),
+        case("a step member on a window row is a crossed row", [text({**run, "step": "a"})], [], invalid=[{"line": 1, "reason": "unknown_field:step"}]),
+        case("a line that is not JSON is corruption", [text(run), "{not json"], [run], invalid=[{"line": 2, "reason": "not_json"}]),
+        case("a row from another instance is corruption", [text({**run, "instanceId": "i-someone-else"})], [], invalid=[{"line": 1, "reason": "instance_mismatch"}]),
+    ]
+
+# ----------------------------------------------------------------------------- run references
+
+RUN_REF_MAX_ENTRIES = 8
+RUN_REF_MAX_TOKEN_LENGTH = 12288
+RUN_REF_READ_MAX_ENTRIES = 32
+RUN_REF_READ_MAX_TOKEN_LENGTH = 40960
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+def run_ref_key_from(secret: str, agent_id: str, target: str) -> bytes:
+    return hmac.new(secret.encode("utf-8"), f"airprompter runRef v1\0{agent_id}\0{target}".encode("utf-8"), hashlib.sha256).digest()
+
+def run_ref_token(body_elements, key: bytes) -> str:
+    body = json.dumps(body_elements, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return f"{b64url(body)}.{b64url(hmac.new(key, body, hashlib.sha256).digest())[:22]}"
+
+def run_ref_vectors():
+    secret, agent, target = "ap_test_shared_secret", "agt_4e8c1b6d", "prod"
+    key = run_ref_key_from(secret, agent, target)
+    previous = "ap_test_previous_secret"
+    run_id = "AAECAwQFBgcICQoLDA0ODw"
+    minute = "2026-09-12T14:03:00Z"
+    entry = {"tag": "support.triage", "artifactId": "prm_support_triage", "versionId": "ver_triage_7", "model": "claude-haiku-4-5", "arm": "none", "bucket": None, "runMinute": minute}
+    worst = lambda i: {"tag": (f"{i}." + "t" * 128)[:128], "artifactId": (f"{i}." + "a" * 128)[:128], "versionId": "v" * 128, "model": "m" * 128, "arm": "a" * 32, "bucket": 9999, "runMinute": minute, "audienceIds": [f"aud_{chr(65 + n) * 22}" for n in range(8)]}
+    def facts(entries, **extra):
+        return {"agentId": agent, "target": target, "runId": run_id, "entries": entries, **extra}
+    def body(f):
+        return [f["agentId"], f["target"], f["runId"], f["entries"], *f.get("extra", [])]
+    def minted(name, f, token_key=key, **rest):
+        token = run_ref_token(body(f), token_key)
+        return {"name": name, "facts": f, "token": token, **rest}
+    eight = facts([worst(i) for i in range(8)])
+    nine = facts([worst(i) for i in range(9)])
+    thirty_two = facts([{**entry, "tag": f"slot.{i}"} for i in range(32)])
+    extended = facts([{**entry, "laterField": {"kept": True}}], extra=[{"addedBy": "a later minor"}, 7])
+    one = minted("one entry", facts([entry]))
+    tokens = [
+        one,
+        minted("audience memberships ride their entry", facts([{**entry, "arm": "candidate", "bucket": 42, "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"]}])),
+        minted("two entries", facts([entry, {**entry, "tag": "support.reply", "arm": "candidate", "bucket": 7}])),
+        minted("no entries", facts([]), note="a ref with no entries parses, and feedback on it returns false"),
+        minted("eight worst-case entries", eight, note="the largest ref a mint may write"),
+        minted("32 entries read", thirty_two, mintRefused=True, note="readers accept 32 entries; minting stops at 8"),
+        minted("a fifth body element and unknown entry keys", extended, note="both survive parse and re-mint, so a 1.0 host can grow a ref a later SDK wrote"),
+    ]
+    forged = one["token"].rsplit(".", 1)
+    return {
+        "bounds": {"maxEntries": RUN_REF_MAX_ENTRIES, "maxTokenLength": RUN_REF_MAX_TOKEN_LENGTH, "readMaxEntries": RUN_REF_READ_MAX_ENTRIES, "readMaxTokenLength": RUN_REF_READ_MAX_TOKEN_LENGTH},
+        "keys": [
+            {"name": "a known secret, agent and target", "secret": secret, "agentId": agent, "target": target, "keyHex": key.hex()},
+            {"name": "a custom stage", "secret": secret, "agentId": agent, "target": "qa", "keyHex": run_ref_key_from(secret, agent, "qa").hex()},
+            {"name": "the previous secret", "secret": previous, "agentId": agent, "target": target, "keyHex": run_ref_key_from(previous, agent, target).hex()},
+        ],
+        "keyHex": key.hex(),
+        "tokens": tokens,
+        "mintRefused": [{"name": "a ninth entry", "facts": nine}, {"name": "two entries with one tag", "facts": facts([entry, entry])}],
+        "rotation": {"name": "a token minted under a previous key parses with that key listed", "token": run_ref_token(body(facts([entry])), run_ref_key_from(previous, agent, target)), "facts": facts([entry]), "currentKeyHex": key.hex(), "previousKeyHex": run_ref_key_from(previous, agent, target).hex()},
+        "refused": [
+            {"name": "a forged entry fails the MAC", "token": f"{b64url(json.dumps(body(facts([{**entry, 'arm': 'candidate'}])), separators=(',', ':')).encode())}.{forged[1]}"},
+            {"name": "another key", "token": run_ref_token(body(facts([entry])), b"\x01" * 32)},
+            {"name": "a body with no runId", "token": run_ref_token([agent, target], key)},
+            {"name": "33 entries", "token": run_ref_token(body(facts([{**entry, "tag": f"slot.{i}"} for i in range(33)])), key)},
+            {"name": "no dot", "token": "AAAA"},
+            {"name": "a short MAC", "token": one["token"].rsplit(".", 1)[0] + ".abc"},
+        ],
     }
 
 def feedback_vectors():
@@ -446,8 +734,9 @@ def feedback_vectors():
     ]
     return {
         "protocol": PROTOCOL,
-        "description": "ap.feedback(runRef, signals) normalisation against feedback-signals.schema.json: what becomes a window outcome, what is rejected and why. `accepted` is the call's return value.",
+        "description": "ap.feedback(runRef, signals) normalisation against feedback-signals.schema.json: what becomes a window outcome, what is rejected and why. `accepted` is the call's return value. `runRef` pins the one token form (spool-format.md › Run reference): a token minted in either SDK parses in the other.",
         "cases": cases,
+        "runRef": run_ref_vectors(),
     }
 
 def main():

@@ -25,11 +25,14 @@ import {
   validateArms,
   decodeBase64Url,
   effectiveArms,
+  mintRunRef,
+  parseRunRef,
+  runRefKeyFrom,
   rampWeightsAt,
   validateRamp,
 } from "./reference.mjs";
-import { trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./trust.mjs";
-import { LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "./spool.mjs";
+import { carriedHashes, frozenTags, optionalHashes, servableExperiments, servableSlots, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./trust.mjs";
+import { LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, SegmentPlanner, WindowAggregator, epochMinute, inspectLines, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "./spool.mjs";
 import { checksRefusals, evaluateChecks, patternRefusal, projectChecks } from "./checks.mjs";
 import { spoolRowsToOtlp } from "./otel.mjs";
 import { datastoreKeys, decodeRecord, encodeRecord } from "./datastore.mjs";
@@ -45,6 +48,7 @@ const fail = (label, detail) => {
   console.log(`  FAIL ${label}${detail ? `\n       ${detail}` : ""}`);
 };
 const section = (title) => console.log(`\n${title}`);
+const sameList = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ---------------------------------------------------------------------------
 section("schemas compile (draft 2020-12)");
@@ -96,16 +100,15 @@ section("OpenAPI hosted compatibility instances");
     required: slots.required,
     properties: {
       agentId: { type: "string" },
-      target: slots.properties.target,
+      target: { $ref: `${schemaIds.manifest}#/$defs/target` },
       generation: slots.properties.generation,
       releaseDigest: { type: "string" },
       capabilities: slots.properties.capabilities,
       slots: { type: "array", maxItems: 0 },
-      experiment: { type: "null" },
     },
   };
   const validateOldCatalogue = ajv.compile(oldCatalogueSchema);
-  const oldCatalogue = { agentId: "agent-1", target: "prod", generation: 1, releaseDigest: `sha256:${"a".repeat(64)}`, slots: [], experiment: null };
+  const oldCatalogue = { agentId: "agent-1", target: "prod", generation: 1, releaseDigest: `sha256:${"a".repeat(64)}`, slots: [] };
   if (validateOldCatalogue(oldCatalogue)) ok("an older catalogue without capabilities remains valid");
   else fail("older catalogue without capabilities", ajv.errorsText(validateOldCatalogue.errors));
   if (validateOldCatalogue({ ...oldCatalogue, capabilities: ["future_feature"] })) ok("unknown hosted capabilities remain valid and ignorable");
@@ -143,7 +146,10 @@ for (const file of readdirSync(refusedDir).filter((f) => f.endsWith(".json")).so
   const entry = readJson(join(refusedDir, file));
   const name = { manifest: "manifest", "key-set": "key-set", bundle: "bundle", "heartbeat-request": "heartbeat#/$defs/request", "heartbeat-response": "heartbeat#/$defs/response", "edge-pointer": "edge-pointer", store: "store", daemon: "daemon", "spool-manifest": "spool-manifest" }[entry.schema];
   const validate = validatorFor(name);
+  // Refused for the reason it names: the schema's error sits at the path the fixture says, not just anywhere.
   if (validate(entry.document)) fail(file, `accepted, but: ${entry.reason}`);
+  else if (typeof entry.code !== "string" || typeof entry.at !== "string") fail(file, "names no code and path");
+  else if (!validate.errors.some((error) => error.instancePath.startsWith(entry.at))) fail(file, `refused elsewhere than ${entry.at}: ${ajv.errorsText(validate.errors)}`);
   else ok(`${file} — ${entry.reason}`);
 }
 
@@ -180,14 +186,14 @@ const manifestRules = (label, manifest) => {
     }
   }
 
-  if (payload.experiment) {
-    const { arms } = payload.experiment;
+  for (const experiment of payload.experiments ?? []) {
+    const { arms } = experiment;
     try {
       validateArms(arms);
-      decodeBase64Url(payload.experiment.salt);
-      ok(`${label}: experiment weights sum to 10000 and the salt decodes`);
+      decodeBase64Url(experiment.salt);
+      ok(`${label}: ${experiment.experimentId} weights sum to 10000 and the salt decodes`);
     } catch (error) {
-      fail(`${label}: experiment`, error.message);
+      fail(`${label}: ${experiment.experimentId}`, error.message);
     }
     const control = arms[0];
     if (control.releaseDigest !== payload.releaseDigest || control.overrides.length !== 0) {
@@ -224,7 +230,7 @@ for (const [file, document] of Object.entries(loaded)) {
       referenced.add(slot.contentHash);
       for (const step of slot.steps ?? []) referenced.add(step.contentHash);
     }
-    for (const arm of contents.manifest.payload.experiment?.arms ?? []) for (const o of arm.overrides) referenced.add(o.contentHash);
+    for (const experiment of contents.manifest.payload.experiments ?? []) for (const arm of experiment.arms) for (const o of arm.overrides) referenced.add(o.contentHash);
     const carried = new Map(contents.payloads.map((p) => [p.contentHash, p]));
     const missing = [...referenced].filter((h) => !carried.has(h));
     if (missing.length) fail(`${file}: bundle carries every referenced payload`, missing.join(", "));
@@ -367,6 +373,37 @@ for (const c of tv.rootMetadata) {
 }
 
 section("vectors: trust chain (manifests)");
+for (const c of readJson(join(protocolDir, "vectors", "manifest-verify.json")).digests) {
+  if (releaseDigest(c.slots) === c.releaseDigest) ok(`digest: ${c.name}`);
+  else fail(`digest: ${c.name}`, releaseDigest(c.slots));
+}
+for (const c of readJson(join(protocolDir, "vectors", "manifest-verify.json")).manifests.filter((entry) => entry.frozenTags)) {
+  if (sameList(frozenTags(c.manifest.payload), c.frozenTags)) ok(`frozen: ${c.name}`);
+  else fail(`frozen: ${c.name}`, frozenTags(c.manifest.payload).join(", "));
+}
+for (const c of readJson(join(protocolDir, "vectors", "manifest-verify.json")).manifests.filter((entry) => entry.frozenRuns)) {
+  for (const entry of c.frozenRuns) {
+    if (sameList(frozenTags(c.manifest.payload, entry.tags), entry.frozenTags)) ok(`frozen: ${c.name}: ${entry.name}`);
+    else fail(`frozen: ${c.name}: ${entry.name}`, frozenTags(c.manifest.payload, entry.tags).join(", "));
+  }
+}
+section("vectors: heartbeat readers");
+for (const c of readJson(join(protocolDir, "vectors", "heartbeat-readers.json")).cases) {
+  const writer = ajv.getSchema("https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request")(c.document);
+  if (writer === c.writerSchema && c.reader === "accepted") ok(`heartbeat reader: ${c.name}`);
+  else fail(`heartbeat reader: ${c.name}`, `writer schema ${writer}, expected ${c.writerSchema}`);
+}
+for (const c of readJson(join(protocolDir, "vectors", "manifest-verify.json")).carriers) {
+  const carried = [...carriedHashes(c.payload)].sort(([a], [b]) => (a < b ? -1 : 1));
+  const optional = [...optionalHashes(c.payload)].sort();
+  if (JSON.stringify(carried) === JSON.stringify(c.carried) && JSON.stringify(optional) === JSON.stringify(c.optional)) ok(`carried: ${c.name}`);
+  else fail(`carried: ${c.name}`, JSON.stringify({ carried, optional }));
+}
+for (const c of readJson(join(protocolDir, "vectors", "manifest-verify.json")).manifests.filter((entry) => entry.servableTags)) {
+  const tags = servableSlots(c.manifest.payload).map((slot) => slot.tag);
+  if (sameList(tags, c.servableTags) && servableExperiments(c.manifest.payload).every((experiment) => !c.skippedTags.includes(experiment.tag))) ok(`servable slots: ${c.name}`);
+  else fail(`servable slots: ${c.name}`, tags.join(", "));
+}
 for (const c of tv.manifests) {
   const payloads = c.payloads ? new Map(c.payloads.map((p) => [p.contentHash, Buffer.from(p.bytes, "base64url")])) : null;
   const result = verifyManifest({
@@ -375,6 +412,8 @@ for (const c of tv.manifests) {
     now: c.now,
     scope: c.scope,
     storedGeneration: c.storedGeneration,
+    carrying: c.carrying === true,
+    absentRequires: c.absentRequires === true,
     payloads,
     countersignRoot: c.countersignRoot ?? null,
     requireCountersign: c.requireCountersign ?? false,
@@ -415,7 +454,7 @@ for (const c of sp.rotation) {
 }
 const windowValidate = validatorFor("telemetry-window");
 const spoolRowValidate = validatorFor("spool-rows");
-const windowKey = (row) => JSON.stringify([row.minute, row.tag, row.artifactId ?? null, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null, row.audienceIds ?? null, row.outcomeRunMinute ?? null]);
+const windowKey = (row) => JSON.stringify([row.minute, row.tag, row.artifactId ?? null, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null, row.audienceIds ?? null, row.outcomeRunMinute ?? null, row.step ?? null]);
 const sortRows = (rows) => [...rows].sort((a, b) => (windowKey(a) < windowKey(b) ? -1 : 1));
 // Key-order-insensitive equality (rows carry non-integer sums, so not the protocol's canonical form).
 const stable = (value) => (Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value);
@@ -425,21 +464,32 @@ for (const c of sp.windows) {
   const refusals = [];
   for (const event of c.events) {
     if (event.kind === "observe") aggregator.observe(event.at, event.observation);
+    else if (event.kind === "recordRun") aggregator.recordRun(event.at, event.run);
+    else if (event.kind === "recordStep") aggregator.recordStep(event.at, event.step);
     else if (event.kind === "feedback") aggregator.outcomes(event.at, event.feedback);
     else if (event.kind === "refusal") refusals.push({ type: "refusal", v: 1, at: new Date(event.at).toISOString(), instanceId: c.instanceId, reason: event.reason, generation: event.generation, tag: event.tag ?? null });
     else if (event.kind === "close") aggregator.close(event.at);
   }
   const got = sortRows(aggregator.emitted);
   const expected = sortRows(c.expectedWindows);
-  if (got.length === expected.length && got.every((row, i) => sameJson(row, expected[i])) && sameJson(refusals, c.expectedRefusals)) ok(`windows: ${c.name}`);
-  else fail(`windows: ${c.name}`, `got ${JSON.stringify(got)} / ${JSON.stringify(refusals)}\n       expected ${JSON.stringify(expected)} / ${JSON.stringify(c.expectedRefusals)}`);
+  const gotSteps = sortRows(aggregator.emittedSteps);
+  const expectedSteps = sortRows(c.expectedSteps);
+  if (got.length === expected.length && got.every((row, i) => sameJson(row, expected[i])) && sameJson(gotSteps, expectedSteps) && sameJson(refusals, c.expectedRefusals)) ok(`windows: ${c.name}`);
+  else fail(`windows: ${c.name}`, `got ${JSON.stringify(got)} / ${JSON.stringify(gotSteps)} / ${JSON.stringify(refusals)}\n       expected ${JSON.stringify(expected)} / ${JSON.stringify(expectedSteps)} / ${JSON.stringify(c.expectedRefusals)}`);
   for (const row of c.expectedWindows) {
     if (!windowValidate(row)) fail(`windows: ${c.name} row validates against telemetry-window`, ajv.errorsText(windowValidate.errors));
     if (!spoolRowValidate(row)) fail(`windows: ${c.name} row validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
   }
+  for (const row of c.expectedSteps) if (!spoolRowValidate(row)) fail(`windows: ${c.name} step row validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
   for (const row of c.expectedRefusals) {
     if (!spoolRowValidate(row)) fail(`windows: ${c.name} refusal validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
   }
+}
+for (const c of sp.tolerance) {
+  const got = inspectLines(c);
+  const sortStripped = (entry) => ({ ...entry, stripped: [...entry.stripped].sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1)) });
+  if (sameJson(sortStripped(got), sortStripped(c.expected))) ok(`tolerance: ${c.name}`);
+  else fail(`tolerance: ${c.name}`, JSON.stringify(got));
 }
 for (const c of sp.invalidArtifactIds) {
   try {
@@ -452,7 +502,7 @@ for (const c of sp.invalidArtifactIds) {
 }
 {
   // Content never has a field in a window: the whole vector file, serialised, carries none of the strings a leak would.
-  const text = JSON.stringify(sp.windows.map((c) => [c.expectedWindows, c.expectedRefusals]));
+  const text = JSON.stringify(sp.windows.map((c) => [c.expectedWindows, c.expectedSteps, c.expectedRefusals]));
   const forbiddenKeys = ["prompt", "text", "userId", "subject", "runRef", "message", "stack", "freeText"];
   const leaked = forbiddenKeys.filter((key) => text.includes(`"${key}"`));
   if (leaked.length === 0) ok("no window or refusal row carries a content-bearing field");
@@ -474,6 +524,47 @@ for (const c of fb.cases) {
   else fail(`feedback: ${c.name} — schema and normaliser agree`, `schema ${schemaAccepts ? "accepts" : "refuses"}, normaliser rejects ${JSON.stringify(c.expected.rejected)}`);
 }
 
+section("vectors: run references (spool-format.md)");
+{
+  const rr = fb.runRef;
+  for (const c of rr.keys) {
+    if (runRefKeyFrom(c.secret, c.agentId, c.target).toString("hex") === c.keyHex) ok(`run reference key: ${c.name}`);
+    else fail(`run reference key: ${c.name}`);
+  }
+  const key = Buffer.from(rr.keyHex, "hex");
+  for (const c of rr.tokens) {
+    if (sameJson(parseRunRef(c.token, [key]), c.facts)) ok(`run reference parses: ${c.name}`);
+    else fail(`run reference parses: ${c.name}`, JSON.stringify(parseRunRef(c.token, [key])));
+    if (c.token.length > rr.bounds.readMaxTokenLength) fail(`run reference size: ${c.name}`, String(c.token.length));
+    if (c.mintRefused) {
+      try {
+        mintRunRef(c.facts, key);
+        fail(`run reference mint refused: ${c.name}`);
+      } catch (error) {
+        if (String(error).includes("run_ref_facts_invalid")) ok(`run reference mint refused: ${c.name}`);
+        else fail(`run reference mint refused: ${c.name}`, String(error));
+      }
+    } else if (mintRunRef(c.facts, key) === c.token && c.token.length <= rr.bounds.maxTokenLength) ok(`run reference mints: ${c.name}`);
+    else fail(`run reference mints: ${c.name}`);
+  }
+  for (const c of rr.mintRefused) {
+    try {
+      mintRunRef(c.facts, key);
+      fail(`run reference mint refused: ${c.name}`);
+    } catch (error) {
+      if (String(error).includes("run_ref_facts_invalid")) ok(`run reference mint refused: ${c.name}`);
+      else fail(`run reference mint refused: ${c.name}`, String(error));
+    }
+  }
+  const previous = Buffer.from(rr.rotation.previousKeyHex, "hex");
+  if (sameJson(parseRunRef(rr.rotation.token, [key, previous]), rr.rotation.facts) && parseRunRef(rr.rotation.token, [key]) === null) ok(rr.rotation.name);
+  else fail(rr.rotation.name);
+  for (const c of rr.refused) {
+    if (parseRunRef(c.token, [key]) === null) ok(`run reference refused: ${c.name}`);
+    else fail(`run reference refused: ${c.name}`);
+  }
+}
+
 section("vectors: output checks (checks.md)");
 const ck = readJson(join(protocolDir, "vectors", "checks.json"));
 const checkSchema = validatorFor("manifest#/$defs/outputCheck");
@@ -492,9 +583,7 @@ for (const c of ck.patterns) {
 section("vectors: OpenTelemetry mapping (S13, docs/telemetry.md)");
 const otel = readJson(join(protocolDir, "vectors", "otel-mapping.json"));
 const protocolVersion = readFileSync(join(protocolDir, "VERSION"), "utf8").trim();
-// The OpenTelemetry mapping corpus remains a 0.3.4 legacy-wire fixture while
-// VERSION advances independently for the future major-1 audience contract.
-if (![protocolVersion, "0.3.5", "0.3.4"].includes(otel.protocol)) fail("otel-mapping.json protocol", `${otel.protocol} vs ${protocolVersion}`);
+if (otel.protocol !== protocolVersion) fail("otel-mapping.json protocol", `${otel.protocol} vs ${protocolVersion}`);
 if (sameJson(otel.explicitBoundsSeconds, LATENCY_BUCKET_EDGES_MS.slice(0, -1).map((e) => e / 1000))) ok("otel: the histogram's bounds are the spool's buckets in seconds, the last bucket the overflow");
 else fail("otel: the histogram's bounds are the spool's buckets in seconds", JSON.stringify(otel.explicitBoundsSeconds));
 for (const c of otel.cases) {
@@ -532,6 +621,8 @@ section("examples/spool-writer: the reference writers without the SDK (D66) pass
   const drive = (writer, c) => {
     for (const event of c.events) {
       if (event.kind === "observe") writer.observe(event.observation, event.at);
+      else if (event.kind === "recordRun") writer.recordRun(event.run, event.at);
+      else if (event.kind === "recordStep") writer.recordStep(event.step, event.at);
       else if (event.kind === "feedback") writer.feedback(event.feedback, event.at);
       else if (event.kind === "close") writer.close(event.at);
     }
@@ -550,7 +641,7 @@ section("examples/spool-writer: the reference writers without the SDK (D66) pass
     const writer = new example.SpoolWriter({ instanceId: c.instanceId, instanceClass: c.instanceClass, sdk: c.sdk });
     drive(writer, c);
     const got = sortRows(writer.emitted);
-    const expected = sortRows(c.expectedWindows);
+    const expected = sortRows([...c.expectedWindows, ...c.expectedSteps]);
     if (got.length === expected.length && got.every((row, i) => sameJson(row, expected[i]))) ok(`spool-writer.mjs windows: ${c.name}`);
     else fail(`spool-writer.mjs windows: ${c.name}`, `got ${JSON.stringify(got)}\n       expected ${JSON.stringify(expected)}`);
     for (const row of writer.emitted) if (!spoolRowValidate(row)) fail(`spool-writer.mjs windows: ${c.name} row validates against spool-rows`, ajv.errorsText(spoolRowValidate.errors));
@@ -572,7 +663,7 @@ section("examples/spool-writer: the reference writers without the SDK (D66) pass
     drive(new example.SpoolWriter({ dir, instanceId: c.instanceId, instanceClass: c.instanceClass, sdk: c.sdk }), c);
     const files = listDir(dir).sort();
     const rows = files.flatMap((f) => readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)));
-    if (files.length > 0 && files.every((f) => f.endsWith(".ndjson")) && sameJson(sortRows(rows), sortRows(c.expectedWindows))) ok(`spool-writer.mjs: a sealed segment (${files[0]}) reads back as the expected rows`);
+    if (files.length > 0 && files.every((f) => f.endsWith(".ndjson")) && sameJson(sortRows(rows), sortRows([...c.expectedWindows, ...c.expectedSteps]))) ok(`spool-writer.mjs: a sealed segment (${files[0]}) reads back as the expected rows`);
     else fail("spool-writer.mjs: sealed segment", `files ${files.join(", ")}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });

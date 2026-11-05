@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.3/spool-manifest.schema.json",
+  "$id": "https://airprompter.com/protocol/3/spool-manifest.schema.json",
   "title": "AirPrompter spool segment manifest (format 1)",
   "description": "daemon.md › The segment manifest: `seg-<instanceId>-<epochMinute>-<n>.manifest.json`, written beside a closed segment after it is closed (temp file + rename). The telemetry daemon scans for these: it uploads only segments whose manifest names its own agent and target, checks the segment's size and SHA-256 against it, and obtains the writer's grant with the manifest's `report`.",
   "type": "object",
@@ -58,12 +58,7 @@
       "minLength": 1
     },
     "target": {
-      "type": "string",
-      "enum": [
-        "dev",
-        "staging",
-        "prod"
-      ]
+      "$ref": "https://airprompter.com/protocol/3/manifest.schema.json#/$defs/target"
     },
     "closedAt": {
       "type": "string",
@@ -76,77 +71,91 @@
       "required": [
         "protocol",
         "instanceId",
+        "instanceClass",
+        "heartbeatIntervalSeconds",
         "sdk",
         "syncMode",
         "generation",
         "applyState",
         "storageProtection",
         "catalog",
-        "lease"
+        "lease",
+        "unlockRequestsSeen",
+        "disabled",
+        "applyPolicy"
       ],
       "properties": {
         "protocol": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/protocol"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/protocol"
         },
         "instanceId": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/instanceId"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/instanceId"
         },
         "instanceClass": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/instanceClass"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/instanceClass"
         },
         "heartbeatIntervalSeconds": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/heartbeatIntervalSeconds"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/heartbeatIntervalSeconds"
         },
         "sdk": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/sdk"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/sdk"
         },
         "host": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/host"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/host"
         },
         "syncMode": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/syncMode"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/syncMode"
         },
         "generation": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/generation"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/generation"
         },
         "activeReleaseDigest": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/activeReleaseDigest"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/activeReleaseDigest"
         },
         "stagedReleaseDigest": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/stagedReleaseDigest"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/stagedReleaseDigest"
         },
         "applyState": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/applyState"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/applyState"
         },
         "refusal": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/refusal"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/refusal"
         },
         "applyPolicy": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/applyPolicy"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/applyPolicy"
         },
         "unavailableModels": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/unavailableModels"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/unavailableModels"
         },
         "signingKeyId": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/signingKeyId"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/signingKeyId"
         },
         "storageProtection": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/storageProtection"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/storageProtection"
         },
         "catalog": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/catalog"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/catalog"
         },
         "lease": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/lease"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/lease"
         },
         "localRollback": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/localRollback"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/localRollback"
         },
         "unlockRequestsSeen": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/unlockRequestsSeen"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/unlockRequestsSeen"
         },
         "disabled": {
-          "$ref": "https://airprompter.com/protocol/0.2/heartbeat.schema.json#/$defs/request/properties/disabled"
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/disabled"
+        },
+        "capabilities": {
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/capabilities"
+        },
+        "runCounters": {
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/runCounters"
+        },
+        "registration": {
+          "$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request/properties/registration"
         }
       }
     }

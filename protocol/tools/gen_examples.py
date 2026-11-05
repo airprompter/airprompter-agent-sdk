@@ -31,12 +31,12 @@ def digest_input(slots):
     out = []
     for s in sorted(slots, key=lambda s: s["tag"]):
         p = {k: s[k] for k in ("tag", "kind", "artifactId", "versionId", "versionOrdinal", "contentHash", "byteLength", "model")}
-        # 0.3.4: default and source are digest-bound when present.
+        # default and source are digest-bound when present.
         p["variables"] = [{"name": v["name"], "required": v["required"], "trust": v["trust"], **({"default": v["default"]} if v.get("default") is not None else {}), **({"source": v["source"]} if v.get("source") is not None else {})} for v in s["variables"]]
         if "steps" in s:
             p["steps"] = [{**{k: st[k] for k in ("stepId", "ordinal", "promptArtifactId", "promptVersionId", "contentHash", "byteLength")}, **({"inference": inference_input(st["inference"])} if st.get("inference") is not None else {})} for st in s["steps"]]
         if s.get("inference") is not None:
-            # 0.3.1: the inference block is digest-bound when present — its known keys, each only when set.
+            # The inference block is digest-bound when present: its known keys, each only when set.
             p["inference"] = inference_input(s["inference"])
         out.append(p)
     return out
@@ -89,10 +89,10 @@ slots = [
         "model": "gpt-5",
         "variables": [
             {"name": "customer_name", "required": True, "trust": "operator", "source": "runtime"},
-            # 0.3.4: an optional operator variable may carry a default, rendered when nothing else fills it.
+            # An optional operator variable may carry a default, rendered when nothing else fills it.
             {"name": "topic", "required": False, "trust": "operator", "default": "your recent order"},
         ],
-        # 0.3.1: how the model is called, as the version declared it — sealed into the digest, applied by the wrappers.
+        # How the model is called, as the version declared it: sealed into the digest, applied by the wrappers.
         # A reasoning model takes an effort and a cap, not a temperature (the control plane refuses what the model cannot take).
         "inference": {"maxOutputTokens": 800, "reasoningEffort": "low"},
     },
@@ -123,6 +123,14 @@ candidate_triage = {**candidate_triage, "versionId": "ver_01j9x4k2m7q9", "versio
 candidate_slots = [candidate_triage if s["tag"] == "support.triage" else s for s in slots]
 candidate_digest = release_digest(candidate_slots)
 
+# One experiment per slot. The reply split tests another prompt under the reply key (the override names a different
+# artifactId), and only inside the audience the service observes on that slot.
+reply_slot = next(s for s in slots if s["tag"] == "support.reply")
+reply_other = {**reply_slot, "artifactId": "prm_retention_script", "versionId": "ver_01j9x4k2m7q1", "versionOrdinal": 1, "contentHash": sha256_prefixed(b"You are a retention specialist.\n"), "byteLength": len(b"You are a retention specialist.\n")}
+reply_candidate_digest = release_digest([reply_other if s["tag"] == "support.reply" else s for s in slots])
+AUDIENCE_ID = "aud_AAAAAAAAAAAAAAAAAAAAAA"
+audience_selector = {"mode": "when", "when": {"any": [{"key": "region", "in": ["eu-west-1", "eu-central-1"]}, {"not": {"key": "plan", "is": "free"}}]}}
+
 manifest_payload = {
     "protocol": PROTOCOL,
     "organizationId": "org_7d3f9a2b",
@@ -133,48 +141,9 @@ manifest_payload = {
     "previousReleaseDigest": "sha256:" + "a" * 64,
     "issuedAt": "2026-09-12T10:00:00Z",
     "leaseSeconds": 3600,
-    "onLeaseExpiry": "degrade",
     "applyPolicy": "unlock_required",
     "requireCountersign": True,
     "slots": slots,
-    "experiment": {
-        "experimentId": "exp_2f9c0a1b",
-        "salt": b64url(bytes(range(16))),
-        "subjectKey": "request",
-        "arms": [
-            {"arm": "control", "weightBps": 9000, "releaseDigest": digest, "overrides": []},
-            {"arm": "candidate", "weightBps": 1000, "releaseDigest": candidate_digest, "overrides": [candidate_triage]},
-        ],
-        # S9: the signed ramp plan — the fleet walks it on its own clock; the customer unlocked it once.
-        "ramp": [
-            {"notBefore": "2026-09-13T02:00:00Z", "weightBps": [7500, 2500]},
-            {"notBefore": "2026-09-13T04:00:00Z", "weightBps": [5000, 5000]},
-            {"notBefore": "2026-09-13T08:00:00Z", "weightBps": [0, 10000]},
-        ],
-    },
-    "directives": [
-        {"kind": "request_unlock", "releaseDigest": digest, "requestedBy": "usr_9b1c2d3e", "requestedAt": "2026-09-12T10:00:00Z", "expiresAt": "2026-09-13T10:00:00Z", "note": "Roll during tonight's window."}
-    ],
-}
-manifest = {
-    "payload": manifest_payload,
-    "signatures": [{"keyId": key_platform, "alg": "ES256", "sig": placeholder_sig}],
-    "countersignatures": [
-        {"keyId": key_customer, "alg": "ES256", "releaseDigest": digest, "sig": placeholder_sig, "signedAt": "2026-09-12T09:30:00Z"},
-        {"keyId": key_customer, "alg": "ES256", "releaseDigest": candidate_digest, "sig": placeholder_sig, "signedAt": "2026-09-12T09:31:00Z"},
-    ],
-}
-
-# S16: the same release with one experiment per slot. The triage split is the legacy one re-expressed with its tag;
-# the reply split tests another prompt under the reply key (the override names a different artifactId).
-reply_slot = next(s for s in slots if s["tag"] == "support.reply")
-reply_other = {**reply_slot, "artifactId": "prm_retention_script", "versionId": "ver_01j9x4k2m7q1", "versionOrdinal": 1, "contentHash": sha256_prefixed(b"You are a retention specialist.\n"), "byteLength": len(b"You are a retention specialist.\n")}
-reply_candidate_digest = release_digest([reply_other if s["tag"] == "support.reply" else s for s in slots])
-manifest_experiments_payload = {
-    **{k: v for k, v in manifest_payload.items() if k != "experiment"},
-    "generation": 43,
-    "previousReleaseDigest": digest,
-    "issuedAt": "2026-09-12T11:00:00Z",
     "experiments": [
         {
             "experimentId": "exp_2f9c0a1b",
@@ -185,29 +154,39 @@ manifest_experiments_payload = {
                 {"arm": "control", "weightBps": 9000, "releaseDigest": digest, "overrides": []},
                 {"arm": "candidate", "weightBps": 1000, "releaseDigest": candidate_digest, "overrides": [candidate_triage]},
             ],
-            "ramp": manifest_payload["experiment"]["ramp"],
+            # S9: the signed ramp plan: the fleet walks it on its own clock; the customer unlocked it once.
+            "ramp": [
+                {"notBefore": "2026-09-13T02:00:00Z", "weightBps": [7500, 2500]},
+                {"notBefore": "2026-09-13T04:00:00Z", "weightBps": [5000, 5000]},
+                {"notBefore": "2026-09-13T08:00:00Z", "weightBps": [0, 10000]},
+            ],
         },
         {
             "experimentId": "exp_6a0d4e2c",
             "tag": "support.reply",
             "salt": b64url(bytes(range(16, 32))),
             "subjectKey": "request",
+            "audience": {"audienceId": AUDIENCE_ID, "selector": audience_selector},
             "arms": [
                 {"arm": "control", "weightBps": 5000, "releaseDigest": digest, "overrides": []},
                 {"arm": "candidate", "weightBps": 5000, "releaseDigest": reply_candidate_digest, "overrides": [reply_other]},
             ],
         },
     ],
-    # S16: an arm-scoped disable names its experiment — arm names repeat across experiments.
-    "directives": [{"kind": "disable", "scope": "arm", "experimentId": "exp_6a0d4e2c", "arm": "candidate", "issuedAt": "2026-09-12T11:30:00Z", "reason": "p95 latency doubled on the reply candidate"}],
+    "observations": [{"audienceId": AUDIENCE_ID, "selector": audience_selector, "tag": "support.reply", "observeFrom": "2026-09-12T09:00:00Z"}],
+    "directives": [
+        {"kind": "request_unlock", "releaseDigest": digest, "requestedBy": "usr_9b1c2d3e", "requestedAt": "2026-09-12T10:00:00Z", "expiresAt": "2026-09-13T10:00:00Z", "note": "Roll during tonight's window."},
+        # An arm-scoped disable names its experiment: arm names repeat across experiments.
+        {"kind": "disable", "scope": "arm", "experimentId": "exp_6a0d4e2c", "arm": "candidate", "issuedAt": "2026-09-12T10:30:00Z", "reason": "p95 latency doubled on the reply candidate"},
+    ],
 }
-manifest_experiments = {
-    "payload": manifest_experiments_payload,
+manifest = {
+    "payload": manifest_payload,
     "signatures": [{"keyId": key_platform, "alg": "ES256", "sig": placeholder_sig}],
     "countersignatures": [
         {"keyId": key_customer, "alg": "ES256", "releaseDigest": digest, "sig": placeholder_sig, "signedAt": "2026-09-12T09:30:00Z"},
         {"keyId": key_customer, "alg": "ES256", "releaseDigest": candidate_digest, "sig": placeholder_sig, "signedAt": "2026-09-12T09:31:00Z"},
-        {"keyId": key_customer, "alg": "ES256", "releaseDigest": reply_candidate_digest, "sig": placeholder_sig, "signedAt": "2026-09-12T10:31:00Z"},
+        {"keyId": key_customer, "alg": "ES256", "releaseDigest": reply_candidate_digest, "sig": placeholder_sig, "signedAt": "2026-09-12T09:32:00Z"},
     ],
 }
 
@@ -239,6 +218,7 @@ for s in slots:
 payload_bytes[sha256_prefixed(step1_text)] = step1_text
 payload_bytes[sha256_prefixed(step2_text)] = step2_text
 payload_bytes[candidate_triage["contentHash"]] = triage_text + b"Be concise.\n"
+payload_bytes[reply_other["contentHash"]] = b"You are a retention specialist.\n"
 
 bundle_plain = {
     "format": "apbundle",
@@ -270,8 +250,13 @@ bundle_encrypted = {
 
 heartbeat_request = {
     "protocol": PROTOCOL,
+    "capabilities": [],
+    "registration": {"tagKeys": ["plan", "region"], "prompts": [{"tag": "support.reply", "displayName": "Support reply"}]},
+    "runCounters": {"passthrough": {}},
     "instanceId": "inst_5f3c9a2b7e1d4c08",
-    "sdk": {"name": "airprompterd", "version": "0.1.0", "protocolRange": ">=0.1.0 <1.0.0"},
+    "instanceClass": "resident",
+    "heartbeatIntervalSeconds": 300,
+    "sdk": {"name": "airprompterd", "version": "1.0.0", "protocolRange": ">=3.0.0 <4.0.0"},
     "host": {"os": "linux", "arch": "arm64", "runtime": "node/22.11.0"},
     "syncMode": "resident",
     "generation": {"active": 41, "staged": 42},
@@ -280,11 +265,13 @@ heartbeat_request = {
     "applyState": "awaiting_unlock",
     "signingKeyId": key_platform,
     "storageProtection": "kms",
-    # 0.3.4: the variable names this instance can fill from the application's own sources (docs/variables.md) — names only.
+    # The variable names this instance can fill from the application's own sources (docs/variables.md): names only.
     "catalog": {"models": ["claude-sonnet-5", "gpt-5"], "variables": ["customer_name"], "reportedAt": "2026-09-12T10:04:00Z"},
     "lease": {"expiresAt": "2026-09-12T11:00:00Z", "expired": False},
     "localRollback": {"active": False, "forced": False},
     "spool": {"depthSegments": 3, "depthBytes": 41210, "droppedSegments": 0, "quarantinedSegments": 0, "lastUploadAt": "2026-09-12T10:03:30Z"},
+    "unlockRequestsSeen": [],
+    "disabled": {"agent": False, "slots": []},
     "applyPolicy": {"effective": "unlock_required", "source": "pinned"},
 }
 heartbeat_response = {
@@ -320,16 +307,19 @@ refused = {
     "manifest.no-signature.json": {"schema": "manifest", "reason": "an unsigned envelope is not a manifest", "document": {**manifest, "signatures": []}},
     "manifest.generation-zero.json": {"schema": "manifest", "reason": "generation starts at 1", "document": {**manifest, "payload": {**manifest_payload, "generation": 0}}},
     "manifest.uppercase-tag.json": {"schema": "manifest", "reason": "slot tags follow the tag grammar", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[0], "tag": "Support.Triage"}]}}},
-    # 0.3.4: a default belongs to an optional operator variable only; a source is one of two words.
-    "manifest.variable-default-on-required.json": {"schema": "manifest", "reason": "a default belongs to an optional variable (0.3.4)", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[1], "variables": [{"name": "customer_name", "required": True, "trust": "operator", "default": "there"}]}]}}},
-    "manifest.variable-default-on-end-user.json": {"schema": "manifest", "reason": "an end-user variable never carries a default (0.3.4)", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[0], "variables": [{"name": "ticket_body", "required": False, "trust": "end_user", "default": "no ticket"}]}]}}},
-    "manifest.variable-source-unknown.json": {"schema": "manifest", "reason": "a variable's source is caller or runtime (0.3.4)", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[1], "variables": [{"name": "customer_name", "required": True, "trust": "operator", "source": "seal"}]}]}}},
+    # A default belongs to an optional operator variable only; a source is one of two words.
+    "manifest.variable-default-on-required.json": {"schema": "manifest", "reason": "a default belongs to an optional variable ", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[1], "variables": [{"name": "customer_name", "required": True, "trust": "operator", "default": "there"}]}]}}},
+    "manifest.variable-default-on-end-user.json": {"schema": "manifest", "reason": "an end-user variable never carries a default ", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[0], "variables": [{"name": "ticket_body", "required": False, "trust": "end_user", "default": "no ticket"}]}]}}},
+    "manifest.variable-source-unknown.json": {"schema": "manifest", "reason": "a variable's source is caller or runtime ", "document": {**manifest, "payload": {**manifest_payload, "slots": [{**slots[1], "variables": [{"name": "customer_name", "required": True, "trust": "operator", "source": "seal"}]}]}}},
     "manifest.slot-disable-without-tag.json": {"schema": "manifest", "reason": "a slot-scoped disable names the slot", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "slot", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
     "manifest.arm-disable-without-arm.json": {"schema": "manifest", "reason": "an arm-scoped disable names the arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "arm", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
-    "manifest.ramp-step-one-weight.json": {"schema": "manifest", "reason": "a ramp step carries one weight per arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "experiment": {**manifest_payload["experiment"], "ramp": [{"notBefore": "2026-09-13T02:00:00Z", "weightBps": [10000]}]}}}},
-    # S16: the two shapes never travel together; every experiments[] entry names its slot.
-    "manifest.experiment-beside-experiments.json": {"schema": "manifest", "reason": "experiment and experiments[] never travel together (S16, experiment_conflict)", "document": {**manifest_experiments, "payload": {**manifest_experiments_payload, "experiment": manifest_payload["experiment"]}}},
-    "manifest.experiments-entry-without-tag.json": {"schema": "manifest", "reason": "every experiments[] entry names the slot it splits (S16)", "document": {**manifest_experiments, "payload": {**manifest_experiments_payload, "experiments": [{k: v for k, v in manifest_experiments_payload["experiments"][0].items() if k != "tag"}]}}},
+    "manifest.arm-disable-without-experiment.json": {"schema": "manifest", "reason": "an arm-scoped disable names its experiment: arm names repeat across experiments", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "arm", "arm": "candidate", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
+    "manifest.ramp-step-one-weight.json": {"schema": "manifest", "reason": "a ramp step carries one weight per arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "experiments": [{**manifest_payload["experiments"][0], "ramp": [{"notBefore": "2026-09-13T02:00:00Z", "weightBps": [10000]}]}, manifest_payload["experiments"][1]]}}},
+    "manifest.experiments-entry-without-tag.json": {"schema": "manifest", "reason": "every experiments[] entry names the slot it splits (S16)", "document": {**manifest, "payload": {**manifest_payload, "experiments": [{k: v for k, v in manifest_payload["experiments"][0].items() if k != "tag"}, manifest_payload["experiments"][1]]}}},
+    # One wire: another major is refused, and the older shapes are unknown members.
+    "manifest.protocol2.json": {"schema": "manifest", "reason": "protocol major 2 is not this wire: only 3.x is", "document": {**manifest, "payload": {**manifest_payload, "protocol": "2.0.0"}}},
+    "manifest.audience-empty-conditions.json": {"schema": "manifest", "reason": "an empty condition list cannot mean fleet-wide", "document": {**manifest, "payload": {**manifest_payload, "observations": [{**manifest_payload["observations"][0], "selector": {"mode": "when", "when": {"all": []}}}]}}},
+    "manifest.slot-requires-empty.json": {"schema": "manifest", "reason": "a slot of another kind names at least one capability it requires", "document": {**manifest, "payload": {**manifest_payload, "slots": [{"tag": "support.triage", "kind": "rubric", "requires": []}]}}},
     "key-set.wrong-curve.json": {"schema": "key-set", "reason": "only P-256 keys in this protocol major", "document": {**key_set, "signed": {**key_set["signed"], "keys": {key_root: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": {**jwk, "crv": "P-384"}}}}}},
     "key-set.non-thumbprint-key-id.json": {"schema": "key-set", "reason": "key ids are thumbprints, lowercase hex", "document": {**key_set, "signed": {**key_set["signed"], "keys": {**key_set["signed"]["keys"], "root-2026-09-prod": key_set["signed"]["keys"][key_root]}}}},
     "key-set.missing-targets-role.json": {"schema": "key-set", "reason": "root metadata always names the targets role", "document": {**key_set, "signed": {**key_set["signed"], "roles": {"root": key_set["signed"]["roles"]["root"]}}}},
@@ -337,13 +327,14 @@ refused = {
     "bundle.plaintext-without-contents.json": {"schema": "bundle", "reason": "a plaintext bundle carries its contents", "document": {**bundle_plain, "encryption": {"scheme": "none"}}},
     "heartbeat.request.with-prompt-text.json": {"schema": "heartbeat-request", "reason": "content-free by schema: no free-form members", "document": {**heartbeat_request, "lastPrompt": "You are..."}},
     "heartbeat.request.hostname-instance.json": {"schema": "heartbeat-request", "reason": "instanceId is random and opaque, never a hostname", "document": {**heartbeat_request, "instanceId": "web-01.acme.internal"}},
+    "heartbeat.request.audience-values.json": {"schema": "heartbeat-request", "reason": "registration never carries observed tag values", "document": {**heartbeat_request, "registration": {**heartbeat_request["registration"], "tagValues": {"region": "eu-west-1"}}}},
     "heartbeat.request.policy-source-unknown.json": {"schema": "heartbeat-request", "reason": "the apply policy's source is a closed set (S4)", "document": {**heartbeat_request, "applyPolicy": {"effective": "auto", "source": "cloud"}}},
     "heartbeat.response.grant-too-large.json": {"schema": "heartbeat-response", "reason": "a grant never allows objects above 1 MiB", "document": {**heartbeat_response, "uploadGrant": {**heartbeat_response["uploadGrant"], "maxObjectBytes": 10485760}}},
     "heartbeat.response.http-grant.json": {"schema": "heartbeat-response", "reason": "grants are https only", "document": {**heartbeat_response, "uploadGrant": {**heartbeat_response["uploadGrant"], "url": "http://telemetry-ingest.example/"}}},
     "edge-pointer.generation-zero.json": {"schema": "edge-pointer", "reason": "the pointer exists only after the first promotion", "document": {**edge_pointer, "generation": 0}},
 }
 
-# S8: store.json, the host's record. Format 1 (what 0.2.0–0.2.5 wrote) and format 2 (the writer, the S4 pin).
+# S8: store.json, the host's record. Format 1 and format 2 (the writer, the S4 pin).
 store_v1 = {
     "version": 1,
     "agentId": "agt_7Qx2mN9pLk3sRt4v",
@@ -382,7 +373,7 @@ daemon_discovery = {
     "upload": {"lastUploadAt": "2026-09-12T10:03:30Z", "backoffUntil": None, "sentSegments": 41, "quarantinedSegments": 0, "droppedSegments": 0, "depthSegments": 3, "depthBytes": 41210},
 }
 segment_report = {k: v for k, v in heartbeat_request.items() if k != "spool"}
-segment_report = {**segment_report, "sdk": {"name": "agent-sdk-typescript", "version": "0.3.0", "protocolRange": ">=0.1.0 <1.0.0"}, "syncMode": "offline"}
+segment_report = {**segment_report, "sdk": {"name": "agent-sdk-typescript", "version": "1.0.0", "protocolRange": ">=3.0.0 <4.0.0"}, "syncMode": "offline"}
 spool_manifest = {
     "format": 1,
     "kind": "segment",
@@ -407,6 +398,53 @@ refused.update({
     "spool-manifest.prompt-text-in-report.json": {"schema": "spool-manifest", "reason": "the report is the heartbeat's closed shape: no free-form member, no prompt text", "document": {**spool_manifest, "report": {**segment_report, "lastPrompt": "You are..."}}},
 })
 
+# Every refused document names where the schema refuses it (`at`, an instance path) and the code an SDK answers with
+# (`code`: `schema_invalid` where only the schema can tell). run.mjs and both SDKs assert these, not just that it fails.
+REFUSED_AT = {
+    "manifest.prompt-slot-with-steps.json": ("/payload/slots/0", "schema_invalid"),
+    "manifest.prompt-text-inside.json": ("/payload/slots/0", "schema_invalid"),
+    "manifest.unknown-directive.json": ("/payload/directives/0", "directive_unknown"),
+    "manifest.no-signature.json": ("/signatures", "schema_invalid"),
+    "manifest.generation-zero.json": ("/payload/generation", "schema_invalid"),
+    "manifest.uppercase-tag.json": ("/payload/slots/0", "schema_invalid"),
+    "manifest.variable-default-on-required.json": ("/payload/slots/0", "schema_invalid"),
+    "manifest.variable-default-on-end-user.json": ("/payload/slots/0", "schema_invalid"),
+    "manifest.variable-source-unknown.json": ("/payload/slots/0", "schema_invalid"),
+    "manifest.slot-disable-without-tag.json": ("/payload/directives/0", "schema_invalid"),
+    "manifest.arm-disable-without-arm.json": ("/payload/directives/0", "schema_invalid"),
+    "manifest.arm-disable-without-experiment.json": {"schema": "manifest", "reason": "an arm-scoped disable names its experiment: arm names repeat across experiments", "document": {**manifest, "payload": {**manifest_payload, "directives": [{"kind": "disable", "scope": "arm", "arm": "candidate", "issuedAt": "2026-09-12T10:00:00Z"}]}}},
+    "manifest.arm-disable-without-experiment.json": ("/payload/directives/0", "experiment_conflict"),
+    "manifest.ramp-step-one-weight.json": ("/payload/experiments/0/ramp/0/weightBps", "ramp_invalid"),
+    "manifest.experiments-entry-without-tag.json": ("/payload/experiments/0", "experiment_conflict"),
+    "manifest.protocol2.json": ("/payload/protocol", "protocol_unsupported"),
+    "manifest.audience-empty-conditions.json": ("/payload/observations/0/selector", "protocol_unsupported"),
+    "manifest.slot-requires-empty.json": ("/payload/slots/0/requires", "schema_invalid"),
+    "key-set.wrong-curve.json": ("/signed/keys", "schema_invalid"),
+    "key-set.non-thumbprint-key-id.json": ("/signed/keys", "schema_invalid"),
+    "key-set.missing-targets-role.json": ("/signed/roles", "schema_invalid"),
+    "bundle.unknown-scheme.json": ("/encryption", "schema_invalid"),
+    "bundle.plaintext-without-contents.json": ("/encryption", "schema_invalid"),
+    "heartbeat.request.with-prompt-text.json": ("", "schema_invalid"),
+    "heartbeat.request.hostname-instance.json": ("/instanceId", "schema_invalid"),
+    "heartbeat.request.audience-values.json": ("/registration", "schema_invalid"),
+    "heartbeat.request.policy-source-unknown.json": ("/applyPolicy/source", "schema_invalid"),
+    "heartbeat.response.grant-too-large.json": ("/uploadGrant/maxObjectBytes", "schema_invalid"),
+    "heartbeat.response.http-grant.json": ("/uploadGrant/url", "schema_invalid"),
+    "edge-pointer.generation-zero.json": ("/generation", "schema_invalid"),
+    "store.newer-format.json": ("/version", "schema_invalid"),
+    "store.v2-without-writer.json": ("", "schema_invalid"),
+    "store.unknown-field.json": ("", "schema_invalid"),
+    "daemon.newer-format.json": ("/format", "schema_invalid"),
+    "daemon.with-key.json": ("", "schema_invalid"),
+    "daemon.no-spool-dir.json": ("", "schema_invalid"),
+    "spool-manifest.report-with-spool.json": ("/report", "schema_invalid"),
+    "spool-manifest.no-digest.json": ("", "schema_invalid"),
+    "spool-manifest.oversize.json": ("/bytes", "schema_invalid"),
+    "spool-manifest.prompt-text-in-report.json": ("/report", "schema_invalid"),
+}
+if set(REFUSED_AT) != set(refused):
+    raise SystemExit(f"refused fixtures and REFUSED_AT disagree: {sorted(set(REFUSED_AT) ^ set(refused))}")
+
 root = sys.argv[1]
 os.makedirs(os.path.join(root, "refused"), exist_ok=True)
 def write(name, doc):
@@ -414,7 +452,6 @@ def write(name, doc):
         json.dump(doc, f, indent=2, ensure_ascii=False)
         f.write("\n")
 write("manifest.json", manifest)
-write("manifest.experiments.json", manifest_experiments)
 write("key-set.json", key_set)
 write("bundle.plaintext.json", bundle_plain)
 write("bundle.encrypted.json", bundle_encrypted)
@@ -427,7 +464,8 @@ write("store.v2.json", store_v2)
 write("daemon.json", daemon_discovery)
 write("spool-manifest.json", spool_manifest)
 for name, entry in refused.items():
-    write(os.path.join("refused", name), entry)
+    at, code = REFUSED_AT[name]
+    write(os.path.join("refused", name), {**entry, "code": code, "at": at})
 print("releaseDigest", digest)
 print("candidateDigest", candidate_digest)
 print("replyCandidateDigest", reply_candidate_digest)

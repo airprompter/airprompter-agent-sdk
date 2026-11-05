@@ -28,8 +28,8 @@
  * ```
  */
 
-import { referencedPayloads, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
-import type { Manifest, RefusalCode, RootMetadata } from "@airprompter/agent-core";
+import { referencedPayloads, servableExperiments, servableSlots, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
+import type { Manifest, RefusalCode, RootMetadata, Target } from "@airprompter/agent-core";
 import type { LoadedSlot, SlotStore } from "../store/slotStore.js";
 import type { SyncClient } from "@airprompter/agent-core";
 
@@ -52,7 +52,7 @@ export interface SyncPassInput {
   store: SlotStore;
   client: SyncClient;
   now: () => string;
-  scope: { organizationId: string; agentId: string; target: "dev" | "staging" | "prod" };
+  scope: { organizationId: string; agentId: string; target: Target };
   /** The last accepted root, or the synthetic pinned document. */
   trustedRoot: RootMetadata;
   /** S3: the heartbeat said the origin is ahead of what the pointer showed — go to the signed manifest, skip the pointer. */
@@ -82,9 +82,12 @@ export interface SyncPassInput {
    * generation not below the stored one) BEFORE the pass decides whether to
    * stage, hold back or ignore it — so a `disable` (Freeze) or a
    * `request_unlock` rides a manifest the runtime would otherwise leave
-   * staged or unchanged. Never a manifest that failed the trust chain.
+   * staged or unchanged. Never a manifest that failed the trust chain. `reduceOnly`: a manifest refused for a
+   * capability this SDK lacks, whose envelope verified: its disables apply and nothing else does.
    */
-  onDirectives?: (payload: Manifest["payload"]) => void;
+  onDirectives?: (payload: Manifest["payload"], options?: { reduceOnly: true }) => void;
+  /** The generation the last pass tried to complete (`strandedTried` of its output). Pass it back: one try per generation. */
+  strandedTried?: number | null;
 }
 
 export interface SyncPassOutput extends SyncPassResult {
@@ -92,23 +95,36 @@ export interface SyncPassOutput extends SyncPassResult {
   edgeEtag: string | null;
   trustedRoot: RootMetadata;
   active: LoadedSlot | null;
+  strandedTried: number | null;
 }
 
-/** The required models of a payload (its slots and every arm override) that the declared catalog lacks; empty when nothing was declared. */
+/** The required models of a payload (its servable slots and their arm overrides) that the declared catalog lacks; empty when nothing was declared. */
 export function requiredModelsMissing(payload: Manifest["payload"], catalog: readonly string[] | null): string[] {
   if (catalog === null) return [];
   const declared = new Set(catalog);
   const missing = new Set<string>();
-  const slots = [...payload.slots, ...(payload.experiment?.arms ?? []).flatMap((arm) => arm.overrides)];
+  const slots = [...servableSlots(payload), ...servableExperiments(payload).flatMap((experiment) => experiment.arms.flatMap((arm) => arm.overrides))];
   for (const slot of slots) if (slot.modelRequired === true && !declared.has(slot.model)) missing.add(slot.model);
   return [...missing].sort();
+}
+
+/** The release in hand names a payload the store never held: a slot it took before this SDK gained the capability. */
+function isStranded(active: LoadedSlot | null): active is LoadedSlot {
+  return active !== null && [...referencedPayloads(active.manifest.payload).keys()].some((hash) => !active.payloads.has(hash));
 }
 
 export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
   const now = input.now();
   let trustedRoot = input.trustedRoot;
   let edgeEtag = input.edgeEtag ?? null;
-  const done = (result: SyncPassResult, active = input.active, etag = input.etag): SyncPassOutput => ({ ...result, etag, edgeEtag, trustedRoot, active });
+  let strandedTried = input.strandedTried ?? null;
+  const done = (result: SyncPassResult, active = input.active, etag = input.etag): SyncPassOutput => ({ ...result, etag, edgeEtag, trustedRoot, active, strandedTried });
+
+  // A stranded release is fetched again at its own generation, once: a staged copy is already the answer, and a payload
+  // the origin cannot serve is not worth a manifest read on every poll. So is a stored release this runtime could not
+  // load. A first release only staged is neither: the store's generation stays 0 until something activates.
+  const stranded = isStranded(input.active) && !input.store.state.staged && strandedTried !== input.active?.generation;
+  const reload = stranded || (!input.active && input.store.state.generation > 0 && !input.store.state.staged);
 
   try {
     // A newer root document is accepted only against the one already trusted (R1–R5).
@@ -127,7 +143,7 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
 
     // Idle path: the edge pointer says whether anything moved, without a Lambda on the other end. It is unsigned and
     // cacheable, so its silence is never contact (S3): the lease does not move on `pointer_unchanged`.
-    if (input.edgePointerUrl && !input.skipPointer) {
+    if (input.edgePointerUrl && !input.skipPointer && !reload) {
       const edge = await input.client.edgePointer(input.edgePointerUrl, edgeEtag);
       if (edge.status === "not_modified") return done({ outcome: "pointer_unchanged" });
       if (edge.status === "ok") {
@@ -136,7 +152,7 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
       }
     }
 
-    const fetched = await input.client.manifest({ ifNoneMatch: input.etag });
+    const fetched = await input.client.manifest({ ifNoneMatch: !reload ? input.etag : null });
     if (fetched.status === "not_modified") return done({ outcome: "unchanged" });
     if (fetched.status === "not_found") return done({ outcome: "nothing_promoted" });
     if (fetched.status === "unauthorized" || fetched.status === "forbidden") {
@@ -146,15 +162,18 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
     if (fetched.status === "error") return done({ outcome: "unavailable", reason: `http_${fetched.httpStatus}` });
 
     const manifest = fetched.manifest;
+    if (stranded) strandedTried = input.active?.generation ?? null;
     const stored = input.store.state.generation;
     const envelope = verifyManifest({ manifest, root: trustedRoot, now, scope: input.scope, storedGeneration: stored, payloads: null, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) });
     if (!envelope.ok) {
+      if (envelope.directivesStand) input.onDirectives?.(manifest.payload, { reduceOnly: true });
       input.onRefusal?.(envelope.reason, manifest.payload.generation);
       return done({ outcome: "refused", reason: envelope.reason, generation: manifest.payload.generation });
     }
     // The signature verified and the generation is not a rollback: its directives stand from here on.
     input.onDirectives?.(manifest.payload);
-    if (manifest.payload.generation === stored) return done({ outcome: "unchanged" }, input.active, fetched.etag);
+    // With nothing active the stored generation is one this runtime could not load: the same generation is the way back.
+    if (manifest.payload.generation === stored && !reload) return done({ outcome: "unchanged" }, input.active, fetched.etag);
     const heldBackBelow = input.store.state.heldBackBelow;
     if (heldBackBelow !== undefined && manifest.payload.generation <= heldBackBelow) {
       // A local rollback stepped down from this generation on purpose; only a newer one ends the hold.
@@ -199,6 +218,8 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
     const active = input.store.load(slot, { now, root: trustedRoot, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) });
     return done({ outcome: "activated", generation: manifest.payload.generation }, active, fetched.etag);
   } catch (error) {
+    // An outage is not an answer: the one try is for a miss the origin answered.
+    strandedTried = input.strandedTried ?? null;
     input.onRefusal?.(`network:${(error as Error).message}`, null);
     return done({ outcome: "unavailable", reason: "network", detail: String((error as Error).message ?? error).slice(0, 240) });
   }

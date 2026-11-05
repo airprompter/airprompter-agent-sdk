@@ -74,7 +74,7 @@ export const IMPORT_OPTIONS: OptionSpec = {
   ...COMMON_OPTIONS,
 };
 
-function spoolDir(stateDir: string, scope: { agentId: string; target: "dev" | "staging" | "prod" }): string {
+function spoolDir(stateDir: string, scope: { agentId: string; target: string }): string {
   return join(SlotStore.path({ stateDir, agentId: scope.agentId, target: scope.target }), "spool", "telemetry");
 }
 
@@ -111,7 +111,7 @@ export async function exportTelemetry(argv: string[], ctx: Context): Promise<num
         ctx.stderr(`${name}: no valid row (${inspection.invalid.length} refused) — left in place`);
         continue;
       }
-      segments.push({ name, instanceId: match[1]!, bytes: bytes.toString("base64url") });
+      segments.push({ name, instanceId: match[1]!, bytes: inspection.payload.toString("base64url") });
       packed.push(name);
     }
   }
@@ -224,7 +224,7 @@ export async function importTelemetry(argv: string[], ctx: Context): Promise<num
         ctx.stderr(`${segment.name}: no valid row for ${instanceId} (${inspection.invalid.length} refused) — not uploaded`);
         continue;
       }
-      const outcome = await postSegment({ grant, segment: segment.name, bytes: raw, fetch: ctx.fetch, now: ctx.now });
+      const outcome = await postSegment({ grant, segment: segment.name, bytes: inspection.payload, fetch: ctx.fetch, now: ctx.now });
       if (outcome.status === "ok") {
         uploaded += 1;
         count += 1;

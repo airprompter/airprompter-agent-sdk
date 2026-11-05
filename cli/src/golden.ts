@@ -20,6 +20,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
 import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "../../sdk-typescript/packages/core/src/golden/index.js";
+import { servableExperiments, servableSlots } from "../../sdk-typescript/packages/core/src/protocol/assignment.js";
 import type { Manifest, ManifestSlot } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import type { OptionSpec } from "./args.js";
 import { Output, usage } from "./io.js";
@@ -64,8 +65,8 @@ export function goldenInvokeOf(input: { run: string | undefined; outputs: string
 /** Every slot with a golden set — the control arm and each arm override — run in order; the reports and whether all met. */
 export async function runGoldenSets(input: { manifest: Manifest; payloads: ReadonlyMap<string, Uint8Array>; invoke: GoldenInvoke; concurrency: number; out: Output }): Promise<{ reports: GoldenReport[]; met: boolean; unavailable: string[] }> {
   const payload = input.manifest.payload;
-  const targets: Array<{ slot: ManifestSlot; arm: string }> = payload.slots.filter((slot) => slot.goldenSet).map((slot) => ({ slot, arm: "none" }));
-  for (const arm of payload.experiment?.arms ?? []) for (const override of arm.overrides) if (override.goldenSet) targets.push({ slot: override, arm: arm.arm });
+  const targets: Array<{ slot: ManifestSlot; arm: string }> = servableSlots(payload).filter((slot) => slot.goldenSet).map((slot) => ({ slot, arm: "none" }));
+  for (const experiment of servableExperiments(payload)) for (const arm of experiment.arms) for (const override of arm.overrides) if (override.goldenSet) targets.push({ slot: override, arm: arm.arm });
   const reports: GoldenReport[] = [];
   const unavailable: string[] = [];
   for (const { slot, arm } of targets) {

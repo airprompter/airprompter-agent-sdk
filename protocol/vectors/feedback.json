@@ -1,6 +1,6 @@
 {
-  "protocol": "0.3.4",
-  "description": "ap.feedback(runRef, signals) normalisation against feedback-signals.schema.json: what becomes a window outcome, what is rejected and why. `accepted` is the call's return value.",
+  "protocol": "3.0.0",
+  "description": "ap.feedback(runRef, signals) normalisation against feedback-signals.schema.json: what becomes a window outcome, what is rejected and why. `accepted` is the call's return value. `runRef` pins the one token form (spool-format.md › Run reference): a token minted in either SDK parses in the other.",
   "cases": [
     {
       "name": "thumbs up",
@@ -437,5 +437,876 @@
         "rejected": {}
       }
     }
-  ]
+  ],
+  "runRef": {
+    "bounds": {
+      "maxEntries": 8,
+      "maxTokenLength": 12288,
+      "readMaxEntries": 32,
+      "readMaxTokenLength": 40960
+    },
+    "keys": [
+      {
+        "name": "a known secret, agent and target",
+        "secret": "ap_test_shared_secret",
+        "agentId": "agt_4e8c1b6d",
+        "target": "prod",
+        "keyHex": "904169a3405348fdc9a23d1da10c2a54487f6dd03c6e2275b6d6253a62ecc7c2"
+      },
+      {
+        "name": "a custom stage",
+        "secret": "ap_test_shared_secret",
+        "agentId": "agt_4e8c1b6d",
+        "target": "qa",
+        "keyHex": "39153f3cb1ccad3ba0b42b8220e2bfc2e30735d6bd4346166ccae0d05edda9e1"
+      },
+      {
+        "name": "the previous secret",
+        "secret": "ap_test_previous_secret",
+        "agentId": "agt_4e8c1b6d",
+        "target": "prod",
+        "keyHex": "130fb89bfffda0840ab7ec2a16d262f5bcfaa851e68815c69c528cdbb055a4f9"
+      }
+    ],
+    "keyHex": "904169a3405348fdc9a23d1da10c2a54487f6dd03c6e2275b6d6253a62ecc7c2",
+    "tokens": [
+      {
+        "name": "one entry",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": [
+            {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            }
+          ]
+        },
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic3VwcG9ydC50cmlhZ2UiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifV1d.2mSXh_UTWWS8JWsQIpOM6C"
+      },
+      {
+        "name": "audience memberships ride their entry",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": [
+            {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "candidate",
+              "bucket": 42,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA"
+              ]
+            }
+          ]
+        },
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic3VwcG9ydC50cmlhZ2UiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoiY2FuZGlkYXRlIiwiYnVja2V0Ijo0MiwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSJdfV1d.ee9ggP9McvhA8CRanarec8"
+      },
+      {
+        "name": "two entries",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": [
+            {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "support.reply",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "candidate",
+              "bucket": 7,
+              "runMinute": "2026-09-12T14:03:00Z"
+            }
+          ]
+        },
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic3VwcG9ydC50cmlhZ2UiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifSx7InRhZyI6InN1cHBvcnQucmVwbHkiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoiY2FuZGlkYXRlIiwiYnVja2V0Ijo3LCJydW5NaW51dGUiOiIyMDI2LTA5LTEyVDE0OjAzOjAwWiJ9XV0.mKru7QJFDbRO3XrAfFb0se"
+      },
+      {
+        "name": "no entries",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": []
+        },
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW11d.CubugtrZeDcR9RmoTEngX-",
+        "note": "a ref with no entries parses, and feedback on it returns false"
+      },
+      {
+        "name": "eight worst-case entries",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": [
+            {
+              "tag": "0.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "0.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "1.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "1.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "2.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "2.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "3.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "3.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "4.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "4.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "5.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "5.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "6.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "6.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "7.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "7.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            }
+          ]
+        },
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoiMC50dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQiLCJhcnRpZmFjdElkIjoiMC5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJ2ZXJzaW9uSWQiOiJ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2diIsIm1vZGVsIjoibW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0iLCJhcm0iOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJ1Y2tldCI6OTk5OSwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImF1ZF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwiYXVkX0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0MiLCJhdWRfRERERERERERERERERERERERERERERCIsImF1ZF9FRUVFRUVFRUVFRUVFRUVFRUVFRUVFIiwiYXVkX0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYiLCJhdWRfR0dHR0dHR0dHR0dHR0dHR0dHR0dHRyIsImF1ZF9ISEhISEhISEhISEhISEhISEhISEhIIl19LHsidGFnIjoiMS50dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQiLCJhcnRpZmFjdElkIjoiMS5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJ2ZXJzaW9uSWQiOiJ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2diIsIm1vZGVsIjoibW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0iLCJhcm0iOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJ1Y2tldCI6OTk5OSwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImF1ZF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwiYXVkX0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0MiLCJhdWRfRERERERERERERERERERERERERERERCIsImF1ZF9FRUVFRUVFRUVFRUVFRUVFRUVFRUVFIiwiYXVkX0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYiLCJhdWRfR0dHR0dHR0dHR0dHR0dHR0dHR0dHRyIsImF1ZF9ISEhISEhISEhISEhISEhISEhISEhIIl19LHsidGFnIjoiMi50dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQiLCJhcnRpZmFjdElkIjoiMi5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJ2ZXJzaW9uSWQiOiJ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2diIsIm1vZGVsIjoibW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0iLCJhcm0iOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJ1Y2tldCI6OTk5OSwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImF1ZF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwiYXVkX0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0MiLCJhdWRfRERERERERERERERERERERERERERERCIsImF1ZF9FRUVFRUVFRUVFRUVFRUVFRUVFRUVFIiwiYXVkX0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYiLCJhdWRfR0dHR0dHR0dHR0dHR0dHR0dHR0dHRyIsImF1ZF9ISEhISEhISEhISEhISEhISEhISEhIIl19LHsidGFnIjoiMy50dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQiLCJhcnRpZmFjdElkIjoiMy5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJ2ZXJzaW9uSWQiOiJ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2diIsIm1vZGVsIjoibW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0iLCJhcm0iOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJ1Y2tldCI6OTk5OSwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImF1ZF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwiYXVkX0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0MiLCJhdWRfRERERERERERERERERERERERERERERCIsImF1ZF9FRUVFRUVFRUVFRUVFRUVFRUVFRUVFIiwiYXVkX0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYiLCJhdWRfR0dHR0dHR0dHR0dHR0dHR0dHR0dHRyIsImF1ZF9ISEhISEhISEhISEhISEhISEhISEhIIl19LHsidGFnIjoiNC50dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQiLCJhcnRpZmFjdElkIjoiNC5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJ2ZXJzaW9uSWQiOiJ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2diIsIm1vZGVsIjoibW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0iLCJhcm0iOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJ1Y2tldCI6OTk5OSwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImF1ZF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwiYXVkX0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0MiLCJhdWRfRERERERERERERERERERERERERERERCIsImF1ZF9FRUVFRUVFRUVFRUVFRUVFRUVFRUVFIiwiYXVkX0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYiLCJhdWRfR0dHR0dHR0dHR0dHR0dHR0dHR0dHRyIsImF1ZF9ISEhISEhISEhISEhISEhISEhISEhIIl19LHsidGFnIjoiNS50dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQiLCJhcnRpZmFjdElkIjoiNS5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJ2ZXJzaW9uSWQiOiJ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2diIsIm1vZGVsIjoibW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0iLCJhcm0iOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJ1Y2tldCI6OTk5OSwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImF1ZF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwiYXVkX0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0MiLCJhdWRfRERERERERERERERERERERERERERERCIsImF1ZF9FRUVFRUVFRUVFRUVFRUVFRUVFRUVFIiwiYXVkX0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYiLCJhdWRfR0dHR0dHR0dHR0dHR0dHR0dHR0dHRyIsImF1ZF9ISEhISEhISEhISEhISEhISEhISEhIIl19LHsidGFnIjoiNi50dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQiLCJhcnRpZmFjdElkIjoiNi5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJ2ZXJzaW9uSWQiOiJ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2diIsIm1vZGVsIjoibW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0iLCJhcm0iOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJ1Y2tldCI6OTk5OSwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImF1ZF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwiYXVkX0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0MiLCJhdWRfRERERERERERERERERERERERERERERCIsImF1ZF9FRUVFRUVFRUVFRUVFRUVFRUVFRUVFIiwiYXVkX0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYiLCJhdWRfR0dHR0dHR0dHR0dHR0dHR0dHR0dHRyIsImF1ZF9ISEhISEhISEhISEhISEhISEhISEhIIl19LHsidGFnIjoiNy50dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQiLCJhcnRpZmFjdElkIjoiNy5hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJ2ZXJzaW9uSWQiOiJ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2diIsIm1vZGVsIjoibW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0iLCJhcm0iOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJ1Y2tldCI6OTk5OSwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJhdWRpZW5jZUlkcyI6WyJhdWRfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImF1ZF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwiYXVkX0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0MiLCJhdWRfRERERERERERERERERERERERERERERCIsImF1ZF9FRUVFRUVFRUVFRUVFRUVFRUVFRUVFIiwiYXVkX0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYiLCJhdWRfR0dHR0dHR0dHR0dHR0dHR0dHR0dHRyIsImF1ZF9ISEhISEhISEhISEhISEhISEhISEhIIl19XV0.-7fgceomCRmjNQDL9TuXb3",
+        "note": "the largest ref a mint may write"
+      },
+      {
+        "name": "32 entries read",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": [
+            {
+              "tag": "slot.0",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.1",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.2",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.3",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.4",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.5",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.6",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.7",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.8",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.9",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.10",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.11",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.12",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.13",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.14",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.15",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.16",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.17",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.18",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.19",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.20",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.21",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.22",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.23",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.24",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.25",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.26",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.27",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.28",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.29",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.30",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "slot.31",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            }
+          ]
+        },
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic2xvdC4wIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjEiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifSx7InRhZyI6InNsb3QuMiIsImFydGlmYWN0SWQiOiJwcm1fc3VwcG9ydF90cmlhZ2UiLCJ2ZXJzaW9uSWQiOiJ2ZXJfdHJpYWdlXzciLCJtb2RlbCI6ImNsYXVkZS1oYWlrdS00LTUiLCJhcm0iOiJub25lIiwiYnVja2V0IjpudWxsLCJydW5NaW51dGUiOiIyMDI2LTA5LTEyVDE0OjAzOjAwWiJ9LHsidGFnIjoic2xvdC4zIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjQiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifSx7InRhZyI6InNsb3QuNSIsImFydGlmYWN0SWQiOiJwcm1fc3VwcG9ydF90cmlhZ2UiLCJ2ZXJzaW9uSWQiOiJ2ZXJfdHJpYWdlXzciLCJtb2RlbCI6ImNsYXVkZS1oYWlrdS00LTUiLCJhcm0iOiJub25lIiwiYnVja2V0IjpudWxsLCJydW5NaW51dGUiOiIyMDI2LTA5LTEyVDE0OjAzOjAwWiJ9LHsidGFnIjoic2xvdC42IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjciLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifSx7InRhZyI6InNsb3QuOCIsImFydGlmYWN0SWQiOiJwcm1fc3VwcG9ydF90cmlhZ2UiLCJ2ZXJzaW9uSWQiOiJ2ZXJfdHJpYWdlXzciLCJtb2RlbCI6ImNsYXVkZS1oYWlrdS00LTUiLCJhcm0iOiJub25lIiwiYnVja2V0IjpudWxsLCJydW5NaW51dGUiOiIyMDI2LTA5LTEyVDE0OjAzOjAwWiJ9LHsidGFnIjoic2xvdC45IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjEwIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjExIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjEyIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjEzIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE0IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE1IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE2IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE3IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE4IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE5IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjIwIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjIxIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjIyIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjIzIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI0IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI1IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI2IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI3IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI4IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI5IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjMwIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjMxIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn1dXQ.VCPYSysHVZamkWPo-Cly5B",
+        "mintRefused": true,
+        "note": "readers accept 32 entries; minting stops at 8"
+      },
+      {
+        "name": "a fifth body element and unknown entry keys",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": [
+            {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "laterField": {
+                "kept": true
+              }
+            }
+          ],
+          "extra": [
+            {
+              "addedBy": "a later minor"
+            },
+            7
+          ]
+        },
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic3VwcG9ydC50cmlhZ2UiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoiLCJsYXRlckZpZWxkIjp7ImtlcHQiOnRydWV9fV0seyJhZGRlZEJ5IjoiYSBsYXRlciBtaW5vciJ9LDdd.g94hgIFrExXBvPMOTX9j_E",
+        "note": "both survive parse and re-mint, so a 1.0 host can grow a ref a later SDK wrote"
+      }
+    ],
+    "mintRefused": [
+      {
+        "name": "a ninth entry",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": [
+            {
+              "tag": "0.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "0.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "1.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "1.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "2.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "2.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "3.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "3.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "4.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "4.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "5.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "5.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "6.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "6.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "7.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "7.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            },
+            {
+              "tag": "8.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+              "artifactId": "8.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "versionId": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+              "model": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+              "arm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bucket": 9999,
+              "runMinute": "2026-09-12T14:03:00Z",
+              "audienceIds": [
+                "aud_AAAAAAAAAAAAAAAAAAAAAA",
+                "aud_BBBBBBBBBBBBBBBBBBBBBB",
+                "aud_CCCCCCCCCCCCCCCCCCCCCC",
+                "aud_DDDDDDDDDDDDDDDDDDDDDD",
+                "aud_EEEEEEEEEEEEEEEEEEEEEE",
+                "aud_FFFFFFFFFFFFFFFFFFFFFF",
+                "aud_GGGGGGGGGGGGGGGGGGGGGG",
+                "aud_HHHHHHHHHHHHHHHHHHHHHH"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "two entries with one tag",
+        "facts": {
+          "agentId": "agt_4e8c1b6d",
+          "target": "prod",
+          "runId": "AAECAwQFBgcICQoLDA0ODw",
+          "entries": [
+            {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            },
+            {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "model": "claude-haiku-4-5",
+              "arm": "none",
+              "bucket": null,
+              "runMinute": "2026-09-12T14:03:00Z"
+            }
+          ]
+        }
+      }
+    ],
+    "rotation": {
+      "name": "a token minted under a previous key parses with that key listed",
+      "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic3VwcG9ydC50cmlhZ2UiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifV1d.eUzbStTx_jM8jgKK0Nefyc",
+      "facts": {
+        "agentId": "agt_4e8c1b6d",
+        "target": "prod",
+        "runId": "AAECAwQFBgcICQoLDA0ODw",
+        "entries": [
+          {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "model": "claude-haiku-4-5",
+            "arm": "none",
+            "bucket": null,
+            "runMinute": "2026-09-12T14:03:00Z"
+          }
+        ]
+      },
+      "currentKeyHex": "904169a3405348fdc9a23d1da10c2a54487f6dd03c6e2275b6d6253a62ecc7c2",
+      "previousKeyHex": "130fb89bfffda0840ab7ec2a16d262f5bcfaa851e68815c69c528cdbb055a4f9"
+    },
+    "refused": [
+      {
+        "name": "a forged entry fails the MAC",
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic3VwcG9ydC50cmlhZ2UiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoiY2FuZGlkYXRlIiwiYnVja2V0IjpudWxsLCJydW5NaW51dGUiOiIyMDI2LTA5LTEyVDE0OjAzOjAwWiJ9XV0.2mSXh_UTWWS8JWsQIpOM6C"
+      },
+      {
+        "name": "another key",
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic3VwcG9ydC50cmlhZ2UiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifV1d.Z1k-jtcsLyu6hI6Ov4IJjR"
+      },
+      {
+        "name": "a body with no runId",
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIl0.3u_UUcwo5Z9v1SpF8w6EhS"
+      },
+      {
+        "name": "33 entries",
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic2xvdC4wIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjEiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifSx7InRhZyI6InNsb3QuMiIsImFydGlmYWN0SWQiOiJwcm1fc3VwcG9ydF90cmlhZ2UiLCJ2ZXJzaW9uSWQiOiJ2ZXJfdHJpYWdlXzciLCJtb2RlbCI6ImNsYXVkZS1oYWlrdS00LTUiLCJhcm0iOiJub25lIiwiYnVja2V0IjpudWxsLCJydW5NaW51dGUiOiIyMDI2LTA5LTEyVDE0OjAzOjAwWiJ9LHsidGFnIjoic2xvdC4zIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjQiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifSx7InRhZyI6InNsb3QuNSIsImFydGlmYWN0SWQiOiJwcm1fc3VwcG9ydF90cmlhZ2UiLCJ2ZXJzaW9uSWQiOiJ2ZXJfdHJpYWdlXzciLCJtb2RlbCI6ImNsYXVkZS1oYWlrdS00LTUiLCJhcm0iOiJub25lIiwiYnVja2V0IjpudWxsLCJydW5NaW51dGUiOiIyMDI2LTA5LTEyVDE0OjAzOjAwWiJ9LHsidGFnIjoic2xvdC42IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjciLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifSx7InRhZyI6InNsb3QuOCIsImFydGlmYWN0SWQiOiJwcm1fc3VwcG9ydF90cmlhZ2UiLCJ2ZXJzaW9uSWQiOiJ2ZXJfdHJpYWdlXzciLCJtb2RlbCI6ImNsYXVkZS1oYWlrdS00LTUiLCJhcm0iOiJub25lIiwiYnVja2V0IjpudWxsLCJydW5NaW51dGUiOiIyMDI2LTA5LTEyVDE0OjAzOjAwWiJ9LHsidGFnIjoic2xvdC45IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjEwIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjExIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjEyIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjEzIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE0IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE1IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE2IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE3IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE4IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjE5IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjIwIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjIxIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjIyIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjIzIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI0IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI1IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI2IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI3IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI4IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjI5IiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjMwIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjMxIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn0seyJ0YWciOiJzbG90LjMyIiwiYXJ0aWZhY3RJZCI6InBybV9zdXBwb3J0X3RyaWFnZSIsInZlcnNpb25JZCI6InZlcl90cmlhZ2VfNyIsIm1vZGVsIjoiY2xhdWRlLWhhaWt1LTQtNSIsImFybSI6Im5vbmUiLCJidWNrZXQiOm51bGwsInJ1bk1pbnV0ZSI6IjIwMjYtMDktMTJUMTQ6MDM6MDBaIn1dXQ.VVVf-Py1YR65ZcZrrH_s1c"
+      },
+      {
+        "name": "no dot",
+        "token": "AAAA"
+      },
+      {
+        "name": "a short MAC",
+        "token": "WyJhZ3RfNGU4YzFiNmQiLCJwcm9kIiwiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EdyIsW3sidGFnIjoic3VwcG9ydC50cmlhZ2UiLCJhcnRpZmFjdElkIjoicHJtX3N1cHBvcnRfdHJpYWdlIiwidmVyc2lvbklkIjoidmVyX3RyaWFnZV83IiwibW9kZWwiOiJjbGF1ZGUtaGFpa3UtNC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xMlQxNDowMzowMFoifV1d.abc"
+      }
+    ]
+  }
 }

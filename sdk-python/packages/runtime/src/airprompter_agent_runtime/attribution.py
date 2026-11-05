@@ -39,11 +39,13 @@ class Attribution:
     version_id: str
     arm: str
     model: str
-    #: 0.3.1: the slot's inference settings, applied to the wrapped call (``inference.py``).
+    #: The slot's inference settings, applied to the wrapped call (``inference.py``).
     inference: Optional[Mapping[str, Any]] = None
     audience_ids: Optional[tuple[str,...]] = None
     run_minute: Optional[str] = None
     artifact_id: Optional[str] = None
+    #: A workflow step's id. ``tag`` stays the slot's.
+    step: Optional[str] = None
 
 
 _scope: contextvars.ContextVar[Optional[Attribution]] = contextvars.ContextVar("airprompter_attribution", default=None)

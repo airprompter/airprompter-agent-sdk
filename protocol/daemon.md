@@ -144,8 +144,9 @@ otherwise, with a random phase per host):
    a segment reclaimed from a crashed writer, or an SDK before 0.3.0 — is
    uploaded once it is a minute old (the grace a writer has to add its
    manifest), attributed to the daemon's own agent and target, under a
-   minimal report (`syncMode: offline`, generation 0, `applyState: active`,
-   storage protection `custom`, no models).
+   minimal report that fills every field the heartbeat request requires
+   (`syncMode: offline`, generation 0, `applyState: active`, storage
+   protection `custom`, no models, nothing disabled).
 4. Refresh `daemon.json`.
 
 Grants, holds, backoff, one segment in flight per host and the

@@ -27,7 +27,7 @@ const T0 = Date.parse("2026-09-12T14:03:10Z");
 const WRITER = "i-writerAAAAAAAA";
 
 function windowRow(minute: string, instanceId = WRITER): SpoolRow {
-  return { type: "window", v: 1, minute, instanceId, instanceClass: "resident", tag: "support.triage", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
+  return { type: "window", v: 4, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag: "support.triage", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
 }
 
 function writeSegment(dir: string, minuteMs: number, n: number, rows: SpoolRow[]): string {
@@ -129,7 +129,7 @@ test("in-process: a host with no Agent key runs the bridge from AirPrompterAgent
     try {
       assert.ok(events.some((e) => e.event === "uploader_started" && e.sink === "otlp"), JSON.stringify(events.map((e) => e.event)));
       const r = ap.prompt("support.reply").render({ name: "Ada" });
-      ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 120, tokens: { input: 10, output: 5 } });
+      ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 120, tokens: { input: 10, output: 5 } });
       clock.ms += 61_000;
       ap.spool.closeWindows(clock.ms);
       const pass = await ap.uploadNow();

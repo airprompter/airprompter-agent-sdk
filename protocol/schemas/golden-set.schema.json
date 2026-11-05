@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.2/golden-set.schema.json",
+  "$id": "https://airprompter.com/protocol/3/golden-set.schema.json",
   "title": "Golden set payload (v1)",
   "description": "The payload a manifest slot's `goldenSet.contentHash` names: 1–50 known inputs with the properties a right answer has (golden-sets.md). Canonical JSON (canonical-json.md), so the same cases always hash the same. Example inputs are content: the payload is encrypted at rest like a prompt and never leaves the host.",
   "type": "object",

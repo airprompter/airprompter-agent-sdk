@@ -54,7 +54,9 @@ export function validateSegmentFile(path: string, instanceIdOverride?: string): 
   const text = data.toString("utf8");
   const lines = text.split("\n").filter((line, index, all) => index < all.length - 1 || line.length > 0).length;
   const oversize = bytes > SEGMENT_MAX_BYTES;
-  return { path, instanceId, bytes, lines, rows: inspection.rows.length, invalid: inspection.invalid, partialTail: inspection.partialTail, oversize, ok: inspection.invalid.length === 0 && !oversize };
+  // This tool holds a writer to the contract, so what an uploader would clean up is still a finding here.
+  const findings = [...inspection.invalid, ...inspection.skipped, ...inspection.stripped.map(({ line, field }) => ({ line, reason: `unknown_field:${field}` }))].sort((a, b) => a.line - b.line);
+  return { path, instanceId, bytes, lines, rows: inspection.rows.length, invalid: findings, partialTail: inspection.partialTail, oversize, ok: findings.length === 0 && !oversize };
 }
 
 export async function telemetryValidate(argv: string[], ctx: Context): Promise<number> {
@@ -81,7 +83,7 @@ export async function telemetryValidate(argv: string[], ctx: Context): Promise<n
   const ok = verdicts.every((v) => v.ok);
   out.set("segments", verdicts);
   out.set("ok", ok);
-  out.line(ok ? `${verdicts.length} segment${verdicts.length === 1 ? "" : "s"} fit the spool contract; the uploader would ship ${verdicts.reduce((n, v) => n + v.rows, 0)} rows` : `${verdicts.filter((v) => !v.ok).length} of ${verdicts.length} segment${verdicts.length === 1 ? "" : "s"} would be quarantined`);
+  out.line(ok ? `${verdicts.length} segment${verdicts.length === 1 ? "" : "s"} fit the spool contract; the uploader would ship ${verdicts.reduce((n, v) => n + v.rows, 0)} rows` : `${verdicts.filter((v) => !v.ok).length} of ${verdicts.length} segment${verdicts.length === 1 ? "" : "s"} would not ship as written`);
   out.flush();
   return ok ? EXIT.ok : EXIT.refused;
 }

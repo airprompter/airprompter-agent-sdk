@@ -20,22 +20,23 @@
  * ```
  */
 
-export { PROTOCOL_VERSION, SDK_VERSION, protocolAtLeast } from "./protocol/version.js";
+export { PROTOCOL_VERSION, SDK_VERSION } from "./protocol/version.js";
+export { SUPPORTED_CAPABILITIES } from "./protocol/capabilities.js";
 export type * from "./protocol/types.js";
-export { DIRECTIVE_KINDS, experimentConflict, experimentForTag, experimentsOf } from "./protocol/types.js";
+export { DIRECTIVE_KINDS, AGENT_ID, TARGET_SLUG, experimentConflict } from "./protocol/types.js";
 export { errorNamed } from "./protocol/errors.js";
 export type { FsPort, FsFailure, FsOpenFlags, ClockPort, FetchPort } from "./protocol/ports.js";
 export { fsFailureCode } from "./protocol/ports.js";
 export { nodeFs, systemClock } from "./ports/node.js";
 export { canonicalJson, canonicalBytes, sha256Prefixed, CanonicalJsonError } from "./protocol/canonicalJson.js";
-export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, validateRamp, rampWeightsAt, effectiveArms, isAssignmentError, orderedSteps, AssignmentError, StepError, ASSIGNMENT_MODULUS, RAMP_MIN_STEP_MS, RAMP_MAX_STEPS } from "./protocol/assignment.js";
-export { keyThumbprint, publicJwkOf, signBytes, verifyBytes, trustedRootFromPinnedKey, verifyRootMetadata, verifyManifest, referencedPayloads, releaseDigest, releaseDigestInput, instant } from "./protocol/trust.js";
+export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, validateRamp, rampWeightsAt, effectiveArms, isAssignmentError, orderedSteps, capabilitiesImplemented, servableExperiments, servableOverrides, frozenExperiment, servableSlots, AssignmentError, StepError, ASSIGNMENT_MODULUS, RAMP_MIN_STEP_MS, RAMP_MAX_STEPS } from "./protocol/assignment.js";
+export { keyThumbprint, publicJwkOf, signBytes, verifyBytes, trustedRootFromPinnedKey, verifyRootMetadata, verifyManifest, referencedPayloads, slotHashes, optionalPayloads, carriedPayloads, releaseDigest, releaseDigestInput, instant } from "./protocol/trust.js";
 export type { Verdict, VerifyManifestInput } from "./protocol/trust.js";
 
 export { renderTemplate, placeholdersOf, defaultOf, xmlDelimiters, MissingVariableError, UnknownVariableError } from "./render/template.js";
 export type { Delimiters, RenderInput } from "./render/template.js";
-export { mintRunRef, parseRunRef } from "./render/runRef.js";
-export type { RunRefFacts } from "./render/runRef.js";
+export { mintRunRef, newRunId, parseRunRef, runRefKeyFrom, RUN_REF_MAX_ENTRIES, RUN_REF_MAX_TOKEN_LENGTH, RUN_REF_READ_MAX_ENTRIES, RUN_REF_READ_MAX_TOKEN_LENGTH } from "./render/runRef.js";
+export type { RunRefEntry, RunRefFacts } from "./render/runRef.js";
 
 export { CHECK_BOUNDS, checkRefusal, checksRefusals, patternRefusal, validateJsonSchema, valueAtPath, evaluateCheck, evaluateChecks, projectChecks, outputTextOf, estimateTokens, type DeclaredCheck, type CheckResult, type CheckOutcome } from "./checks/index.js";
 export { parseGoldenSet, runGoldenSet, goldenReportsMeet, passBpsOf, GoldenSetError, GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, type GoldenSet, type GoldenCase, type GoldenInvoke, type GoldenInvocation, type GoldenReport, type GoldenCaseResult } from "./golden/index.js";
@@ -51,14 +52,14 @@ export type { BundleReleaseInput, BundleReleaseRefusal } from "./release/bundleR
 export { SyncClient } from "./control/client.js";
 export type { ControlPlaneRefusal, FetchLike, ManifestFetch, SyncClientOptions } from "./control/client.js";
 
-export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "./telemetry/rows.js";
-export type { Observation, WindowRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "./telemetry/rows.js";
+export { LATENCY_BUCKET_EDGES_MS, STEP_BOUNDS, SLOT_TAG, WINDOW_STATUSES, STEP_STATUSES, USAGE_SOURCES, ERROR_CLASSES, countOf, latencyBucketIndex, minuteOf, epochMinute, stepName, validStepName } from "./telemetry/rows.js";
+export type { Observation, RunDimensions, RunTotals, StepTotals, TokenMoments, TokenTotals, UsageSource, WindowRow, StepRow, RefusalRow, DroppedRow, SpoolRow, ErrorClass } from "./telemetry/rows.js";
 export type { UploadSink, UploadSegment, UploadOutcome } from "./telemetry/uploadSink.js";
 export { normalizeFeedback, BOOLEAN_SIGNALS, UNIT_SIGNALS, COUNT_SIGNALS, RUNTIME_SIGNALS, CATALOGUE, OUTCOME_NAME, type NormalizedFeedback, type FeedbackRejection } from "./telemetry/feedback.js";
 
-// 0.4.0 audience primitives live with assignment; never export observed values.
-export { AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION, validAudienceKey, validAudienceLabel, validAudienceIds, validAudienceSelector, matchesAudience, copyAudienceTags, validAudienceManifest, capturedAudienceIds } from "./protocol/assignment.js";
-export type { AudienceSelector, AudienceSnapshot, AudienceObservation } from "./protocol/assignment.js";
+// Audience primitives live with assignment; never export observed values.
+export { AUDIENCE_LIMITS, validAudienceKey, validAudienceLabel, validAudienceIds, validAudienceSelector, matchesAudience, copyAudienceTags, validAudienceManifest, capturedAudienceIds } from "./protocol/assignment.js";
+export type { AudienceCondition, AudienceSelector, AudienceSnapshot, AudienceObservation } from "./protocol/assignment.js";
 
 export { ambiguousAudienceAttribution } from "./protocol/assignment.js";
 

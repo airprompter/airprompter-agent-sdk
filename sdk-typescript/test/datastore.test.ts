@@ -15,7 +15,7 @@ import test from "node:test";
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
 import { generateX25519KeyPair } from "../packages/core/src/bundle/hpke.js";
 import { SyncClient } from "../packages/core/src/control/client.js";
-import { publicJwkOf, trustedRootFromPinnedKey } from "../packages/core/src/protocol/trust.js";
+import { publicJwkOf, trustedRootFromPinnedKey, releaseDigest } from "../packages/core/src/protocol/trust.js";
 import { pullToDatastore } from "../packages/sync/src/sync/pullToDatastore.js";
 import { MemoryReleaseDatastore, clearDatastoreRollback, resolveHydration, rollbackDatastore, type ReleaseKey } from "../packages/sync/src/store/releaseDatastore.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
@@ -59,7 +59,7 @@ test("the puller writes sealed rows and its edge state through the DAO; a runtim
   const candidate = plane.slot({ tag: "support.reply", text: "Reply warmly.", versionId: "ver_2" });
   const past = new Date(Date.now() - 2 * 3600_000).toISOString();
   const later = new Date(Date.now() - 3600_000).toISOString();
-  plane.promote([control], { experiment: { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 9000, releaseDigest: `sha256:${"0".repeat(64)}`, overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: `sha256:${"1".repeat(64)}`, overrides: [candidate] }], ramp: [{ notBefore: past, weightBps: [7500, 2500] }, { notBefore: later, weightBps: [5000, 5000] }] } });
+  plane.promote([control], { experiments: [{ tag: control.tag, experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 9000, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: `sha256:${"1".repeat(64)}`, overrides: [candidate] }], ramp: [{ notBefore: past, weightBps: [7500, 2500] }, { notBefore: later, weightBps: [5000, 5000] }] }] });
   assert.equal((await pull()).status, "ok");
   const row2 = (await datastore.latest(key))!;
   assert.deepEqual(row2.rollout.experiments[0]!.arms, [{ arm: "control", weightBps: 9000 }, { arm: "candidate", weightBps: 1000 }], "the dial-up percentages, queryable");
@@ -80,6 +80,30 @@ test("the puller writes sealed rows and its edge state through the DAO; a runtim
   assert.deepEqual(await ap.hydrate(), { outcome: "unchanged", generation: 2 });
   await ap.stop();
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("a capability-refused row delivers its disables to a datastore host, and a later refused row without them lifts them", async () => {
+  const { plane, fleetKey, distributionKey, datastore } = setup();
+  const slot = plane.slot({ tag: "support.reply", text: "Reply politely." });
+  plane.promote([slot]);
+  const pull = puller(plane, datastore, fleetKey.publicRaw);
+  await pull();
+  const dir = mkdtempSync(join(tmpdir(), "ap-datastore-"));
+  const ap = await AirPrompterAgent.start({ ...scope, stateDir: dir, root: { pinned: publicJwkOf(plane.rootKey) }, fetch: noNetwork, distributionKey, datastore: { store: datastore } });
+  try {
+    plane.promote([slot], { requiredCapabilities: ["future_slots"], directives: [{ kind: "disable", scope: "slot", tag: "support.reply", issuedAt: "2026-09-12T11:00:00Z" }] });
+    await pull();
+    assert.equal((await ap.hydrate()).outcome, "refused");
+    assert.equal(ap.generation, 1);
+    assert.throws(() => ap.prompt("support.reply").render({}), /disabled/, "the disable reached a datastore host");
+    plane.promote([slot], { requiredCapabilities: ["future_slots"], directives: [] });
+    await pull();
+    await ap.hydrate();
+    assert.equal(ap.prompt("support.reply").render({}).text, "Reply politely.", "and a lift lands");
+  } finally {
+    await ap.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a rollback in the datastore moves every runtime down, verified and held; a newer promotion or clearing it moves them back", async () => {

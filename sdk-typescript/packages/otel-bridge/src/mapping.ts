@@ -92,7 +92,8 @@ const sumMetric = (name: string, unit: string, dataPoints: OtlpNumberPoint[], de
 
 /** A segment's rows as one OTLP/HTTP JSON request. Empty rows give a request with no metrics. */
 export function spoolRowsToOtlp(rows: readonly SpoolRow[], options: MappingOptions = {}): ExportMetricsServiceRequest {
-  const first = rows[0];
+  // A step row is skipped on purpose: no metric reads one, and it does not name the resource either.
+  const first = rows.find((row) => row.type !== "step");
   const [sdkName, sdkVersion] = String((first as { sdk?: string } | undefined)?.sdk ?? "").split("/");
   const resource: OtlpAttribute[] = first ? [otlpAttribute("service.instance.id", first.instanceId)] : [];
   if (first && "instanceClass" in first && first.instanceClass) resource.push(otlpAttribute("airprompter.instance.class", first.instanceClass));
@@ -108,6 +109,7 @@ export function spoolRowsToOtlp(rows: readonly SpoolRow[], options: MappingOptio
   const droppedSegments: OtlpNumberPoint[] = [];
   const droppedBytes: OtlpNumberPoint[] = [];
   for (const row of rows) {
+    if (row.type === "step") continue;
     if (row.type === "window") {
       const start = nanos(row.minute);
       const end = minuteEnd(start);

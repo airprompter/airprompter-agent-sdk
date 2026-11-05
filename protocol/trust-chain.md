@@ -66,20 +66,21 @@ this order:
 | # | Check | Refusal |
 |---|---|---|
 | M1 | root document not expired at `now` | `root_expired` |
-| M2 | `payload.protocol` major is one the runtime speaks | `protocol_unsupported` |
+| M2 | `payload.protocol` is `major.minor.patch` and the major is one the runtime speaks. Minors are never compared | `protocol_unsupported` |
 | M3 | at least one signature names a key in the root's `targets` role | `unknown_signing_key` |
 | M4 | each such key is within its `notBefore`/`notAfter` at `now` (absent means unbounded) | `signing_key_expired` |
 | M5 | signatures from those keys verify over the canonical `payload` bytes; at least one | `signature_invalid` |
 | M6 | …and at least `targets.threshold` of them | `signature_threshold` |
 | M7 | `organizationId`, `agentId`, `target` equal the runtime's configuration | `scope_mismatch` |
 | M8 | `generation` ≥ the stored generation (equal is a no-op re-fetch, not a refusal) | `generation_rollback` |
-| M9 | every payload the manifest references is present (slots, steps, arm overrides) | `payload_missing` |
+| M8b | every `requiredCapabilities` value is one the runtime implements (`capabilities.md`). Checked after M3–M8, so a host that cannot read a release still takes its `disable` directives, on a sync pass, a bundle or a datastore read (`capabilities.md`) | `protocol_unsupported` |
+| M9 | every payload the manifest references is present (slots, steps, arm overrides). A store and a carrier may go without a payload named only under a slot or an arm override carrying `requires`: that slot is absent, not a failure. Every other reader refuses | `payload_missing` |
 | M10 | every present payload's SHA-256 equals its `contentHash` and its length its `byteLength` | `payload_hash_mismatch` |
 | M11 | when `requireCountersign` (or the target is locally configured to require it): every release the manifest can activate — the manifest's `releaseDigest` and each experiment arm's — carries a countersignature from a key in the **customer** root's `targets` role | `countersign_missing` |
 | M12 | …and each of those signatures verifies over the UTF-8 digest string | `countersign_invalid` |
 | M13 | every `directives[]` entry is of a kind the runtime honours — `disable` or `request_unlock` (S4; checked with M7/M8, before any payload is fetched) | `directive_unknown` |
 | M14 | every experiment's `ramp`, when present, is a well-formed plan — 1–8 steps, strictly increasing and ≥ 1 h apart, one integer weight per arm summing to 10000 (S9, assignment-hash.md › The ramp plan) | `ramp_invalid` |
-| M15 | the per-prompt shape is consistent (S16, checked with M13 before any payload): `experiment` and `experiments[]` never together; every `experiments[]` entry names a slot of the release, no slot twice; each arm's overrides name that slot only; an arm-scoped `disable` names one of the experiments | `experiment_conflict` |
+| M15 | the per-prompt shape is consistent (S16, checked with M13 before any payload, on the overrides a reader can serve): every `experiments[]` entry names a slot of the release, no slot twice; each arm's overrides name that slot only; an arm-scoped `disable` names `experimentId`, even with no experiments, and that id is one of them | `experiment_conflict` |
 
 Only then does apply policy run — and the policy is the host's, not the
 manifest's (see below): the manifest's `applyPolicy` pins the host on first
@@ -104,9 +105,21 @@ Notes:
   fetched, the active release keeps serving, and the heartbeat reports the
   refusal with `unavailableModels`. A runtime that declared no models is
   never refused over one — the check needs a catalog to check against.
-* Countersign targets take `leaseSeconds`, `onLeaseExpiry` and every
+* Countersign targets take `leaseSeconds` and every
   directive except `disable` from local configuration (D58); the manifest's
   values are advisory there.
+
+## Slots a reader cannot serve
+
+A slot may carry `requires`: capability names from `capabilities.md`. A reader missing any of them treats the slot as absent. It is skipped and not validated, its payload is not fetched (M9 and M10 do not name it), experiments naming its tag are skipped too, and rendering it answers as a slot the release does not have. Everything else in the manifest loads, including disables, so one new slot kind cannot freeze prompt updates or emergency disables on a host that does not know it.
+
+An arm that loses the override for the experiment's own tag takes the experiment with it, and so does a `subjectKey` the reader does not know: the host sits out that experiment, with base text, arm `none` and bucket null. If every arm of it is disabled, the host still stops for runs in its audience; an audience it cannot read matches nothing. A host that stored the override's manifest without its payload sits out too, before assignment. An unmet override of another tag is dropped on its own, before M15 and the audience checks read the arm, and the experiment and its other overrides stay. No payload is asked of a dropped entry. What a host cannot read never counts as evidence.
+
+Top-level `requiredCapabilities` still refuses the whole manifest. Which of the two a kind uses is the service's choice per kind, so a reader needs no per-kind knowledge. The signature covers the canonical payload and a reader never recomputes `releaseDigest`, so a slot it cannot read does not break verification. `requires` is in the digest projection when present.
+
+A store that took a release before its SDK gained a capability holds no payload for that slot. The slot is absent there as well: the host comes up serving the rest, and its next sync takes the same generation again, once, to fetch what is missing. Only a missing payload is excused: a tampered or undecryptable one is corrupt. A bundle host picks the slot up at its next generation.
+
+A pull path runs a carrier's check instead: signatures, scope and M9 and M10 over every `{contentHash, byteLength}` pair anywhere under the payload, with no capability refusal and no servable filter. M9 goes without a payload named only under `requires`, and nothing else. M13, M14 and M15 run only on a manifest it can read. The envelope is checked before the walk. The runtime that opens the bundle runs the whole chain.
 
 ## Rotation
 
@@ -157,9 +170,7 @@ retreat and a dial-down. Three rules:
 3. **Only the origin renews a lease.** A runtime hydrated from the
    customer's datastore, or one running from a vendored bundle, counts no
    read of its own as contact: its lease runs from the manifest's issue
-   (or the bundle's `notAfter`) until it reaches the origin. (Before 0.3.0
-   a runtime attached to a host daemon took the daemon's lease; that mode
-   is removed — `daemon.md`.)
+   (or the bundle's `notAfter`) until it reaches the origin.
 
 Together: a stale or pinned pointer costs at most one heartbeat interval
 of delay before the fleet sees what the origin has, and a runtime that can
@@ -210,7 +221,8 @@ host runs under is the host's, recorded in `store.json`
    local act. There is no reweight, no activation and no loosening in the
    set. `request_unlock` asks and never grants. Any other kind refuses the
    whole manifest (M13, `directive_unknown`) — a runtime never obeys a
-   manifest by halves.
+   manifest by halves. A manifest refused for naming a capability does
+   deliver its disables (M8b).
 
 Vectors: `sdk-typescript/test/policy.test.ts`, `sdk-python/tests/test_policy.py`,
 `cli/test/cli.test.ts` "S4", and

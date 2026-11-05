@@ -193,7 +193,7 @@ def test_pushable_set_is_closed(state_dir):
     assert ap.status().apply_state == "refused"
     assert ap.heartbeat_body()["refusal"] == "directive_unknown", "counted on the heartbeat"
     assert ap.generation == 2 and ap.status().staged_generation is None
-    assert ap.status().disabled == {"agent": False, "slots": [], "arms": []}, "the disable beside the unknown kind was not obeyed"
+    assert ap.status().disabled == {"agent": False, "slots": [], "arms": []}, "the disable beside the unknown kind was not obeyed: the Freeze does not land by halves"
     assert ap.prompt("support.reply").render(name="x").text == "Reply v1b to x"
     assert any(e.get("event") == "sync_refused" and e.get("reason") == "directive_unknown" and e.get("generation") == 3 for e in events)
 

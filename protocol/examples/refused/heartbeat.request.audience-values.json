@@ -1,12 +1,34 @@
 {
   "schema": "heartbeat-request",
-  "reason": "Registration never carries observed values",
+  "reason": "registration never carries observed tag values",
   "document": {
-    "protocol": "2.0.0",
+    "protocol": "3.0.0",
+    "capabilities": [],
+    "registration": {
+      "tagKeys": [
+        "plan",
+        "region"
+      ],
+      "prompts": [
+        {
+          "tag": "support.reply",
+          "displayName": "Support reply"
+        }
+      ],
+      "tagValues": {
+        "region": "eu-west-1"
+      }
+    },
+    "runCounters": {
+      "passthrough": {}
+    },
     "instanceId": "inst_5f3c9a2b7e1d4c08",
+    "instanceClass": "resident",
+    "heartbeatIntervalSeconds": 300,
     "sdk": {
-      "name": "agent-sdk-python",
-      "version": "0.5.0"
+      "name": "airprompterd",
+      "version": "1.0.0",
+      "protocolRange": ">=3.0.0 <4.0.0"
     },
     "host": {
       "os": "linux",
@@ -48,27 +70,16 @@
       "quarantinedSegments": 0,
       "lastUploadAt": "2026-09-12T10:03:30Z"
     },
+    "unlockRequestsSeen": [],
+    "disabled": {
+      "agent": false,
+      "slots": []
+    },
     "applyPolicy": {
       "effective": "unlock_required",
       "source": "pinned"
-    },
-    "capabilities": [
-      "audience"
-    ],
-    "registration": {
-      "tagKeys": [
-        "device_id",
-        "region"
-      ],
-      "prompts": [
-        {
-          "tag": "support.reply",
-          "displayName": "Support reply"
-        }
-      ],
-      "tagValues": {
-        "device_id": "device-042"
-      }
     }
-  }
+  },
+  "code": "schema_invalid",
+  "at": "/registration"
 }

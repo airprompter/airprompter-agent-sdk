@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 
-import { mintRunRef, parseRunRef } from "../packages/core/src/render/runRef.js";
+import { mintRunRef, newRunId, parseRunRef, type RunRefFacts } from "../packages/core/src/render/runRef.js";
 import { MissingVariableError, UnknownVariableError, renderTemplate, xmlDelimiters } from "../packages/core/src/render/template.js";
 
 const variables = [
@@ -28,7 +28,7 @@ test("an optional variable left out renders empty; null and undefined count as a
   assert.equal(renderTemplate({ tag: "t", text: "{{team}} {{ticket}}", variables, values: { team: 42, ticket: true } }), "42 <ticket>true</ticket>");
 });
 
-test("0.3.4: an optional operator variable renders its declared default when nothing fills it; a default elsewhere is ignored", () => {
+test("an optional operator variable renders its declared default when nothing fills it; a default elsewhere is ignored", () => {
   const withDefaults = [
     { name: "team", required: true, trust: "operator" as const, default: "never used" },
     { name: "ticket", required: true, trust: "end_user" as const },
@@ -54,12 +54,40 @@ test("an undeclared placeholder in the text is left visible; custom delimiters a
   assert.equal(xmlDelimiters.open("x"), "<x>");
 });
 
+test("runRef: a two-entry token round-trips, a forged entry fails the MAC, and runId survives a re-mint with one more entry", () => {
+  const key = randomBytes(32);
+  const entry = { tag: "support.triage", artifactId: "prm_9", versionId: "ver_9", model: "gpt-5", arm: "none", bucket: null, runMinute: "2026-09-12T14:03:00Z" };
+  const second = { ...entry, tag: "support.reply", artifactId: "prm_2" };
+  const runId = newRunId();
+  const one: RunRefFacts = { agentId: "agt_1", target: "prod", runId, entries: [entry] };
+  const two = { ...one, entries: [entry, second] };
+  const token = mintRunRef(two, key);
+  assert.deepEqual(parseRunRef(token, key), two);
+  const grown = parseRunRef(mintRunRef({ ...parseRunRef(mintRunRef(one, key), key)!, entries: [entry, second] }, key), key)!;
+  assert.equal(grown.runId, runId, "a token that grows keeps the run's identity");
+  const [body, mac] = token.split(".") as [string, string];
+  const forged = Buffer.from(body, "base64url").toString("utf8").replace('"arm":"none"', '"arm":"gold"');
+  assert.equal(parseRunRef(`${Buffer.from(forged).toString("base64url")}.${mac}`, key), null, "the body is what the MAC covers");
+  assert.deepEqual(parseRunRef(token, [randomBytes(32), key]), two, "each key is tried");
+  assert.equal(parseRunRef(token, []), null);
+});
+
+test("runRef: past either minting bound the mint throws, and the reader still takes it", () => {
+  const key = randomBytes(32);
+  const entries = Array.from({ length: 9 }, (_, i) => ({ tag: `slot.${i}`, artifactId: "prm_9", versionId: "ver_9", model: "gpt-5", arm: "none", bucket: null, runMinute: "2026-09-12T14:03:00Z" }));
+  const facts: RunRefFacts = { agentId: "agt_1", target: "prod", runId: newRunId(), entries };
+  assert.throws(() => mintRunRef(facts, key), /run_ref_facts_invalid/);
+  assert.throws(() => mintRunRef({ ...facts, entries: entries.slice(0, 2).map((entry) => ({ ...entry, tag: "same" })) }, key), /run_ref_facts_invalid/, "tags are unique");
+  assert.throws(() => mintRunRef({ ...facts, entries: entries.slice(0, 1), extra: ["x".repeat(12288)] }, key), /run_ref_facts_invalid/, "the length bound");
+});
+
 test("runRef: round-trips its facts, carries no text, and a forged or re-keyed token parses to null", () => {
   const key = randomBytes(32);
-  const facts = { agentId: "agt_1", target: "prod", tag: "support.triage", versionId: "ver_9", arm: "candidate", generation: 12, bucket: 4321 };
+  const entry = { tag: "support.triage", artifactId: "prm_9", versionId: "ver_9", model: "gpt-5", arm: "candidate", bucket: 4321, runMinute: "2026-09-12T14:03:00Z" };
+  const facts: RunRefFacts = { agentId: "agt_1", target: "prod", runId: newRunId(), entries: [entry] };
   const token = mintRunRef(facts, key);
   assert.deepEqual(parseRunRef(token, key), facts);
-  assert.deepEqual(parseRunRef(mintRunRef({ ...facts, bucket: null }, key), key), { ...facts, bucket: null });
+  assert.deepEqual(parseRunRef(mintRunRef({ ...facts, entries: [{ ...entry, bucket: null }] }, key), key), { ...facts, entries: [{ ...entry, bucket: null }] });
   assert.equal(parseRunRef(token, randomBytes(32)), null);
   assert.equal(parseRunRef(`${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`, key), null);
   assert.equal(parseRunRef("not.a.token", key), null);

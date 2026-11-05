@@ -22,7 +22,8 @@ import random
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Sequence
 
-from airprompter_agent_core.protocol.trust import experiments_of, referenced_payloads, verify_manifest, verify_root_metadata
+from airprompter_agent_core.protocol.assignment import servable_experiments, servable_slots
+from airprompter_agent_core.protocol.trust import referenced_payloads, verify_manifest, verify_root_metadata
 from ..store.slot_store import LoadedSlot, SlotStore
 from airprompter_agent_core.control.client import SyncClient
 
@@ -41,18 +42,25 @@ class SyncPassOutput:
     active: Optional[LoadedSlot]
     generation: Optional[int] = None
     reason: Optional[str] = None
+    #: The generation this pass, or an earlier one, tried to complete. Hand it to the next pass: one try per generation.
+    stranded_tried: Optional[int] = None
 
 
 def required_models_missing(payload: Mapping[str, Any], catalog: Optional[Sequence[str]]) -> list[str]:
-    """The required models of a payload (its slots and every arm override) the declared catalog lacks; empty when nothing was declared."""
+    """The required models of a payload (its servable slots and their arm overrides) the declared catalog lacks; empty when nothing was declared."""
     if catalog is None:
         return []
     declared = set(catalog)
-    slots = list(payload.get("slots", []))
-    for experiment in experiments_of(payload):
+    slots = list(servable_slots(payload))
+    for experiment in servable_experiments(payload):
         for arm in experiment.get("arms", []):
             slots.extend(arm.get("overrides", []))
     return sorted({slot["model"] for slot in slots if slot.get("modelRequired") is True and slot["model"] not in declared})
+
+
+def _is_stranded(active: Optional[LoadedSlot]) -> bool:
+    """The release in hand names a payload the store never held: a slot it took before this SDK gained the capability."""
+    return active is not None and any(content_hash not in active.payloads for content_hash in referenced_payloads(active.manifest["payload"]))
 
 
 def sync_once(
@@ -72,23 +80,33 @@ def sync_once(
     require_countersign: Optional[bool] = None,
     countersign_root: Optional[Mapping[str, Any]] = None,
     on_refusal: Optional[Callable[[str, Optional[int]], None]] = None,
-    on_directives: Optional[Callable[[Mapping[str, Any]], None]] = None,
+    on_directives: Optional[Callable[..., None]] = None,
     catalog: Optional[Sequence[str]] = None,
     on_model_unavailable: Optional[Callable[[list[str], int], None]] = None,
+    stranded_tried: Optional[int] = None,
 ) -> SyncPassOutput:
     """``on_directives`` (T9) is called with every manifest whose envelope verifies BEFORE the pass decides whether to stage,
     hold back or ignore it — so a ``disable`` (Freeze) or a ``request_unlock`` rides a manifest the runtime would otherwise
-    leave staged or unchanged. Never a manifest that failed the trust chain."""
+    leave staged or unchanged. Never a manifest that failed the trust chain. ``reduce_only=True`` names a manifest refused
+    for a capability this SDK lacks, whose envelope verified: its disables apply and nothing else does. ``stranded_tried``
+    is the generation the last pass tried to complete, from its output: pass it back, one try per generation."""
     at = now()
     root = trusted_root
     current_edge_etag = edge_etag
 
     def done(outcome: str, *, active_slot: Optional[LoadedSlot] = active, next_etag: Optional[str] = etag, generation: Optional[int] = None, reason: Optional[str] = None) -> SyncPassOutput:
-        return SyncPassOutput(outcome, next_etag, current_edge_etag, root, active_slot, generation, reason)
+        return SyncPassOutput(outcome, next_etag, current_edge_etag, root, active_slot, generation, reason, stranded_tried)
 
     def refuse(reason: str, generation: Optional[int]) -> None:
         if on_refusal:
             on_refusal(reason, generation)
+
+    # A stranded release is fetched again at its own generation, once: a staged copy is already the answer, and a payload
+    # the origin cannot serve is not worth a manifest read on every poll. So is a stored release this runtime could not
+    # load. A first release only staged is neither: the store's generation stays 0 until something activates.
+    stranded = _is_stranded(active) and not store.state.get("staged") and stranded_tried != (active.generation if active else None)
+    reload = stranded or (active is None and store.state["generation"] > 0 and not store.state.get("staged"))
+    tried_before = stranded_tried
 
     try:
         # A newer root document is accepted only against the one already trusted (R1–R5).
@@ -104,7 +122,7 @@ def sync_once(
 
         # Idle path: the edge pointer says whether anything moved, without a Lambda on the other end. It is unsigned and
         # cacheable, so its silence is never contact (S3): the lease does not move on ``pointer_unchanged``.
-        if edge_pointer_url and not skip_pointer:
+        if edge_pointer_url and not skip_pointer and not reload:
             edge = client.edge_pointer(edge_pointer_url, current_edge_etag)
             if edge.status == "not_modified":
                 return done("pointer_unchanged")
@@ -113,7 +131,7 @@ def sync_once(
                 if active and edge.pointer.get("generation", 0) <= active.generation:
                     return done("pointer_unchanged")
 
-        fetched = client.manifest(if_none_match=etag)
+        fetched = client.manifest(if_none_match=etag if not reload else None)
         if fetched.status == "not_modified":
             return done("unchanged")
         if fetched.status == "not_found":
@@ -125,16 +143,21 @@ def sync_once(
             return done("unavailable", reason=f"http_{fetched.http_status}")
 
         manifest = fetched.manifest or {}
+        if stranded and active is not None:
+            stranded_tried = active.generation
         generation = manifest["payload"]["generation"]
         stored = store.state["generation"]
         envelope = verify_manifest(manifest=manifest, root=root, now=at, scope=scope, stored_generation=stored, payloads=None, countersign_root=countersign_root, require_countersign=require_countersign)
         if not envelope.ok:
+            if envelope.directives_stand and on_directives:
+                on_directives(manifest["payload"], reduce_only=True)
             refuse(envelope.reason or "signature_invalid", generation)
             return done("refused", reason=envelope.reason, generation=generation)
         # The signature verified and the generation is not a rollback: its directives stand from here on.
         if on_directives:
             on_directives(manifest["payload"])
-        if generation == stored:
+        # With nothing active the stored generation is one this runtime could not load: the same generation is the way back.
+        if generation == stored and not reload:
             return done("unchanged", next_etag=fetched.etag)
         held_back_below = store.state.get("heldBackBelow")
         if held_back_below is not None and generation <= held_back_below:
@@ -177,6 +200,8 @@ def sync_once(
         loaded = store.load(slot, now=at, root=root, countersign_root=countersign_root, require_countersign=require_countersign)
         return done("activated", active_slot=loaded, next_etag=fetched.etag, generation=generation)
     except Exception as error:  # noqa: BLE001 — a sync pass never raises past its caller
+        # An outage is not an answer: the one try is for a miss the origin answered.
+        stranded_tried = tried_before
         refuse(f"network:{error}", None)
         return done("unavailable", reason="network")
 

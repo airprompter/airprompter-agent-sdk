@@ -80,7 +80,7 @@ reply = openai.chat.completions.create(model=r.model, messages=[{"role": "system
 # …or the explicit helper, which places the rendered text for you:
 reply = chat_completion(ap, r, openai, messages=[{"role": "user", "content": user_message}])
 # …or report by hand:
-ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90})
+ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90}, tool_calls={"calls": 2, "errors": 0})
 ap.feedback(r.run_ref, thumbs="up")
 ```
 
@@ -164,7 +164,7 @@ update-window timers on daemon threads.
    `unlock_required`** and nothing active — a first production release,
    or a restart whose active slot is unusable beside a staged one. The
    host starts with nothing to serve (`generation` 0, `apply_state`
-   `awaiting_unlock`, `healthz()` failing, logged `awaiting_first_unlock`),
+   `awaiting_unlock`, `healthz()` degraded, logged `awaiting_first_unlock`),
    heartbeats `{"active": 0, "staged": N}`, keeps syncing, and answers
    `unlock()`, the window, or the `on_staged` hook; `prompt()` refuses with
    the staged generation named until then. The unlock is yours to give,
@@ -175,9 +175,7 @@ instances never wake a Lambda), `on_invoke` (serverless: `ap.invoke(fn)`
 syncs before and after the handler; telemetry goes to a memory sink you
 drain with `ap.drain_memory_sink()` at invocation end), `offline` (no
 `api_key`: serve the store, the datastore or the bundle, never call home).
-`daemon` was removed in 0.3.0 and is refused with
-`AgentStartError("invalid_options")`: the host's `airprompterd` ships
-telemetry only and never serves a release.
+The host's `airprompterd` ships telemetry only and never serves a release.
 
 Telemetry and the host's daemon (`protocol/daemon.md`): the spool goes to
 `TelemetryOptions(spool_dir=…)`, else `AIRPROMPTER_SPOOL_DIR`, else the
@@ -204,8 +202,13 @@ another process already running on the same store keeps what it loaded.
 
 Every process is its own instance (S6): `ap.instance_id` is minted at
 start, never the store's; N workers are N instances in the fleet view and
-N writers into one spool. `run_ref`s parse across workers because their key
-is the store's.
+N writers into one spool. `run_ref`s parse across workers and across hosts
+because their key derives from what instances of one agent and target share:
+`run_ref_secret`, else `api_key`, so a fleet needs no new setting.
+`run_ref_previous_secrets` keeps refs minted before a rotation working. A host
+with neither (offline, or a datastore runtime holding only a distribution key)
+falls back to the store's id, which works on that one store only, and logs
+`run_ref_key_store_scoped` once. Set `run_ref_secret` to fix it.
 
 The policy is the host's, not the manifest's (S4). The first manifest a
 host verifies pins `applyPolicy` in `store.json`; a later manifest may
@@ -260,9 +263,10 @@ refused over a model.
 A `disable` directive (a Freeze from the console) is honoured from any
 manifest whose signature verifies — even one left staged — and
 `render()` raises `RenderRefusedError("disabled")` until the next
-verified manifest lifts it. A lapsed lease degrades (keeps serving,
-reports it) or halts (`RenderRefusedError("lease_expired")`) per the
-manifest's `onLeaseExpiry`.
+verified manifest lifts it. A lapsed lease means the agent is stale: it
+keeps serving the last verified release, reports it (`healthz` degrades with
+`lease_expired`, the spool carries one `lease_expired` refusal row), and never
+stops a render.
 
 ## Key providers
 
@@ -319,7 +323,7 @@ reports what was seen.
 `with_raw_response` / `with_streaming_response` surfaces and any method
 not in the table are the client's own and are not observed.
 
-**The release's inference settings (protocol 0.3.1 / 0.3.2).** A prompt
+**The release's inference settings.** A prompt
 version declares how its model is called — temperature, top-p, the output
 cap, stop sequences, reasoning effort — and the release seals those with
 the text (`rendered.inference`, integers on the wire: `temperatureMilli`
@@ -366,7 +370,7 @@ tests/test_wrap_live.py` locally).
 
 ## Parity with the TypeScript SDK
 
-Same protocol version (`0.3.4`), same vectors, same store layout. The
+Same protocol (3.x, `protocol/VERSION`), same vectors, same store layout. The
 conformance suite (`tests/test_protocol_vectors.py`, `tests/test_spool.py`)
 runs every vector the TypeScript SDK runs, and `tests/test_interop.py`
 opens a store the TypeScript SDK wrote (encrypted A slot, spool segment,
@@ -388,5 +392,5 @@ a `run_ref` minted there).
 | Managed mode (catalogue, run, stream, typed refusals, 429 retry) | ✓ | ✓ |
 | Variable sources (`variables`, `needs()`, `status().variables`, fenced by the stricter trust, workflow steps, managed fill) | ✓ (`renderAsync`) | ✓ (`render()` runs plain callables on threads; `render_async()` awaits coroutine functions) |
 | Provider wrappers | `ap.wrap()` for openai / Anthropic, AI SDK middleware | `ap.wrap()` for openai / anthropic (sync + async), explicit helpers, LiteLLM callback |
-| Spool upload on hosts | `airprompterd` uploads every writer's segments under that writer's own report (T26, 0.3.0); with no live daemon the runtime uploads its own (S5) | ✓ (`SpoolUploader`, `upload_now()`, `TelemetryOptions(upload=False)`) |
+| Spool upload on hosts | `airprompterd` uploads every writer's segments under that writer's own report (T26); with no live daemon the runtime uploads its own (S5) | ✓ (`SpoolUploader`, `upload_now()`, `TelemetryOptions(upload=False)`) |
 | Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓, awaited before `invoke()` returns (S5) | ✓ (`flush_telemetry()`, `request_upload_grant()`, `TelemetryOptions(flush="background")` opt-out) |

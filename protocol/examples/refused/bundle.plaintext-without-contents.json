@@ -4,9 +4,11 @@
   "document": {
     "format": "apbundle",
     "version": 1,
-    "protocol": "0.3.4",
+    "protocol": "3.0.0",
     "encryption": {
       "scheme": "none"
     }
-  }
+  },
+  "code": "schema_invalid",
+  "at": "/encryption"
 }

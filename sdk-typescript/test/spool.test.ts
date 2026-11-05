@@ -14,7 +14,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { normalizeFeedback } from "../packages/core/src/telemetry/feedback.js";
-import { DirectorySink, LATENCY_BUCKET_EDGES_MS, MemorySink, SEGMENT_MAX_BYTES, SegmentPlanner, SpoolWriter, epochMinute, latencyBucketIndex, minuteOf, segmentName, type Observation, type SpoolRow, type WindowRow } from "../packages/telemetry/src/spool/writer.js";
+import { DirectorySink, LATENCY_BUCKET_EDGES_MS, MemorySink, SEGMENT_MAX_BYTES, SegmentPlanner, SpoolWriter, epochMinute, latencyBucketIndex, minuteOf, segmentName, type StepRow, type Observation, type SpoolRow, type WindowRow } from "../packages/telemetry/src/spool/writer.js";
 
 const vector = (name: string) => JSON.parse(readFileSync(new URL(`../../protocol/vectors/${name}`, import.meta.url), "utf8"));
 const stable = (value: unknown): unknown => (Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable((value as Record<string, unknown>)[k])])) : value);
@@ -48,6 +48,8 @@ test("spool.json: window aggregation through SpoolWriter", () => {
       if (event.kind === "observe") writer.observe(event.observation as Observation, event.at);
       else if (event.kind === "feedback") writer.outcomes(event.feedback, event.feedback.outcomes, event.at);
       else if (event.kind === "refusal") writer.refusal({ at: new Date(event.at).toISOString(), reason: event.reason, generation: event.generation, tag: event.tag ?? null }, event.at);
+      else if (event.kind === "recordRun") writer.recordRun(event.run, event.at);
+      else if (event.kind === "recordStep") writer.recordStep(event.step, event.at);
       else if (event.kind === "close") writer.closeWindows(event.at);
     }
     const rows = sink.drain();
@@ -56,6 +58,9 @@ test("spool.json: window aggregation through SpoolWriter", () => {
     assert.equal(windows.length, expected.length, c.name);
     windows.forEach((row, i) => assert.ok(same(row, expected[i]), `${c.name}: ${JSON.stringify(row)} vs ${JSON.stringify(expected[i])}`));
     assert.ok(same(rows.filter((r) => r.type === "refusal"), c.expectedRefusals), `${c.name}: refusals`);
+    const stepKey = (row: StepRow) => JSON.stringify([row.minute, row.tag, row.step, row.status]);
+    const steps = rows.filter((r): r is StepRow => r.type === "step").sort((a, b) => (stepKey(a) < stepKey(b) ? -1 : 1));
+    assert.ok(same(steps, [...c.expectedSteps].sort((a: StepRow, b: StepRow) => (stepKey(a) < stepKey(b) ? -1 : 1))), `${c.name}: step rows ${JSON.stringify(steps)}`);
   }
 });
 
@@ -65,7 +70,22 @@ test("feedback.json: the catalogue normaliser", () => {
 });
 
 const T0 = Date.parse("2026-09-12T14:03:10Z");
-const observation: Observation = { tag: "a.b", versionId: "v1", arm: "none", model: "m", status: "ok", latencyMs: 10 };
+const observation: Observation = { tag: "a.b", artifactId: "art_1", versionId: "v1", arm: "none", model: "m", status: "ok", latencyMs: 10 };
+
+test("a long run has a bucket of its own: 200 seconds lands at 262,144 ms and p95 does not saturate", () => {
+  const sink = new MemorySink();
+  const writer = new SpoolWriter(sink, { instanceId: "i-testinstance", instanceClass: "resident", sdk: "t/0" });
+  assert.equal(LATENCY_BUCKET_EDGES_MS.length, 23);
+  for (let i = 0; i < 20; i += 1) writer.observe({ ...observation, latencyMs: 200_000 }, T0);
+  writer.closeWindows(T0);
+  const [row] = sink.drain().filter((candidate): candidate is WindowRow => candidate.type === "window");
+  const index = LATENCY_BUCKET_EDGES_MS.indexOf(262144);
+  assert.equal(row!.latencyMs.buckets[index], 20);
+  assert.equal(row!.latencyMs.buckets.at(-1), 0, "nothing saturates the last bucket");
+  let seen = 0;
+  const p95 = LATENCY_BUCKET_EDGES_MS[row!.latencyMs.buckets.findIndex((count) => (seen += count) >= 19)];
+  assert.equal(p95, 262144);
+});
 
 test("artifact-aware windows reject non-canonical artifact identities from the shared vectors", () => {
   const writer = new SpoolWriter(new MemorySink(), { instanceId: "i-testinstance", instanceClass: "resident", sdk: "t/0" });
@@ -74,31 +94,31 @@ test("artifact-aware windows reject non-canonical artifact identities from the s
   }
 });
 
-test("v2 and v3 outcomes without a run minute require an open measured run", () => {
+test("outcomes without a run minute require an open measured run", () => {
   const sink = new MemorySink();
   const writer = new SpoolWriter(sink, { instanceId: "i-testinstance", instanceClass: "resident", sdk: "t/0" });
   const audienceIds = ["aud_AAAAAAAAAAAAAAAAAAAAAA"];
-  const dimensions = { tag: observation.tag, versionId: observation.versionId, arm: observation.arm, model: observation.model };
+  const dimensions = { tag: observation.tag, artifactId: "prm_support_alpha", versionId: observation.versionId, arm: observation.arm, model: observation.model };
 
-  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha" }, { thumbs: true }, T0);
+  writer.outcomes(dimensions, { thumbs: true }, T0);
   writer.outcomes({ ...dimensions, audienceIds }, { thumbs: false }, T0);
   writer.closeWindows(T0);
-  assert.deepEqual(sink.drain(), [], "unattributed outcomes cannot create zero-run v2/v3 rows");
+  assert.deepEqual(sink.drain(), [], "unattributed outcomes cannot create zero-run rows");
 
   writer.observe({ ...observation, artifactId: "prm_support_alpha" }, T0);
-  writer.outcomes({ ...dimensions, artifactId: "prm_support_alpha" }, { thumbs: true }, T0);
-  writer.observe({ ...observation, audienceIds }, T0);
+  writer.outcomes(dimensions, { thumbs: true }, T0);
+  writer.observe({ ...observation, artifactId: "prm_support_alpha", audienceIds }, T0);
   writer.outcomes({ ...dimensions, audienceIds }, { thumbs: false }, T0);
   writer.closeWindows(T0);
   const rows = sink.drain().filter((row): row is WindowRow => row.type === "window");
   assert.equal(rows.length, 2);
   assert.deepEqual(rows.map((row) => [row.v, row.count, row.outcomes?.thumbs]), [
-    [3, 1, { n: 1, sum: 1 }],
-    [2, 1, { n: 1, sum: 0 }],
+    [4, 1, { n: 1, sum: 1, sumSq: 1 }],
+    [4, 1, { n: 1, sum: 0, sumSq: 0 }],
   ]);
 });
 
-test("outcome attribution rejects invalid minutes, legacy minutes, and malformed audience ids", () => {
+test("outcome attribution rejects invalid minutes, an absent artifact, and malformed audience ids", () => {
   const sink = new MemorySink();
   const writer = new SpoolWriter(sink, { instanceId: "i-testinstance", instanceClass: "resident", sdk: "t/0" });
   const dimensions = { tag: observation.tag, versionId: observation.versionId, arm: observation.arm, model: observation.model };

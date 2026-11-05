@@ -2,8 +2,9 @@
 
 The runtime never sends a prompt, an answer or an end-user identifier
 anywhere. What leaves the host is one row per minute per dimension set —
-counts, token totals, a 16-bucket latency histogram, error classes, output
-check counts and declared feedback outcomes — written to a local spool and
+run counts, model and tool call counts, token totals and their second
+moments, a 23-bucket latency histogram, error classes, output check counts
+and declared feedback outcomes — written to a local spool and
 uploaded under a short-lived grant to your organization's own prefix.
 The spool is a **public contract** (design D66): any process, in any
 language, can write to it and be picked up by the telemetry daemon
@@ -34,10 +35,11 @@ release: every process loads its own.
 |---|---|---|
 | Location | `<state-dir>/<agentId>/<target>/spool/telemetry/`, 0700; segments 0600 | [`protocol/spool-format.md` › Location and permissions](../protocol/spool-format.md#location-and-permissions) |
 | Segments | `seg-<instanceId>-<epochMinute>-<n>.ndjson`, `.open` until fsync + rename; rotate at the minute, at 1 MiB, or on an oversize line | [Segment files](../protocol/spool-format.md#segment-files); `vectors/spool.json` rotation cases |
-| Rows | `window` (one minute of one dimension set), `refusal` (a control-plane refusal), `dropped` (segments evicted by the disk budget) — each validated against `spool-rows.schema.json` | [Row types](../protocol/spool-format.md#row-types) |
-| Latency | 16 fixed bucket edges every writer uses | `schemas/latency-buckets.json`; `vectors/spool.json` 32 values |
-| Feedback | `outcomes[signal] = {n, sum}` from the declared catalogue only; `goldenPass` is the runtime's own | `schemas/feedback-signals.schema.json`; `vectors/feedback.json` |
-| Never in the spool | prompt text, model output, end-user identifiers, stack traces, application error messages — no field exists for them; unknown fields are dropped and unknown rows quarantined at ingest | [What must never be in the spool](../protocol/spool-format.md#what-must-never-be-in-the-spool) |
+| Rows | `window` (one minute of one dimension set; `count` means runs), `step` (one step of a run, a row of its own), `refusal` (a control-plane refusal), `dropped` (segments evicted by the disk budget) — each validated against `spool-rows.schema.json` | [Row types](../protocol/spool-format.md#row-types) |
+| Latency | 23 fixed bucket edges every writer uses, up to one hour | `schemas/latency-buckets.json`; `vectors/spool.json` |
+| Runs | v4 window rows: `count` is runs, `modelCalls` the calls across them, `agentRun` the runs this slot opened, `tools` the tool counts with no names, `tokensSq` the second moments of each run's token totals | [Row types](../protocol/spool-format.md#row-types); `vectors/spool.json` |
+| Feedback | `outcomes[signal] = {n, sum, sumSq}` from the declared catalogue only; `goldenPass` is the runtime's own | `schemas/feedback-signals.schema.json`; `vectors/feedback.json` |
+| Never in the spool | prompt text, model output, end-user identifiers, stack traces, application error messages — no field exists for them; unknown fields are stripped, unknown rows are skipped and counted, and only corruption quarantines a segment at ingest | [What must never be in the spool](../protocol/spool-format.md#what-must-never-be-in-the-spool) |
 | Upload | heartbeat → presigned S3 POST grant (≤ 15 min, ≤ 1 MiB, the instance's own prefix); backoff with full jitter; acknowledged segments deleted (S6); a refused grant is the throttle | [Upload](../protocol/spool-format.md#upload-for-reference-implemented-by-the-telemetry-daemon); `sdk-typescript/test/uploader.test.ts` |
 | Offline | `airprompter export-telemetry` / `import-telemetry` carry the spool as one file, idempotent by key | [The spool over a file](../protocol/spool-format.md#the-spool-over-a-file-t16) |
 | Third-party writers | `examples/spool-writer/` (TypeScript and Python, dependency-free) pass the same vectors | [Writing to the spool without our SDK](../protocol/spool-format.md#writing-to-the-spool-without-our-sdk) |
@@ -58,9 +60,10 @@ without the format:
 | `errorClass` | attribute `error.type` | one of the fixed error classes; absent on `ok` |
 | `status`, `usageSource` | attributes `airprompter.status`, `airprompter.usage.source` | `reported` / `estimated` / `unavailable` |
 | `checks.passed` / `checks.failed` | sum `airprompter.checks` by `airprompter.check.outcome` | declared output checks (`checks.md`) |
-| `outcomes.<signal>.{n,sum}` | sums `airprompter.feedback.count` (monotonic) and `airprompter.feedback.sum` (not) by `airprompter.feedback.signal` | the declared catalogue; a rate is sum / count; `goldenPass` from a golden-set run |
+| `outcomes.<signal>.{n,sum}` (`sumSq` is not exported) | sums `airprompter.feedback.count` (monotonic) and `airprompter.feedback.sum` (not) by `airprompter.feedback.signal` | the declared catalogue; a rate is sum / count; `goldenPass` from a golden-set run |
 | `tag`, `versionId`, `arm` | attributes `airprompter.prompt.tag`, `.version`, `.arm` | the arm is `none` outside a rollout |
 | `sdk` | resource `telemetry.sdk.name` / `telemetry.sdk.version` | a **dimension at ingest**, so a misreporting writer is isolated |
+| a `step` row | none | skipped on purpose: `duration`, `tokens`, `checks` and `feedback` take nothing from a step row, so a segment gives the same metrics with or without them |
 | `instanceId`, `instanceClass` | resource `service.instance.id`; `airprompter.instance.class` | random, persisted; `resident` or `ephemeral` |
 | `refusal` row | sum `airprompter.refusals` by `airprompter.refusal.reason`, `airprompter.generation` (+ `.prompt.tag`) | a render refused |
 | `dropped` row | sums `airprompter.spool.dropped_segments`, `airprompter.spool.dropped_bytes` | the budget's loss, reported |

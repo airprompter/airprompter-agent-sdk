@@ -160,6 +160,50 @@ test("keygen → pull (encrypted) → verify → apply on a clean host → statu
   rmSync(work, { recursive: true, force: true });
 });
 
+test("pull carries a slot this CLI cannot serve, in the bundle and in the count, and diff still names an open slot", async () => {
+  const { work, plane, rootDocPath, stateDir } = setup();
+  try {
+    const base = plane.slot({ tag: "support.reply", text: "Reply" });
+    const future = { ...plane.slot({ tag: "support.future", text: "From the future" }), requires: ["future_slots"] };
+    const { variables: _variables, ...open } = future;
+    plane.promote([base, open as never]);
+    const h = harness(plane, work);
+    await run(["keygen", "--purpose", "distribution", "--out", join(work, "keys", "prod")], h.ctx);
+    const bundle = join(work, "carried.apbundle");
+    assert.equal(await run(["pull", ...scopeArgs, "--root", rootDocPath, "--distribution-key", join(work, "keys", "prod.pub.json"), "--out", bundle, "--json"], h.ctx), EXIT.ok, h.all());
+    assert.equal(h.json().payloads, 2, "2 of 2 payloads");
+    h.reset();
+    assert.equal(await run(["diff", bundle, ...scopeArgs, "--distribution-key", join(work, "keys", "prod.key.json"), "--state-dir", stateDir, "--json"], h.ctx), EXIT.ok, h.all());
+    assert.ok(h.all().includes("support.future"), "the diff shows the slot");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("pull verifies what it carries: a release it cannot read goes through, bytes it cannot serve are still checked, and a forged manifest costs no payload read", async () => {
+  const { work, plane, rootDocPath } = setup();
+  try {
+    const base = plane.slot({ tag: "support.reply", text: "Reply" });
+    const future = { ...plane.slot({ tag: "support.future", text: "From the future" }), requires: ["future_slots"] };
+    plane.promote([base, future as never], { requiredCapabilities: ["future_slots"] });
+    const h = harness(plane, work);
+    await run(["keygen", "--purpose", "distribution", "--out", join(work, "keys", "prod")], h.ctx);
+    const args = (out: string) => ["pull", ...scopeArgs, "--root", rootDocPath, "--distribution-key", join(work, "keys", "prod.pub.json"), "--out", join(work, out), "--json"];
+    assert.equal(await run(args("capability.apbundle"), h.ctx), EXIT.ok, h.all());
+    plane.payloads.set(future.contentHash, Buffer.alloc(future.byteLength, 1));
+    h.reset();
+    assert.equal(await run(args("tampered.apbundle"), h.ctx), EXIT.refused, "the second check carries too");
+    assert.ok(h.all().includes("payload_hash_mismatch"), h.all());
+    plane.promote([base], { signWith: newKey() });
+    plane.requests.length = 0;
+    h.reset();
+    assert.equal(await run(args("forged.apbundle"), h.ctx), EXIT.refused);
+    assert.equal(plane.requests.some((url) => url.includes("/payloads/")), false, "the envelope comes before the walk");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
 test("diff names what changes, apply moves the store forward, pull --check reports how far behind a build is with the exit contract", async () => {
   const { work, plane, rootPath, rootDocPath, stateDir } = setup();
   const triage = plane.slot({ tag: "support.triage", text: PROMPT_TEXT, variables: [{ name: "team", required: true, trust: "operator" }] });
@@ -375,8 +419,8 @@ test("usage errors exit 2 with the option named; --json carries the error; the A
   h.reset();
   assert.equal(await run(["pull", "--org", "o", "--agent", "agt_1", "--environment", "prod", "--api-key", "apa_live_x", "--out", "x"], h.ctx), EXIT.usage, "there is no --api-key option");
   h.reset();
-  assert.equal(await run(["verify", "--org", "o", "--agent", "a", "--environment", "qa", "--root", "r", join(work, "nope")], h.ctx), EXIT.usage);
-  assert.ok(h.stderr[0]!.includes("dev, staging or prod"));
+  assert.equal(await run(["verify", "--org", "o", "--agent", "a", "--environment", "Not_A_Slug", "--root", "r", join(work, "nope")], h.ctx), EXIT.usage);
+  assert.ok(h.stderr[0]!.includes("lowercase slug"), "the CLI checks the shape of a stage, not its name");
   h.reset();
   assert.equal(await run(["keygen", "--purpose", "signing", "--out", join(work, "k")], h.ctx), EXIT.usage);
   h.reset();
@@ -397,7 +441,7 @@ test("pull --tags-only writes the hosted catalogue with a run key: tags, variabl
   const printed = h.json();
   assert.equal(printed.generation, 1);
   assert.deepEqual(printed.slots, ["support.triage (prompt, 2 vars)"]);
-  const written = JSON.parse(readFileSync(out, "utf8")) as { kind: string; slots: Array<{ tag: string; variables: unknown[] }>; experiment: unknown };
+  const written = JSON.parse(readFileSync(out, "utf8")) as { kind: string; slots: Array<{ tag: string; variables: unknown[] }>; experiments: unknown };
   assert.equal(written.kind, "airprompter-hosted-catalogue");
   assert.deepEqual(written.slots.map((s) => s.tag), ["support.triage"]);
   assert.equal(readFileSync(out, "utf8").includes("triage assistant"), false, "no payload text in the catalogue");

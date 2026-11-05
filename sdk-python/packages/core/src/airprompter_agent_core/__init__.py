@@ -7,11 +7,11 @@ a file, a socket or a thread at import time, and nothing here imports a sibling 
 
 Example::
 
-    from airprompter_agent_core import BundleRelease, PROTOCOL_VERSION, protocol_at_least
+    from airprompter_agent_core import BundleRelease, PROTOCOL_VERSION
 
     reader = BundleRelease.load(bundle=bundle, root=pinned_root, scope=scope, now="2026-09-17T00:00:00Z")   # refuses before it holds a byte
     reader.current().generation                    # the verified release a runtime serves
-    protocol_at_least(PROTOCOL_VERSION, "0.3.4")   # True: this SDK speaks the 0.3.4 members
+    heartbeat = {"protocol": PROTOCOL_VERSION}     # the one wire this SDK speaks
 """
 
 from .bundle.apbundle import APBUNDLE_INFO, BundleError, DistributionKey, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle
@@ -22,10 +22,15 @@ from .golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, GoldenCaseResult, Gol
 from .judge import JUDGE_RUBRICS, PROTECTION_CRITERIA, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
 from .ports import OS_FS, SYSTEM_CLOCK, ClockPort, FsPort, OsFs, SystemClock, fs_failure_code, fs_or_default
 from .protocol import (
+    AGENT_ID,
     ASSIGNMENT_MODULUS,
+    AUDIENCE_LIMITS,
+    PROTOCOL_VERSION,
     RAMP_MAX_STEPS,
     RAMP_MIN_STEP_MS,
+    SUPPORTED_CAPABILITIES,
     SUPPORTED_PROTOCOL_MAJORS,
+    TARGET_SLUG,
     UNDEFINED,
     Assignment,
     AssignmentError,
@@ -35,8 +40,10 @@ from .protocol import (
     arm_for_bucket,
     assign_arm,
     bucket_from_hash,
+    capabilities_implemented,
     canonical_bytes,
     canonical_json,
+    carried_payloads,
     effective_arms,
     generate_p256_jwk,
     key_thumbprint,
@@ -46,6 +53,12 @@ from .protocol import (
     referenced_payloads,
     release_digest,
     release_digest_input,
+    optional_payloads,
+    slot_hashes,
+    servable_experiments,
+    servable_overrides,
+    frozen_experiment,
+    servable_slots,
     sha256_prefixed,
     sign_bytes,
     subject_hash,
@@ -58,29 +71,19 @@ from .protocol import (
 )
 from .release.bundle_release import BundleRelease, BundleReleaseRefused
 from .release.reader import LoadedRelease, ReleaseReader, ReleaseSlot
-from .render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
+from .render.run_ref import RUN_REF_MAX_ENTRIES, RUN_REF_MAX_TOKEN_LENGTH, RUN_REF_READ_MAX_ENTRIES, RUN_REF_READ_MAX_TOKEN_LENGTH, RunRefFacts, mint_run_ref, new_run_id, parse_run_ref, run_ref_key_from
 from .render.template import Delimiters, MissingVariableError, UnknownVariableError, default_of, placeholders_of, render_template, xml_delimiters
 from .telemetry.feedback import NormalizedFeedback, normalize_feedback
-from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, Observation, SpoolRow, epoch_minute, latency_bucket_index, minute_of
+from .telemetry.rows import ERROR_CLASSES, LATENCY_BUCKET_EDGES_MS, SLOT_TAG, STEP_BOUNDS, STEP_STATUSES, USAGE_SOURCES, WINDOW_STATUSES, Observation, RunDimensions, RunTotals, SpoolRow, StepTotals, count_of, epoch_minute, latency_bucket_index, minute_of, step_name, utf16_length, valid_step_name
 from .telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 
-PROTOCOL_VERSION = "2.0.0"
-
-
-def protocol_at_least(version: str, floor: str) -> bool:
-    """Whether a protocol version string is at least another (``major.minor.patch``, numerically). The manifest a
-    control plane sealed names the protocol it speaks; a runtime that must send a newer optional member reads that
-    before sending it, so a 0.3.4 SDK talking to a 0.3.3 service never trips its strict schemas."""
-    import re as _re
-
-    if not isinstance(version, str) or not isinstance(floor, str) or not _re.fullmatch(r"\d+\.\d+\.\d+", version) or not _re.fullmatch(r"\d+\.\d+\.\d+", floor):
-        return False
-    return [int(part) for part in version.split(".")] >= [int(part) for part in floor.split(".")]
 SDK_VERSION = "0.5.0"
 
 __all__ = [
     "APBUNDLE_INFO",
+    "AGENT_ID",
     "ASSIGNMENT_MODULUS",
+    "AUDIENCE_LIMITS",
     "Assignment",
     "AssignmentError",
     "BundleError",
@@ -112,17 +115,30 @@ __all__ = [
     "OsFs",
     "PROTECTION_CRITERIA",
     "PROTOCOL_VERSION",
-    "protocol_at_least",
     "RAMP_MAX_STEPS",
     "RAMP_MIN_STEP_MS",
+    "RUN_REF_MAX_ENTRIES",
+    "RUN_REF_MAX_TOKEN_LENGTH",
+    "RUN_REF_READ_MAX_ENTRIES",
+    "RUN_REF_READ_MAX_TOKEN_LENGTH",
     "ReleaseReader",
     "ReleaseSlot",
+    "RunDimensions",
     "RunRefFacts",
+    "RunTotals",
     "SDK_VERSION",
+    "SLOT_TAG",
+    "STEP_BOUNDS",
+    "STEP_STATUSES",
+    "USAGE_SOURCES",
+    "WINDOW_STATUSES",
+    "SUPPORTED_CAPABILITIES",
     "SUPPORTED_PROTOCOL_MAJORS",
     "SYSTEM_CLOCK",
+    "TARGET_SLUG",
     "SpoolRow",
     "StepError",
+    "StepTotals",
     "SyncClient",
     "SystemClock",
     "UNDEFINED",
@@ -160,6 +176,7 @@ __all__ = [
     "manifest_has_golden",
     "mint_run_ref",
     "minute_of",
+    "new_run_id",
     "normalize_feedback",
     "open_bundle",
     "ordered_steps",
@@ -175,6 +192,19 @@ __all__ = [
     "referenced_payloads",
     "release_digest",
     "release_digest_input",
+    "run_ref_key_from",
+    "capabilities_implemented",
+    "carried_payloads",
+    "count_of",
+    "optional_payloads",
+    "slot_hashes",
+    "servable_experiments",
+    "servable_overrides",
+    "frozen_experiment",
+    "servable_slots",
+    "step_name",
+    "utf16_length",
+    "valid_step_name",
     "default_of",
     "placeholders_of",
     "render_template",

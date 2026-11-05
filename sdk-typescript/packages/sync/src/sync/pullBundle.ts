@@ -26,12 +26,12 @@
  * ```
  */
 
-import { createEncryptedBundle, createPlaintextBundle, referencedPayloads, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
-import type { Bundle, BundleContents, Manifest, RefusalCode, RootMetadata, SyncClient } from "@airprompter/agent-core";
+import { carriedPayloads, createEncryptedBundle, createPlaintextBundle, optionalPayloads, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
+import type { Bundle, BundleContents, Manifest, RefusalCode, RootMetadata, SyncClient, Target } from "@airprompter/agent-core";
 
 export interface PullBundleInput {
   client: SyncClient;
-  scope: { organizationId: string; agentId: string; target: "dev" | "staging" | "prod" };
+  scope: { organizationId: string; agentId: string; target: Target };
   /** The last accepted root, or the synthetic pinned document. */
   trustedRoot: RootMetadata;
   /**
@@ -163,16 +163,23 @@ export async function pullBundle(input: PullBundleInput): Promise<PullBundleResu
     const manifest = fetched.manifest;
     if (manifest.payload.generation < held) return { status: "refused", reason: "generation_rollback", held, detail: `the control plane answered generation ${manifest.payload.generation}; the caller holds ${held}`, edge: given };
 
+    // The envelope first: the walk below reads whatever the manifest holds, so it reads only a signed one.
+    const carrying = { carrying: true, absentRequires: true, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) };
+    const envelope = verifyManifest({ manifest, root: trustedRoot, now, scope: input.scope, storedGeneration: 0, payloads: null, ...carrying });
+    if (!envelope.ok) return { status: "refused", reason: envelope.reason, edge: given };
+    // A puller carries what a newer runtime needs, not what this SDK can serve. Only a payload named solely under `requires` may be absent (M9).
+    const optional = optionalPayloads(manifest.payload);
     const payloads = new Map<string, Uint8Array>();
-    for (const [hash, byteLength] of referencedPayloads(manifest.payload)) {
+    for (const [hash, byteLength] of carriedPayloads(manifest.payload)) {
       const bytes = await input.client.payload(hash);
+      if (!bytes && optional.has(hash)) continue;
       if (!bytes) return { status: "refused", reason: "payload_missing", contentHash: hash, edge: given };
       if (bytes.length !== byteLength) return { status: "refused", reason: "payload_length_mismatch", contentHash: hash, edge: given };
       payloads.set(hash, bytes);
     }
     // No stored generation here: a puller has no host to move backwards. Anti-rollback is the store's rule, applied
     // by every runtime that opens this bundle.
-    const verdict = verifyManifest({ manifest, root: trustedRoot, now, scope: input.scope, storedGeneration: 0, payloads, countersignRoot: input.countersignRoot ?? null, ...(input.requireCountersign !== undefined ? { requireCountersign: input.requireCountersign } : {}) });
+    const verdict = verifyManifest({ manifest, root: trustedRoot, now, scope: input.scope, storedGeneration: 0, payloads, ...carrying });
     if (!verdict.ok) return { status: "refused", reason: verdict.reason, edge: given };
     // The bundle is built: the manifest's ETag is the caller's to keep — with the row, never before it.
     edge.manifestEtag = fetched.etag;

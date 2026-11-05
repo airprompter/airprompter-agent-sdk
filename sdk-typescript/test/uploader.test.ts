@@ -30,7 +30,7 @@ const WRITER_A = "i-writerAAAAAAAA";
 const WRITER_B = "i-writerBBBBBBBB";
 
 function windowRow(instanceId: string, minute: string, tag = "support.triage"): SpoolRow {
-  return { type: "window", v: 1, minute, instanceId, instanceClass: "resident", tag, versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
+  return { type: "window", v: 4, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag, versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
 }
 
 function writeSegment(dir: string, instanceId: string, minuteMs: number, n: number, lines: string[]): string {
@@ -38,6 +38,21 @@ function writeSegment(dir: string, instanceId: string, minuteMs: number, n: numb
   writeFileSync(join(dir, name), lines.map((line) => `${line}\n`).join(""), { mode: 0o600 });
   return name;
 }
+
+test("spool.json: a reader tolerates what a later 3.x wrote, line by line, and only corruption quarantines", () => {
+  const sp = vector("spool.json");
+  assert.ok(sp.tolerance.length >= 4, "the vector carries the cases");
+  const ordered = (values: Array<{ line: number; field: string }>) => [...values].sort((x, y) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1));
+  for (const c of sp.tolerance as Array<{ name: string; instanceId: string; nowMs: number; lines: string[]; expected: { rows: unknown[]; invalid: unknown[]; skipped: unknown[]; stripped: Array<{ line: number; field: string }> } }>) {
+    const inspection = inspectSegment(Buffer.from(`${c.lines.join("\n")}\n`), c.instanceId, c.nowMs);
+    assert.deepEqual(inspection.rows, c.expected.rows, `${c.name}: rows`);
+    assert.deepEqual(inspection.invalid, c.expected.invalid, `${c.name}: invalid`);
+    assert.deepEqual(inspection.skipped, c.expected.skipped, `${c.name}: skipped`);
+    assert.deepEqual(ordered(inspection.stripped), ordered(c.expected.stripped), `${c.name}: stripped`);
+    const shipped = inspection.payload.toString("utf8");
+    for (const { field } of c.expected.stripped) assert.equal(shipped.includes(`"${field.split(".").pop()}"`), false, `${c.name}: ${field} left the host`);
+  }
+});
 
 test("the validator accepts every row the vectors expect and refuses the shapes the contract forbids", () => {
   const sp = vector("spool.json");
@@ -52,17 +67,20 @@ test("the validator accepts every row the vectors expect and refuses the shapes 
   assert.ok(accepted >= 10, `vector rows accepted: ${accepted}`);
   assert.ok(validateSpoolRow({ type: "dropped", v: 1, at: "2026-09-12T14:03:00Z", instanceId: WRITER_A, segments: 3, bytes: 900 }).ok);
   const base = windowRow(WRITER_A, "2026-09-12T14:03:00Z");
-  for (const c of sp.invalidArtifactIds) assert.deepEqual(validateSpoolRow({ ...base, v: 3, artifactId: c.artifactId }), { ok: false, reason: "artifactId" }, c.name);
-  assert.deepEqual(validateSpoolRow({ ...base, type: "trace" }), { ok: false, reason: "unknown_type" });
-  assert.deepEqual(validateSpoolRow({ ...base, prompt: "the secret text" }), { ok: false, reason: "unknown_field:prompt" });
-  assert.deepEqual(validateSpoolRow({ ...base, tokens: { input: 1, output: 2, text: "leak" } }), { ok: false, reason: "tokens" });
+  for (const c of sp.invalidArtifactIds) assert.deepEqual(validateSpoolRow({ ...base, artifactId: c.artifactId }), { ok: false, reason: "artifactId" }, c.name);
+  assert.deepEqual(validateSpoolRow({ ...base, type: "trace" }), { ok: false, reason: "unknown_type", later: true });
+  const unknownField = validateSpoolRow({ ...base, prompt: "the secret text" });
+  assert.ok(unknownField.ok && !("prompt" in unknownField.row), "an unknown field never leaves the host");
+  assert.deepEqual(unknownField.stripped, ["prompt"]);
+  const nested = validateSpoolRow({ ...base, tokens: { input: 1, output: 2, text: "leak" } });
+  assert.ok(nested.ok && !("text" in (nested.row as { tokens: object }).tokens), "an unknown nested field never leaves the host");
   assert.deepEqual(validateSpoolRow({ ...base, latencyMs: { buckets: [1], sum: 1 } }), { ok: false, reason: "latencyMs" });
-  assert.deepEqual(validateSpoolRow({ ...base, errorClass: "exploded" }), { ok: false, reason: "errorClass" });
-  assert.deepEqual(validateSpoolRow({ ...base, outcomes: { thumbs: { n: 1, sum: 1 }, "Free Text": { n: 1, sum: 0 } } }), { ok: false, reason: "outcomes:Free Text" });
-  assert.deepEqual(validateSpoolRow({ ...base, v: 2 }), { ok: false, reason: "audienceIds" });
-  assert.ok(validateSpoolRow({ ...base, tag: "onboarding.flow#1" }).ok, "workflow step tags are valid telemetry dimensions");
-  assert.deepEqual(validateSpoolRow({ ...base, tag: "onboarding.flow#0" }), { ok: false, reason: "tag" });
-  assert.deepEqual(validateSpoolRow({ type: "refusal", v: 1, at: "2026-09-12T14:03:00Z", instanceId: WRITER_A, reason: "bored", generation: 1, tag: null }), { ok: false, reason: "reason" });
+  assert.equal(validateSpoolRow({ ...base, status: "error", errorClass: "exploded" }).ok, true, "a later error class is any slug");
+  assert.deepEqual(validateSpoolRow({ ...base, status: "error", errorClass: "Not A Slug" }), { ok: false, reason: "errorClass" });
+  assert.deepEqual(validateSpoolRow({ ...base, outcomes: { thumbs: { n: 1, sum: 1, sumSq: 1 }, "Free Text": { n: 1, sum: 0, sumSq: 0 } } }), { ok: false, reason: "outcomes:Free Text" });
+  for (const v of [1, 2, 3, 5]) assert.deepEqual(validateSpoolRow({ ...base, v }), { ok: false, reason: "v", later: true }, `v${v} is not read`);
+  assert.deepEqual(validateSpoolRow({ ...base, tag: "onboarding.flow#1" }), { ok: false, reason: "tag" }, "a step never rides in tag");
+  assert.deepEqual(validateSpoolRow({ type: "refusal", v: 1, at: "2026-09-12T14:03:00Z", instanceId: WRITER_A, reason: "Not A Slug", generation: 1, tag: null }), { ok: false, reason: "reason" });
   assert.deepEqual(validateSpoolRow("a line"), { ok: false, reason: "not_an_object" });
   const segment = Buffer.from(`${JSON.stringify(base)}\n${JSON.stringify(windowRow(WRITER_B, "2026-09-12T14:03:00Z"))}\nnot json\n{"type":"window","v":1,"partial`, "utf8");
   const inspection = inspectSegment(segment, WRITER_A);
@@ -139,8 +157,8 @@ test("two writers and a stranger: one grant per writer prefix, the malformed thi
     const a0 = writeSegment(h.dir, WRITER_A, T0, 0, [JSON.stringify(windowRow(WRITER_A, m0))]);
     const b0 = writeSegment(h.dir, WRITER_B, T0, 0, [JSON.stringify(windowRow(WRITER_B, m0)), JSON.stringify({ type: "refusal", v: 1, at: m0, instanceId: WRITER_B, reason: "disabled", generation: 1, tag: null })]);
     const a1 = writeSegment(h.dir, WRITER_A, T0 + 60_000, 0, [JSON.stringify(windowRow(WRITER_A, "2026-09-12T14:04:00Z"))]);
-    // A third-party writer whose row carries a field the contract has no place for.
-    const stranger = writeSegment(h.dir, "i-thirdparty0000", T0, 0, [JSON.stringify({ ...windowRow("i-thirdparty0000", m0), prompt: "You are a helpful assistant" })]);
+    // A third-party writer whose segment is corrupt.
+    const stranger = writeSegment(h.dir, "i-thirdparty0000", T0, 0, [JSON.stringify({ ...windowRow("i-thirdparty0000", m0), count: "You are a helpful assistant" })]);
     // An open segment is never read.
     writeFileSync(join(h.dir, `${segmentName(WRITER_A, epochMinute(T0 + 120_000), 0)}.open`), "{}\n");
     const result = await h.uploader.runOnce();
@@ -234,13 +252,13 @@ test("a hold is honoured until retryAfter; an expired grant is refreshed once; a
 });
 
 test("the host budget across writers: the oldest unsent segments go first and the loss is one dropped row under the daemon's own id, uploaded like any segment", async () => {
-  const h = harness({ budgetBytes: 900 });
+  const h = harness({ budgetBytes: 1500 });
   try {
     const names = [0, 1, 2, 3, 4].map((i) => writeSegment(h.dir, i % 2 === 0 ? WRITER_A : WRITER_B, T0 + i * 60_000, 0, [JSON.stringify(windowRow(i % 2 === 0 ? WRITER_A : WRITER_B, `2026-09-12T14:0${3 + i}:00Z`))]));
     const each = readFileSync(join(h.dir, names[0]!)).length;
-    assert.ok(each * 3 > 900 && each * 2 <= 900, `segment ${each} bytes`);
+    assert.ok(each * 3 > 1500 && each * 2 <= 1500, `segment ${each} bytes`);
     const result = await h.uploader.runOnce();
-    assert.equal(result.dropped, 3, "three oldest evicted to fit two under 900 bytes");
+    assert.equal(result.dropped, 3, "three oldest evicted to fit two under 1500 bytes");
     const droppedKey = h.plane.uploads.find((k) => k.includes("/i-daemon00000000/seg-i-daemon00000000-"));
     assert.ok(droppedKey, "the dropped row was written as the daemon's own segment and uploaded");
     const droppedSegment = droppedKey!.slice(droppedKey!.lastIndexOf("/") + 1);
@@ -292,7 +310,7 @@ test("serverless: invoke() flushes the memory sink under the runtime's own grant
   const ap = await AirPrompterAgent.start({ ...scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "on_invoke", rootUrl: "https://edge.test/roots/prod/root.json" }, fetch: plane.fetch() });
   try {
     const r = ap.prompt("support.reply").render({});
-    await ap.invoke(async () => ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 }));
+    await ap.invoke(async () => ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 }));
     // S5: the flush is awaited — the segment is there the moment invoke() returns, with nothing left for a frozen process to lose.
     assert.equal(plane.uploads.length, 1, "one segment per invocation");
     assert.ok(plane.uploads[0]!.startsWith(`org/org_1/agent/agt_1/prod/${ap.instanceId}/seg-${ap.instanceId}-`));
@@ -302,7 +320,7 @@ test("serverless: invoke() flushes the memory sink under the runtime's own grant
     // A hold: the rows stay buffered and go with the next flush.
     plane.grantHold = { retryAfterSeconds: 60 };
     (ap as unknown as { uploadGrant: null }).uploadGrant = null;
-    ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 3 });
+    ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 3 });
     ap.spool.closeWindows(Date.now() + 60_000);
     const held = await ap.flushTelemetry();
     assert.equal(held.status, "held");

@@ -7,7 +7,7 @@
  * the variable — so the model sees where untrusted input starts and stops,
  * and the assurance lens can find it. A missing required variable throws:
  * that is the customer's bug and silence would ship a broken prompt. An
- * optional variable nobody supplied renders its declared `default` (0.3.4)
+ * optional variable nobody supplied renders its declared `default`
  * when it has one, and nothing otherwise.
  * Sync and telemetry failures degrade; render contract failures throw.
  *
@@ -94,7 +94,7 @@ export function renderTemplate(input: RenderInput): string {
   });
 }
 
-/** 0.3.4: a default counts only where the control plane allows one — an optional `operator` variable; elsewhere it is ignored. */
+/** A default counts only where the control plane allows one — an optional `operator` variable; elsewhere it is ignored. */
 export function defaultOf(variable: SlotVariable): string | undefined {
   return !variable.required && variable.trust === "operator" && typeof variable.default === "string" ? variable.default : undefined;
 }

@@ -1,28 +1,48 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.2/key-set.schema.json",
+  "$id": "https://airprompter.com/protocol/3/key-set.schema.json",
   "title": "AirPrompter root metadata (key-set)",
   "description": "TUF-shaped root of trust (D53). `signed` lists the online `targets` keys that may sign manifests, with a threshold and an expiry, and is itself signed by the offline `root` keys. The root public key is pinned in SDK source; rotating a signing key is a new root document signed by root, so a compromised signing key can never authorize its successor. Customer countersign key-sets use the same shape with `purpose: countersign`.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["signed", "signatures"],
+  "required": [
+    "signed",
+    "signatures"
+  ],
   "properties": {
     "signed": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "protocol", "purpose", "environment", "version", "expires", "keys", "roles"],
+      "required": [
+        "type",
+        "protocol",
+        "purpose",
+        "environment",
+        "version",
+        "expires",
+        "keys",
+        "roles"
+      ],
       "properties": {
-        "type": { "const": "root" },
-        "protocol": { "$ref": "manifest.schema.json#/$defs/protocolVersion" },
+        "type": {
+          "const": "root"
+        },
+        "protocol": {
+          "description": "Plain semver: a root is signed offline and outlives a major.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
         "purpose": {
           "description": "`platform`: AirPrompter's manifest signing keys. `countersign`: a customer's release keys (§6.3).",
           "type": "string",
-          "enum": ["platform", "countersign"]
+          "enum": [
+            "platform",
+            "countersign"
+          ]
         },
         "environment": {
-          "description": "The hosted environment this root governs (one platform key per environment, D43). Customer key-sets name the target they countersign for.",
-          "type": "string",
-          "enum": ["dev", "staging", "prod"]
+          "description": "`platform`: the hosted environment this root governs (one platform key per environment, D43). `countersign`: the agent stage a customer's key-set signs for.",
+          "type": "string"
         },
         "version": {
           "description": "Strictly increasing per (purpose, environment). A runtime refuses a root document older than the one it holds.",
@@ -37,18 +57,56 @@
           "type": "object",
           "minProperties": 1,
           "maxProperties": 32,
-          "propertyNames": { "$ref": "manifest.schema.json#/$defs/keyId" },
-          "additionalProperties": { "$ref": "#/$defs/publicKey" }
+          "propertyNames": {
+            "$ref": "manifest.schema.json#/$defs/keyId"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/publicKey"
+          }
         },
         "roles": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["root", "targets"],
+          "required": [
+            "root",
+            "targets"
+          ],
           "properties": {
-            "root": { "$ref": "#/$defs/role" },
-            "targets": { "$ref": "#/$defs/role" }
+            "root": {
+              "$ref": "#/$defs/role"
+            },
+            "targets": {
+              "$ref": "#/$defs/role"
+            }
           }
         }
+      },
+      "if": {
+        "properties": {
+          "purpose": {
+            "const": "countersign"
+          }
+        },
+        "required": [
+          "purpose"
+        ],
+        "type": "object"
+      },
+      "then": {
+        "properties": {
+          "environment": {
+            "$ref": "manifest.schema.json#/$defs/target"
+          }
+        },
+        "type": "object"
+      },
+      "else": {
+        "properties": {
+          "environment": {
+            "$ref": "manifest.schema.json#/$defs/hostedEnvironment"
+          }
+        },
+        "type": "object"
       }
     },
     "signatures": {
@@ -56,30 +114,57 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 8,
-      "items": { "$ref": "manifest.schema.json#/$defs/signature" }
+      "items": {
+        "$ref": "manifest.schema.json#/$defs/signature"
+      }
     }
   },
   "$defs": {
     "publicKey": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["keyType", "scheme", "publicKey"],
+      "required": [
+        "keyType",
+        "scheme",
+        "publicKey"
+      ],
       "properties": {
-        "keyType": { "const": "ecdsa-p256" },
-        "scheme": { "const": "ES256" },
+        "keyType": {
+          "const": "ecdsa-p256"
+        },
+        "scheme": {
+          "const": "ES256"
+        },
         "publicKey": {
           "description": "The public key as a JWK. `keyId` is expected to be its RFC 7638 thumbprint.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["kty", "crv", "x", "y"],
+          "required": [
+            "kty",
+            "crv",
+            "x",
+            "y"
+          ],
           "properties": {
-            "kty": { "const": "EC" },
-            "crv": { "const": "P-256" },
-            "x": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
-            "y": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+            "kty": {
+              "const": "EC"
+            },
+            "crv": {
+              "const": "P-256"
+            },
+            "x": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            },
+            "y": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
           }
         },
-        "notBefore": { "$ref": "manifest.schema.json#/$defs/timestamp" },
+        "notBefore": {
+          "$ref": "manifest.schema.json#/$defs/timestamp"
+        },
         "notAfter": {
           "description": "Optional per-key expiry, used during an overlap rotation so the old key ages out without a further ceremony.",
           "$ref": "manifest.schema.json#/$defs/timestamp"
@@ -89,16 +174,25 @@
     "role": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["keyIds", "threshold"],
+      "required": [
+        "keyIds",
+        "threshold"
+      ],
       "properties": {
         "keyIds": {
           "type": "array",
           "minItems": 1,
           "maxItems": 8,
           "uniqueItems": true,
-          "items": { "$ref": "manifest.schema.json#/$defs/keyId" }
+          "items": {
+            "$ref": "manifest.schema.json#/$defs/keyId"
+          }
         },
-        "threshold": { "type": "integer", "minimum": 1, "maximum": 8 }
+        "threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        }
       }
     }
   }

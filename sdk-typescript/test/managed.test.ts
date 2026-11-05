@@ -27,7 +27,7 @@ const CATALOGUE = {
     { tag: "support.triage", kind: "prompt", model: "anthropic.claude-sonnet-5", variables: [{ name: "team", required: true, trust: "operator" }, { name: "ticket", required: true, trust: "end_user" }], steps: null },
     { tag: "onboarding.flow", kind: "workflow", model: "anthropic.claude-haiku-4-5", variables: [{ name: "name", required: true, trust: "operator" }], steps: [{ stepId: "welcome#1" }, { stepId: "verify#2" }] },
   ],
-  experiment: { salt: SALT, subjectKey: "request", arms: ["control", "warmer"] },
+  experiments: [{ experimentId: "exp_1", tag: "support.triage", salt: SALT, subjectKey: "request", arms: ["control", "warmer"] }, { experimentId: "exp_2", tag: "onboarding.flow", salt: SALT, subjectKey: "request", arms: ["control", "warmer"] }],
 };
 const DONE = {
   runId: "run_0f3a",
@@ -106,8 +106,8 @@ test("start reads the catalogue with the run key; run() sends the salted subject
 });
 
 test("managed audience selectors match arbitrary tags locally and send only opaque audience ids", async () => {
-  const deviceAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
-  const regionAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", conditions: [{ key: "region", operator: "contains", value: "west" }] } } as const;
+  const deviceAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "when" as const, when: { key: "device_id", is: "device-007" } } } as const;
+  const regionAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "when" as const, when: { key: "region", contains: "west" } } } as const;
   const allAudience = { audienceId: "aud_CCCCCCCCCCCCCCCCCCCCCC", tag: "support.triage", selector: { mode: "all" } } as const;
   const { fetch, calls } = fakeFetch([
     () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, observations: [deviceAudience, regionAudience, allAudience] }) }),
@@ -130,8 +130,8 @@ test("managed audience selectors match arbitrary tags locally and send only opaq
 });
 
 test("managed runs refresh and rematch once when the signed catalogue generation changed", async () => {
-  const oldAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "tags", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
-  const newAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "tags", conditions: [{ key: "device_id", operator: "is", value: "device-007" }] } } as const;
+  const oldAudience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", tag: "support.triage", selector: { mode: "when" as const, when: { key: "device_id", is: "device-007" } } } as const;
+  const newAudience = { audienceId: "aud_BBBBBBBBBBBBBBBBBBBBBB", tag: "support.triage", selector: { mode: "when" as const, when: { key: "device_id", is: "device-007" } } } as const;
   const { fetch, calls } = fakeFetch([
     () => ({ status: 200, body: JSON.stringify({ ...CATALOGUE, generation: 1, observations: [oldAudience] }) }),
     () => ({ status: 409, body: JSON.stringify({ error: "refresh", code: "catalogue_stale", detail: "2" }) }),
@@ -146,10 +146,10 @@ test("managed runs refresh and rematch once when the signed catalogue generation
   assert.equal(JSON.parse(calls[3]!.init.body!).catalogueGeneration, 2);
 });
 
-test("an older catalogue does not advertise the generation handshake, so 0.4.1 remains compatible with its strict run route", async () => {
-  const { capabilities: _capabilities, ...legacyCatalogue } = CATALOGUE;
+test("a catalogue with no capabilities sends no catalogue generation", async () => {
+  const { capabilities: _capabilities, ...plainCatalogue } = CATALOGUE;
   const { fetch, calls } = fakeFetch([
-    () => ({ status: 200, body: JSON.stringify(legacyCatalogue) }),
+    () => ({ status: 200, body: JSON.stringify(plainCatalogue) }),
     () => ({ status: 200, body: RUN_SSE, stream: true }),
   ]);
   const agent = await ManagedAgent.start({ agentId: "agent-1", target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example", fetch });
@@ -246,9 +246,9 @@ test("feedback(runRef, signals) posts to the run surface's feedback route and re
   await assert.rejects(agent.feedback("forged", { accepted: true }), (e: unknown) => e instanceof ManagedRunError && e.code === "invalid_run_ref" && e.status === 400);
 });
 
-test("S17: per-prompt experiments — a run on each slot hashes the subject with THAT slot's salt; a slot outside every experiment sends no hash; the legacy single experiment still covers every slot", async () => {
+test("S17: per-prompt experiments — a run on each slot hashes the subject with THAT slot's salt; a slot outside every experiment sends no hash", async () => {
   const SALT_B = "EBESExQVFhcYGRobHB0eHyAhIiMkJSYn";
-  const perPrompt = { ...CATALOGUE, experiment: { salt: SALT, subjectKey: "request", arms: ["control", "candidate"] }, experiments: [{ experimentId: "exp_a", tag: "support.triage", salt: SALT, subjectKey: "request", arms: ["control", "candidate"] }, { experimentId: "exp_b", tag: "onboarding.flow", salt: SALT_B, subjectKey: "request", arms: ["control", "candidate"] }] };
+  const perPrompt = { ...CATALOGUE, experiments: [{ experimentId: "exp_a", tag: "support.triage", salt: SALT, subjectKey: "request", arms: ["control", "candidate"] }, { experimentId: "exp_b", tag: "onboarding.flow", salt: SALT_B, subjectKey: "request", arms: ["control", "candidate"] }] };
   const { fetch, calls } = fakeFetch([() => ({ status: 200, headers: { "x-agent-generation": "3" }, body: JSON.stringify(perPrompt) }), () => ({ status: 200, body: RUN_SSE, stream: true }), () => ({ status: 200, body: RUN_SSE, stream: true })]);
   const agent = await ManagedAgent.start({ agentId: "agent-1", target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example/", fetch, sleep: async () => {} });
   await agent.run("support.triage", { team: "Billing", ticket: "x" }, { subject: "user-42" });
@@ -258,7 +258,4 @@ test("S17: per-prompt experiments — a run on each slot hashes the subject with
   assert.equal(agent.experimentFor("docs.missing"), null, "a slot outside every experiment");
   assert.equal(agent.subjectHashFor("user-42", "docs.missing"), undefined);
   assert.deepEqual(agent.experimentFor("onboarding.flow")?.arms, ["control", "candidate"]);
-  // The legacy catalogue (one `experiment`, no list): every slot hashes on it.
-  const { agent: legacy } = await startWith([]);
-  assert.equal(legacy.subjectHashFor("user-42", "onboarding.flow"), subjectHash(SALT, "user-42"));
 });

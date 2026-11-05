@@ -7,7 +7,7 @@
 //   $ npm run build          # from sdk-typescript/; the release workflow runs the same
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,6 +16,16 @@ export const BUILD_ORDER = ["core", "sync", "runtime", "telemetry", "otel-bridge
 const published = (name) => (name === "otel-bridge" || name.startsWith("datastore-") ? `@airprompter/${name}` : `@airprompter/agent-${name}`);
 const tsc = join(root, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
 
+/** `protocol/VERSION` is the only hand-edited protocol version; the package constant is written from it. */
+function writeProtocolVersion() {
+  const version = readFileSync(join(root, "..", "protocol", "VERSION"), "utf8").trim();
+  const path = join(root, "packages", "core", "src", "protocol", "version.ts");
+  const source = readFileSync(path, "utf8");
+  const next = source.replace(/^export const PROTOCOL_VERSION = ".*";$/m, `export const PROTOCOL_VERSION = "${version}";`);
+  if (next !== source) writeFileSync(path, next);
+}
+
+writeProtocolVersion();
 for (const name of BUILD_ORDER) {
   const dir = join(root, "packages", name);
   rmSync(join(dir, "dist"), { recursive: true, force: true });

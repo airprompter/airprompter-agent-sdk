@@ -6,7 +6,7 @@
  * Freeze honoured from a manifest that is otherwise left staged (directives
  * before the apply decision); the heartbeat body (the protocol's shape,
  * content-free, the cadence adopted from the answer, the open request
- * reported as seen); halt without a way home degrading.
+ * reported as seen); a lapsed lease serving on with no way home.
  */
 
 import assert from "node:assert/strict";
@@ -215,11 +215,11 @@ test("the heartbeat: the protocol's body, content-free; the cadence is adopted f
   await ap.stop();
   rmSync(stateDir, { recursive: true, force: true });
 
-  // Offline: no key, no heartbeat, and halt degrades with one log line instead of an outage the runtime cannot end.
+  // Offline: no key, no heartbeat, and a lapsed lease keeps serving.
   const dir2 = tempDir();
   const plane2 = new FakeControlPlane(scope);
   const [t2, r2] = slots(plane2);
-  plane2.promote([t2!, r2!], { leaseSeconds: 60, onLeaseExpiry: "halt" });
+  plane2.promote([t2!, r2!], { leaseSeconds: 60 });
   // The fake stamps issuedAt with the real clock; the lease-from-issue fallback is measured against it.
   let clock = Date.now();
   const online = await start(plane2, dir2, { now: () => clock });
@@ -228,8 +228,7 @@ test("the heartbeat: the protocol's body, content-free; the cadence is adopted f
   const offline = await AirPrompterAgent.start({ ...scope, stateDir: dir2, root: { pinned: publicJwkOf(plane2.rootKey) }, sync: { mode: "offline" }, now: () => clock, logger: (e) => void events.push(String(e.event)) });
   clock += 120_000;
   assert.equal(offline.status().leaseExpired, true);
-  assert.equal(offline.prompt("support.reply").render({}).text, "Reply to .", "halt without a way home degrades");
-  assert.ok(events.includes("halt_without_contact_degraded"));
+  assert.equal(offline.prompt("support.reply").render({}).text, "Reply to .", "a lapsed lease keeps serving");
   assert.equal(offline.heartbeatBody().syncMode, "offline");
   await offline.stop();
   assert.equal(plane2.heartbeats.length, 1, "only the online start heart-beat");

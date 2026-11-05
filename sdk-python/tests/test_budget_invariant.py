@@ -34,7 +34,7 @@ def iso_minute(ms: float) -> str:
 
 
 def window_row(instance_id: str, minute: str) -> dict:
-    return {"type": "window", "v": 1, "minute": minute, "instanceId": instance_id, "instanceClass": "resident", "tag": "support.reply", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "latencyMs": {"buckets": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], "sum": 812}, "tokens": {"input": 40, "output": 9}, "sdk": "agent-sdk-py/0.1.0"}
+    return {"type": "window", "v": 4, "artifactId": "art_1", "minute": minute, "instanceId": instance_id, "instanceClass": "resident", "tag": "support.reply", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 40, "output": 9}, "sdk": "agent-sdk-py/0.1.0"}
 
 
 def segment(fs: MemoryFs, instance_id: str, minute_ms: float, n: int, rows: list[dict], open_: bool = False) -> str:
@@ -56,14 +56,14 @@ def test_two_writers_over_budget_with_a_crash_mid_open():
     fs.clock_ms = T0
     fs.mkdirp(DIR, 0o700)
     events: list[dict] = []
-    uploader = SpoolUploader(directory=DIR, instance_id="i-hostprocess000", grant_for=sink_absent, fs=fs, now_ms=lambda: fs.clock_ms, rand=lambda: 0.5, logger=events.append, budget_bytes=900, quarantine_cap_bytes=4096, exported_cap_bytes=4096)
+    uploader = SpoolUploader(directory=DIR, instance_id="i-hostprocess000", grant_for=sink_absent, fs=fs, now_ms=lambda: fs.clock_ms, rand=lambda: 0.5, logger=events.append, budget_bytes=1500, quarantine_cap_bytes=4096, exported_cap_bytes=4096)
     names = []
     for i in range(5):
         fs.clock_ms = T0 + i * 60_000
         writer = WRITER_A if i % 2 == 0 else WRITER_B
         names.append(segment(fs, writer, fs.clock_ms, 0, [window_row(writer, iso_minute(fs.clock_ms))]))
     each = fs.stat(os.path.join(DIR, names[0]))[0]
-    assert each * 3 > 900 >= each * 2, f"segment {each} bytes"
+    assert each * 3 > 1500 >= each * 2, f"segment {each} bytes"
     fs.clock_ms = T0 - 2 * 60 * 60_000
     abandoned = segment(fs, "i-crashed0000000", fs.clock_ms, 0, [window_row("i-crashed0000000", "2026-09-13T10:00:00Z")], open_=True)
     fs.clock_ms = T0 + 5 * 60_000
@@ -72,7 +72,7 @@ def test_two_writers_over_budget_with_a_crash_mid_open():
     result = uploader.run_once()
     assert uploader.status()["reclaimedSegments"] == 1, "the abandoned .open was closed"
     assert any(e.get("event") == "open_segment_reclaimed" and e.get("segment") == abandoned[: -len(".open")] for e in events)
-    assert result.dropped == 4, "six closed segments, two fit in 900: the reclaimed one and the three oldest went"
+    assert result.dropped == 4, "six closed segments, two fit in 1500: the reclaimed one and the three oldest went"
     assert result.held is True
     remaining = closed(fs)
     dropped = next(n for n in remaining if n.startswith("seg-i-hostprocess000-"))
@@ -85,8 +85,8 @@ def test_two_writers_over_budget_with_a_crash_mid_open():
     tree = uploader.status()["tree"]
     assert (tree["openSegments"], tree["quarantineBytes"], tree["exportedBytes"]) == (1, 0, 0)
     assert tree["totalBytes"] <= uploader.bound(1)
-    assert uploader.status()["depth"]["bytes"] <= 900
-    assert uploader.bound(2) == 900 + 2 * SEGMENT_MAX_BYTES + 4096 + 4096
+    assert uploader.status()["depth"]["bytes"] <= 1500
+    assert uploader.bound(2) == 1500 + 2 * SEGMENT_MAX_BYTES + 4096 + 4096
 
 
 def test_quarantine_and_exported_are_capped_oldest_first():
@@ -97,7 +97,7 @@ def test_quarantine_and_exported_are_capped_oldest_first():
     bad = []
     for i in range(6):
         fs.clock_ms = T0 + i * 60_000
-        bad.append(segment(fs, "i-thirdparty0000", fs.clock_ms, 0, [{**window_row("i-thirdparty0000", "2026-09-13T12:00:00Z"), "prompt": "You are a helpful assistant"}]))
+        bad.append(segment(fs, "i-thirdparty0000", fs.clock_ms, 0, [{**window_row("i-thirdparty0000", "2026-09-13T12:00:00Z"), "count": "You are a helpful assistant"}]))
     uploader.run_once()
     assert uploader.status()["quarantinedSegments"] == 6
     uploader.run_once()
@@ -118,7 +118,7 @@ def test_stale_windows_close_on_the_sweep_never_the_current_minute():
     sink = MemorySink({"instanceId": WRITER_A})
     writer = SpoolWriter(sink, WriterIdentity(WRITER_A, "resident", "test/0"))
     clock = T0
-    writer.observe(Observation(tag="support.reply", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=5, usage_source="unavailable"), clock)
+    writer.observe(Observation(tag="support.reply", artifact_id="art_1", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=5, usage_source="unavailable"), clock)
     assert writer.open_window_count == 1
     writer.close_stale_windows(clock + 10_000)
     assert writer.open_window_count == 1, "the same minute: the window stays open, no split row"
@@ -135,7 +135,7 @@ def state_dir():
     shutil.rmtree(path, ignore_errors=True)
 
 
-def test_every_process_is_its_own_instance_and_the_run_ref_key_is_the_stores(state_dir):
+def test_every_process_is_its_own_instance_and_workers_share_the_run_ref_key(state_dir):
     scope = {"organizationId": "org_1", "agentId": "agt_workers", "target": "prod"}
     kw = {"organization_id": "org_1", "agent_id": "agt_workers", "target": "prod"}
     plane = FakeControlPlane(scope)
@@ -152,7 +152,7 @@ def test_every_process_is_its_own_instance_and_the_run_ref_key_is_the_stores(sta
         store = SlotStore.open(state_dir=state_dir, agent_id="agt_workers", target="prod", key_provider=file_key(os.path.join(SlotStore.path(state_dir=state_dir, agent_id="agt_workers", target="prod"), "store.key")))
         assert a.instance_id != b.instance_id, "N workers are N instances"
         assert store.instance_id not in (a.instance_id, b.instance_id), "the store's id is the store's, not a process's"
-        assert a._run_ref_key == b._run_ref_key, "the runRef key is the store's: a run_ref minted by one worker parses in another"
+        assert a._run_ref_key == b._run_ref_key, "the runRef key derives from what the workers share: a run_ref minted by one parses in another"
         rendered = a.prompt("support.reply").render()
         assert b.feedback(rendered.run_ref, thumbs="up") is True
         deadline = time.time() + 5
@@ -161,7 +161,7 @@ def test_every_process_is_its_own_instance_and_the_run_ref_key_is_the_stores(sta
         assert {h["instanceId"] for h in plane.heartbeats} >= {a.instance_id, b.instance_id}, "the fleet sees both"
         for ap in (a, b):
             r = ap.prompt("support.reply").render()
-            ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=3)
+            ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=3)
             ap.spool.close_windows(T0)
         spool = os.path.join(SlotStore.path(state_dir=state_dir, agent_id="agt_workers", target="prod"), "spool", "telemetry")
         assert len([n for n in os.listdir(spool) if SEGMENT_NAME.match(n)]) >= 2, "two writers, their segments, one spool"

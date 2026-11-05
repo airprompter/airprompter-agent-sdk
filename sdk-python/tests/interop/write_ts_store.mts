@@ -13,7 +13,7 @@ import { fileKey } from "../../../sdk-typescript/packages/sync/src/store/keyProv
 import { SlotStore } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
 import { DirectorySink, SpoolWriter } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
 import { publicJwkOf } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
-import { mintRunRef } from "../../../sdk-typescript/packages/core/src/render/runRef.js";
+import { mintRunRef, newRunId } from "../../../sdk-typescript/packages/core/src/render/runRef.js";
 import { createHmac } from "node:crypto";
 import { FakeControlPlane } from "../../../sdk-typescript/test/helpers/controlPlane.js";
 
@@ -32,10 +32,10 @@ store.activate();
 const sink = new DirectorySink(join(store.dir, "spool", "telemetry"), store.instanceId);
 const writer = new SpoolWriter(sink, { instanceId: store.instanceId, instanceClass: "resident", sdk: "agent-sdk-ts/0.1.0" });
 const t0 = Date.parse("2026-09-12T14:03:10Z");
-writer.observe({ tag: "support.triage", versionId: "ver_support.triage_1", arm: "none", model: "claude-sonnet-5", status: "ok", latencyMs: 812, tokens: { input: 400, output: 90, cachedInput: 100 } }, t0);
+writer.observe({ tag: "support.triage", artifactId: "art_support.triage", versionId: "ver_support.triage_1", arm: "none", model: "claude-sonnet-5", status: "ok", latencyMs: 812, tokens: { input: 400, output: 90, cachedInput: 100 } }, t0);
 writer.closeWindows(t0 + 60_000);
 const runRefKey = createHmac("sha256", Buffer.from(store.instanceId, "utf8")).update("runRef").digest();
-const runRef = mintRunRef({ agentId: "agt_1", target: "prod", tag: "support.triage", versionId: "ver_support.triage_1", arm: "none", generation: 1, bucket: null }, runRefKey);
+const runRef = mintRunRef({ agentId: "agt_1", target: "prod", runId: newRunId(), entries: [{ tag: "support.triage", artifactId: "art_support.triage", versionId: "ver_support.triage_1", model: "claude-sonnet-5", arm: "none", bucket: null, runMinute: "2026-09-12T14:03:00Z" }] }, runRefKey);
 process.stdout.write(
   JSON.stringify({
     pinnedRoot: publicJwkOf(plane.rootKey),

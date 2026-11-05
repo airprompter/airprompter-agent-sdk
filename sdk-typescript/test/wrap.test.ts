@@ -351,7 +351,7 @@ test("nothing the wrapper does fails the call: a broken attribution hook, an odd
     },
   };
   const wrapped = wrapClient(odd, {
-    attribute: () => ({ tag: "t", versionId: "v", arm: "none", model: "m" }),
+    attribute: () => ({ tag: "t", artifactId: "art_1", versionId: "v", arm: "none", model: "m" }),
     observe: async (target, call, options) => {
       const result = await call();
       recorded.push({ target, model: options?.model, result });
@@ -364,12 +364,12 @@ test("nothing the wrapper does fails the call: a broken attribution hook, an odd
   assert.deepEqual(chunks, [null, 42, { type: "content_block_delta", delta: { type: "text_delta", text: "x" } }, "str"]);
   await new Promise((r) => setImmediate(r));
   assert.equal(recorded.length, 1);
-  assert.deepEqual(recorded[0], { target: { tag: "t", versionId: "v", arm: "none", model: "m" }, model: "m2", result: { stop_reason: "end_turn", content: [{ type: "text", text: "x" }] } });
+  assert.deepEqual(recorded[0], { target: { tag: "t", artifactId: "art_1", versionId: "v", arm: "none", model: "m" }, model: "m2", result: { stop_reason: "end_turn", content: [{ type: "text", text: "x" }] } });
 
   // A consumer that stops after the first chunk: what was seen is reported (no usage yet → unavailable).
   recorded.length = 0;
   const early = wrapClient(new FakeOpenAI(), {
-    attribute: () => ({ tag: "t", versionId: "v", arm: "none", model: "m" }),
+    attribute: () => ({ tag: "t", artifactId: "art_1", versionId: "v", arm: "none", model: "m" }),
     observe: async (target, call) => {
       const result = await call();
       recorded.push(result);
@@ -464,12 +464,12 @@ test("requestTexts reads system and instructions before messages, strings and te
   assert.deepEqual(requestTexts(null), []);
   assert.deepEqual(requestTexts({ messages: "just a string" }), ["just a string"]);
   const registry = new RenderRegistry(3);
-  for (const n of [1, 2, 3, 4]) registry.register(`text ${n}`, { tag: `t${n}`, versionId: "v", arm: "none", model: "m" });
+  for (const n of [1, 2, 3, 4]) registry.register(`text ${n}`, { tag: `t${n}`, artifactId: "art_1", versionId: "v", arm: "none", model: "m" });
   assert.equal(registry.size, 3);
   assert.equal(registry.match(["text 1"]), undefined, "the oldest was evicted");
   assert.equal(registry.match(["nothing", "text 3"])?.tag, "t3");
-  registry.register("text 2", { tag: "t2b", versionId: "v", arm: "none", model: "m" });
-  assert.equal(registry.match(["text 2"])?.tag, "t2b", "the newest render of the same text wins");
+  registry.register("text 2", { tag: "t2", artifactId: "art_1", versionId: "v", arm: "none", model: "m2" });
+  assert.equal(registry.match(["text 2"])?.model, "m2", "the newest render of the same text wins");
 });
 
 test("the middleware never imports the AI SDK and the wrapper never reads a provider package", async () => {

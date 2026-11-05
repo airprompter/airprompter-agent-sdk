@@ -15,12 +15,14 @@ import { createHash } from "node:crypto";
 export interface Attribution {
   audienceIds?: readonly string[];
   runMinute?: string;
-  artifactId?: string;
+  artifactId: string;
   tag: string;
+  /** A workflow step's id. `tag` stays the slot's. */
+  step?: string;
   versionId: string;
   arm: string;
   model: string;
-  /** 0.3.1: the slot's inference settings, applied to the wrapped call (`inference.ts`). */
+  /** The slot's inference settings, applied to the wrapped call (`inference.ts`). */
   inference?: SlotInference;
 }
 

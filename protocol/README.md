@@ -7,13 +7,14 @@ service, and by any self-hosted registry that implements it.
 | File | Purpose |
 |---|---|
 | `openapi.yaml` | The customer-v1 agent routes: manifest, payloads, heartbeat, countersign, run. Each operation says whether the hosted service serves it yet |
+| `capabilities.md` | The capability registry and the naming rule: how a 3.x minor adds a feature |
 | `schemas/manifest.schema.json` | The signed release manifest: slots, experiment arms, directives, lease, generation; `signatures[]` and `countersignatures[]` |
 | `schemas/key-set.schema.json` | Root metadata (TUF-shaped): offline root keys → online signing keys, threshold, expiry; the same shape for customer countersign keys |
 | `schemas/bundle.schema.json` | The `.apbundle` offline format: manifest + payloads + key-set, encrypted to the target's distribution key (plaintext is a `dev` opt-in) |
 | `schemas/heartbeat.schema.json` | Instance state in, presigned upload grant + intervals out — content-free by schema |
 | `schemas/edge-pointer.schema.json` | `generation.json`, the few hundred bytes idle instances poll at the edge |
 | `schemas/telemetry-window.schema.json` | One minute of one dimension set — content-free by schema |
-| `schemas/latency-buckets.json` | The 16 fixed histogram edges every writer must use |
+| `schemas/latency-buckets.json` | The 23 fixed histogram edges every writer must use |
 | `schemas/feedback-signals.schema.json` | What `ap.feedback()` accepts |
 | `schemas/golden-set.schema.json` | The golden-set payload a manifest slot's `goldenSet.contentHash` names: 1–50 cases with expectations in the output-check grammar |
 | `canonical-json.md` | Canonical JSON: the encoding under every release digest and every signature, and what the digest covers |
@@ -51,15 +52,24 @@ are `trust-chain.md`; `vectors/manifest-verify.json` has a case per refusal.
 
 This directory has its own semver, tagged `protocol/vX.Y.Z`; `VERSION`
 holds the current one and CI refuses a tag that disagrees with it. A manifest
-carries the `protocol` version it was written for; the hosted service
-supports the current and previous major. SDK packages declare the
+carries the `protocol` version it was written for. SDK packages declare the
 protocol range they speak. Consumers pin a tag and vendor `schemas/`,
 `vectors/` and `examples/` — the hosted service does exactly that
 (`packages/contracts/protocol/` in prompt-haven, refreshed by
 `protocol-sync.mjs`, drift-checked in CI).
 
-Before `1.0.0` a minor bump may change a schema in a breaking way; the
-CHANGELOG says so per entry. From `1.0.0`, breaking changes are a major.
+Breaking changes are a major. A 3.x minor adds a feature behind a named
+capability (`capabilities.md`), so a reader never compares minors.
+
+Schemas are a writer's contract for its minor. A reader is not a schema
+validator. A 3.x reader ignores a member it does not know. In a report, it takes
+an unknown enum value as unknown, never as a refusal. In a manifest, what it must
+act on and cannot read never widens what runs. Only `requiredCapabilities`
+refuses a manifest for being newer than the reader, and M13's directive kinds are
+the one closed list a newer feature can hit: a later directive kind names a
+capability, which still delivers disables. Malformed is not the same as unknown,
+and M2 to M15 still apply. A minor that widens a validated bound names a
+capability.
 
 ## Where the protocol lives (DA-8)
 

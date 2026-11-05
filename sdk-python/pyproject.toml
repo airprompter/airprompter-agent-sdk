@@ -1,6 +1,6 @@
-# The Python SDK workspace (S10): five distributions under packages/, one version, released in lockstep —
-# airprompter-agent-core, -sync, -runtime, -telemetry and the facade airprompter-agent. This file holds the tooling
-# only; each package has its own pyproject.toml. Install for development with `python tools/install_dev.py`.
+# The Python SDK workspace: five distributions under packages/, one version, released in lockstep: airprompter-agent,
+# airprompter-agent-otel and the three airprompter-datastore-* adapters. This file holds the tooling only; each package
+# has its own pyproject.toml. Install for development with `python tools/install_dev.py`.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

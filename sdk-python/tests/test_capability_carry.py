@@ -16,22 +16,22 @@ import httpx
 import pytest
 
 from airprompter_agent.agent import AgentStartError, AirPrompterAgent, ApplyOptions, GoldenOptions, RenderRefusedError, SyncOptions, VendoredBundle
-from airprompter_agent_core._util import b64url_encode, iso_ms, now_ms
-from airprompter_agent_core.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle, open_bundle
-from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
-from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_core.protocol import assignment
-from airprompter_agent_core.protocol.canonical_json import canonical_bytes, sha256_prefixed
-from airprompter_agent_core.protocol.trust import carried_payloads, experiment_conflict, optional_payloads, public_jwk_of, referenced_payloads, release_digest, slot_hashes, trusted_root_from_pinned_key, verify_manifest
-from airprompter_agent_core.release.bundle_release import BundleRelease, BundleReleaseRefused
-from airprompter_agent_core.render.run_ref import parse_run_ref, run_ref_key_from
-from airprompter_agent_runtime.managed import ManagedAgent, ManagedRunError
-from airprompter_agent_runtime.observe import ObserveTarget, observe_call, observe_call_async
-from airprompter_agent_sync import pull_bundle
-from airprompter_agent_sync.store.key_provider import file_key
-from airprompter_agent_sync.store.payload_crypto import encrypt_payload, payload_aad
-from airprompter_agent_sync.store.slot_store import SlotStore, StoreError
-from airprompter_agent_sync.sync.loop import sync_once
+from airprompter_agent.core._util import b64url_encode, iso_ms, now_ms
+from airprompter_agent.core.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle, open_bundle
+from airprompter_agent.core.bundle.hpke import generate_x25519_key_pair
+from airprompter_agent.core.control.client import SyncClient
+from airprompter_agent.core.protocol import assignment
+from airprompter_agent.core.protocol.canonical_json import canonical_bytes, sha256_prefixed
+from airprompter_agent.core.protocol.trust import carried_payloads, experiment_conflict, optional_payloads, public_jwk_of, referenced_payloads, release_digest, slot_hashes, trusted_root_from_pinned_key, verify_manifest
+from airprompter_agent.core.release.bundle_release import BundleRelease, BundleReleaseRefused
+from airprompter_agent.core.render.run_ref import parse_run_ref, run_ref_key_from
+from airprompter_agent.runtime.managed import ManagedAgent, ManagedRunError
+from airprompter_agent.runtime.observe import ObserveTarget, observe_call, observe_call_async
+from airprompter_agent.sync import pull_bundle
+from airprompter_agent.sync.store.key_provider import file_key
+from airprompter_agent.sync.store.payload_crypto import encrypt_payload, payload_aad
+from airprompter_agent.sync.store.slot_store import SlotStore, StoreError
+from airprompter_agent.sync.sync.loop import sync_once
 
 from .control_plane import FakeControlPlane, new_key
 

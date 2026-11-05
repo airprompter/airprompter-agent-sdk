@@ -15,16 +15,16 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent, SPOOL_DIR_ENV, isAgentStartError, type StartOptions } from "../packages/sdk/src/agent.js";
-import { generateX25519KeyPair } from "../packages/core/src/bundle/hpke.js";
-import { SyncClient } from "../packages/core/src/control/client.js";
-import { publicJwkOf, trustedRootFromPinnedKey } from "../packages/core/src/protocol/trust.js";
-import { SlotStore } from "../packages/sync/src/store/slotStore.js";
-import { MemoryReleaseDatastore } from "../packages/sync/src/store/releaseDatastore.js";
-import { pullToDatastore } from "../packages/sync/src/sync/pullToDatastore.js";
-import { DirectorySink, epochMinute, segmentName, SpoolWriter, type SpoolRow } from "../packages/telemetry/src/spool/writer.js";
-import { MANIFEST_GRACE_MS, manifestNameOf, readSegmentManifest, sha256Hex, writeDaemonDiscovery, writeSegmentManifest, type DaemonDiscovery } from "../packages/telemetry/src/spool/manifest.js";
-import { SpoolUploader, type GrantDecision } from "../packages/telemetry/src/uploader.js";
-import { nodeFs } from "../packages/core/src/index.js";
+import { generateX25519KeyPair } from "../packages/sdk/src/core/bundle/hpke.js";
+import { SyncClient } from "../packages/sdk/src/core/control/client.js";
+import { publicJwkOf, trustedRootFromPinnedKey } from "../packages/sdk/src/core/protocol/trust.js";
+import { SlotStore } from "../packages/sdk/src/sync/store/slotStore.js";
+import { MemoryReleaseDatastore } from "../packages/sdk/src/sync/store/releaseDatastore.js";
+import { pullToDatastore } from "../packages/sdk/src/sync/sync/pullToDatastore.js";
+import { DirectorySink, epochMinute, segmentName, SpoolWriter, type SpoolRow } from "../packages/sdk/src/telemetry/spool/writer.js";
+import { MANIFEST_GRACE_MS, manifestNameOf, readSegmentManifest, sha256Hex, writeDaemonDiscovery, writeSegmentManifest, type DaemonDiscovery } from "../packages/sdk/src/telemetry/spool/manifest.js";
+import { SpoolUploader, type GrantDecision } from "../packages/sdk/src/telemetry/uploader.js";
+import { nodeFs } from "../packages/sdk/src/core/index.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const scope: { organizationId: string; agentId: string; target: "dev" | "staging" | "prod" } = { organizationId: "org_1", agentId: "agt_1", target: "prod" };

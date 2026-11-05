@@ -1,0 +1,64 @@
+{
+  "name": "@airprompter/agent-otel",
+  "version": "0.6.0",
+  "description": "The AirPrompter agent SDK's telemetry spool as an OpenTelemetry exporter: minute windows become OTLP metrics (gen_ai.client.operation.duration, tokens, checks, feedback, refusals) shipped to the collector you already run, with no AirPrompter grant at all. An UploadSink for the uploader in @airprompter/agent-sdk/telemetry, in airprompterd or in-process.",
+  "keywords": [
+    "airprompter",
+    "prompts",
+    "llm",
+    "agent",
+    "opentelemetry",
+    "otlp",
+    "metrics"
+  ],
+  "homepage": "https://github.com/airprompter/airprompter-agent-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/airprompter/airprompter-agent-sdk/issues"
+  },
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/airprompter/airprompter-agent-sdk",
+    "directory": "sdk-typescript/packages/agent-otel"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./exporter": {
+      "types": "./dist/esm/exporter/index.d.ts",
+      "import": "./dist/esm/exporter/index.js",
+      "require": "./dist/cjs/exporter/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/.tsbuildinfo",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\""
+  },
+  "airprompter": {
+    "sizeBudgetBytes": 80000
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "typesVersions": {
+    "*": {
+      "exporter": [
+        "dist/esm/exporter/index.d.ts"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@airprompter/agent-sdk": "0.6.0"
+  },
+  "devDependencies": {
+    "@airprompter/agent-sdk": "0.6.0"
+  }
+}

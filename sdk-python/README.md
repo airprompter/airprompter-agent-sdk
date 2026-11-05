@@ -17,28 +17,41 @@ pip install airprompter-agent            # + [openai] [anthropic] [litellm] [kms
 
 ## Packages
 
-Install what you use. The SDK is five distributions released in lockstep
-(one version; the facade exact-pins its siblings), mirroring the
-TypeScript packages one for one:
+One install. Everything below is in the one distribution; you import the part
+you use. The tree mirrors the TypeScript SDK's subpaths.
 
-| Distribution | Import package | Install it alone when | Depends on |
-| --- | --- | --- | --- |
-| `airprompter-agent-core` | `airprompter_agent_core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane client, the port protocols. Nothing here opens a file, a socket or a thread at import. The CI kit is `airprompter_agent_core.testing`. | — |
-| `airprompter-agent-sync` | `airprompter_agent_sync` | Your CI pulls and verifies releases (`sync_once`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). Key providers are its extras: `[kms]`, `[vault]`, `[keyring]`. | core |
-| `airprompter-agent-runtime` | `airprompter_agent_runtime` | Your application renders and assigns over a release **it already holds** — a bundle you loaded, a release from the store or a datastore row — with no store or network of its own (`BundleRelease` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`); the hosted-execution client (`ManagedAgent`). | core |
-| `airprompter-agent-telemetry` | `airprompter_agent_telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`); `airprompter_agent_telemetry.otel` sends the windows to your OpenTelemetry collector instead (`OtlpUploadSink`, `spool_rows_to_otlp`) — no grant, no Agent key. | core |
-| `airprompter-agent` | `airprompter_agent` | One install with today's `AirPrompterAgent`: the facade over the four, every public name re-exported, `airprompter_agent.integrations.*` for the openai / anthropic / LiteLLM clients. | all four |
+```bash
+pip install airprompter-agent
+```
 
-The direction is fixed and linted (`tools/lint_imports.py`): core imports
-nothing of ours; the three clients import core and never each other; the
-facade imports the clients. `tests/test_package_split.py` pins the edge
-set and proves the runtime alone renders over a bundle — the same vectors
-as the TypeScript `packageSplit.test.ts`.
+| Import | Use it when |
+| --- | --- |
+| `airprompter_agent` | `AirPrompterAgent`, its options and results, and the names the layers below export. `airprompter_agent.integrations.*` holds the openai, anthropic and LiteLLM clients. |
+| `airprompter_agent.core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane client, the port protocols. The CI kit is `airprompter_agent.core.testing`. |
+| `airprompter_agent.sync` | Your CI pulls and verifies releases (`sync_once`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). Key providers are extras: `[kms]`, `[vault]`, `[keyring]`. |
+| `airprompter_agent.runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `.core` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`); the hosted-execution client (`ManagedAgent`). |
+| `airprompter_agent.telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
+
+Beside it, separate distributions only where a dependency footprint earns one.
+Each pins `airprompter-agent` to the same version, so an environment holds one
+copy:
+
+| Distribution | Use it when |
+| --- | --- |
+| `airprompter-agent-otel` | Your OpenTelemetry collector takes the windows instead of AirPrompter: `airprompter_agent_otel.exporter` (`OtlpUploadSink`, `spool_rows_to_otlp`), no grant, no Agent key. |
+| `airprompter-datastore-s3`, `-postgres`, `-redis` | Your own datastore carries releases to your runtimes. |
+
+The direction is fixed and linted (`tools/lint_imports.py`): `core` imports
+nothing of ours; `sync`, `runtime` and `telemetry` import `core` and never each
+other; the agent imports those; a layer is reached only through its package,
+never one of its modules. `tests/test_package_shape.py` pins the edge set and
+proves the runtime renders over a bundle with no agent: the same vectors as the
+TypeScript `packageShape.test.ts`.
 
 ```python
-# The runtime alone, over a bundle committed beside the code: no store, no daemon, no network.
-from airprompter_agent_core import BundleRelease, trusted_root_from_pinned_key
-from airprompter_agent_runtime import ReleaseResolver
+# The runtime over a bundle committed beside the code: no store, no daemon, no network.
+from airprompter_agent.core import BundleRelease, trusted_root_from_pinned_key
+from airprompter_agent.runtime import ReleaseResolver
 
 root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=PINNED_ROOT_JWK)
 loaded = BundleRelease.load(bundle=json.load(open("release.apbundle")), root=root, scope=scope, now=now_iso())  # raises BundleReleaseRefused
@@ -48,10 +61,9 @@ if outcome.ok:
     r = runtime.render(outcome.slot, {"team": "Billing", "ticket": ticket_text})  # Rendered(text, model, version_id, arm, generation, run_ref, tag)
 ```
 
-Development: `python tools/install_dev.py` installs the five editable in
-dependency order; `python tools/build_all.py` builds every sdist and wheel
-into one `dist/`; `python tools/version_lockstep.py --set X.Y.Z` bumps them
-together.
+Development: `python tools/install_dev.py` installs the five distributions
+editable; `python tools/build_all.py` builds every sdist and wheel into one
+`dist/`; `python tools/version_lockstep.py --set X.Y.Z` bumps them together.
 
 ## Quick start
 
@@ -346,7 +358,7 @@ callback sees a call after the fact, so pass
 `**litellm_inference(rendered)` to `litellm.completion` (OpenAI chat
 names). Instrumentation that calls a provider itself uses
 `apply_inference(kind, params, inference, model=…)` (exported from
-`airprompter_agent_runtime` and `airprompter_agent`); a golden-set `invoke`
+`airprompter_agent.runtime` and `airprompter_agent`); a golden-set `invoke`
 receives `inference` so the activation gate samples as production does.
 
 **Which render a call belongs to.** In order: an enclosing

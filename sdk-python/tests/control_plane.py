@@ -13,10 +13,10 @@ from typing import Any, Callable, Optional
 
 import httpx
 
-from airprompter_agent_core._util import instant, iso_ms, now_ms
-from airprompter_agent_core.protocol.canonical_json import canonical_bytes, sha256_prefixed
-from airprompter_agent_core.protocol import PROTOCOL_VERSION
-from airprompter_agent_core.protocol.trust import generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
+from airprompter_agent.core._util import instant, iso_ms, now_ms
+from airprompter_agent.core.protocol.canonical_json import canonical_bytes, sha256_prefixed
+from airprompter_agent.core.protocol import PROTOCOL_VERSION
+from airprompter_agent.core.protocol.trust import generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
 
 PROTOCOL = PROTOCOL_VERSION
 

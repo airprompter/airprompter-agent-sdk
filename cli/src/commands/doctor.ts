@@ -20,14 +20,14 @@
 import { accessSync, constants as fsConstants, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { SyncClient } from "../../../sdk-typescript/packages/core/src/control/client.js";
-import { instant } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
-import { SlotStore, isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { fileKey } from "../../../sdk-typescript/packages/sync/src/store/keyProvider.js";
-import { nodeFs } from "../../../sdk-typescript/packages/core/src/ports/node.js";
-import { readDaemonDiscovery } from "../../../sdk-typescript/packages/telemetry/src/spool/manifest.js";
-import { HOST_SPOOL_BUDGET_BYTES } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
-import { LAST_UPLOAD_MARKER } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
+import { SyncClient } from "../../../sdk-typescript/packages/sdk/src/core/control/client.js";
+import { instant } from "../../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
+import { SlotStore, isStoreError } from "../../../sdk-typescript/packages/sdk/src/sync/store/slotStore.js";
+import { fileKey } from "../../../sdk-typescript/packages/sdk/src/sync/store/keyProvider.js";
+import { nodeFs } from "../../../sdk-typescript/packages/sdk/src/core/ports/node.js";
+import { readDaemonDiscovery } from "../../../sdk-typescript/packages/sdk/src/telemetry/spool/manifest.js";
+import { HOST_SPOOL_BUDGET_BYTES } from "../../../sdk-typescript/packages/sdk/src/telemetry/spool/writer.js";
+import { LAST_UPLOAD_MARKER } from "../../../sdk-typescript/packages/sdk/src/telemetry/uploader.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, hostedEnvironmentOf, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { summarizeManifest } from "../chain.js";
 import { EXIT, Output, usage, type Context } from "../io.js";

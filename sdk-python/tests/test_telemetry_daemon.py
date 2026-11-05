@@ -24,17 +24,17 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import SPOOL_DIR_ENV, SyncOptions, TelemetryOptions
-from airprompter_agent_core._util import iso_ms
-from airprompter_agent_core.bundle.apbundle import DistributionKey
-from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
-from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_core.ports import fs_or_default
-from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key
-from airprompter_agent_sync import MemoryReleaseDatastore, pull_to_datastore
-from airprompter_agent_sync.store.slot_store import SlotStore
-from airprompter_agent_telemetry.spool.manifest import MANIFEST_GRACE_MS, manifest_name_of, read_segment_manifest, sha256_hex, write_daemon_discovery, write_segment_manifest
-from airprompter_agent_telemetry.spool.writer import DirectorySink, Observation, SpoolWriter, WriterIdentity, epoch_minute, segment_name
-from airprompter_agent_telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant
+from airprompter_agent.core._util import iso_ms
+from airprompter_agent.core.bundle.apbundle import DistributionKey
+from airprompter_agent.core.bundle.hpke import generate_x25519_key_pair
+from airprompter_agent.core.control.client import SyncClient
+from airprompter_agent.core.ports import fs_or_default
+from airprompter_agent.core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key
+from airprompter_agent.sync import MemoryReleaseDatastore, pull_to_datastore
+from airprompter_agent.sync.store.slot_store import SlotStore
+from airprompter_agent.telemetry.spool.manifest import MANIFEST_GRACE_MS, manifest_name_of, read_segment_manifest, sha256_hex, write_daemon_discovery, write_segment_manifest
+from airprompter_agent.telemetry.spool.writer import DirectorySink, Observation, SpoolWriter, WriterIdentity, epoch_minute, segment_name
+from airprompter_agent.telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant
 
 from .control_plane import FakeControlPlane
 

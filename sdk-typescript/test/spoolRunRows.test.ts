@@ -10,9 +10,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { spoolRowsToOtlp } from "../packages/otel-bridge/src/mapping.js";
-import { LATENCY_BUCKET_EDGES_MS, MemorySink, SpoolWriter, latencyBucketIndex, type RunTotals, type SpoolRow, type StepRow, type StepTotals, type WindowRow } from "../packages/telemetry/src/spool/writer.js";
-import { inspectSegment, validateSpoolRow } from "../packages/telemetry/src/uploader.js";
+import { spoolRowsToOtlp } from "../packages/agent-otel/src/exporter/mapping.js";
+import { LATENCY_BUCKET_EDGES_MS, MemorySink, SpoolWriter, latencyBucketIndex, type RunTotals, type SpoolRow, type StepRow, type StepTotals, type WindowRow } from "../packages/sdk/src/telemetry/spool/writer.js";
+import { inspectSegment, validateSpoolRow } from "../packages/sdk/src/telemetry/uploader.js";
 
 const T0 = Date.parse("2026-09-12T14:03:10Z");
 const identity = { instanceId: "i-testinstance", instanceClass: "resident" as const, sdk: "t/0" };

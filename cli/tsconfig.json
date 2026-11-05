@@ -20,26 +20,26 @@
     "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
-      "@airprompter/agent-core": [
-        "../sdk-typescript/packages/core/src/index.ts"
-      ],
-      "@airprompter/agent-core/testing": [
-        "../sdk-typescript/packages/core/src/testing/index.ts"
-      ],
-      "@airprompter/agent-sync": [
-        "../sdk-typescript/packages/sync/src/index.ts"
-      ],
-      "@airprompter/agent-runtime": [
-        "../sdk-typescript/packages/runtime/src/index.ts"
-      ],
-      "@airprompter/agent-telemetry": [
-        "../sdk-typescript/packages/telemetry/src/index.ts"
-      ],
       "@airprompter/agent-sdk": [
         "../sdk-typescript/packages/sdk/src/index.ts"
       ],
-      "@airprompter/otel-bridge": [
-        "../sdk-typescript/packages/otel-bridge/src/index.ts"
+      "@airprompter/agent-sdk/core": [
+        "../sdk-typescript/packages/sdk/src/core/index.ts"
+      ],
+      "@airprompter/agent-sdk/sync": [
+        "../sdk-typescript/packages/sdk/src/sync/index.ts"
+      ],
+      "@airprompter/agent-sdk/runtime": [
+        "../sdk-typescript/packages/sdk/src/runtime/index.ts"
+      ],
+      "@airprompter/agent-sdk/telemetry": [
+        "../sdk-typescript/packages/sdk/src/telemetry/index.ts"
+      ],
+      "@airprompter/agent-sdk/testing": [
+        "../sdk-typescript/packages/sdk/src/testing.ts"
+      ],
+      "@airprompter/agent-otel/exporter": [
+        "../sdk-typescript/packages/agent-otel/src/exporter/index.ts"
       ]
     }
   },

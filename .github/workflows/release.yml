@@ -5,15 +5,13 @@
 #   protocol/vX.Y.Z        protocol tag — CI conformance only (ci.yml); the
 #                          protocol is consumed by pinning the tag, not by a
 #                          package.
-#   sdk-typescript/vX.Y.Z  npm publish of the nine packages (core, sync,
-#                          runtime, telemetry, otel-bridge, the three
-#                          datastore adapters, sdk) from one tag, in
-#                          dependency order, each with provenance (OIDC; no
+#   sdk-typescript/vX.Y.Z  npm publish of the five packages (agent-sdk,
+#                          agent-otel, the three datastore adapters) from one
+#                          tag, the SDK first, each with provenance (OIDC; no
 #                          npm token in the repository — trusted publishing
-#                          on npmjs.com must be configured for every
-#                          @airprompter/agent-* package,
-#                          @airprompter/otel-bridge and every
-#                          @airprompter/datastore-* package). npm registers a
+#                          on npmjs.com must be configured for
+#                          @airprompter/agent-sdk, @airprompter/agent-otel and
+#                          every @airprompter/datastore-* package). npm registers a
 #                          trusted publisher only on a package that already
 #                          exists: a NEW package's first version is published
 #                          once by hand (`npm publish --access public` from
@@ -22,9 +20,8 @@
 #                          pushed — this job skips any version already on
 #                          the registry, so the hand-published one is left
 #                          as it is.
-#   sdk-python/vX.Y.Z      PyPI trusted publishing of the eight distributions
-#                          (airprompter-agent-core, -sync, -runtime,
-#                          -telemetry, airprompter-agent, and
+#   sdk-python/vX.Y.Z      PyPI trusted publishing of the five distributions
+#                          (airprompter-agent, airprompter-agent-otel, and
 #                          airprompter-datastore-s3, -postgres, -redis) from
 #                          one tag; each needs a trusted publisher on PyPI.
 #   cli/vX.Y.Z             single-file executables for linux/macos/windows,
@@ -124,7 +121,7 @@ jobs:
           generate_release_notes: true
 
   npm:
-    name: Publish @airprompter/* (nine packages, one tag)
+    name: Publish @airprompter/* (five packages, one tag)
     if: startsWith(github.ref, 'refs/tags/sdk-typescript/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -160,24 +157,23 @@ jobs:
           path: sdk-typescript
           format: spdx-json
           output-file: agent-sdk.spdx.json
-      - name: Publish with provenance, in dependency order
-        # core first: a sibling's exact pin must resolve on the registry before the sibling is published.
+      - name: Publish with provenance, the SDK first
+        # The SDK first: a satellite's exact peer pin must resolve on the registry before the satellite is published.
         # A version already on the registry is skipped, so a run that failed part-way can be re-run: without it the
         # re-run dies on the first package it already published, and the rest of the version can never go out.
         run: |
+          v=$(node -p "require('./packages/sdk/package.json').version")
           publish() {
-            v=$(node -p "require('./packages/$2/package.json').version")
             if npm view "$1@$v" version >/dev/null 2>&1; then
               echo "$1@$v is already on the registry; skipped"
             else
               npm publish --provenance --access public --workspace "$1"
             fi
           }
-          for name in core sync runtime telemetry sdk; do publish "@airprompter/agent-$name" "$name"; done
-          # S13: the bridge is optional and pins core; it goes out after core, whatever its position.
-          publish "@airprompter/otel-bridge" otel-bridge
-          # T40: the datastore adapters are optional and pin sync; they go out after it.
-          for adapter in s3 postgres redis; do publish "@airprompter/datastore-$adapter" "datastore-$adapter"; done
+          publish "@airprompter/agent-sdk"
+          # Optional and peer on the SDK; they go out after it.
+          publish "@airprompter/agent-otel"
+          for adapter in s3 postgres redis; do publish "@airprompter/datastore-$adapter"; done
         working-directory: sdk-typescript
       - uses: softprops/action-gh-release@v2
         with:
@@ -185,7 +181,7 @@ jobs:
           generate_release_notes: true
 
   pypi:
-    name: Publish airprompter-agent-* and airprompter-datastore-* (eight distributions, one tag)
+    name: Publish airprompter-agent, -agent-otel and airprompter-datastore-* (five distributions, one tag)
     if: startsWith(github.ref, 'refs/tags/sdk-python/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -199,7 +195,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install build
-      - name: Build every distribution into one dist/ (core, sync, runtime, telemetry, agent, the three datastore adapters)
+      - name: Build every distribution into one dist/ (agent, agent-otel, the three datastore adapters)
         run: python tools/build_all.py
         working-directory: sdk-python
       - name: Tag matches every pyproject version (one version, lockstep)

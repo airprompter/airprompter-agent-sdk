@@ -8,11 +8,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, SpoolWriter, type SpoolRow } from "../packages/telemetry/src/spool/writer.js";
-import { SlotStore } from "../packages/sync/src/store/slotStore.js";
-import { customKeyProvider } from "../packages/sync/src/store/keyProvider.js";
-import { SpoolUploader } from "../packages/telemetry/src/uploader.js";
-import { FakeClock, MemoryFs } from "../packages/core/src/testing/index.js";
+import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, SpoolWriter, type SpoolRow } from "../packages/sdk/src/telemetry/spool/writer.js";
+import { SlotStore } from "../packages/sdk/src/sync/store/slotStore.js";
+import { customKeyProvider } from "../packages/sdk/src/sync/store/keyProvider.js";
+import { SpoolUploader } from "../packages/sdk/src/telemetry/uploader.js";
+import { FakeClock, MemoryFs } from "../packages/sdk/src/core/testing/index.js";
 
 const DIR = "/state/airprompter/agt_1/prod/spool/telemetry";
 const MINUTE = Date.UTC(2026, 8, 13, 12, 0, 0);

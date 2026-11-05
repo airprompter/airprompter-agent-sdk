@@ -9,12 +9,12 @@
 
 import { createRequire } from "node:module";
 
-import { generateX25519KeyPair } from "../../../sdk-typescript/packages/core/src/bundle/hpke.js";
-import { SyncClient } from "../../../sdk-typescript/packages/core/src/control/client.js";
-import { publicJwkOf, trustedRootFromPinnedKey } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
-import { fsKvStore, type KvStore } from "../../../sdk-typescript/packages/sync/src/store/kvStore.js";
-import { kvReleaseDatastore, rollbackDatastore } from "../../../sdk-typescript/packages/sync/src/store/releaseDatastore.js";
-import { pullToDatastore } from "../../../sdk-typescript/packages/sync/src/sync/pullToDatastore.js";
+import { generateX25519KeyPair } from "../../../sdk-typescript/packages/sdk/src/core/bundle/hpke.js";
+import { SyncClient } from "../../../sdk-typescript/packages/sdk/src/core/control/client.js";
+import { publicJwkOf, trustedRootFromPinnedKey } from "../../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
+import { fsKvStore, type KvStore } from "../../../sdk-typescript/packages/sdk/src/sync/store/kvStore.js";
+import { kvReleaseDatastore, rollbackDatastore } from "../../../sdk-typescript/packages/sdk/src/sync/store/releaseDatastore.js";
+import { pullToDatastore } from "../../../sdk-typescript/packages/sdk/src/sync/sync/pullToDatastore.js";
 import { postgresKvStore } from "../../../sdk-typescript/packages/datastore-postgres/src/index.js";
 import { fromNodeRedis, redisKvStore } from "../../../sdk-typescript/packages/datastore-redis/src/index.js";
 import { s3KvStore } from "../../../sdk-typescript/packages/datastore-s3/src/index.js";

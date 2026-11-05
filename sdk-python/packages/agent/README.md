@@ -1,11 +1,9 @@
 # airprompter-agent
 
-One install, today's `AirPrompterAgent`: the facade over
-`airprompter-agent-core`, `-sync`, `-runtime` and `-telemetry` — signed
-pull-only updates, the encrypted restart-safe slot store, offline
-operation, rendering with trust-aware variables, `ap.wrap()` for the
-openai and anthropic clients (and a LiteLLM callback), content-free
-telemetry. Every public name of the four distributions is re-exported.
+One install for `AirPrompterAgent`: signed pull-only updates, the encrypted
+restart-safe slot store, offline operation, rendering with trust-aware
+variables, `ap.wrap()` for the openai and anthropic clients (and a LiteLLM
+callback), and content-free telemetry.
 
 ```python
 from airprompter_agent import AirPrompterAgent
@@ -16,10 +14,15 @@ completion = ap.observe(rendered, lambda: client.chat.completions.create(model=r
 ap.feedback(rendered.run_ref, thumbs="up")
 ```
 
-One of five distributions released in lockstep — `airprompter-agent-core`,
-`-sync`, `-runtime`, `-telemetry` and the facade `airprompter-agent` — one
-version, exact-pinned siblings, mirroring the TypeScript packages one for
-one. The full README and the parity matrix are in
+The parts are subpackages: `airprompter_agent.core` (the protocol with no I/O),
+`.sync` (pull and verify, the encrypted slot store, the apply policy), `.runtime`
+(render and assign over a release you hold, the provider wrappers) and
+`.telemetry` (the spool and its uploader). Extras: `[kms]`, `[vault]`, `[keyring]`,
+`[openai]`, `[anthropic]`, `[litellm]`.
+
+Separate distributions exist only for dependency footprint and pin this one to
+the same version: `airprompter-agent-otel`, `airprompter-datastore-s3`, `-postgres`
+and `-redis`. The full README and the parity matrix are in
 [`sdk-python/README.md`](https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-python);
 the protocol is in [`protocol/`](https://github.com/airprompter/airprompter-agent-sdk/tree/main/protocol).
 BSD-3-Clause.

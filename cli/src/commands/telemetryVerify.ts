@@ -23,9 +23,9 @@
 
 import { join } from "node:path";
 
-import { epochMinute, segmentName, SEGMENT_MAX_BYTES, type SpoolRow } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
-import { EXPORTED_CAP_BYTES, QUARANTINE_CAP_BYTES, SEGMENT_NAME, SpoolUploader } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
-import { MemoryFs } from "../../../sdk-typescript/packages/core/src/testing/memoryFs.js";
+import { epochMinute, segmentName, SEGMENT_MAX_BYTES, type SpoolRow } from "../../../sdk-typescript/packages/sdk/src/telemetry/spool/writer.js";
+import { EXPORTED_CAP_BYTES, QUARANTINE_CAP_BYTES, SEGMENT_NAME, SpoolUploader } from "../../../sdk-typescript/packages/sdk/src/telemetry/uploader.js";
+import { MemoryFs } from "../../../sdk-typescript/packages/sdk/src/core/testing/memoryFs.js";
 import { COMMON_OPTIONS, flag, helpFor, parse, str, type OptionSpec } from "../args.js";
 import { CliError, EXIT, Output, type Context } from "../io.js";
 

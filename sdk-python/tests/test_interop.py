@@ -19,9 +19,9 @@ import tempfile
 import pytest
 
 from airprompter_agent.agent import AirPrompterAgent
-from airprompter_agent_core.render.run_ref import parse_run_ref
-from airprompter_agent_telemetry.spool.writer import epoch_minute
-from airprompter_agent_core._util import instant
+from airprompter_agent.core.render.run_ref import parse_run_ref
+from airprompter_agent.telemetry.spool.writer import epoch_minute
+from airprompter_agent.core._util import instant
 
 HERE = os.path.dirname(__file__)
 TS_DIR = os.path.abspath(os.path.join(HERE, "..", "..", "sdk-typescript"))
@@ -78,7 +78,7 @@ def _datastore_backends(tmp_dir: str) -> list[tuple[str, str]]:
 def _python_kv(name: str, tmp_dir: str):
     """The Python adapter for the backend the TypeScript adapter wrote: the same table, keys, hashes or objects."""
     if name == "file":
-        from airprompter_agent_sync import FileKvStore
+        from airprompter_agent.sync import FileKvStore
 
         return FileKvStore(tmp_dir), lambda: None
     if name == "postgres":
@@ -106,9 +106,9 @@ def test_datastore_written_by_typescript_hydrates_here_through_every_adapter():
     through the Python adapter for the same backend — the shared format and each adapter's layout, end to end."""
     import base64
 
-    from airprompter_agent_core.bundle.apbundle import DistributionKey
-    from airprompter_agent_core.bundle.hpke import x25519_private_key_from_raw
-    from airprompter_agent_sync import ReleaseKey, clear_datastore_rollback, kv_release_datastore
+    from airprompter_agent.core.bundle.apbundle import DistributionKey
+    from airprompter_agent.core.bundle.hpke import x25519_private_key_from_raw
+    from airprompter_agent.sync import ReleaseKey, clear_datastore_rollback, kv_release_datastore
 
     fixture = os.path.join(HERE, "interop", "write_ts_datastore.mts")
     tmp_dir = tempfile.mkdtemp(prefix="ap-interop-ds-")

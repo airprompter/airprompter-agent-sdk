@@ -12,7 +12,7 @@
  * @example
  * ```ts
  * import { S3Client } from "@aws-sdk/client-s3";
- * import { kvReleaseDatastore } from "@airprompter/agent-sdk";
+ * import { kvReleaseDatastore } from "@airprompter/agent-sdk/sync";
  * import { s3KvStore } from "@airprompter/datastore-s3";
  *
  * const kv = s3KvStore({ client: new S3Client({ region: "eu-west-1" }), bucket: "acme-airprompter-releases" });
@@ -21,7 +21,7 @@
  */
 
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
-import type { KvEntry, KvPutCondition, KvStore } from "@airprompter/agent-sync";
+import type { KvEntry, KvPutCondition, KvStore } from "@airprompter/agent-sdk/sync";
 
 export interface S3KvStoreOptions {
   /** A configured client (credentials, region, endpoint). Anything with `S3Client#send` works. */

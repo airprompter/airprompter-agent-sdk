@@ -1,7 +1,7 @@
 {
   "name": "@airprompter/agent-sdk",
   "version": "0.6.0",
-  "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry.",
+  "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. One package: the agent at the root, its parts behind the subpaths /core, /sync, /runtime and /telemetry, the CI kit at /testing, framework adapters under /frameworks.",
   "keywords": [
     "airprompter",
     "prompts",
@@ -36,6 +36,26 @@
       "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.js"
     },
+    "./core": {
+      "types": "./dist/esm/core/index.d.ts",
+      "import": "./dist/esm/core/index.js",
+      "require": "./dist/cjs/core/index.js"
+    },
+    "./sync": {
+      "types": "./dist/esm/sync/index.d.ts",
+      "import": "./dist/esm/sync/index.js",
+      "require": "./dist/cjs/sync/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/esm/runtime/index.d.ts",
+      "import": "./dist/esm/runtime/index.js",
+      "require": "./dist/cjs/runtime/index.js"
+    },
+    "./telemetry": {
+      "types": "./dist/esm/telemetry/index.d.ts",
+      "import": "./dist/esm/telemetry/index.js",
+      "require": "./dist/cjs/telemetry/index.js"
+    },
     "./testing": {
       "types": "./dist/esm/testing.d.ts",
       "import": "./dist/esm/testing.js",
@@ -45,6 +65,28 @@
       "types": "./dist/esm/frameworks/langchain.d.ts",
       "import": "./dist/esm/frameworks/langchain.js",
       "require": "./dist/cjs/frameworks/langchain.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "core": [
+        "dist/esm/core/index.d.ts"
+      ],
+      "sync": [
+        "dist/esm/sync/index.d.ts"
+      ],
+      "runtime": [
+        "dist/esm/runtime/index.d.ts"
+      ],
+      "telemetry": [
+        "dist/esm/telemetry/index.d.ts"
+      ],
+      "testing": [
+        "dist/esm/testing.d.ts"
+      ],
+      "frameworks/langchain": [
+        "dist/esm/frameworks/langchain.d.ts"
+      ]
     }
   },
   "files": [
@@ -57,17 +99,19 @@
     "build": "rm -rf dist && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json', JSON.stringify({type:'commonjs'}))\""
   },
   "airprompter": {
-    "sizeBudgetBytes": 295000
+    "sizeBudgetBytes": {
+      ".": 265000,
+      "./core": 315000,
+      "./sync": 220000,
+      "./runtime": 215000,
+      "./telemetry": 187000,
+      "./testing": 85000,
+      "./frameworks/langchain": 30000
+    }
   },
   "publishConfig": {
     "access": "public",
     "provenance": true
-  },
-  "dependencies": {
-    "@airprompter/agent-core": "0.6.0",
-    "@airprompter/agent-sync": "0.6.0",
-    "@airprompter/agent-runtime": "0.6.0",
-    "@airprompter/agent-telemetry": "0.6.0"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.40",

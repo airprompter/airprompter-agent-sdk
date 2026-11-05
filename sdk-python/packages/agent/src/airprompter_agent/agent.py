@@ -41,41 +41,42 @@ from typing import Any, Awaitable, Callable, Mapping, Optional, Sequence, TypeVa
 
 import httpx
 
-from airprompter_agent_core._util import instant, iso_ms, now_ms, random_id
-from airprompter_agent_sync.apply.window import UpdateWindow, parse_window, window_state
-from airprompter_agent_core.bundle.apbundle import DistributionKey, bundle_payload_bytes, open_bundle
-from airprompter_agent_core.protocol.assignment import ramp_weights_at, servable_experiments, servable_slots
-from airprompter_agent_core.protocol.capabilities import SUPPORTED_CAPABILITIES
-from airprompter_agent_core.protocol.trust import AGENT_ID, TARGET_SLUG, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
-from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
-from airprompter_agent_runtime.wrap import WrapHooks, wrap_client
-from airprompter_agent_core.protocol.assignment import copy_audience_tags, valid_audience_label
-from airprompter_agent_core.render.run_ref import parse_run_ref, run_ref_key_from
-from airprompter_agent_core.render.template import Delimiters
-from airprompter_agent_core.telemetry.feedback import normalize_feedback
-from airprompter_agent_telemetry.spool.manifest import read_daemon_discovery
-from airprompter_agent_telemetry.spool.writer import DirectorySink, MemorySink, Observation, SpoolSink, SpoolWriter, WriterIdentity, epoch_minute, segment_name
-from airprompter_agent_sync.store.key_provider import KeyProvider, file_key
-from airprompter_agent_sync.store.slot_store import LoadedSlot, SlotStore, StoreError, StoreHooks
-from airprompter_agent_sync.store.release_datastore import HydrationPlan, ReleaseDatastore, ReleaseKey, resolve_hydration
-from airprompter_agent_sync.sync.loop import required_models_missing
-from airprompter_agent_telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant, post_segment
-from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_sync.sync.loop import jittered_delay_ms, sync_once
-from airprompter_agent_core.checks import evaluate_checks, output_text_of
-from airprompter_agent_core.golden import GoldenInvoke, GoldenReport, golden_reports_meet, manifest_has_golden, parse_golden_set, run_golden_set
-from airprompter_agent_core.judge import JUDGE_RUBRICS, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
-from airprompter_agent_runtime.observe import PendingObservation, ObserveTarget, observe_call, observe_call_async
-from airprompter_agent_core.release.reader import ReleaseSlot
-from airprompter_agent_runtime.release.resolver import ReleaseResolver, Rendered, Workflow, WorkflowStep, copy_inference, disabled_from
-from airprompter_agent_runtime.variables import FilledRender, FillPlan, VariableSourceContext, VariableSourceInput, VariableSourceRegistry, fill_async, fill_sync, is_variable_source_error, plan_fill, unsourced
+from airprompter_agent.core import instant
+from airprompter_agent.core._util import iso_ms, now_ms, random_id
+from airprompter_agent.sync import UpdateWindow, parse_window, window_state
+from airprompter_agent.core import DistributionKey, bundle_payload_bytes, open_bundle
+from airprompter_agent.core import ramp_weights_at, servable_experiments, servable_slots
+from airprompter_agent.core import SUPPORTED_CAPABILITIES
+from airprompter_agent.core import AGENT_ID, TARGET_SLUG, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
+from airprompter_agent.runtime import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
+from airprompter_agent.runtime import WrapHooks, wrap_client
+from airprompter_agent.core import copy_audience_tags, valid_audience_label
+from airprompter_agent.core import parse_run_ref, run_ref_key_from
+from airprompter_agent.core import Delimiters
+from airprompter_agent.core import normalize_feedback
+from airprompter_agent.telemetry import read_daemon_discovery
+from airprompter_agent.telemetry import DirectorySink, MemorySink, Observation, SpoolSink, SpoolWriter, WriterIdentity, epoch_minute, segment_name
+from airprompter_agent.sync import KeyProvider, file_key
+from airprompter_agent.sync import LoadedSlot, SlotStore, StoreError, StoreHooks
+from airprompter_agent.sync import HydrationPlan, ReleaseDatastore, ReleaseKey, resolve_hydration
+from airprompter_agent.sync import required_models_missing
+from airprompter_agent.telemetry import GrantDecision, SpoolUploader, UploadGrant, post_segment
+from airprompter_agent.core import SyncClient
+from airprompter_agent.sync import jittered_delay_ms, sync_once
+from airprompter_agent.core import evaluate_checks, output_text_of
+from airprompter_agent.core import GoldenInvoke, GoldenReport, golden_reports_meet, manifest_has_golden, parse_golden_set, run_golden_set
+from airprompter_agent.core import JUDGE_RUBRICS, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
+from airprompter_agent.runtime import PendingObservation, ObserveTarget, observe_call, observe_call_async
+from airprompter_agent.core import ReleaseSlot
+from airprompter_agent.runtime import ReleaseResolver, Rendered, Workflow, WorkflowStep, copy_inference, disabled_from
+from airprompter_agent.runtime import FilledRender, FillPlan, VariableSourceContext, VariableSourceInput, VariableSourceRegistry, fill_async, fill_sync, is_variable_source_error, plan_fill, unsourced
 
-from airprompter_agent_core import SDK_VERSION  # one constant, pinned to pyproject by tests/test_package_split.py
+from airprompter_agent.core import SDK_VERSION  # one source: the distribution's metadata (tests/test_package_shape.py)
 
 SDK_NAME = "agent-sdk-python"
 #: The protocol this SDK speaks; the heartbeat names it (the manifest carries its own). One constant, core's — a
 #: second copy here drifted a whole protocol bump behind it.
-from airprompter_agent_core import PROTOCOL_VERSION  # noqa: E402
+from airprompter_agent.core import PROTOCOL_VERSION  # noqa: E402
 # A vendored bundle this close to its notAfter logs vendored_bundle_expiring_soon at start (the platform warns at the same distance).
 VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30
 _USER_AGENT = f"{SDK_NAME}/{SDK_VERSION}"
@@ -150,7 +151,7 @@ class TelemetryOptions:
     #: explicit folder never moves; a discovered one is re-read once a minute (``protocol/daemon.md``).
     spool_dir: Optional[str] = None
     #: S13: where the uploader ships validated segments. ``None``: AirPrompter's sink (a grant per writer, a PUT to your prefix).
-    #: ``OtlpUploadSink(...)`` from ``airprompter_agent_telemetry.otel`` sends the windows to your OpenTelemetry collector
+    #: ``OtlpUploadSink(...)`` from ``airprompter_agent_otel.exporter`` sends the windows to your OpenTelemetry collector
     #: instead — no grant is ever requested — and a customer's own sink takes the same segments.
     upload_sink: Optional[Any] = None
     #: S5: serverless — ``invoke()`` flushes the invocation's rows before it returns (``"await"``, the default). ``"background"``
@@ -336,7 +337,7 @@ def _same_path(a: str, b: str) -> bool:
 
 
 def _default_fs() -> Any:
-    from airprompter_agent_core.ports import fs_or_default
+    from airprompter_agent.core import fs_or_default
 
     return fs_or_default(None)
 
@@ -1044,7 +1045,7 @@ class AirPrompterAgent:
         """S5: the telemetry daemon is an optimisation, never a requirement — a resident host with no live daemon uploads its own spool. The same
         uploader the daemon runs, in-process, on a timer off the request path: closed segments go out under this runtime's own
         grant, a failed pass backs off, and past the budget the oldest unsent segments are dropped and counted. Never blocks a render."""
-        # S13: a sink of the customer's own (the OpenTelemetry bridge) needs no client and no grant: it runs offline too.
+        # S13: a sink of the customer's own (the OpenTelemetry exporter) needs no client and no grant: it runs offline too.
         custom_sink = self._telemetry.upload_sink
         if self._uploader is not None or (custom_sink is None and self._client is None) or self._store is None or not self._telemetry.upload or self._stopped:
             return
@@ -1431,7 +1432,7 @@ class AirPrompterAgent:
         return self._resolver().disabled().as_dict()
 
     def _resolver(self) -> ReleaseResolver:
-        """S10: the runtime over the active release — resolution, the ramp walk and rendering live in ``airprompter_agent_runtime``."""
+        """S10: the runtime over the active release — resolution, the ramp walk and rendering live in ``airprompter_agent.runtime``."""
         release = self._active
         if release is None:
             if self._staged_manifest is not None:

@@ -19,7 +19,7 @@ release digests you consider private, or prompt text into an issue.
 - The protocol version the runtime reports (`ap.status().protocol`, `airprompter status`)
 - The output of `airprompter doctor` or `healthz()` — both are content-free
 - The smallest reproduction you can manage against the fake control plane in
-  `sdk-typescript/packages/core/src/testing/` or `sdk-python/tests/control_plane.py`
+  `sdk-typescript/packages/sdk/src/core/testing/` or `sdk-python/tests/control_plane.py`
 
 ## Response times
 

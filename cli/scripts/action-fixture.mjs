@@ -21,8 +21,8 @@ const sdk = (rel) => JSON.stringify(pathToFileURL(join(root, "..", "sdk-typescri
 const script = `
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createPlaintextBundle } from ${sdk("packages/core/src/bundle/apbundle.ts")};
-import { publicJwkOf } from ${sdk("packages/core/src/protocol/trust.ts")};
+import { createPlaintextBundle } from ${sdk("packages/sdk/src/core/bundle/apbundle.ts")};
+import { publicJwkOf } from ${sdk("packages/sdk/src/core/protocol/trust.ts")};
 import { FakeControlPlane } from ${sdk("test/helpers/controlPlane.ts")};
 const scope = { organizationId: "org_ci", agentId: "agt_ci", target: "prod" };
 const plane = new FakeControlPlane(scope);

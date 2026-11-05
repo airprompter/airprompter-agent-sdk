@@ -47,11 +47,14 @@
   "airprompter": {
     "sizeBudgetBytes": 30000
   },
-  "dependencies": {
-    "@airprompter/agent-sync": "0.6.0"
-  },
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "peerDependencies": {
+    "@airprompter/agent-sdk": "0.6.0"
+  },
+  "devDependencies": {
+    "@airprompter/agent-sdk": "0.6.0"
   }
 }

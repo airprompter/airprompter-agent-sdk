@@ -13,11 +13,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { generateX25519KeyPair } from "../packages/core/src/bundle/hpke.js";
-import { SyncClient } from "../packages/core/src/control/client.js";
-import { publicJwkOf, trustedRootFromPinnedKey, releaseDigest } from "../packages/core/src/protocol/trust.js";
-import { pullToDatastore } from "../packages/sync/src/sync/pullToDatastore.js";
-import { MemoryReleaseDatastore, clearDatastoreRollback, resolveHydration, rollbackDatastore, type ReleaseKey } from "../packages/sync/src/store/releaseDatastore.js";
+import { generateX25519KeyPair } from "../packages/sdk/src/core/bundle/hpke.js";
+import { SyncClient } from "../packages/sdk/src/core/control/client.js";
+import { publicJwkOf, trustedRootFromPinnedKey, releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
+import { pullToDatastore } from "../packages/sdk/src/sync/sync/pullToDatastore.js";
+import { MemoryReleaseDatastore, clearDatastoreRollback, resolveHydration, rollbackDatastore, type ReleaseKey } from "../packages/sdk/src/sync/store/releaseDatastore.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const scope: { organizationId: string; agentId: string; target: "dev" | "staging" | "prod" } = { organizationId: "org_1", agentId: "agt_1", target: "prod" };

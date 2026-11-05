@@ -15,13 +15,13 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { GoldenSetError, parseGoldenSet, runGoldenSet, passBpsOf } from "../packages/core/src/golden/index.js";
-import { JUDGE_RUBRICS, judgePrompt, parseJudgeReply, rubricFromPrompt } from "../packages/core/src/judge/index.js";
-import { canonicalBytes, sha256Prefixed } from "../packages/core/src/protocol/canonicalJson.js";
-import { releaseDigest } from "../packages/core/src/protocol/trust.js";
-import type { ManifestSlot } from "../packages/core/src/protocol/types.js";
-import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
-import type { WindowRow } from "../packages/telemetry/src/spool/writer.js";
+import { GoldenSetError, parseGoldenSet, runGoldenSet, passBpsOf } from "../packages/sdk/src/core/golden/index.js";
+import { JUDGE_RUBRICS, judgePrompt, parseJudgeReply, rubricFromPrompt } from "../packages/sdk/src/core/judge/index.js";
+import { canonicalBytes, sha256Prefixed } from "../packages/sdk/src/core/protocol/canonicalJson.js";
+import { releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
+import type { ManifestSlot } from "../packages/sdk/src/core/protocol/types.js";
+import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
+import type { WindowRow } from "../packages/sdk/src/telemetry/spool/writer.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };

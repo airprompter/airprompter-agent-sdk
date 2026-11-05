@@ -16,7 +16,7 @@
  * ```
  */
 
-import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
+import { isStoreError } from "../../../sdk-typescript/packages/sdk/src/sync/store/slotStore.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { CliError, EXIT, Output, refused, type Context } from "../io.js";
 

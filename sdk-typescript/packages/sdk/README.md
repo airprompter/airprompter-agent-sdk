@@ -1,12 +1,9 @@
 # @airprompter/agent-sdk
 
-One install, today's `AirPrompterAgent`: the facade over
-`@airprompter/agent-core`, `-sync`, `-runtime` and `-telemetry` — signed
-pull-only updates, the encrypted restart-safe slot store, offline
-operation, rendering with trust-aware variables, `ap.wrap()` for the
-OpenAI, Anthropic and Vercel AI SDK clients, and content-free telemetry.
-Every public name of the four packages is re-exported here, and the CI kit
-is `@airprompter/agent-sdk/testing`.
+One install for `AirPrompterAgent`: signed pull-only updates, the encrypted
+restart-safe slot store, offline operation, rendering with trust-aware
+variables, `ap.wrap()` for the OpenAI, Anthropic and Vercel AI SDK clients, and
+content-free telemetry.
 
 ```ts
 import { AirPrompterAgent } from "@airprompter/agent-sdk";
@@ -17,14 +14,21 @@ const reply = await ap.observe(r, () => openai.chat.completions.create({ model: 
 ap.feedback(r.runRef, { thumbs: "up" });
 ```
 
-A customer who wants less installs the sibling directly: the runtime alone
-renders and assigns over a bundle, the sync package alone pulls and
-verifies in CI, the telemetry package alone writes the spool.
+The root is the agent, its option and result types, and the hosted client.
+Everything else is a subpath, and a subpath you do not import is not loaded:
 
-One of five packages released in lockstep — `@airprompter/agent-core`, `-sync`,
-`-runtime`, `-telemetry` and the facade `@airprompter/agent-sdk` — one
-version, exact-pinned siblings. The direction is core → clients → sdk and is
-linted. The full README and the module map are in
+| Subpath | What it holds |
+| --- | --- |
+| `/core` | The protocol with no I/O: trust chain, assignment, render, bundles, row schemas, the control-plane client |
+| `/sync` | Pull and verify, the encrypted slot store, the apply policy, the customer's datastore |
+| `/runtime` | Render and assign over a release you hold, the provider wrappers, the hosted client |
+| `/telemetry` | The spool and its uploader |
+| `/testing` | The CI kit: `FakeControlPlane`, `MemoryFs`, `FakeClock` |
+| `/frameworks/langchain` | LangChain middleware; `langchain`, `@langchain/core` and `zod` are optional peers |
+
+Separate packages exist only for dependency footprint and take this one as a
+peer at the same version: `@airprompter/agent-otel`, `@airprompter/datastore-s3`,
+`-postgres` and `-redis`. The full README and the module map are in
 [`sdk-typescript/README.md`](https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-typescript);
 the protocol is in [`protocol/`](https://github.com/airprompter/airprompter-agent-sdk/tree/main/protocol).
 BSD-3-Clause.

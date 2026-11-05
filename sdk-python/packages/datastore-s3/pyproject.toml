@@ -24,7 +24,7 @@ classifiers = [
 ]
 # The client library is the application's: the adapter imports none, and the extras below only name a known-good one.
 dependencies = [
-  "airprompter-agent-sync==0.5.0",
+  "airprompter-agent==0.5.0",
 ]
 
 [project.optional-dependencies]

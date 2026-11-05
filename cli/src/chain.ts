@@ -12,9 +12,9 @@
  * ```
  */
 
-import { openBundle, bundlePayloadBytes, type DistributionKey } from "../../sdk-typescript/packages/core/src/bundle/apbundle.js";
-import { carriedPayloads, instant, referencedPayloads, verifyManifest, verifyRootMetadata } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
-import type { Bundle, BundleContents, Manifest, RootMetadata, Target } from "../../sdk-typescript/packages/core/src/protocol/types.js";
+import { openBundle, bundlePayloadBytes, type DistributionKey } from "../../sdk-typescript/packages/sdk/src/core/bundle/apbundle.js";
+import { carriedPayloads, instant, referencedPayloads, verifyManifest, verifyRootMetadata } from "../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
+import type { Bundle, BundleContents, Manifest, RootMetadata, Target } from "../../sdk-typescript/packages/sdk/src/core/protocol/types.js";
 import { refused } from "./io.js";
 import type { RootSource } from "./keys.js";
 

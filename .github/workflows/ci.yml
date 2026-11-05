@@ -115,7 +115,7 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
-      # S10: nine packages in lockstep. Build in dependency order first — the
+      # Five packages in lockstep. Build the SDK, then the satellites — the
       # two-copies vector loads the built dist beside the source — then the
       # whole tree as one program, the import direction, the suites, and the
       # size budgets.
@@ -127,7 +127,7 @@ jobs:
         working-directory: sdk-typescript
       - run: npm run size
         working-directory: sdk-typescript
-      - name: Every package installs on its own (a fresh project, one sibling at a time)
+      - name: The packed SDK imports alone, subpath by subpath, and one copy resolves beside each satellite
         shell: bash
         run: node scripts/install-alone.mjs
         working-directory: sdk-typescript
@@ -156,7 +156,7 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
-      # S10: eight distributions in lockstep, installed editable in dependency order; the import direction is linted.
+      # Five distributions in lockstep, installed editable; the import direction is linted.
       - run: python tools/install_dev.py pyflakes build
         working-directory: sdk-python
       - run: python -m pyflakes packages/*/src tests tools

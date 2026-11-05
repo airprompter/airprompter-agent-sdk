@@ -1,0 +1,476 @@
+/**
+ * Managed ("hosted") mode (§18, T23): no store, no models, no keys of your
+ * own. `ManagedAgent.start()` reads the environment's catalogue (slot tags,
+ * declared variables, workflow step ids, the experiment's salt and arms)
+ * with a run key, and `run()` / `stream()` POST to the run route. The
+ * subject never leaves the process: `subjectHash` is `hex(SHA-256(salt ‖
+ * subject))` computed here, exactly as client mode computes it, so an A/B
+ * across modes is one A/B. Refusals are typed; 429s honour `Retry-After`,
+ * while one `catalogue_stale` refusal refreshes the signed catalogue and
+ * recomputes the request. Every run streams under the hood — the run route
+ * sits behind an edge that closes a silent connection at 60 s, and a JSON
+ * run is silent until the model finishes — and `run()` assembles the `done`
+ * frame for callers who did not ask to stream. Variable sources the
+ * application registered (`start({ variables })`) fill required declared
+ * variables, and any marked `source: runtime`, here, before the POST — the
+ * hosted route has no way into your systems; this process does.
+ *
+ * @example
+ * ```ts
+ * const agent = await ManagedAgent.start({ agentId, target: "prod", apiKey: process.env.AIRPROMPTER_RUN_KEY!, baseUrl: "https://d123.cloudfront.net" });
+ * const result = await agent.run("support.triage", { team: "Billing", ticket: userMessage }, { subject: userId }); // subject is hashed, never sent
+ * result.output; result.runRef; result.priceMicros;
+ * const stream = await agent.stream("support.triage", { team: "Billing", ticket: userMessage });
+ * for await (const delta of stream) process.stdout.write(delta);
+ * ```
+ */
+
+import type { AudienceSelector, SlotInference, SlotVariable, Target } from "../../core/index.js";
+import { createHash } from "node:crypto";
+import { VariableSourceRegistry, type VariableSourceInput } from "../variables/sources.js";
+import { fillAsync, planFill, stricterSources, supplied, unsourced, type RenderValues } from "../variables/fill.js";
+import { VariableSourceError } from "../variables/sources.js";
+import { AGENT_ID, TARGET_SLUG, copyAudienceTags, errorNamed, matchesAudience, servableSlots } from "../../core/index.js";
+
+import { subjectHash as saltedSubjectHash } from "../../core/index.js";
+
+export const MANAGED_SDK_USER_AGENT = "airprompter-agent-sdk-ts/managed";
+
+export type ManagedTarget = Target;
+
+export type ManagedFetchLike = (
+  input: string,
+  init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal },
+) => Promise<{
+  status: number;
+  headers: { get(name: string): string | null };
+  body?: ReadableStream<Uint8Array> | null;
+  text(): Promise<string>;
+}>;
+
+export interface ManagedStartOptions {
+  agentId: string;
+  target: ManagedTarget;
+  /** A run key (`agent_run` kind, `agent.run` scope) for this agent and target. */
+  apiKey: string;
+  /** The run route's origin (the AgentRunUrl output of the execution stack), e.g. `https://d123.cloudfront.net`. */
+  baseUrl: string;
+  fetch?: ManagedFetchLike;
+  /**
+   * How this process fills a slot's declared variables from its own system before a run is posted (the hosted
+   * endpoint has no way into your systems; this process does). A literal per name, or `{ resolve, trust, … }` — see
+   * `variables/sources.ts`. Consulted for every required declared variable the call site did not pass, and for one
+   * the author marked `source: runtime` (the catalogue names the declarations, not the text, so "used in the text"
+   * cannot be known here).
+   */
+  variables?: Record<string, VariableSourceInput>;
+  /** Arbitrary local audience tags. Values are matched in this process and are never sent to AirPrompter. */
+  tags?: Readonly<Record<string, string>>;
+  /** Rate-limit retries; each waits `Retry-After` (or a second). Default 2. */
+  maxRateLimitRetries?: number;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  /** Stable per-process id used when the experiment assigns by instance. */
+  instanceId?: string;
+  userAgent?: string;
+}
+
+export interface ManagedSlot {
+  tag: string;
+  kind: "prompt" | "workflow";
+  model: string;
+  /** The slot's declarations as the catalogue names them, with `default` and `source` when the author set them. */
+  variables: readonly SlotVariable[];
+  /** How the model is called for the slot, as the release sealed it: what a hosted run uses. */
+  inference?: SlotInference;
+  steps: ReadonlyArray<{ stepId: string; inference?: SlotInference }> | null;
+  /** Capabilities this slot needs; an SDK missing one treats the slot as absent. */
+  requires?: readonly string[];
+}
+
+export interface ManagedCatalogue {
+  agentId: string;
+  target: string;
+  generation: number;
+  releaseDigest: string;
+  capabilities?: readonly string[];
+  slots: readonly ManagedSlot[];
+  /** S17: one entry per experiment, each naming the slot it splits. */
+  experiments?: readonly { experimentId: string; tag: string; salt: string; subjectKey: "request" | "instance"; arms: readonly string[] }[];
+  /** Signed audience rules. Only matching opaque ids are returned on a run; tag values remain local. */
+  observations?: readonly { audienceId: string; tag: string; selector: AudienceSelector }[];
+}
+
+export interface ManagedRunOptions {
+  /** The experiment subject (an end-user id, a session id). Hashed with the experiment's salt; never sent. */
+  subject?: string;
+  /** A workflow slot's step to run. */
+  stepId?: string;
+  idempotencyKey?: string;
+  maxOutputTokens?: number;
+  /** Content-free correlation the customer keeps; echoed on the response. */
+  metadata?: Record<string, string>;
+  signal?: AbortSignal;
+  /** Per-run local audience tags merged over `start({ tags })`; values never leave this process. */
+  tags?: Readonly<Record<string, string>>;
+}
+
+export interface ManagedRunResult {
+  runId: string;
+  runRef: string;
+  output: string;
+  model: string;
+  versionId: string;
+  arm: string;
+  generation: number;
+  usage: { inputTokens: number; cachedInputTokens: number; outputTokens: number };
+  latencyMs: number;
+  priceMicros: number;
+  priceBookRevision: string;
+  stopReason: "end_turn" | "max_tokens" | "stop_sequence" | "cancelled" | "unknown";
+  source: "executed" | "replayed";
+  metadata?: Record<string, string>;
+}
+
+export interface ManagedRunFeedbackAttribution {
+  tag: string;
+  versionId: string;
+  arm: string;
+  minute: string;
+  artifactId?: string;
+  audienceIds?: readonly string[];
+  runMinute?: string;
+}
+
+export interface ManagedRunFeedbackResponse {
+  accepted: boolean;
+  attributedTo: ManagedRunFeedbackAttribution | null;
+  rejected: Record<string, string>;
+}
+
+export type ManagedRefusalCode =
+  | "invalid_options"
+  | "unauthorized"
+  | "forbidden"
+  | "invalid_request"
+  | "render_missing_variable"
+  | "render_unknown_variable"
+  | "model_not_priced"
+  | "model_not_offered"
+  | "allowance_exhausted"
+  | "agent_cap_exhausted"
+  | "target_not_hosted"
+  | "slot_not_found"
+  | "nothing_promoted"
+  | "step_not_found"
+  | "already_executed"
+  | "catalogue_stale"
+  | "rate_limited"
+  | "agent_rate_limited"
+  | "model_unavailable"
+  | "invalid_run_ref"
+  | "internal";
+
+/** The run route said no (or the edge did): the code the route named, its status, and what it told us. */
+export class ManagedRunError extends Error {
+  constructor(
+    readonly code: ManagedRefusalCode,
+    readonly status: number,
+    message: string,
+    readonly detail?: string,
+    readonly retryAfterSeconds?: number,
+  ) {
+    super(`${code} (${status}): ${message}`);
+    this.name = "ManagedRunError";
+  }
+}
+
+/** `ManagedRunError` by name and code — true across duplicated package copies. */
+export function isManagedRunError(error: unknown): error is ManagedRunError {
+  return errorNamed<ManagedRefusalCode>(error, "ManagedRunError");
+}
+
+/** The stream: deltas as they arrive, then the assembled result. */
+export interface ManagedRunStream extends AsyncIterable<string> {
+  /** Resolves with the `done` frame once the stream ends; rejects with a `ManagedRunError` on an `error` frame. */
+  readonly result: Promise<ManagedRunResult>;
+}
+
+interface SseFrame {
+  event: string;
+  data: string;
+}
+
+/** SSE frames from a text chunk stream: `event: x\ndata: y\n\n`, tolerant of partial chunks. */
+export async function* parseSse(chunks: AsyncIterable<string>): AsyncGenerator<SseFrame> {
+  let buffer = "";
+  for await (const chunk of chunks) {
+    buffer += chunk;
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary >= 0) {
+      const raw = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const frame = frameOf(raw);
+      if (frame) yield frame;
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+  const tail = frameOf(buffer);
+  if (tail) yield tail;
+}
+
+function frameOf(raw: string): SseFrame | null {
+  let event = "message";
+  const data: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+  }
+  return data.length ? { event, data: data.join("\n") } : null;
+}
+
+async function* textChunks(response: { body?: ReadableStream<Uint8Array> | null; text(): Promise<string> }): AsyncGenerator<string> {
+  if (response.body && typeof response.body.getReader === "function") {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) yield decoder.decode(value, { stream: true });
+    }
+    yield decoder.decode();
+    return;
+  }
+  yield await response.text();
+}
+
+function refusalFrom(status: number, body: unknown, retryAfterHeader: string | null): ManagedRunError {
+  const parsed = (body ?? {}) as { error?: string; code?: string; detail?: string; retryAfterSeconds?: number };
+  const code = (parsed.code as ManagedRefusalCode | undefined) ?? (status === 401 ? "unauthorized" : status === 403 ? "forbidden" : status === 429 ? "rate_limited" : status >= 500 ? "internal" : "invalid_request");
+  const retryAfter = parsed.retryAfterSeconds ?? (retryAfterHeader ? Number(retryAfterHeader) : undefined);
+  return new ManagedRunError(code, status, parsed.error ?? `HTTP ${status}`, parsed.detail, Number.isFinite(retryAfter) ? retryAfter : undefined);
+}
+
+export class ManagedAgent {
+  private catalogue: ManagedCatalogue;
+  private readonly fetchImpl: ManagedFetchLike;
+  private readonly instanceId: string;
+  /** The application's variable sources (`start({ variables })`, `agent.variables.provide()`). */
+  readonly variables: VariableSourceRegistry;
+  private audienceTags: Readonly<Record<string, string>>;
+
+  private constructor(
+    private readonly options: ManagedStartOptions,
+    catalogue: ManagedCatalogue,
+  ) {
+    this.catalogue = catalogue;
+    this.fetchImpl = options.fetch ?? (globalThis.fetch as unknown as ManagedFetchLike);
+    this.instanceId = options.instanceId ?? createHash("sha256").update(`${process.pid}:${Date.now()}:${Math.random()}`).digest("hex");
+    this.variables = new VariableSourceRegistry(options.variables);
+    this.audienceTags = copyAudienceTags(options.tags ?? {});
+  }
+
+  /** Reads the catalogue once; refuses (typed) when the key, the target or the promotion is not there. */
+  static async start(options: ManagedStartOptions): Promise<ManagedAgent> {
+    const fetchImpl = options.fetch ?? (globalThis.fetch as unknown as ManagedFetchLike);
+    if (!fetchImpl) throw new Error("no fetch available: Node 20+ or pass options.fetch");
+    if (typeof options.target !== "string" || !TARGET_SLUG.test(options.target)) throw new ManagedRunError("invalid_options", 0, "target must be a lowercase slug: a letter, then up to 31 letters, digits or hyphens");
+    if (typeof options.agentId !== "string" || !AGENT_ID.test(options.agentId)) throw new ManagedRunError("invalid_options", 0, "agentId must be an agent id: a letter or digit, then up to 127 letters, digits, dots, underscores, colons or hyphens");
+    const catalogue = await ManagedAgent.readCatalogue(fetchImpl, options);
+    return new ManagedAgent(options, catalogue);
+  }
+
+  private static async readCatalogue(fetchImpl: ManagedFetchLike, options: ManagedStartOptions): Promise<ManagedCatalogue> {
+    const response = await fetchImpl(`${options.baseUrl.replace(/\/$/, "")}/v1/agents/${encodeURIComponent(options.agentId)}/targets/${options.target}/slots`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${options.apiKey}`, accept: "application/json", "user-agent": options.userAgent ?? MANAGED_SDK_USER_AGENT },
+    });
+    const text = await response.text();
+    if (response.status !== 200) throw refusalFrom(response.status, safeJson(text), response.headers.get("retry-after"));
+    return JSON.parse(text) as ManagedCatalogue;
+  }
+
+  /** The catalogue as last read: tags, variables, steps, the experiment's arms. */
+  get slots(): ManagedCatalogue {
+    return this.catalogue;
+  }
+
+  /** Re-reads the catalogue (a run answered with a newer generation, or on a schedule of your own). */
+  async refresh(): Promise<ManagedCatalogue> {
+    this.catalogue = await ManagedAgent.readCatalogue(this.fetchImpl, this.options);
+    return this.catalogue;
+  }
+
+  setTags(tags: Readonly<Record<string, string>>): this {
+    this.audienceTags = copyAudienceTags(tags);
+    return this;
+  }
+
+  private audienceIdsFor(tag: string, override?: Readonly<Record<string, string>>): string[] | undefined {
+    const rules = this.catalogue.observations?.filter((entry) => entry.tag === tag);
+    if (!rules?.length) return;
+    const local = override ? copyAudienceTags({ ...this.audienceTags, ...override }) : this.audienceTags;
+    return rules.flatMap((entry) => matchesAudience(entry.selector, local) ? [entry.audienceId] : []).sort();
+  }
+
+  /** S17: the experiment that splits a slot, else null. */
+  experimentFor(tag: string): { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null {
+    return this.catalogue.experiments?.find((experiment) => experiment.tag === tag) ?? null;
+  }
+
+  /** The hash the route buckets on: the slot's experiment salt over the subject (or this instance when the experiment assigns by instance). Never the subject. */
+  subjectHashFor(subject: string | undefined, tag?: string): string | undefined {
+    const experiment = tag === undefined ? (this.catalogue.experiments?.[0] ?? null) : this.experimentFor(tag);
+    if (!experiment) return undefined;
+    const value = experiment.subjectKey === "instance" || subject === undefined ? this.instanceId : subject;
+    return saltedSubjectHash(experiment.salt, value);
+  }
+
+  /**
+   * T30: quality signals against a run, by the `runRef` it returned — from this process or any other that kept the
+   * ref. Numbers, booleans and the declared enums only; the answer says what landed and what was refused and why.
+   * A ref that does not verify, or one for another agent or environment, is a `ManagedRunError` (`invalid_run_ref`).
+   */
+  async feedback(runRef: string, signals: Record<string, unknown>): Promise<ManagedRunFeedbackResponse> {
+    const url = `${this.options.baseUrl.replace(/\/$/, "")}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/feedback`;
+    const response = await this.fetchImpl(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.options.apiKey}`, "content-type": "application/json", accept: "application/json", "user-agent": this.options.userAgent ?? MANAGED_SDK_USER_AGENT },
+      body: JSON.stringify({ runRef, signals }),
+    });
+    const text = await response.text();
+    if (response.status !== 202) throw refusalFrom(response.status, safeJson(text), response.headers.get("retry-after"));
+    return JSON.parse(text) as ManagedRunFeedbackResponse;
+  }
+
+  /** One managed run: streams under the hood, returns the assembled result. */
+  async run(tag: string, variables: Record<string, string>, options: ManagedRunOptions = {}): Promise<ManagedRunResult> {
+    const stream = await this.stream(tag, variables, options);
+    for await (const _delta of stream) {
+      /* drain */
+    }
+    return stream.result;
+  }
+
+  /** A workflow slot: the customer executes tools between steps and calls `step()` for each. */
+  workflow(tag: string, options: { subject?: string } = {}) {
+    const slot = servableSlots(this.catalogue).find((s) => s.tag === tag);
+    return {
+      steps: slot?.steps ?? [],
+      step: (stepId: string, variables: Record<string, string>, stepOptions: Omit<ManagedRunOptions, "subject" | "stepId"> = {}) => this.run(tag, variables, { ...stepOptions, ...(options.subject !== undefined ? { subject: options.subject } : {}), stepId }),
+    };
+  }
+
+  /** The required declared variables a run of this slot would still lack after these values and the registered sources. */
+  needs(tag: string, values: RenderValues = {}): string[] {
+    const slot = servableSlots(this.catalogue).find((s) => s.tag === tag);
+    if (!slot) throw new Error(`no slot ${tag} in the catalogue`);
+    return unsourced({ variables: slot.variables, values, registry: this.variables });
+  }
+
+  /**
+   * The values a run posts: the call site's, then the application's sources for required declared variables it left
+   * unfilled. Trust cannot be tightened here — the hosted run fences by the slot's declaration — so a source stricter
+   * than the declaration is refused BEFORE any lookup (`VariableSourceError`, reason `unfenceable`), never sent raw.
+   * The catalogue is parsed JSON the type only asserts; anything but `end_user` counts as the looser declaration,
+   * which is the safe direction. An aborted run is not filled.
+   */
+  private async fillForRun(tag: string, values: Record<string, string>, subject: string | undefined, signal: AbortSignal | undefined): Promise<Record<string, string>> {
+    const slot = servableSlots(this.catalogue).find((s) => s.tag === tag);
+    if (!slot || this.variables.names().length === 0) return values;
+    const declared = slot.variables;
+    const plan = planFill({ tag, variables: declared, text: null, values, registry: this.variables });
+    if (plan.literal.length === 0 && plan.async.length === 0) return values;
+    // Only what this run would actually fill can be unfenceable: an optional variable no run posts is not refused.
+    const planned = new Set([...plan.literal, ...plan.async]);
+    const unfenceable = stricterSources(declared, this.variables).filter((name) => planned.has(name));
+    if (unfenceable.length > 0) throw new VariableSourceError(tag, unfenceable[0]!, "unfenceable");
+    if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("run aborted");
+    const filled = await fillAsync(plan, { tag, subject, versionId: null, arm: null }, this.variables);
+    return Object.fromEntries(Object.entries(filled.values).filter(([name]) => supplied(filled.values, name)).map(([k, v]) => [k, String(v)]));
+  }
+
+  /** The run as SSE: iterate the deltas, await `result`. */
+  async stream(tag: string, variables: Record<string, string>, options: ManagedRunOptions = {}): Promise<ManagedRunStream> {
+    const url = `${this.options.baseUrl.replace(/\/$/, "")}/v1/agents/${encodeURIComponent(this.options.agentId)}/targets/${this.options.target}/run`;
+    const headers = { authorization: `Bearer ${this.options.apiKey}`, "content-type": "application/json", accept: "text/event-stream", "user-agent": this.options.userAgent ?? MANAGED_SDK_USER_AGENT };
+    const retries = this.options.maxRateLimitRetries ?? 2;
+    const sleep = this.options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    let refreshes = 0;
+    for (;;) {
+      const subjectHash = this.subjectHashFor(options.subject, tag);
+      const audienceIds = this.audienceIdsFor(tag, options.tags);
+      const body = JSON.stringify({
+        tag, variables: await this.fillForRun(tag, variables, options.subject, options.signal), stream: true,
+        ...(this.catalogue.capabilities?.includes("catalogue_generation") ? { catalogueGeneration: this.catalogue.generation } : {}),
+        ...(subjectHash ? { subjectHash } : {}), ...(audienceIds ? { audienceIds } : {}),
+        ...(options.stepId ? { stepId: options.stepId } : {}), ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+        ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}), ...(options.metadata ? { metadata: options.metadata } : {}),
+      });
+      let attempt = 0;
+      for (;;) {
+        const response = await this.fetchImpl(url, { method: "POST", headers, body, ...(options.signal ? { signal: options.signal } : {}) });
+        if (response.status === 200) return this.consume(response);
+        const refusal = refusalFrom(response.status, safeJson(await response.text()), response.headers.get("retry-after"));
+        if (refusal.code === "catalogue_stale" && refreshes === 0) {
+          refreshes += 1;
+          await this.refresh();
+          break;
+        }
+        if (response.status === 429 && attempt < retries) {
+          attempt += 1;
+          await sleep(Math.max(1, refusal.retryAfterSeconds ?? 1) * 1000);
+          continue;
+        }
+        throw refusal;
+      }
+    }
+  }
+
+  private consume(response: { headers: { get(name: string): string | null }; body?: ReadableStream<Uint8Array> | null; text(): Promise<string> }): ManagedRunStream {
+    let resolveResult!: (r: ManagedRunResult) => void;
+    let rejectResult!: (e: Error) => void;
+    const result = new Promise<ManagedRunResult>((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+    // A rejection nobody awaits yet must not surface as unhandled; `result` is re-awaited by the caller.
+    result.catch(() => {});
+    const frames = parseSse(textChunks(response));
+    let settled = false;
+    const iterable: ManagedRunStream = {
+      result,
+      async *[Symbol.asyncIterator]() {
+        try {
+          for await (const frame of frames) {
+            if (frame.event === "delta") {
+              yield (JSON.parse(frame.data) as { delta: string }).delta;
+            } else if (frame.event === "done") {
+              const done = JSON.parse(frame.data) as ManagedRunResult;
+              settled = true;
+              resolveResult(done);
+            } else if (frame.event === "error") {
+              const body = JSON.parse(frame.data) as { error: string; code: ManagedRefusalCode; detail?: string; retryAfterSeconds?: number };
+              settled = true;
+              rejectResult(new ManagedRunError(body.code, 200, body.error, body.detail, body.retryAfterSeconds));
+              return;
+            }
+          }
+          if (!settled) rejectResult(new ManagedRunError("internal", 200, "the stream ended without a done frame"));
+        } catch (error) {
+          if (!settled) rejectResult(error instanceof Error ? error : new Error(String(error)));
+          throw error;
+        }
+      },
+    };
+    return iterable;
+  }
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text.slice(0, 200) };
+  }
+}

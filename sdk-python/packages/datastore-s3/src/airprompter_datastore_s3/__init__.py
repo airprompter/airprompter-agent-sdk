@@ -8,7 +8,7 @@ when they honour both headers (MinIO, Cloudflare R2) — prove yours with ``chec
 Example::
 
     import boto3
-    from airprompter_agent import kv_release_datastore
+    from airprompter_agent.sync import kv_release_datastore
     from airprompter_datastore_s3 import s3_kv_store
 
     kv = s3_kv_store(client=boto3.client("s3", region_name="eu-west-1"), bucket="acme-airprompter-releases")
@@ -19,7 +19,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from airprompter_agent_sync.store.kv_store import KvEntry, check_condition
+from airprompter_agent.sync import KvEntry
+from airprompter_agent.core._util import check_condition
 
 __all__ = ["S3KvStore", "s3_kv_store"]
 

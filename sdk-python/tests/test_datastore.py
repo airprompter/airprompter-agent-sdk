@@ -14,11 +14,11 @@ import httpx
 import pytest
 
 from airprompter_agent.agent import AirPrompterAgent, RenderRefusedError
-from airprompter_agent_core.bundle.apbundle import DistributionKey
-from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
-from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key, release_digest
-from airprompter_agent_sync import MemoryReleaseDatastore, ReleaseKey, clear_datastore_rollback, pull_to_datastore, resolve_hydration, rollback_datastore
+from airprompter_agent.core.bundle.apbundle import DistributionKey
+from airprompter_agent.core.bundle.hpke import generate_x25519_key_pair
+from airprompter_agent.core.control.client import SyncClient
+from airprompter_agent.core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key, release_digest
+from airprompter_agent.sync import MemoryReleaseDatastore, ReleaseKey, clear_datastore_rollback, pull_to_datastore, resolve_hydration, rollback_datastore
 
 from .control_plane import FakeControlPlane
 

@@ -1,0 +1,105 @@
+"""``airprompter_agent.runtime``: serving a verified release: which slot a subject gets under which arm (the ramp
+walked on this host's clock, a retreat honoured), the rendered text with its run reference, the provider wrappers that
+attribute a model call to a render and classify what came back, and the hosted-execution client. Consumes a
+``LoadedRelease`` from ``airprompter_agent.core`` — the slot store, a daemon or a bundle the customer loaded — and
+never imports the sync or the telemetry layer.
+
+Example::
+
+    from airprompter_agent.runtime import ReleaseResolver, Rendered
+
+    resolver = ReleaseResolver(release=reader.current(), run_ref_key=key, agent_id="agt_1", target="prod", instance_id="host-1", now_ms=now_ms)
+    outcome = resolver.resolve("support.reply", subject="user-42")                  # ok with the slot and arm, or a refusal as data
+    rendered: Rendered = resolver.render(outcome.slot, {"customer_name": "Ada"})   # .text, .model, .run_ref
+"""
+
+from .attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
+from .inference import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
+from .managed import MANAGED_REFUSAL_CODES, MANAGED_SDK_USER_AGENT, ManagedAgent, ManagedRunError, ManagedRunResult, ManagedRunStream, ManagedWorkflow, parse_sse
+from .observe import ObserveTarget, PendingObservation, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
+from .release.resolver import Disabled, ReleaseResolver, Rendered, ResolveOutcome, Workflow, WorkflowStep, copy_inference, disabled_from
+from .variables import (
+    DEFAULT_SOURCE_MAX_BYTES,
+    DEFAULT_SOURCE_TIMEOUT_SECONDS,
+    Filled,
+    FilledRender,
+    FillPlan,
+    RegisteredSource,
+    RenderValues,
+    VariableSource,
+    VariableSourceContext,
+    VariableSourceError,
+    VariableSourceInput,
+    VariableSourceRegistry,
+    VariableSourceRequiredError,
+    fill_async,
+    fill_sync,
+    is_variable_source_error,
+    is_variable_source_required_error,
+    plan_fill,
+    stricter_sources,
+    supplied,
+    unsourced,
+)
+from .wrap import WRAPPED_METHODS, WrapHooks, wrap_client
+
+__all__ = [
+    "DEFAULT_SOURCE_MAX_BYTES",
+    "DEFAULT_SOURCE_TIMEOUT_SECONDS",
+    "FillPlan",
+    "Filled",
+    "FilledRender",
+    "RegisteredSource",
+    "RenderValues",
+    "VariableSource",
+    "VariableSourceContext",
+    "VariableSourceError",
+    "VariableSourceInput",
+    "VariableSourceRegistry",
+    "VariableSourceRequiredError",
+    "fill_async",
+    "fill_sync",
+    "is_variable_source_error",
+    "is_variable_source_required_error",
+    "plan_fill",
+    "stricter_sources",
+    "supplied",
+    "unsourced",
+    "AppliedInference",
+    "Attribution",
+    "INFERENCE_KEYS",
+    "apply_inference",
+    "temperature_of",
+    "top_p_of",
+    "Disabled",
+    "MANAGED_REFUSAL_CODES",
+    "MANAGED_SDK_USER_AGENT",
+    "ManagedAgent",
+    "ManagedRunError",
+    "ManagedRunResult",
+    "ManagedRunStream",
+    "ManagedWorkflow",
+    "ObserveTarget",
+    "PendingObservation",
+    "ReleaseResolver",
+    "RenderRegistry",
+    "Rendered",
+    "ResolveOutcome",
+    "UsageNormalized",
+    "WRAPPED_METHODS",
+    "Workflow",
+    "WorkflowStep",
+    "WrapHooks",
+    "attribution_scope",
+    "classify_error",
+    "classify_result",
+    "copy_inference",
+    "current_attribution",
+    "disabled_from",
+    "normalize_usage",
+    "observe_call",
+    "observe_call_async",
+    "parse_sse",
+    "request_texts",
+    "wrap_client",
+]

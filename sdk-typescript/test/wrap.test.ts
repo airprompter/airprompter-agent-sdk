@@ -14,11 +14,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
-import type { WindowRow } from "../packages/telemetry/src/spool/writer.js";
-import { RenderRegistry, requestTexts } from "../packages/runtime/src/wrap/attribution.js";
-import { wrapClient } from "../packages/runtime/src/wrap/client.js";
-import { aiSdkMiddleware } from "../packages/runtime/src/wrap/aiSdk.js";
+import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
+import type { WindowRow } from "../packages/sdk/src/telemetry/spool/writer.js";
+import { RenderRegistry, requestTexts } from "../packages/sdk/src/runtime/wrap/attribution.js";
+import { wrapClient } from "../packages/sdk/src/runtime/wrap/client.js";
+import { aiSdkMiddleware } from "../packages/sdk/src/runtime/wrap/aiSdk.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
@@ -475,7 +475,7 @@ test("requestTexts reads system and instructions before messages, strings and te
 test("the middleware never imports the AI SDK and the wrapper never reads a provider package", async () => {
   const { readFileSync } = await import("node:fs");
   for (const file of ["client.ts", "aiSdk.ts", "attribution.ts"]) {
-    const source = readFileSync(new URL(`../packages/runtime/src/wrap/${file}`, import.meta.url), "utf8");
+    const source = readFileSync(new URL(`../packages/sdk/src/runtime/wrap/${file}`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /from "(openai|@anthropic-ai\/sdk|ai|@ai-sdk\/[^"]+)"/, file);
   }
   assert.equal(typeof aiSdkMiddleware, "function");

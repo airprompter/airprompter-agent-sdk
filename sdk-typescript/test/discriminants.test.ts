@@ -15,11 +15,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AgentStartError, isAgentStartError } from "../packages/sdk/src/agent.js";
-import { ManagedRunError, isManagedRunError } from "../packages/runtime/src/managed/client.js";
-import { errorNamed } from "../packages/core/src/protocol/errors.js";
-import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type SpoolSink } from "../packages/telemetry/src/spool/writer.js";
-import { PayloadDecryptError, isPayloadDecryptError } from "../packages/sync/src/store/payloadCrypto.js";
-import { StoreError, isStoreError } from "../packages/sync/src/store/slotStore.js";
+import { ManagedRunError, isManagedRunError } from "../packages/sdk/src/runtime/managed/client.js";
+import { errorNamed } from "../packages/sdk/src/core/protocol/errors.js";
+import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type SpoolSink } from "../packages/sdk/src/telemetry/spool/writer.js";
+import { PayloadDecryptError, isPayloadDecryptError } from "../packages/sdk/src/sync/store/payloadCrypto.js";
+import { StoreError, isStoreError } from "../packages/sdk/src/sync/store/slotStore.js";
 
 /** What another copy of this package throws: a plain Error dressed with the same name and code. */
 function foreign(name: string, fields: Record<string, unknown>): Error {

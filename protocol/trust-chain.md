@@ -233,10 +233,10 @@ honour".
 
 | Rule | Package |
 |---|---|
-| Signed bytes, root metadata, manifest rules M1–M14, rotation, countersign | `@airprompter/agent-core` · `airprompter_agent_core.protocol` (no I/O) |
-| The pointer never extends trust | the client in core (`edgePointer`), the loop in `@airprompter/agent-sync` and the facade `@airprompter/agent-sdk` (the lease renews only on a signed manifest or an authenticated origin answer) |
-| The ramp plan is what users will see | the maths in core (`rampWeightsAt`, `effectiveArms`), the walk in `@airprompter/agent-runtime` (`ReleaseResolver`) |
-| The apply policy is the customer's | `store.json` and the pin in `@airprompter/agent-sync` (`SlotStore`); the operator's `policy set` in the CLI |
+| Signed bytes, root metadata, manifest rules M1–M14, rotation, countersign | `@airprompter/agent-sdk/core` · `airprompter_agent.core` (no I/O) |
+| The pointer never extends trust | the client in core (`edgePointer`), the loop in `@airprompter/agent-sdk/sync` and the agent in `@airprompter/agent-sdk` (the lease renews only on a signed manifest or an authenticated origin answer) |
+| The ramp plan is what users will see | the maths in core (`rampWeightsAt`, `effectiveArms`), the walk in `@airprompter/agent-sdk/runtime` (`ReleaseResolver`) |
+| The apply policy is the customer's | `store.json` and the pin in `@airprompter/agent-sdk/sync` (`SlotStore`); the operator's `policy set` in the CLI |
 | The reduction set | M13 in core; `disable` honoured at render in runtime |
 
 Every SDK's vectors run through the published harness

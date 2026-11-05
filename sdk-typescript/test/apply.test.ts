@@ -16,11 +16,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent, RenderRefusedError, SDK_VERSION } from "../packages/sdk/src/agent.js";
-import { parseWindow, windowState } from "../packages/sync/src/apply/window.js";
-import { publicJwkOf, releaseDigest } from "../packages/core/src/protocol/trust.js";
-import { requiredModelsMissing } from "../packages/sync/src/sync/loop.js";
+import { parseWindow, windowState } from "../packages/sdk/src/sync/apply/window.js";
+import { publicJwkOf, releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
+import { requiredModelsMissing } from "../packages/sdk/src/sync/sync/loop.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
-import { PROTOCOL_VERSION } from "../packages/core/src/protocol/version.js";
+import { PROTOCOL_VERSION } from "../packages/sdk/src/core/protocol/version.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
 const tempDir = () => mkdtempSync(join(tmpdir(), "ap-apply-"));

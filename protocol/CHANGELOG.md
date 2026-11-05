@@ -46,6 +46,7 @@ Refused examples now name the code an SDK answers with and the instance path the
 ## Unreleased (text only)
 
 - `assignment-hash.md`: an absent subject is a fresh id per call, and the instance id is used only through `subjectKey: "instance"`. No version change: no schema, vector or wire byte moved.
+- `store-format.md`, `trust-chain.md`: the SDK's parts are subpaths of one package now, so the names in their prose changed. No version change: no schema, vector or wire byte moved.
 
 ## 2.0.0 · One audience contract
 

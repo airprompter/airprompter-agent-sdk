@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Install the five distributions editable, in dependency order, plus the test extras and ``jsonschema`` (the protocol
-schema tests validate with it) — one command for a contributor or CI.
+"""Install the five distributions editable, plus the test extras and ``jsonschema`` (the protocol schema tests validate
+with it): one command for a contributor or CI.
 
 Usage::
 
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ORDER = ["core", "sync", "runtime", "telemetry", "agent", "datastore-s3", "datastore-postgres", "datastore-redis"]
+ORDER = ["agent", "agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"]
 DEFAULT_EXTRAS = ["jsonschema"]
 
 

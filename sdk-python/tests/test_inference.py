@@ -11,9 +11,9 @@ import pytest
 
 from airprompter_agent import apply_inference as exported_apply_inference
 from airprompter_agent.integrations.litellm import litellm_inference
-from airprompter_agent_core.golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, run_golden_set
-from airprompter_agent_core.protocol.trust import inference_digest_input, release_digest
-from airprompter_agent_runtime.inference import apply_inference
+from airprompter_agent.core.golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, run_golden_set
+from airprompter_agent.core.protocol.trust import inference_digest_input, release_digest
+from airprompter_agent.runtime.inference import apply_inference
 
 from .control_plane import FakeControlPlane
 from .test_agent import SCOPE, start

@@ -18,16 +18,16 @@ import time
 
 import pytest
 
-from airprompter_agent_core._util import instant, iso_ms, now_ms
+from airprompter_agent.core._util import instant, iso_ms, now_ms
 from airprompter_agent.agent import AgentStartError, AirPrompterAgent, RenderRefusedError, SyncOptions, VendoredBundle
-from airprompter_agent_core.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle
-from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
-from airprompter_agent_core.protocol.trust import key_thumbprint, public_jwk_of, release_digest
-from airprompter_agent_core.protocol import PROTOCOL_VERSION, referenced_payloads
-from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id, parse_run_ref
-from airprompter_agent_core.render.template import MissingVariableError, UnknownVariableError
-from airprompter_agent_sync.sync.loop import required_models_missing
-from airprompter_agent_core._util import b64url_encode
+from airprompter_agent.core.bundle.apbundle import DistributionKey, create_encrypted_bundle, create_plaintext_bundle
+from airprompter_agent.core.bundle.hpke import generate_x25519_key_pair
+from airprompter_agent.core.protocol.trust import key_thumbprint, public_jwk_of, release_digest
+from airprompter_agent.core.protocol import PROTOCOL_VERSION, referenced_payloads
+from airprompter_agent.core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id, parse_run_ref
+from airprompter_agent.core.render.template import MissingVariableError, UnknownVariableError
+from airprompter_agent.sync.sync.loop import required_models_missing
+from airprompter_agent.core._util import b64url_encode
 
 from .control_plane import FakeControlPlane, new_key
 
@@ -543,8 +543,8 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
         assert rendered.audience_ids == (audience["audienceId"],)
         ap.observe(rendered, lambda: {"content":[{"type":"text","text":"{\"category\":\"ok\"}"}],"usage":{"input_tokens":1,"output_tokens":1}})
         assert ap.checks(rendered, "{\"category\":\"ok\"}")["passed"] == 1
-        from airprompter_agent_runtime.release.resolver import WorkflowStep
-        from airprompter_agent_runtime.attribution import current_attribution
+        from airprompter_agent.runtime.release.resolver import WorkflowStep
+        from airprompter_agent.runtime.attribution import current_attribution
         step = WorkflowStep("support.flow#1",1,rendered.version_id,rendered.artifact_id,"step",rendered.run_ref,audience_ids=rendered.audience_ids,run_minute=rendered.run_minute)
         captured=[]; original_observe=ap.spool.observe
         ap.spool.observe=lambda observation, at_ms: captured.append(observation)
@@ -656,7 +656,7 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
 
 
 def test_ambiguous_cohort_text_requires_scope():
-    from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution
+    from airprompter_agent.runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution
     registry=RenderRegistry(2)
     a=Attribution("support.reply","ver_a","control","gpt-5",audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",),run_minute="2026-09-12T14:03:00Z")
     b=Attribution("support.reply","ver_a","control","gpt-5",audience_ids=(),run_minute=a.run_minute)

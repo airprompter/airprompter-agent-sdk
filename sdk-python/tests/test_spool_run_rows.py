@@ -9,11 +9,11 @@ import json
 
 import pytest
 
-from airprompter_agent_core._util import instant
-from airprompter_agent_core.telemetry.rows import count_of, step_name, utf16_length, valid_step_name
-from airprompter_agent_telemetry.otel import spool_rows_to_otlp
-from airprompter_agent_telemetry.spool.writer import LATENCY_BUCKET_EDGES_MS, MemorySink, Observation, RunDimensions, RunTotals, SpoolWriter, StepTotals, WriterIdentity, _row_bytes, latency_bucket_index
-from airprompter_agent_telemetry.uploader import inspect_segment, validate_spool_row
+from airprompter_agent.core._util import instant
+from airprompter_agent.core.telemetry.rows import count_of, step_name, utf16_length, valid_step_name
+from airprompter_agent_otel.exporter import spool_rows_to_otlp
+from airprompter_agent.telemetry.spool.writer import LATENCY_BUCKET_EDGES_MS, MemorySink, Observation, RunDimensions, RunTotals, SpoolWriter, StepTotals, WriterIdentity, _row_bytes, latency_bucket_index
+from airprompter_agent.telemetry.uploader import inspect_segment, validate_spool_row
 
 T0 = instant("2026-09-12T14:03:10Z")
 IDENTITY = WriterIdentity("i-testinstance", "resident", "t/0")

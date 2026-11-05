@@ -12,8 +12,8 @@
  * ```
  */
 
-import type { FetchLike } from "../../sdk-typescript/packages/core/src/control/client.js";
-import { errorNamed } from "../../sdk-typescript/packages/core/src/protocol/errors.js";
+import type { FetchLike } from "../../sdk-typescript/packages/sdk/src/core/control/client.js";
+import { errorNamed } from "../../sdk-typescript/packages/sdk/src/core/protocol/errors.js";
 
 /** Exit codes are the CI contract: scripts branch on them, never on text. */
 export const EXIT = {

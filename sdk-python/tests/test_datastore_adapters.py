@@ -17,11 +17,11 @@ import httpx
 import pytest
 
 from airprompter_agent.agent import AirPrompterAgent
-from airprompter_agent_core.bundle.apbundle import DistributionKey
-from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
-from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key
-from airprompter_agent_sync import ReleaseKey, check_kv_store, datastore_keys, decode_datastore_record, kv_release_datastore, pull_to_datastore, rollback_datastore
+from airprompter_agent.core.bundle.apbundle import DistributionKey
+from airprompter_agent.core.bundle.hpke import generate_x25519_key_pair
+from airprompter_agent.core.control.client import SyncClient
+from airprompter_agent.core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key
+from airprompter_agent.sync import ReleaseKey, check_kv_store, datastore_keys, decode_datastore_record, kv_release_datastore, pull_to_datastore, rollback_datastore
 from airprompter_datastore_postgres import postgres_kv_schema, postgres_kv_store
 from airprompter_datastore_redis import redis_kv_store
 from airprompter_datastore_s3 import s3_kv_store

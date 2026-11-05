@@ -11,10 +11,7 @@
   ],
   "references": [
     {
-      "path": "../core/tsconfig.esm.json"
-    },
-    {
-      "path": "../sync/tsconfig.esm.json"
+      "path": "../sdk/tsconfig.esm.json"
     }
   ]
 }

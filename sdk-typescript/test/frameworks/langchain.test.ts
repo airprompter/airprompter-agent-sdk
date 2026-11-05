@@ -17,8 +17,8 @@ import { z } from "zod";
 
 import { AirPrompterAgent } from "../../packages/sdk/src/agent.js";
 import { airprompter } from "../../packages/sdk/src/frameworks/langchain.js";
-import { publicJwkOf, releaseDigest } from "../../packages/core/src/protocol/trust.js";
-import { FakeControlPlane } from "../../packages/core/src/testing/index.js";
+import { publicJwkOf, releaseDigest } from "../../packages/sdk/src/core/protocol/trust.js";
+import { FakeControlPlane } from "../../packages/sdk/src/core/testing/index.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_lc", target: "prod" as const };
 const TAG = "support-reply";

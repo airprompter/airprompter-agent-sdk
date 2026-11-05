@@ -1,7 +1,7 @@
 # @airprompter/datastore-postgres
 
 The AirPrompter release datastore over one PostgreSQL table: a `KvStore`
-for `kvReleaseDatastore` (`@airprompter/agent-sync`). The puller writes
+for `kvReleaseDatastore` (`@airprompter/agent-sdk/sync`). The puller writes
 sealed releases through it; every runtime hydrates from it — the release,
 its dial-up and ramp, the fleet's rollback, the region
 ([docs/datastore.md](https://github.com/airprompter/airprompter-agent-sdk/blob/main/docs/datastore.md)).
@@ -10,7 +10,8 @@ puller and a TypeScript runtime read each other's.
 
 ```ts
 import pg from "pg";
-import { AirPrompterAgent, kvReleaseDatastore } from "@airprompter/agent-sdk";
+import { AirPrompterAgent } from "@airprompter/agent-sdk";
+import { kvReleaseDatastore } from "@airprompter/agent-sdk/sync";
 import { postgresKvStore } from "@airprompter/datastore-postgres";
 
 const kv = postgresKvStore({ client: new pg.Pool({ connectionString: process.env.DATABASE_URL }) });

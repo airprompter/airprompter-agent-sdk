@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from airprompter_agent_sync import (
+from airprompter_agent.sync import (
     DatastoreRecordError,
     FileKvStore,
     KvEntry,

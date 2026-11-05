@@ -11,7 +11,7 @@
  * @example
  * ```ts
  * import pg from "pg";
- * import { kvReleaseDatastore, pullToDatastore } from "@airprompter/agent-sdk";
+ * import { kvReleaseDatastore, pullToDatastore } from "@airprompter/agent-sdk/sync";
  * import { postgresKvStore } from "@airprompter/datastore-postgres";
  *
  * const kv = postgresKvStore({ client: new pg.Pool({ connectionString: process.env.DATABASE_URL }) });
@@ -20,7 +20,7 @@
  * ```
  */
 
-import type { KvEntry, KvPutCondition, KvStore } from "@airprompter/agent-sync";
+import type { KvEntry, KvPutCondition, KvStore } from "@airprompter/agent-sdk/sync";
 
 /** What the adapter calls: `pg`'s `Pool` / `Client` shape (`rowCount` may be null on some drivers for SELECT). */
 export interface PostgresQueryable {

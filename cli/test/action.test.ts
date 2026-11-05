@@ -15,8 +15,8 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createEncryptedBundle, createPlaintextBundle } from "../../sdk-typescript/packages/core/src/bundle/apbundle.js";
-import { publicJwkOf } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
+import { createEncryptedBundle, createPlaintextBundle } from "../../sdk-typescript/packages/sdk/src/core/bundle/apbundle.js";
+import { publicJwkOf } from "../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
 import { FakeControlPlane } from "../../sdk-typescript/test/helpers/controlPlane.js";
 // @ts-expect-error the action is plain JavaScript (Node's standard library only); its exports are checked by these tests
 import { commandFor, expandBundles } from "../../action/verify/run.mjs";

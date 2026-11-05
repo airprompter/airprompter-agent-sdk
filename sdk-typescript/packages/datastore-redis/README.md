@@ -1,13 +1,13 @@
 # @airprompter/datastore-redis
 
 The AirPrompter release datastore over Redis (6.2+) or Valkey: a `KvStore`
-for `kvReleaseDatastore` (`@airprompter/agent-sync`). The puller writes
+for `kvReleaseDatastore` (`@airprompter/agent-sdk/sync`). The puller writes
 sealed releases through it; every runtime hydrates from it
 ([docs/datastore.md](https://github.com/airprompter/airprompter-agent-sdk/blob/main/docs/datastore.md)).
 
 ```ts
 import { createClient } from "redis";
-import { kvReleaseDatastore } from "@airprompter/agent-sdk";
+import { kvReleaseDatastore } from "@airprompter/agent-sdk/sync";
 import { redisKvStore, fromNodeRedis } from "@airprompter/datastore-redis";
 
 const client = await createClient({ url: process.env.REDIS_URL }).connect();

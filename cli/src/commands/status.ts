@@ -20,12 +20,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { instant } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
-import { isStoreError } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { SlotStore } from "../../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import { nodeFs } from "../../../sdk-typescript/packages/core/src/ports/node.js";
-import { readDaemonDiscovery } from "../../../sdk-typescript/packages/telemetry/src/spool/manifest.js";
-import { LAST_UPLOAD_MARKER } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
+import { instant } from "../../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
+import { isStoreError } from "../../../sdk-typescript/packages/sdk/src/sync/store/slotStore.js";
+import { SlotStore } from "../../../sdk-typescript/packages/sdk/src/sync/store/slotStore.js";
+import { nodeFs } from "../../../sdk-typescript/packages/sdk/src/core/ports/node.js";
+import { readDaemonDiscovery } from "../../../sdk-typescript/packages/sdk/src/telemetry/spool/manifest.js";
+import { LAST_UPLOAD_MARKER } from "../../../sdk-typescript/packages/sdk/src/telemetry/uploader.js";
 import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, openStore, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { summarizeManifest } from "../chain.js";
 import { EXIT, Output, refused, type Context } from "../io.js";

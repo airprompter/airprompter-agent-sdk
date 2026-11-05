@@ -9,7 +9,7 @@ the operations. Usage::
 
     node conformance/harness.mjs --adapter-command "python3 examples/conformance-adapter/python/adapter.py"
 
-Needs the SDK importable (``pip install airprompter-agent-core airprompter-agent-telemetry``,
+Needs the SDK importable (``pip install airprompter-agent airprompter-agent-otel``,
 or ``PYTHONPATH`` over the source trees as this repository's CI sets it).
 """
 from __future__ import annotations
@@ -20,17 +20,17 @@ import json
 import sys
 from typing import Any, Callable
 
-from airprompter_agent_core.checks import checks_refusals, evaluate_checks, pattern_refusal, project_checks
-from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, frozen_experiment, matches_audience, ordered_steps, ramp_weights_at, servable_experiments, servable_slots, valid_audience_instant, valid_audience_key, valid_audience_label, valid_audience_selector, validate_ramp
-from airprompter_agent_core.protocol.canonical_json import canonical_json, sha256_prefixed
-from airprompter_agent_core.protocol.trust import carried_payloads, experiment_conflict, optional_payloads, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
-from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref, run_ref_key_from
-from airprompter_agent_core.telemetry.feedback import normalize_feedback
-from airprompter_agent_core.telemetry.rows import RunTotals, StepTotals, epoch_minute, latency_bucket_index, minute_of
-from airprompter_agent_runtime.release.resolver import disabled_from
-from airprompter_agent_telemetry.otel import spool_rows_to_otlp
-from airprompter_agent_telemetry.spool.writer import MemorySink, Observation, SegmentPlanner, SpoolWriter, WriterIdentity, segment_name
-from airprompter_agent_telemetry.uploader import inspect_segment
+from airprompter_agent.core.checks import checks_refusals, evaluate_checks, pattern_refusal, project_checks
+from airprompter_agent.core.protocol.assignment import assign_arm, effective_arms, frozen_experiment, matches_audience, ordered_steps, ramp_weights_at, servable_experiments, servable_slots, valid_audience_instant, valid_audience_key, valid_audience_label, valid_audience_selector, validate_ramp
+from airprompter_agent.core.protocol.canonical_json import canonical_json, sha256_prefixed
+from airprompter_agent.core.protocol.trust import carried_payloads, experiment_conflict, optional_payloads, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
+from airprompter_agent.core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref, run_ref_key_from
+from airprompter_agent.core.telemetry.feedback import normalize_feedback
+from airprompter_agent.core.telemetry.rows import RunTotals, StepTotals, epoch_minute, latency_bucket_index, minute_of
+from airprompter_agent.runtime.release.resolver import disabled_from
+from airprompter_agent_otel.exporter import spool_rows_to_otlp
+from airprompter_agent.telemetry.spool.writer import MemorySink, Observation, SegmentPlanner, SpoolWriter, WriterIdentity, segment_name
+from airprompter_agent.telemetry.uploader import inspect_segment
 
 
 class _Refused(Exception):

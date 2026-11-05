@@ -15,13 +15,13 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { publicJwkOf } from "../packages/core/src/protocol/trust.js";
-import { ManagedAgent } from "../packages/runtime/src/managed/client.js";
-import { VariableSourceRegistry, isVariableSourceError, isVariableSourceRequiredError } from "../packages/runtime/src/variables/sources.js";
-import { fillAsync, fillSync, planFill, stricterSources, unsourced } from "../packages/runtime/src/variables/fill.js";
-import { renderTemplate } from "../packages/core/src/render/template.js";
-import { releaseDigest } from "../packages/core/src/protocol/trust.js";
-import type { WindowRow } from "../packages/telemetry/src/spool/writer.js";
+import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
+import { ManagedAgent } from "../packages/sdk/src/runtime/managed/client.js";
+import { VariableSourceRegistry, isVariableSourceError, isVariableSourceRequiredError } from "../packages/sdk/src/runtime/variables/sources.js";
+import { fillAsync, fillSync, planFill, stricterSources, unsourced } from "../packages/sdk/src/runtime/variables/fill.js";
+import { renderTemplate } from "../packages/sdk/src/core/render/template.js";
+import { releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
+import type { WindowRow } from "../packages/sdk/src/telemetry/spool/writer.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };

@@ -15,10 +15,10 @@ import sys
 
 import pytest
 
-from airprompter_agent_core._util import instant, iso_ms, iso_seconds
-from airprompter_agent_core.telemetry.rows import STEP_BOUNDS, RunTotals, StepTotals
-from airprompter_agent_core.telemetry.feedback import normalize_feedback
-from airprompter_agent_telemetry.spool.writer import (
+from airprompter_agent.core._util import instant, iso_ms, iso_seconds
+from airprompter_agent.core.telemetry.rows import STEP_BOUNDS, RunTotals, StepTotals
+from airprompter_agent.core.telemetry.feedback import normalize_feedback
+from airprompter_agent.telemetry.spool.writer import (
     LATENCY_BUCKET_EDGES_MS,
     SEGMENT_MAX_BYTES,
     DirectorySink,
@@ -32,8 +32,8 @@ from airprompter_agent_telemetry.spool.writer import (
     minute_of,
     segment_name,
 )
-from airprompter_agent_core.telemetry.upload_sink import UploadOutcome, UploadSegment
-from airprompter_agent_telemetry.uploader import SpoolUploader, inspect_segment, validate_spool_row
+from airprompter_agent.core.telemetry.upload_sink import UploadOutcome, UploadSegment
+from airprompter_agent.telemetry.uploader import SpoolUploader, inspect_segment, validate_spool_row
 
 from .test_protocol_vectors import vector
 

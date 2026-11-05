@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "airprompter-agent"
 version = "0.5.0"
-description = "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. The facade over airprompter-agent-core, -sync, -runtime and -telemetry."
+description = "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. One distribution: the agent at the top, its parts in airprompter_agent.core, .sync, .runtime and .telemetry."
 readme = "README.md"
 license = "BSD-3-Clause"
 requires-python = ">=3.10"
@@ -23,19 +23,17 @@ classifiers = [
   "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-  "airprompter-agent-core==0.5.0",
-  "airprompter-agent-sync==0.5.0",
-  "airprompter-agent-runtime==0.5.0",
-  "airprompter-agent-telemetry==0.5.0",
+  "cryptography>=42",
+  "httpx>=0.27,<1",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
-# Key providers (airprompter-agent-sync extras), re-exposed here so one install names them.
-kms = ["airprompter-agent-sync[kms]==0.5.0"]
-vault = ["airprompter-agent-sync[vault]==0.5.0"]
-keyring = ["airprompter-agent-sync[keyring]==0.5.0"]
-# Provider wrappers: `airprompter_agent.integrations.*` import these lazily.
+# Key providers: what protects the store's key-encryption key (reported on the heartbeat as storageProtection).
+kms = ["boto3>=1.34"]
+vault = ["hvac>=2"]
+keyring = ["keyring>=25"]
+# Provider wrappers: `airprompter_agent.integrations.*` import these lazily; nothing else does.
 openai = ["openai>=1.40"]
 anthropic = ["anthropic>=0.40"]
 litellm = ["litellm>=1.50"]

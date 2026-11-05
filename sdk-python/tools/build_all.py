@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Build every distribution (sdist + wheel) into one ``dist/`` in dependency order: core, sync, runtime, telemetry,
-agent, then the three datastore adapters. The release workflow publishes that directory in one trusted-publishing step.
-``protocol/VERSION``, the only hand-edited protocol version, is written into core's ``protocol/_version.py`` first.
+"""Build every distribution (sdist + wheel) into one ``dist/`` in dependency order: the agent, then the OpenTelemetry
+package and the three datastore adapters. The release workflow publishes that directory in one trusted-publishing step.
+``protocol/VERSION``, the only hand-edited protocol version, is written into ``core/protocol/_version.py`` first.
 
 Usage::
 
-    $ python tools/build_all.py        # from sdk-python/; dist/ holds sixteen files afterwards
+    $ python tools/build_all.py        # from sdk-python/; dist/ holds ten files afterwards
 """
 
 from __future__ import annotations
@@ -16,15 +16,15 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ORDER = ["core", "sync", "runtime", "telemetry", "agent", "datastore-s3", "datastore-postgres", "datastore-redis"]
+ORDER = ["agent", "agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"]
 VERSION_SOURCE = ROOT.parent / "protocol" / "VERSION"
-VERSION_MODULE = ROOT / "packages" / "core" / "src" / "airprompter_agent_core" / "protocol" / "_version.py"
+VERSION_MODULE = ROOT / "packages" / "agent" / "src" / "airprompter_agent" / "core" / "protocol" / "_version.py"
 VERSION_TEMPLATE = '''"""The protocol this SDK speaks. ``tools/build_all.py`` writes this file from ``protocol/VERSION``, the only
 hand-edited protocol version: change that file, never this one.
 
 Example::
 
-    from airprompter_agent_core.protocol import PROTOCOL_VERSION
+    from airprompter_agent.core import PROTOCOL_VERSION
 
     heartbeat = {{"protocol": PROTOCOL_VERSION}}
 """

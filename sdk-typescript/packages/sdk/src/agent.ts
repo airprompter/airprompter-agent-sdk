@@ -27,40 +27,40 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
-import { AGENT_ID, errorNamed, nodeFs, runRefKeyFrom, servableExperiments, servableSlots, SUPPORTED_CAPABILITIES, TARGET_SLUG } from "@airprompter/agent-core";
-import type { FsPort } from "@airprompter/agent-core";
+import { AGENT_ID, errorNamed, nodeFs, runRefKeyFrom, servableExperiments, servableSlots, SUPPORTED_CAPABILITIES, TARGET_SLUG } from "./core/index.js";
+import type { FsPort } from "./core/index.js";
 import { realpathSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 
-import { bundlePayloadBytes, openBundle, type DistributionKey } from "@airprompter/agent-core";
-import { rampWeightsAt } from "@airprompter/agent-core";
-import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
-import type { ApplyPolicy, Bundle, Directive, HostedEnvironment, Manifest, ManifestPayload, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, SlotVariable, Target, UploadSink } from "@airprompter/agent-core";
-import { copyAudienceTags, validAudienceKey, validAudienceLabel, parseRunRef } from "@airprompter/agent-core";
-import type { Delimiters } from "@airprompter/agent-core";
-import { normalizeFeedback } from "@airprompter/agent-core";
-import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "@airprompter/agent-telemetry";
-import { readDaemonDiscovery, type DiscoveryResult } from "@airprompter/agent-telemetry";
-import { fileKey, type KeyProvider, type StorageProtection } from "@airprompter/agent-sync";
-import { requiredModelsMissing } from "@airprompter/agent-sync";
-import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "@airprompter/agent-sync";
-import { observeCall, type ObserveOptions } from "@airprompter/agent-runtime";
-import { ReleaseResolver, disabledFrom, newSubject, type Rendered } from "@airprompter/agent-runtime";
-import { DEFAULT_RUN_IDLE_TIMEOUT_MS, RunRegistry, classifyError, type AgentRuntime, type RunInput, type RunSession } from "@airprompter/agent-runtime";
-import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, unsourced, type FillPlan, type FilledRender, type RenderValues, type VariableSourceInput } from "@airprompter/agent-runtime";
-import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "@airprompter/agent-runtime";
-import { wrapClient, type WrapHooks } from "@airprompter/agent-runtime";
-import { aiSdkMiddleware, type AiSdkMiddleware, type AiSdkMiddlewareOptions } from "@airprompter/agent-runtime";
-import { evaluateChecks, outputTextOf, type CheckOutcome } from "@airprompter/agent-core";
-import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "@airprompter/agent-core";
-import { JUDGE_RUBRICS, judgePrompt, judgeSignalsOf, parseJudgeReply, rubricFromPrompt, type JudgeResult, type JudgeRubric } from "@airprompter/agent-core";
-import { SpoolUploader, postSegment, type GrantDecision, type UploadGrant, type UploaderStatus } from "@airprompter/agent-telemetry";
-import { parseWindow, windowState, type UpdateWindow } from "@airprompter/agent-sync";
-import { SyncClient, type FetchLike } from "@airprompter/agent-core";
-import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "@airprompter/agent-sync";
-import { resolveHydration, type HydrationPlan, type ReleaseDatastore, type ReleaseKey } from "@airprompter/agent-sync";
+import { bundlePayloadBytes, openBundle, type DistributionKey } from "./core/index.js";
+import { rampWeightsAt } from "./core/index.js";
+import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./core/index.js";
+import type { ApplyPolicy, Bundle, Directive, HostedEnvironment, Manifest, ManifestPayload, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, SlotVariable, Target, UploadSink } from "./core/index.js";
+import { copyAudienceTags, validAudienceKey, validAudienceLabel, parseRunRef } from "./core/index.js";
+import type { Delimiters } from "./core/index.js";
+import { normalizeFeedback } from "./core/index.js";
+import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "./telemetry/index.js";
+import { readDaemonDiscovery, type DiscoveryResult } from "./telemetry/index.js";
+import { fileKey, type KeyProvider, type StorageProtection } from "./sync/index.js";
+import { requiredModelsMissing } from "./sync/index.js";
+import { SlotStore, StoreError, isStoreError, type LoadedSlot } from "./sync/index.js";
+import { observeCall, type ObserveOptions } from "./runtime/index.js";
+import { ReleaseResolver, disabledFrom, newSubject, type Rendered } from "./runtime/index.js";
+import { DEFAULT_RUN_IDLE_TIMEOUT_MS, RunRegistry, classifyError, type AgentRuntime, type RunInput, type RunSession } from "./runtime/index.js";
+import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, unsourced, type FillPlan, type FilledRender, type RenderValues, type VariableSourceInput } from "./runtime/index.js";
+import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "./runtime/index.js";
+import { wrapClient, type WrapHooks } from "./runtime/index.js";
+import { aiSdkMiddleware, type AiSdkMiddleware, type AiSdkMiddlewareOptions } from "./runtime/index.js";
+import { evaluateChecks, outputTextOf, type CheckOutcome } from "./core/index.js";
+import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "./core/index.js";
+import { JUDGE_RUBRICS, judgePrompt, judgeSignalsOf, parseJudgeReply, rubricFromPrompt, type JudgeResult, type JudgeRubric } from "./core/index.js";
+import { SpoolUploader, postSegment, type GrantDecision, type UploadGrant, type UploaderStatus } from "./telemetry/index.js";
+import { parseWindow, windowState, type UpdateWindow } from "./sync/index.js";
+import { SyncClient, type FetchLike } from "./core/index.js";
+import { jitteredDelayMs, syncOnce, type ApplyPolicyDecision } from "./sync/index.js";
+import { resolveHydration, type HydrationPlan, type ReleaseDatastore, type ReleaseKey } from "./sync/index.js";
 
-import { PROTOCOL_VERSION, SDK_VERSION } from "@airprompter/agent-core";
+import { PROTOCOL_VERSION, SDK_VERSION } from "./core/index.js";
 
 export const SDK_NAME = "agent-sdk-ts";
 /** This package's version and the protocol it speaks (`protocol/version.ts`); the heartbeat names both, store.json records the first (S8). */
@@ -185,7 +185,7 @@ export interface StartOptions {
     upload?: boolean;
     /**
      * S13: where the uploader ships validated segments. Absent: AirPrompter's sink (a grant per writer, a PUT to your
-     * prefix). `otlpUploadSink(...)` from `@airprompter/otel-bridge` sends the windows to your OpenTelemetry collector
+     * prefix). `otlpUploadSink(...)` from `@airprompter/agent-otel/exporter` sends the windows to your OpenTelemetry collector
      * instead — no grant is ever requested — and a customer's own sink takes the same segments.
      */
     uploadSink?: UploadSink;
@@ -1068,7 +1068,7 @@ export class AirPrompterAgent implements AgentRuntime {
    * here ever blocks a render.
    */
   private startUploader(): void {
-    // S13: a sink of the customer's own (the OpenTelemetry bridge) needs no client and no grant: it runs offline too.
+    // S13: a sink of the customer's own (the OpenTelemetry exporter) needs no client and no grant: it runs offline too.
     const customSink = this.options.telemetry?.uploadSink;
     if (this.uploader || (!customSink && !this.client) || !this.store || this.stopped) return;
     if (this.options.telemetry?.upload === false) return;
@@ -1427,7 +1427,7 @@ export class AirPrompterAgent implements AgentRuntime {
     return { agent: detail.agent, slots: detail.slots, arms: Object.values(detail.armsByExperiment).flat() };
   }
 
-  /** S10: the runtime over the active release — resolution, the ramp walk and rendering live in `@airprompter/agent-runtime`. */
+  /** S10: the runtime over the active release — resolution, the ramp walk and rendering live in `@airprompter/agent-sdk/runtime`. */
   private resolver(): ReleaseResolver {
     const release = this.active;
     if (!release) throw new AgentStartError("no_verified_release", this.stagedManifest ? `no active release: generation ${this.stagedManifest.payload.generation} is staged under unlock_required and waiting for an unlock` : "no active release");

@@ -31,7 +31,7 @@ Two layers, so any datastore can join:
 | S3 (and MinIO, R2) | `@airprompter/datastore-s3` → `s3KvStore({ client, bucket })` | `airprompter-datastore-s3` → `s3_kv_store(client=, bucket=)` | `If-None-Match: *`, `If-Match: <ETag>` |
 | PostgreSQL 11+ | `@airprompter/datastore-postgres` → `postgresKvStore({ client })` | `airprompter-datastore-postgres` → `postgres_kv_store(connection=)` | `INSERT … ON CONFLICT DO NOTHING`, `UPDATE … WHERE version = $n` |
 | Redis 6.2+ / Valkey | `@airprompter/datastore-redis` → `redisKvStore({ command })` | `airprompter-datastore-redis` → `redis_kv_store(client=)` | one Lua `EVAL` per write |
-| A directory | `fsKvStore(dir)` (in `agent-sync`) | `FileKvStore(dir)` | single writer per directory |
+| A directory | `fsKvStore(dir)` (in `@airprompter/agent-sdk/sync`) | `FileKvStore(dir)` | single writer per directory |
 | Tests | `MemoryKvStore`, `MemoryReleaseDatastore` | the same names | — |
 
 The adapters bundle no client library: pass the `S3Client`, `pg.Pool`,

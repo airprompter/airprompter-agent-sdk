@@ -1,14 +1,14 @@
 # @airprompter/datastore-s3
 
 The AirPrompter release datastore over an S3 bucket: a `KvStore` for
-`kvReleaseDatastore` (`@airprompter/agent-sync`), with S3's own conditional
+`kvReleaseDatastore` (`@airprompter/agent-sdk/sync`), with S3's own conditional
 writes. The puller writes sealed releases through it; every runtime
 hydrates from it
 ([docs/datastore.md](https://github.com/airprompter/airprompter-agent-sdk/blob/main/docs/datastore.md)).
 
 ```ts
 import { S3Client } from "@aws-sdk/client-s3";
-import { kvReleaseDatastore } from "@airprompter/agent-sdk";
+import { kvReleaseDatastore } from "@airprompter/agent-sdk/sync";
 import { s3KvStore } from "@airprompter/datastore-s3";
 
 const kv = s3KvStore({ client: new S3Client({ region: "eu-west-1" }), bucket: "acme-airprompter-releases" });

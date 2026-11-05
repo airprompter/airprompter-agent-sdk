@@ -19,7 +19,7 @@ import { createEncryptedBundle, createPlaintextBundle } from "../../sdk-typescri
 import { publicJwkOf } from "../../sdk-typescript/packages/sdk/src/core/protocol/trust.js";
 import { FakeControlPlane } from "../../sdk-typescript/test/helpers/controlPlane.js";
 // @ts-expect-error the action is plain JavaScript (Node's standard library only); its exports are checked by these tests
-import { commandFor, expandBundles } from "../../action/verify/run.mjs";
+import { CLI_RELEASE_VERSION, commandFor, expandBundles } from "../../action/verify/run.mjs";
 import { generateDistributionKeyFiles } from "../src/keys.js";
 
 const cliRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -127,4 +127,9 @@ test("action helpers: commandFor picks node for bundles and tsx for sources; exp
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+});
+
+test("a release candidate is a version the action can download; a branch or a loose suffix is not", () => {
+  for (const version of ["cli/v1.0.0", "v1.0.0", "1.0.0", "cli/v1.0.0-rc.0", "1.0.0-beta.2", "cli/v1.0.0-alpha.1"]) assert.ok(CLI_RELEASE_VERSION.test(version), version);
+  for (const version of ["main", "cli/v1.0", "cli/v1.0.0-rc", "cli/v1.0.0rc0", "cli/v1.0.0-rc.0-evil", "sdk-python/v1.0.0"]) assert.equal(CLI_RELEASE_VERSION.test(version), false, version);
 });

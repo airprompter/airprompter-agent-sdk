@@ -44,6 +44,7 @@ Both SDKs speak protocol 3.0.0 and no other. See the [protocol changelog](protoc
 - **The import lint in both languages holds a layer to another layer's package,** never a module inside it.
 - `version-lockstep.mjs` and `version_lockstep.py` read a prerelease in either form, `1.0.0-rc.0` or `1.0.0rc0`.
 - `release.yml` publishes a prerelease under the npm dist-tag `next` and marks its GitHub release a pre-release.
+- `tag-release.yml` and the verify action accept a prerelease tag such as `cli/v1.0.0-rc.0`. Conformance and protocol tags stay final-only.
 
 ### Added
 - `runRefSecret` and `runRefPreviousSecrets` on `start()` (Python: `run_ref_secret`, `run_ref_previous_secrets`). A run reference now works on any instance of an agent and target; the key derives from the secret, else the Agent key.

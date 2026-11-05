@@ -67,7 +67,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/protocol/v')
         run: test "protocol/v$(cat protocol/VERSION)" = "$GITHUB_REF_NAME"
       - name: openapi.yaml info.version equals protocol/VERSION
-        run: test "$(sed -n 's/^  version: //p' protocol/openapi.yaml | head -n 1)" = "$(cat protocol/VERSION)"
+        run: |
+          test "$(sed -n 's/^  version: //p' protocol/openapi.yaml | head -n 1)" = "$(cat protocol/VERSION)"
       - name: Every protocol change carries a CHANGELOG entry
         if: github.event_name == 'pull_request'
         env:

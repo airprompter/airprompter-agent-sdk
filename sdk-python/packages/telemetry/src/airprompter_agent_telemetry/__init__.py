@@ -8,7 +8,7 @@ Example::
     from airprompter_agent_telemetry import DirectorySink, Observation, SpoolWriter, WriterIdentity
 
     writer = SpoolWriter(DirectorySink(spool_dir, "i-hostprocess000"), WriterIdentity("i-hostprocess000", "resident", "acme/1.0"))
-    writer.observe(Observation(tag="support.reply", version_id="ver_9", arm="none", model="gpt-5", status="ok", latency_ms=812), now_ms)
+    writer.observe(Observation(tag="support.reply", artifact_id="prm_reply", version_id="ver_9", arm="none", model="gpt-5", status="ok", latency_ms=812), now_ms)
 """
 
 from .spool.writer import (
@@ -20,10 +20,13 @@ from .spool.writer import (
     DirectorySink,
     MemorySink,
     Observation,
+    RunDimensions,
+    RunTotals,
     SegmentPlanner,
     SpoolRow,
     SpoolSink,
     SpoolWriter,
+    StepTotals,
     WriterIdentity,
     epoch_minute,
     latency_bucket_index,
@@ -82,6 +85,8 @@ __all__ = [
     "Observation",
     "OtlpUploadSink",
     "PassResult",
+    "RunDimensions",
+    "RunTotals",
     "SEGMENT_MAX_BYTES",
     "SERVERLESS_BUFFER_BYTES",
     "SegmentPlanner",
@@ -89,6 +94,7 @@ __all__ = [
     "SpoolSink",
     "SpoolUploader",
     "SpoolWriter",
+    "StepTotals",
     "UploadGrant",
     "WriterIdentity",
     "backoff_delay_ms",

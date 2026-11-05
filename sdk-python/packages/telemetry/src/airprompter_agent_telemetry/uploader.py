@@ -1,8 +1,9 @@
 """The spool uploader (T26 P4, D52/D66; S5 brings it to hosts with no daemon).
 
 Closed segments from ANY writer in ``<store>/spool/telemetry/`` are validated
-line by line against the spool row contract, quarantined when they do not
-fit, and POSTed straight to S3 under the heartbeat's presigned grant — one
+line by line against the spool row contract: an unknown field is stripped, a
+row a later 3.x wrote is skipped and counted, and only corruption quarantines
+a segment. What is left is POSTed straight to S3 under the heartbeat's presigned grant — one
 in flight per host, oldest first, exponential backoff with full jitter
 (1 s → 5 min), acknowledged segments deleted (S6), ``quarantine/`` and
 ``exported/`` capped in bytes and swept by age, the host budget enforced
@@ -26,8 +27,6 @@ Example::
 from __future__ import annotations
 
 import inspect
-from airprompter_agent_core.protocol.assignment import valid_audience_ids
-
 import json
 import math
 import os
@@ -43,6 +42,9 @@ import httpx
 
 from airprompter_agent_core._util import instant, iso_ms
 from airprompter_agent_core.ports import FsPort, OsFs, fs_failure_code
+from airprompter_agent_core.protocol.assignment import valid_audience_ids, valid_audience_minute
+from airprompter_agent_core._util import iso_seconds
+from airprompter_agent_core.telemetry.rows import SLOT_TAG, STEP_STATUSES, WINDOW_STATUSES, utf16_length, valid_step_name
 from airprompter_agent_core.telemetry.upload_sink import UploadOutcome, UploadSegment, UploadSink, sink_status
 from .spool.manifest import MANIFEST_GRACE_MS, MANIFEST_NAME, manifest_name_of, read_segment_manifest, segment_name_of_manifest, sha256_hex
 from .spool.writer import HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epoch_minute, segment_name
@@ -67,13 +69,21 @@ OPEN_SEGMENT_NAME = re.compile(r"^seg-([A-Za-z0-9._~-]{8,64})-(\d+)-(\d+)\.ndjso
 # ---------------------------------------------------------------------------
 
 _INSTANCE_ID = re.compile(r"^[A-Za-z0-9._~-]{8,64}$")
-_TAG = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:#[1-9][0-9]{0,2})?$")
-_ARM = re.compile(r"^[a-z0-9_-]{1,32}$")
+_TAG = SLOT_TAG
+_ARM = SLOT_TAG
+_ARTIFACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _OUTCOME_NAME = re.compile(r"^[a-z][a-zA-Z0-9]{0,31}$")
-_DATE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$")
-_ERROR_CLASSES = frozenset({"render_missing_variable", "context_length_exceeded", "output_schema_invalid", "truncated", "content_filter", "provider_error", "provider_timeout", "provider_rate_limited"})
-_REFUSAL_REASONS = frozenset({"disabled", "lease_expired", "payload_verification_failed", "forced_downgrade", "model_unavailable", "unlock_refused"})
-_USAGE_SOURCES = frozenset({"reported", "measured", "estimated", "unavailable"})
+_DATE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$", re.ASCII)
+#: A later 3.x may add an error class, a usage source or a refusal reason: a reader takes the shape, not the list.
+_SLUG = re.compile(r"[a-z][a-z0-9_]{0,31}")
+_ROW_VERSIONS = {"window": 4, "step": 1, "refusal": 1, "dropped": 1}
+_TOKEN_MOMENTS = ("input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput")
+_MAX_SAFE_INTEGER = 2**53 - 1
+_WINDOW_FIELDS = ("type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk")
+_STEP_FIELDS = ("type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "modelCalls", "latencyMs", "tokens", "tools", "sdk")
+_WINDOW_ONLY_FIELDS = ("tokensSq", "count", "outcomes", "checks")
+_REFUSAL_FIELDS = ("type", "v", "at", "instanceId", "reason", "generation", "tag")
+_DROPPED_FIELDS = ("type", "v", "at", "instanceId", "segments", "lines", "bytes")
 
 
 def _is_int(value: Any, minimum: int = 0) -> bool:
@@ -81,139 +91,240 @@ def _is_int(value: Any, minimum: int = 0) -> bool:
 
 
 def _is_str(value: Any, maximum: int) -> bool:
-    return isinstance(value, str) and len(value) <= maximum
+    return isinstance(value, str) and utf16_length(value) <= maximum
 
 
-def _extra_key(obj: Mapping[str, Any], allowed: tuple[str, ...]) -> Optional[str]:
-    for key in obj:
-        if key not in allowed:
-            return key
+def _is_finite(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an integer past every double
+        return False
+
+
+def _is_moment(value: Any) -> bool:
+    return _is_finite(value) and value >= 0
+
+
+def _is_slug(value: Any) -> bool:
+    return isinstance(value, str) and _SLUG.fullmatch(value) is not None
+
+
+def _histogram_fits(latency: Any) -> bool:
+    return isinstance(latency, Mapping) and isinstance(latency.get("buckets"), list) and len(latency["buckets"]) == len(LATENCY_BUCKET_EDGES_MS) and all(_is_int(b) for b in latency["buckets"]) and _is_int(latency.get("sum"))
+
+
+def _tokens_fit(tokens: Any) -> bool:
+    return isinstance(tokens, Mapping) and _is_int(tokens.get("input")) and _is_int(tokens.get("output")) and ("cachedInput" not in tokens or _is_int(tokens["cachedInput"]))
+
+
+def _tools_fit(tools: Any) -> bool:
+    return isinstance(tools, Mapping) and _is_int(tools.get("calls")) and _is_int(tools.get("errors"))
+
+
+def _pick(obj: Mapping[str, Any], fields: tuple[str, ...], path: str, stripped: list[str]) -> dict[str, Any]:
+    """Only the named fields survive; what went is named in ``stripped``, path first. No value is ever read."""
+    kept: dict[str, Any] = {}
+    for key, value in obj.items():
+        if key in fields:
+            kept[key] = value
+        else:
+            stripped.append(f"{path}{key}")
+    return kept
+
+
+def _pick_nested(row: Mapping[str, Any], stripped: list[str]) -> dict[str, Any]:
+    """The nested objects of a window or step row, down to what this reader knows."""
+    nested = dict(row)
+    for field_name, fields in (("latencyMs", ("buckets", "sum")), ("tokens", ("input", "cachedInput", "output")), ("tools", ("calls", "errors")), ("tokensSq", _TOKEN_MOMENTS), ("checks", ("passed", "failed"))):
+        if isinstance(row.get(field_name), Mapping):
+            nested[field_name] = _pick(row[field_name], fields, f"{field_name}.", stripped)
+    if isinstance(row.get("outcomes"), Mapping):
+        nested["outcomes"] = {name: _pick(entry, ("n", "sum", "sumSq"), f"outcomes.{name}.", stripped) if isinstance(entry, Mapping) else entry for name, entry in row["outcomes"].items()}
+    return nested
+
+
+def _dimension_reason(value: Mapping[str, Any]) -> Optional[str]:
+    """The fields a run dimension shares between window and step rows, in the order a reason names them."""
+    if not _is_str(value.get("artifactId"), 128) or not _ARTIFACT_ID.fullmatch(value["artifactId"]):
+        return "artifactId"
+    if "audienceIds" in value and not valid_audience_ids(value["audienceIds"]):
+        return "audienceIds"
+    if not valid_audience_minute(value.get("minute")):
+        return "minute"
+    if value.get("instanceClass") not in ("resident", "ephemeral"):
+        return "instanceClass"
+    if not _is_str(value.get("tag"), 128) or not _TAG.fullmatch(value["tag"]):
+        return "tag"
+    if not _is_str(value.get("versionId"), 128):
+        return "versionId"
+    if not _is_str(value.get("arm"), 32) or not _ARM.fullmatch(value["arm"]):
+        return "arm"
+    if not _is_str(value.get("model"), 128):
+        return "model"
+    error_class = value.get("errorClass")
+    if error_class is not None and not _is_slug(error_class):
+        return "errorClass"
+    if not _is_slug(value.get("usageSource")):
+        return "usageSource"
+    if not _is_int(value.get("modelCalls")):
+        return "modelCalls"
+    if not _tools_fit(value.get("tools")):
+        return "tools"
+    if not _histogram_fits(value.get("latencyMs")):
+        return "latencyMs"
+    if not _tokens_fit(value.get("tokens")):
+        return "tokens"
+    if "sdk" in value and not _is_str(value["sdk"], 64):
+        return "sdk"
+    return None
+
+
+def _window_reason(value: Mapping[str, Any]) -> Optional[str]:
+    dimension = _dimension_reason(value)
+    if dimension:
+        return dimension
+    if value.get("status") not in WINDOW_STATUSES:
+        return "status"
+    count = value.get("count")
+    if not _is_int(count):
+        return "count"
+    if not _is_int(value.get("agentRun")) or value["agentRun"] > count:
+        return "agentRun"
+    filing, original = value["minute"], value.get("outcomeRunMinute")
+    if "outcomeRunMinute" in value and (not valid_audience_minute(original) or instant(original) > instant(filing)):
+        return "outcomeRunMinute"
+    outcomes = value.get("outcomes")
+    if count == 0 and (original is None or not isinstance(outcomes, Mapping) or not outcomes):
+        return "outcomeRunMinute"
+    if count > 0 and original is not None and instant(original) != instant(filing):
+        return "outcomeRunMinute"
+    latency, tokens, tools = value["latencyMs"], value["tokens"], value["tools"]
+    checks = value.get("checks")
+    if count == 0 and (value["modelCalls"] != 0 or tools["calls"] != 0 or tools["errors"] != 0 or latency["sum"] != 0 or tokens["input"] != 0 or tokens["output"] != 0 or (tokens.get("cachedInput") or 0) != 0 or "tokensSq" in value or (isinstance(checks, Mapping) and ((checks.get("passed") or 0) != 0 or (checks.get("failed") or 0) != 0))):
+        return "feedback_measurements"
+    if count > 0:
+        moments = value.get("tokensSq")
+        if not isinstance(moments, Mapping) or not all(_is_moment(moments.get(name)) for name in _TOKEN_MOMENTS):
+            return "tokensSq"
+    if "checks" in value and (not isinstance(checks, Mapping) or ("passed" in checks and not _is_int(checks["passed"])) or ("failed" in checks and not _is_int(checks["failed"]))):
+        return "checks"
+    if "outcomes" in value:
+        if not isinstance(outcomes, Mapping):
+            return "outcomes"
+        for name, entry in outcomes.items():
+            if not _OUTCOME_NAME.fullmatch(name) or not isinstance(entry, Mapping) or not _is_int(entry.get("n")) or not _is_finite(entry.get("sum")) or not _is_moment(entry.get("sumSq")):
+                return f"outcomes:{name}"
+        thumbs = outcomes.get("thumbs")
+        if thumbs and (thumbs["sum"] != int(thumbs["sum"]) or not 0 <= thumbs["sum"] <= min(thumbs["n"], _MAX_SAFE_INTEGER)):
+            return "thumbs"
+    if sum(latency["buckets"]) != count:
+        return "histogram"
+    return None
+
+
+def _step_reason(value: Mapping[str, Any]) -> Optional[str]:
+    dimension = _dimension_reason(value)
+    if dimension:
+        return dimension
+    if not valid_step_name(value.get("step")):
+        return "step"
+    if value.get("status") not in STEP_STATUSES:
+        return "status"
+    if sum(value["latencyMs"]["buckets"]) != value["modelCalls"]:
+        return "histogram"
     return None
 
 
 @dataclass
 class RowVerdict:
+    """``row``: the line as it may leave this host, holding only the fields this reader knows; ``stripped`` names the rest.
+    ``later``: a row this reader cannot read and a later 3.x may have written. It is skipped and counted, and only the
+    line goes. Anything else refused is corruption, and quarantines the segment."""
+
     ok: bool
     reason: Optional[str] = None
     row: Optional[dict[str, Any]] = None
+    stripped: list[str] = field(default_factory=list)
+    later: bool = False
 
 
 def validate_spool_row(value: Any) -> RowVerdict:
-    """One parsed line against the contract. The reason names the first field that does not fit — never the value."""
+    """One parsed line against the contract. The reason names the first field that does not fit, never the value."""
     if not isinstance(value, Mapping):
         return RowVerdict(False, "not_an_object")
-    if value.get("v") != 1 and not (value.get("v") in (2,3) and value.get("type") == "window"):
-        return RowVerdict(False, "v")
-    instance_id = value.get("instanceId")
-    if not _is_str(instance_id, 64) or not _INSTANCE_ID.match(instance_id):
-        return RowVerdict(False, "instanceId")
     kind = value.get("type")
-    if kind == "window":
-        extra = _extra_key(value, (("audienceIds", "outcomeRunMinute") if value.get("v") in (2,3) else ()) + (("artifactId",) if value.get("v") == 3 else ()) + ("type", "v", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "latencyMs", "tokens", "checks", "outcomes", "sdk"))
-        if extra:
-            return RowVerdict(False, f"unknown_field:{extra}")
-        if not _is_str(value.get("minute"), 64) or not _DATE_TIME.match(value["minute"]):
-            return RowVerdict(False, "minute")
-        if value.get("instanceClass") not in ("resident", "ephemeral"):
-            return RowVerdict(False, "instanceClass")
-        if not _is_str(value.get("tag"), 132) or not _TAG.match(value["tag"]):
-            return RowVerdict(False, "tag")
-        if not _is_str(value.get("versionId"), 128):
-            return RowVerdict(False, "versionId")
-        if not _is_str(value.get("arm"), 32) or not (re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*",value["arm"]) if value.get("v") in (2,3) else _ARM.match(value["arm"])):
-            return RowVerdict(False, "arm")
-        if not _is_str(value.get("model"), 128):
-            return RowVerdict(False, "model")
-        if value.get("status") not in ("ok", "error", "refused"):
-            return RowVerdict(False, "status")
-        error_class = value.get("errorClass")
-        if error_class is not None and error_class not in _ERROR_CLASSES:
-            return RowVerdict(False, "errorClass")
-        if value.get("usageSource") not in _USAGE_SOURCES:
-            return RowVerdict(False, "usageSource")
-        if not _is_int(value.get("count")):
-            return RowVerdict(False, "count")
-        latency = value.get("latencyMs")
-        if not isinstance(latency, Mapping) or _extra_key(latency, ("buckets", "sum")) or not isinstance(latency.get("buckets"), list) or len(latency["buckets"]) != len(LATENCY_BUCKET_EDGES_MS) or not all(_is_int(b) for b in latency["buckets"]) or not _is_int(latency.get("sum")):
-            return RowVerdict(False, "latencyMs")
-        tokens = value.get("tokens")
-        if not isinstance(tokens, Mapping) or _extra_key(tokens, ("input", "cachedInput", "output")) or not _is_int(tokens.get("input")) or not _is_int(tokens.get("output")) or ("cachedInput" in tokens and not _is_int(tokens["cachedInput"])):
-            return RowVerdict(False, "tokens")
-        if "checks" in value:
-            checks = value["checks"]
-            if not isinstance(checks, Mapping) or _extra_key(checks, ("passed", "failed")) or ("passed" in checks and not _is_int(checks["passed"])) or ("failed" in checks and not _is_int(checks["failed"])):
-                return RowVerdict(False, "checks")
-        if "outcomes" in value:
-            outcomes = value["outcomes"]
-            if not isinstance(outcomes, Mapping):
-                return RowVerdict(False, "outcomes")
-            for name, entry in outcomes.items():
-                if not _OUTCOME_NAME.match(name) or not isinstance(entry, Mapping) or _extra_key(entry, ("n", "sum")) or not _is_int(entry.get("n")) or not isinstance(entry.get("sum"), (int, float)) or isinstance(entry.get("sum"), bool) or not math.isfinite(entry["sum"]):
-                    return RowVerdict(False, f"outcomes:{name}")
-        if value.get("v") in (2,3):
-            if value.get("v") == 3 and (not _is_str(value.get("artifactId"),128) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",value["artifactId"])): return RowVerdict(False,"artifactId")
-            ids = value.get("audienceIds")
-            if value.get("v") == 2 and ids is None: return RowVerdict(False,"audienceIds")
-            if ids is not None and not valid_audience_ids(ids): return RowVerdict(False,"audienceIds")
-            def minute(v):
-                if not isinstance(v,str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z",v): return False
-                try: instant(v); return True
-                except (ValueError,TypeError): return False
-            filing, original = value.get("minute"), value.get("outcomeRunMinute")
-            if not minute(filing) or (original is not None and (not minute(original) or instant(original) > instant(filing))): return RowVerdict(False,"outcomeRunMinute")
-            if sum(latency["buckets"]) != value["count"]: return RowVerdict(False,"histogram")
-            if value["count"] == 0:
-                if original is None or not value.get("outcomes"): return RowVerdict(False,"outcomeRunMinute")
-                if latency["sum"] or any(tokens.values()) or any((value.get("checks") or {}).values()): return RowVerdict(False,"feedback_measurements")
-            elif original is not None and instant(original) != instant(filing): return RowVerdict(False,"outcomeRunMinute")
-            thumbs = (value.get("outcomes") or {}).get("thumbs")
-            if thumbs and (type(thumbs["sum"]) is not int or not 0 <= thumbs["sum"] <= thumbs["n"]): return RowVerdict(False,"thumbs")
-        if "sdk" in value and not _is_str(value["sdk"], 64):
-            return RowVerdict(False, "sdk")
-        return RowVerdict(True, row=dict(value))
+    if not isinstance(kind, str) or kind not in _ROW_VERSIONS:
+        return RowVerdict(False, "unknown_type", later=True)
+    version = value.get("v")
+    if isinstance(version, bool) or version != _ROW_VERSIONS[kind]:
+        return RowVerdict(False, "v", later=True)
+    instance_id = value.get("instanceId")
+    if not _is_str(instance_id, 64) or not _INSTANCE_ID.fullmatch(instance_id):
+        return RowVerdict(False, "instanceId")
+    stripped: list[str] = []
+    if kind == "window" or kind == "step":
+        # A member of the other row form is a crossed row, not a later one: the two forms never mix.
+        crossed = next((name for name in (("step",) if kind == "window" else _WINDOW_ONLY_FIELDS) if name in value), None)
+        if crossed:
+            return RowVerdict(False, f"unknown_field:{crossed}")
+        reason = _window_reason(value) if kind == "window" else _step_reason(value)
+        if reason is not None:
+            # A status is a closed list per row type: one this reader lacks is a later writer's, skipped and counted.
+            return RowVerdict(False, reason, later=reason == "status")
+        return RowVerdict(True, row=_pick_nested(_pick(value, _WINDOW_FIELDS if kind == "window" else _STEP_FIELDS, "", stripped), stripped), stripped=stripped)
+    if not _is_str(value.get("at"), 64) or not _DATE_TIME.fullmatch(value["at"]):
+        return RowVerdict(False, "at")
     if kind == "refusal":
-        extra = _extra_key(value, ("type", "v", "at", "instanceId", "reason", "generation", "tag"))
-        if extra:
-            return RowVerdict(False, f"unknown_field:{extra}")
-        if not _is_str(value.get("at"), 64) or not _DATE_TIME.match(value["at"]):
-            return RowVerdict(False, "at")
-        if value.get("reason") not in _REFUSAL_REASONS:
+        if not _is_slug(value.get("reason")):
             return RowVerdict(False, "reason")
         if not _is_int(value.get("generation")):
             return RowVerdict(False, "generation")
-        if "tag" not in value or not (value["tag"] is None or (_is_str(value["tag"], 128) and _TAG.match(value["tag"]))):
+        if "tag" not in value or not (value["tag"] is None or (_is_str(value["tag"], 128) and _TAG.fullmatch(value["tag"]))):
             return RowVerdict(False, "tag")
-        return RowVerdict(True, row=dict(value))
-    if kind == "dropped":
-        extra = _extra_key(value, ("type", "v", "at", "instanceId", "segments", "bytes"))
-        if extra:
-            return RowVerdict(False, f"unknown_field:{extra}")
-        if not _is_str(value.get("at"), 64) or not _DATE_TIME.match(value["at"]):
-            return RowVerdict(False, "at")
-        if not _is_int(value.get("segments"), 1):
-            return RowVerdict(False, "segments")
-        if not _is_int(value.get("bytes")):
-            return RowVerdict(False, "bytes")
-        return RowVerdict(True, row=dict(value))
-    return RowVerdict(False, "unknown_type")
+        return RowVerdict(True, row=_pick(value, _REFUSAL_FIELDS, "", stripped), stripped=stripped)
+    if "lines" in value and not _is_int(value["lines"], 1):
+        return RowVerdict(False, "lines")
+    if not _is_int(value.get("segments"), 0 if "lines" in value else 1):
+        return RowVerdict(False, "segments")
+    if not _is_int(value.get("bytes")):
+        return RowVerdict(False, "bytes")
+    return RowVerdict(True, row=_pick(value, _DROPPED_FIELDS, "", stripped), stripped=stripped)
 
 
 @dataclass
 class SegmentInspection:
+    #: What may leave this host: known rows, known fields, and one ``dropped`` row when lines were skipped.
     rows: list[dict[str, Any]] = field(default_factory=list)
-    #: Line numbers (1-based) and reasons; empty means the segment fits the contract.
+    #: Corruption, by line (1-based) and reason; empty means the segment may ship.
     invalid: list[dict[str, Any]] = field(default_factory=list)
+    #: Lines a later 3.x may have written: skipped one by one, counted in the ``dropped`` row.
+    skipped: list[dict[str, Any]] = field(default_factory=list)
+    #: Fields this reader does not know, by line. They never leave the host.
+    stripped: list[dict[str, Any]] = field(default_factory=list)
     #: A last line without its newline (a crashed writer): skipped, never counted as invalid.
     partial_tail: bool = False
+    #: The whole lines to send: the file's own bytes when nothing was changed, else ``rows`` serialised again.
+    payload: bytes = b""
 
 
-def inspect_segment(data: bytes, instance_id: str) -> SegmentInspection:
+def _row_line(row: Mapping[str, Any]) -> bytes:
+    text = json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n"
+    try:
+        return text.encode("utf-8")
+    except UnicodeEncodeError:  # a lone surrogate, which UTF-8 cannot carry, stays escaped
+        return (json.dumps(row, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def inspect_segment(data: bytes, instance_id: str, now_ms: Optional[float] = None) -> SegmentInspection:
     """Every line of a segment against the contract; ``instance_id`` (from the file name) is authoritative for every row."""
     text = data.decode("utf-8", errors="replace")
     partial_tail = len(text) > 0 and not text.endswith("\n")
     lines = text.split("\n")
     lines.pop()  # the partial tail, or the empty string after the final newline
     inspection = SegmentInspection(partial_tail=partial_tail)
+    skipped_bytes = 0
     for index, line in enumerate(lines):
         if not line.strip():
             continue
@@ -223,12 +334,21 @@ def inspect_segment(data: bytes, instance_id: str) -> SegmentInspection:
             inspection.invalid.append({"line": index + 1, "reason": "not_json"})
             continue
         verdict = validate_spool_row(parsed)
-        if not verdict.ok:
+        if verdict.ok and verdict.row is not None:
+            if verdict.row.get("instanceId") != instance_id:
+                inspection.invalid.append({"line": index + 1, "reason": "instance_mismatch"})
+            else:
+                inspection.rows.append(verdict.row)
+                inspection.stripped.extend({"line": index + 1, "field": name} for name in verdict.stripped)
+        elif verdict.later:
+            inspection.skipped.append({"line": index + 1, "reason": verdict.reason})
+            skipped_bytes += len(line.encode("utf-8", "surrogatepass")) + 1
+        else:
             inspection.invalid.append({"line": index + 1, "reason": verdict.reason})
-        elif verdict.row is not None and verdict.row.get("instanceId") != instance_id:
-            inspection.invalid.append({"line": index + 1, "reason": "instance_mismatch"})
-        elif verdict.row is not None:
-            inspection.rows.append(verdict.row)
+    if inspection.skipped:
+        inspection.rows.append({"type": "dropped", "v": 1, "at": iso_seconds(time.time() * 1000 if now_ms is None else now_ms), "instanceId": instance_id, "segments": 0, "lines": len(inspection.skipped), "bytes": skipped_bytes})
+    whole = data[: data.rfind(b"\n") + 1] if partial_tail else data
+    inspection.payload = whole if not inspection.skipped and not inspection.stripped else b"".join(_row_line(row) for row in inspection.rows)
     return inspection
 
 
@@ -327,7 +447,7 @@ class PassResult:
 
 
 def _takes_report(grant_for: Callable[..., GrantDecision]) -> bool:
-    """Whether a ``grant_for`` accepts the writer's report as a second argument (0.3.0); an older one takes the id alone."""
+    """Whether a ``grant_for`` accepts the writer's report as a second argument; an older one takes the id alone."""
     try:
         parameters = list(inspect.signature(grant_for).parameters.values())
     except (TypeError, ValueError):
@@ -738,7 +858,9 @@ class SpoolUploader:
                     self._quarantine(name, "oversize", len(data))
                     result.quarantined.append(name)
                     continue
-                inspection = inspect_segment(data, instance_id)
+                inspection = inspect_segment(data, instance_id, self._now_ms())
+                if inspection.skipped or inspection.stripped:
+                    self._log({"event": "segment_cleaned", "segment": name, "skippedRows": len(inspection.skipped), "strippedFields": len(inspection.stripped)})
                 if inspection.invalid:
                     self._quarantine(name, "invalid_rows", inspection.invalid[:5])
                     result.quarantined.append(name)
@@ -748,9 +870,8 @@ class SpoolUploader:
                     if self._guard("ack_segment", lambda: self._fs.unlink(path)):
                         self._remove_manifest(name)
                     continue
-                # The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines.
-                payload = data[: data.rfind(b"\n") + 1] if inspection.partial_tail else data
-                outcome = self._sink.ship(UploadSegment(instance_id=instance_id, segment=name, rows=inspection.rows, data=payload, report=report))
+                # The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines, cleaned.
+                outcome = self._sink.ship(UploadSegment(instance_id=instance_id, segment=name, rows=inspection.rows, data=inspection.payload, report=report))
                 if outcome.status == "hold":
                     retry_ms = int(outcome.retry_after_ms or 900_000)
                     self._backoff_until_ms = self._now() + retry_ms

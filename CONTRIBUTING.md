@@ -51,7 +51,7 @@ expects.
 | the TypeScript SDK | a test in `sdk-typescript/test/`, and the same behaviour in the Python SDK (the two are lockstep: one version, the same conformance vectors, the same store layout). If you cannot do the Python side, say so in the PR and we will. |
 | the Python SDK | the mirror of the above. |
 | a provider wrapper (`wrap`, the AI SDK middleware, LiteLLM) | a fake-client test (see `sdk-typescript/test/wrap.test.ts`, `sdk-python/tests/test_wrap.py`); the real-package tests are optional and skip when the package is not installed. |
-| a public function's name or shape | a line in [`CHANGELOG.md`](CHANGELOG.md) under **Unreleased**, and the compat table (`cd sdk-typescript && npm run compat-table`). |
+| a public function's name or shape | a line in [`CHANGELOG.md`](CHANGELOG.md) under **Unreleased** |
 | customer docs (`docs/`) | `node docs/check-links.mjs` — every relative link and anchor must resolve. |
 
 ### Conventions

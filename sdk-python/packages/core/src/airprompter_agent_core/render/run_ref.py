@@ -1,140 +1,153 @@
-"""``runRef``: a compact, content-free token a customer keeps beside their own
-trace to attach feedback later. Its legacy seven-part body remains readable;
-Team runs add an authenticated JSON extension with the atomic artifact/model
-pair and, when targeted, opaque audience IDs plus the original run minute.
-The per-store HMAC prevents forged feedback. No subject, tag value, or prompt
-text is carried.
+"""``runRef``: a compact, content-free token a customer keeps beside their own trace to attach feedback later. One body
+form: ``[agentId, target, runId, entries]`` as JSON, base64url, then the same 22-character HMAC. One entry per slot the
+run used, so a one-slot run is a list of one. ``run_id`` is fixed, because a token that grows cannot be the run's
+identity. The token carries no subject, tag values, or prompt text.
+
+Readers are tolerant so a host can grow a ref a later SDK wrote: a body element past the fourth lands in ``extra``,
+unknown keys stay on their entry, and both survive ``mint_run_ref``. Readers accept more than minting writes. A hosted
+run's ref (prompt-haven) is a different token and is never parsed here.
+
+An entry is the wire's own dict (camelCase), so its unknown keys and its key order survive a re-mint. Built here and in
+the TypeScript SDK in the same key order, a token is byte-identical in both.
 
 Example::
 
-    facts = RunRefFacts(agent_id="agt_1", target="prod", tag="support.reply", version_id="ver_9", arm="none", generation=12, bucket=None,
-                        artifact_id="prm_reply", model="gpt-5", audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",), run_minute="2026-09-12T14:03:00Z")
-    run_ref = mint_run_ref(facts, key)   # the per-store key; keep the token beside your own trace
-    parse_run_ref(run_ref, key)          # authenticated facts, or None for a forged/malformed token
+    key = run_ref_key_from(api_key, "agt_1", "prod")   # the same on every instance of this agent and target
+    facts = RunRefFacts("agt_1", "prod", new_run_id(), ({"tag": "support.reply", "artifactId": "prm_reply", "versionId": "ver_9", "model": "gpt-5", "arm": "none", "bucket": None, "runMinute": "2026-09-12T14:03:00Z"},))
+    run_ref = mint_run_ref(facts, key)         # keep the token beside your own trace
+    parse_run_ref(run_ref, [key, previous])    # tries each key: the facts, or None for a forged or malformed token
 """
 
 from __future__ import annotations
 
-import json
-import re
-from ..protocol.assignment import valid_audience_ids
-
 import hashlib
 import hmac
+import json
+import re
+import secrets
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Mapping, Optional, Sequence, Union
 
-from .._util import b64url_decode, b64url_encode, instant
+from .._util import b64url_decode, b64url_encode
+from ..protocol.assignment import valid_audience_ids, valid_audience_minute
 
-_SEP = "·"
-_ARTIFACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+RUN_REF_MAX_ENTRIES = 8
+#: Eight worst-case entries are about 9,500 characters.
+RUN_REF_MAX_TOKEN_LENGTH = 12288
+#: Reading stays above minting, so a later minor can raise what is minted.
+RUN_REF_READ_MAX_ENTRIES = 32
+RUN_REF_READ_MAX_TOKEN_LENGTH = 40960
+
+_ARTIFACT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
+_MAC = re.compile(r"[A-Za-z0-9_-]{22}")
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 @dataclass(frozen=True)
 class RunRefFacts:
     agent_id: str
     target: str
-    tag: str
-    version_id: str
-    arm: str
-    generation: int
-    bucket: Optional[int]
-    audience_ids: Optional[tuple[str, ...]] = None
-    run_minute: Optional[str] = None
-    artifact_id: Optional[str] = None
-    model: Optional[str] = None
+    run_id: str
+    #: Tags are unique. ``tag``, ``artifactId``, ``versionId``, ``model``, ``arm``, ``bucket``, ``runMinute``, optional ``audienceIds``.
+    entries: Sequence[Mapping[str, Any]]
+    #: Body elements past the fourth, kept for a later re-mint.
+    extra: Sequence[Any] = ()
+
+    @classmethod
+    def from_wire(cls, facts: Mapping[str, Any]) -> "RunRefFacts":
+        """The protocol's camelCase shape (as the vectors carry it)."""
+        return cls(facts["agentId"], facts["target"], facts["runId"], facts["entries"], facts.get("extra", ()))
+
+    def to_wire(self) -> dict[str, Any]:
+        return {"agentId": self.agent_id, "target": self.target, "runId": self.run_id, "entries": list(self.entries), **({"extra": list(self.extra)} if self.extra else {})}
 
 
-def _mac(body: str, key: bytes) -> str:
-    return b64url_encode(hmac.new(key, body.encode("utf-8"), hashlib.sha256).digest())[:22]
+def _non_empty(value: Any) -> bool:
+    return isinstance(value, str) and len(value) > 0
+
+
+def _valid_entry(entry: Any) -> bool:
+    if not isinstance(entry, Mapping):
+        return False
+    if not _non_empty(entry.get("tag")) or not _non_empty(entry.get("versionId")) or not _non_empty(entry.get("arm")):
+        return False
+    artifact_id, model = entry.get("artifactId"), entry.get("model")
+    if not isinstance(artifact_id, str) or not _ARTIFACT_ID.fullmatch(artifact_id) or not isinstance(model, str) or not _MODEL_ID.fullmatch(model):
+        return False
+    if "bucket" not in entry:
+        return False
+    bucket = entry["bucket"]
+    if bucket is not None and (type(bucket) is not int or not 0 <= bucket <= 9999):
+        return False
+    return valid_audience_minute(entry.get("runMinute")) and ("audienceIds" not in entry or valid_audience_ids(entry["audienceIds"]))
+
+
+def _body_of(elements: list[Any]) -> bytes:
+    """``JSON.stringify``'s bytes: a lone surrogate, which UTF-8 cannot carry, is escaped the way it escapes one."""
+    text = json.dumps(elements, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return _LONE_SURROGATE.sub(lambda match: f"\\u{ord(match.group()):04x}", text).encode("utf-8")
+
+
+def _mac(body: bytes, key: bytes) -> str:
+    return b64url_encode(hmac.new(key, body, hashlib.sha256).digest())[:22]
+
+
+def new_run_id() -> str:
+    """22 base64url characters from 16 random bytes."""
+    return b64url_encode(secrets.token_bytes(16))
+
+
+def run_ref_key_from(secret: str, agent_id: str, target: str) -> bytes:
+    """The key instances of one agent and target share: derived, so the secret itself never keys a token."""
+    return hmac.new(secret.encode("utf-8"), f"airprompter runRef v1\0{agent_id}\0{target}".encode("utf-8"), hashlib.sha256).digest()
 
 
 def mint_run_ref(facts: RunRefFacts, key: bytes) -> str:
-    if any(not isinstance(value, str) or _SEP in value for value in (facts.agent_id, facts.target, facts.tag, facts.version_id, facts.arm)):
+    """Raises ``run_ref_facts_invalid`` past either minting bound, on repeated tags, or on an entry that does not fit."""
+    entries = facts.entries
+    if not _non_empty(facts.agent_id) or not _non_empty(facts.target) or not _non_empty(facts.run_id) or not isinstance(entries, (list, tuple)) or len(entries) > RUN_REF_MAX_ENTRIES:
         raise ValueError("run_ref_facts_invalid")
-    if not isinstance(facts.generation, int) or isinstance(facts.generation, bool) or not 1 <= facts.generation <= 9007199254740991 or facts.bucket is not None and (
-        not isinstance(facts.bucket, int) or isinstance(facts.bucket, bool) or not 0 <= facts.bucket <= 9999
-    ):
-        raise ValueError("run_ref_facts_invalid")
-    if (facts.artifact_id is None) != (facts.model is None) or facts.artifact_id is not None and (
-        not isinstance(facts.artifact_id, str) or not _ARTIFACT_ID.fullmatch(facts.artifact_id)
-        or not isinstance(facts.model, str) or not _MODEL_ID.fullmatch(facts.model)
-    ):
+    if not all(_valid_entry(entry) for entry in entries) or len({entry["tag"] for entry in entries}) != len(entries):
         raise ValueError("run_ref_facts_invalid")
     try:
-        if facts.run_minute is not None:
-            if not isinstance(facts.run_minute, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z", facts.run_minute): raise ValueError
-            instant(facts.run_minute)
-            if facts.artifact_id is None and facts.audience_ids is None: raise ValueError
-        if facts.audience_ids is not None and (not valid_audience_ids(facts.audience_ids) or facts.run_minute is None): raise ValueError
-    except (ValueError, TypeError, OverflowError):
+        body = _body_of([facts.agent_id, facts.target, facts.run_id, [dict(entry) for entry in entries], *facts.extra])
+    except (TypeError, ValueError):
         raise ValueError("run_ref_facts_invalid") from None
-    body = _SEP.join([facts.agent_id, facts.target, facts.tag, facts.version_id, facts.arm, str(facts.generation), "-" if facts.bucket is None else str(facts.bucket)])
-    extension = None
-    if facts.artifact_id is not None:
-        extension = {"artifactId": facts.artifact_id, "model": facts.model}
-        if facts.run_minute is not None:
-            extension["runMinute"] = facts.run_minute
-        if facts.audience_ids is not None:
-            extension["audienceIds"] = facts.audience_ids
-    elif facts.audience_ids is not None:
-        extension = [facts.audience_ids, facts.run_minute]
-    if extension is not None:
-        body += _SEP + json.dumps(extension, separators=(",", ":"))
-    return f"{b64url_encode(body.encode('utf-8'))}.{_mac(body, key)}"
+    token = f"{b64url_encode(body)}.{_mac(body, key)}"
+    if len(token) > RUN_REF_MAX_TOKEN_LENGTH:
+        raise ValueError("run_ref_facts_invalid")
+    return token
 
 
-def parse_run_ref(token: str, key: bytes) -> Optional[RunRefFacts]:
-    dot = token.rfind(".")
-    if dot <= 0 or len(token) > 4096:
+def _refuse_constant(name: str) -> None:
+    raise ValueError(name)
+
+
+def parse_run_ref(token: str, keys: Union[bytes, Sequence[bytes]]) -> Optional[RunRefFacts]:
+    """The authenticated facts, or None for a forged or malformed token. ``keys`` is tried in order, so a rotation keeps older refs working."""
+    if not isinstance(token, str):
         return None
-    try:
-        body = b64url_decode(token[:dot]).decode("utf-8")
-    except (ValueError, UnicodeDecodeError):
+    dot = token.rfind(".")
+    if dot <= 0 or len(token) > RUN_REF_READ_MAX_TOKEN_LENGTH:
         return None
     mac = token[dot + 1 :]
-    expected = _mac(body, key)
-    if len(mac) != len(expected) or not hmac.compare_digest(mac.encode("ascii", "replace"), expected.encode("ascii")):
+    if not _MAC.fullmatch(mac):
         return None
-    parts = body.split(_SEP)
-    if len(parts) not in (7, 8):
+    try:
+        body = b64url_decode(token[:dot])
+    except ValueError:
         return None
-    agent_id, target, tag, version_id, arm, generation_text, bucket_text = parts[:7]
-    if not re.fullmatch(r"[1-9][0-9]*", generation_text) or bucket_text != "-" and not re.fullmatch(r"(?:0|[1-9][0-9]{0,3})", bucket_text):
+    candidates = [keys] if isinstance(keys, (bytes, bytearray, memoryview)) else keys
+    if not any(hmac.compare_digest(mac.encode("ascii"), _mac(body, bytes(key)).encode("ascii")) for key in candidates):
         return None
-    generation = int(generation_text)
-    bucket = None if bucket_text == "-" else int(bucket_text)
-    if generation > 9007199254740991 or bucket is not None and bucket > 9999:
+    try:
+        parsed = json.loads(body.decode("utf-8"), parse_constant=_refuse_constant)
+    except (ValueError, RecursionError):
         return None
-    cohort = {}
-    if len(parts) == 8:
-        try:
-            extension = json.loads(parts[7])
-            if isinstance(extension, list):
-                if len(extension) != 2: return None
-                ids, minute = extension
-                if not valid_audience_ids(ids) or not isinstance(minute,str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z",minute): return None
-                from .._util import instant
-                instant(minute)
-                cohort = {"audience_ids": tuple(ids), "run_minute": minute}
-            elif isinstance(extension, dict):
-                if not set(extension).issubset({"artifactId","model","audienceIds","runMinute"}): return None
-                artifact_id = extension.get("artifactId")
-                if not isinstance(artifact_id,str) or not _ARTIFACT_ID.fullmatch(artifact_id): return None
-                model = extension.get("model")
-                if not isinstance(model,str) or not _MODEL_ID.fullmatch(model): return None
-                cohort = {"artifact_id": artifact_id, "model": model}
-                minute = extension.get("runMinute")
-                if minute is not None:
-                    if not isinstance(minute,str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z",minute): return None
-                    from .._util import instant
-                    instant(minute)
-                    cohort["run_minute"] = minute
-                if "audienceIds" in extension:
-                    ids = extension.get("audienceIds")
-                    if not valid_audience_ids(ids) or minute is None: return None
-                    cohort["audience_ids"] = tuple(ids)
-            else: return None
-        except (ValueError, TypeError): return None
-    return RunRefFacts(agent_id, target, tag, version_id, arm, generation, bucket, **cohort)
+    if not isinstance(parsed, list) or len(parsed) < 4:
+        return None
+    agent_id, target, run_id, entries, *extra = parsed
+    if not _non_empty(agent_id) or not _non_empty(target) or not _non_empty(run_id) or not isinstance(entries, list) or len(entries) > RUN_REF_READ_MAX_ENTRIES or not all(_valid_entry(entry) for entry in entries):
+        return None
+    return RunRefFacts(agent_id, target, run_id, entries, extra)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Install the five distributions editable, in dependency order, plus the test extras — one command for a
-contributor or CI.
+"""Install the five distributions editable, in dependency order, plus the test extras and ``jsonschema`` (the protocol
+schema tests validate with it) — one command for a contributor or CI.
 
 Usage::
 
@@ -16,10 +16,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ORDER = ["core", "sync", "runtime", "telemetry", "agent", "datastore-s3", "datastore-postgres", "datastore-redis"]
+DEFAULT_EXTRAS = ["jsonschema"]
 
 
 def main() -> int:
-    extra = sys.argv[1:]
+    extra = [*DEFAULT_EXTRAS, *sys.argv[1:]]
     targets = []
     for name in ORDER:
         path = ROOT / "packages" / name

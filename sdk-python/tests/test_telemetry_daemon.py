@@ -23,7 +23,7 @@ import httpx
 import pytest
 
 from airprompter_agent import AirPrompterAgent
-from airprompter_agent.agent import SPOOL_DIR_ENV, AgentStartError, SyncOptions, TelemetryOptions
+from airprompter_agent.agent import SPOOL_DIR_ENV, SyncOptions, TelemetryOptions
 from airprompter_agent_core._util import iso_ms
 from airprompter_agent_core.bundle.apbundle import DistributionKey
 from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
@@ -115,7 +115,7 @@ def online_host(state_dir: str, clock: Clock, plane: FakeControlPlane | None = N
 
 def report_one(ap: AirPrompterAgent) -> None:
     r = ap.prompt("support.reply").render()
-    ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12)
+    ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12)
 
 
 @pytest.fixture
@@ -130,16 +130,6 @@ def dirs():
     yield make
     for path in made:
         shutil.rmtree(path, ignore_errors=True)
-
-
-def test_sync_mode_daemon_is_refused_at_start(dirs):
-    state_dir = dirs()
-    plane = FakeControlPlane(SCOPE)
-    for sync in ({"mode": "daemon"}, {"daemon_socket_path": "/run/x.sock"}):
-        with pytest.raises(AgentStartError) as raised:
-            AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, sync=sync)
-        assert raised.value.code == "invalid_options" and "removed in 0.3.0" in str(raised.value)
-    assert not os.path.exists(os.path.join(store_dir_of(state_dir), "store.json")), "refused before the store was touched"
 
 
 def test_every_closed_segment_gets_a_manifest_with_the_writers_report_without_spool(dirs):
@@ -284,7 +274,7 @@ def test_a_process_hydrated_from_the_datastore_sends_its_telemetry_to_the_daemon
 
 def _window_row(instance_id: str, minute_ms: float) -> dict:
     minute = datetime.fromtimestamp(int(minute_ms // 60_000) * 60, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return {"type": "window", "v": 1, "minute": minute, "instanceId": instance_id, "instanceClass": "resident", "tag": "support.reply", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 5, "sum": 812}, "tokens": {"input": 4, "output": 2}, "sdk": "agent-sdk-py/0.3.0"}
+    return {"type": "window", "v": 4, "artifactId": "art_1", "minute": minute, "instanceId": instance_id, "instanceClass": "resident", "tag": "support.reply", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 4, "output": 2}, "sdk": "agent-sdk-py/0.3.0"}
 
 
 def test_the_uploader_honours_manifests(dirs):
@@ -302,7 +292,7 @@ def test_the_uploader_honours_manifests(dirs):
         return httpx.Response(204)
 
     uploader = SpoolUploader(directory=directory, instance_id="i-daemonDDDDDDDD", scope={"agentId": SCOPE["agentId"], "target": SCOPE["target"]}, grant_for=grant_for, transport=httpx.MockTransport(bucket), now_ms=clock, rand=lambda: 0)
-    report = {"protocol": "0.3.4", "instanceId": "i-writerAAAAAAAA", "sdk": {"name": "agent-sdk-python", "version": "0.3.0"}, "syncMode": "offline", "generation": {"active": 3}, "applyState": "active", "storageProtection": "file_key", "catalog": {"models": []}, "lease": {"expired": False}}
+    report = {"protocol": "3.0.0", "instanceId": "i-writerAAAAAAAA", "sdk": {"name": "agent-sdk-python", "version": "0.3.0"}, "syncMode": "offline", "generation": {"active": 3}, "applyState": "active", "storageProtection": "file_key", "catalog": {"models": []}, "lease": {"expired": False}}
 
     def write(instance_id: str, scope):
         name = segment_name(instance_id, epoch_minute(clock.ms), 0)
@@ -341,11 +331,11 @@ def test_the_uploader_honours_manifests(dirs):
 
 def test_the_sinks_own_eviction_takes_each_manifest_with_it(dirs):
     directory = dirs("ap-tdaemon-evict-")
-    context = {"organizationId": SCOPE["organizationId"], "agentId": SCOPE["agentId"], "target": SCOPE["target"], "report": {"protocol": "0.3.4"}}
+    context = {"organizationId": SCOPE["organizationId"], "agentId": SCOPE["agentId"], "target": SCOPE["target"], "report": {"protocol": "3.0.0"}}
     sink = DirectorySink(directory, "i-writerAAAAAAAA", 900, manifest=lambda: context, now=lambda: T0)
     writer = SpoolWriter(sink, WriterIdentity("i-writerAAAAAAAA", "resident", "agent-sdk-py/0.3.0"))
     for i in range(4):
-        writer.observe(Observation(tag="support.reply", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=10), T0 + i * 60_000)
+        writer.observe(Observation(tag="support.reply", artifact_id="art_1", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=10), T0 + i * 60_000)
         writer.close_windows(T0 + i * 60_000)
     segments = segments_in(directory)
     assert len(segments) < 5, "the budget evicted some"

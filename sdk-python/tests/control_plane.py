@@ -15,10 +15,10 @@ import httpx
 
 from airprompter_agent_core._util import instant, iso_ms, now_ms
 from airprompter_agent_core.protocol.canonical_json import canonical_bytes, sha256_prefixed
-from airprompter_agent_core.protocol.trust import experiments_of, generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
+from airprompter_agent_core.protocol import PROTOCOL_VERSION
+from airprompter_agent_core.protocol.trust import generate_p256_jwk, key_thumbprint, public_jwk_of, release_digest, sign_bytes
 
-#: Baseline fake manifests stay on the established non-audience wire; audience tests opt into protocol 2 explicitly.
-PROTOCOL = "0.3.4"
+PROTOCOL = PROTOCOL_VERSION
 
 new_key = generate_p256_jwk
 
@@ -51,7 +51,8 @@ class FakeControlPlane:
         self.api_key = api_key
         self.root_key = new_key()
         self.signing_key = new_key()
-        self.root = root_document(root_key=self.root_key, signing_keys=[self.signing_key], environment=hosted_environment or scope["target"])
+        # The hosted environment the root governs; by default the one named like the stage, else ``dev``.
+        self.root = root_document(root_key=self.root_key, signing_keys=[self.signing_key], environment=hosted_environment or (scope["target"] if scope["target"] in ("staging", "prod") else "dev"))
         self.payloads: dict[str, bytes] = {}
         self.requests: list[str] = []
         self._current: Optional[dict[str, Any]] = None
@@ -68,7 +69,6 @@ class FakeControlPlane:
         self.heartbeat_latest_generation = True
         self.heartbeat_interval_seconds = 300
         self.heartbeat_refusal: Optional[dict[str, Any]] = None
-        self.heartbeat_capabilities: Any = ["audience"]
         # T26 / S5: the grant issuer and a fake S3 behind it. With ``grant_base_url`` set, every accepted heartbeat answers an
         # ``uploadGrant`` for the body's instance prefix (or ``retryAfterSeconds`` while ``grant_hold`` is set); the POST endpoint
         # at ``<grant_base_url>/s3/agent-telemetry`` checks the policy the way the bucket would and keeps the objects by key.
@@ -165,8 +165,8 @@ class FakeControlPlane:
                 slot["steps"].append({"stepId": f"{tag}#{index + 1}", "ordinal": index + 1, "promptArtifactId": f"art_{tag}_{index + 1}", "promptVersionId": step.get("versionId") or f"ver_{tag}_step{index + 1}", "contentHash": step_hash, "byteLength": len(step_bytes), **({"inference": step["inference"]} if step.get("inference") else {})})
         return slot
 
-    def promote(self, slots: list[dict[str, Any]], *, apply_policy: str = "auto", lease_seconds: int = 3600, experiment: Optional[dict] = None, experiments: Optional[list[dict]] = None, directives: Optional[list] = None, on_lease_expiry: str = "degrade", unlock_window: Optional[dict] = None, sign_with: Optional[dict] = None, generation: Optional[int] = None, protocol: Optional[str] = None) -> dict[str, Any]:
-        """Seal and promote: generation + 1, signed with the signing key. ``protocol`` seals as an older service would."""
+    def promote(self, slots: list[dict[str, Any]], *, apply_policy: str = "auto", lease_seconds: int = 3600, experiments: Optional[list[dict]] = None, directives: Optional[list] = None, unlock_window: Optional[dict] = None, sign_with: Optional[dict] = None, generation: Optional[int] = None, protocol: Optional[str] = None, required_capabilities: Optional[list[str]] = None, observations: Optional[list[dict]] = None) -> dict[str, Any]:
+        """Seal and promote: generation + 1, signed with the signing key. ``protocol`` seals another protocol version."""
         ordered = sorted(slots, key=lambda s: s["tag"])
         self.generation = generation if generation is not None else self.generation + 1
         payload: dict[str, Any] = {
@@ -176,7 +176,6 @@ class FakeControlPlane:
             "releaseDigest": release_digest(ordered),
             "issuedAt": iso_ms(now_ms()),
             "leaseSeconds": lease_seconds,
-            "onLeaseExpiry": on_lease_expiry,
             "applyPolicy": apply_policy,
             "requireCountersign": self.require_countersign,
             "slots": ordered,
@@ -184,8 +183,10 @@ class FakeControlPlane:
         }
         if unlock_window:
             payload["unlockWindow"] = unlock_window
-        if experiment:
-            payload["experiment"] = experiment
+        if required_capabilities is not None:
+            payload["requiredCapabilities"] = required_capabilities
+        if observations is not None:
+            payload["observations"] = observations
         if experiments:
             payload["experiments"] = experiments
         signer = sign_with or self.signing_key
@@ -240,8 +241,7 @@ class FakeControlPlane:
                     "generation": payload["generation"],
                     "releaseDigest": payload["releaseDigest"],
                     "slots": [{"tag": p["tag"], "kind": p["kind"], "model": p["model"], "variables": p["variables"], "steps": [{"stepId": s["stepId"]} for s in p["steps"]] if p.get("steps") else None} for p in payload["slots"]],
-                    "experiment": {"salt": payload["experiment"]["salt"], "subjectKey": payload["experiment"]["subjectKey"], "arms": [a["arm"] for a in payload["experiment"]["arms"]]} if payload.get("experiment") else None,
-                    "experiments": [{"experimentId": e["experimentId"], "tag": e.get("tag"), "salt": e["salt"], "subjectKey": e["subjectKey"], "arms": [a["arm"] for a in e["arms"]]} for e in experiments_of(payload)],
+                    "experiments": [{"experimentId": e["experimentId"], "tag": e["tag"], "salt": e["salt"], "subjectKey": e["subjectKey"], "arms": [a["arm"] for a in e["arms"]]} for e in payload.get("experiments") or []],
                 }
                 return httpx.Response(200, json=catalogue, headers={"x-agent-generation": str(payload["generation"])})
             heartbeat_match = re.match(r"^/v1/agents/([^/]+)/targets/([^/]+)/heartbeat$", path)
@@ -254,15 +254,12 @@ class FakeControlPlane:
                 for key in ("protocol", "instanceId", "sdk", "syncMode", "generation", "applyState", "storageProtection", "catalog", "lease", "spool"):
                     if key not in body:
                         return httpx.Response(400, json={"error": f"heartbeat: missing {key}"})
-                allowed = {"protocol", "capabilities", "registration", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"}
+                allowed = {"protocol", "capabilities", "registration", "runCounters", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"}
                 for key in body:
                     if key not in allowed:
                         return httpx.Response(400, json={"error": f"heartbeat: unknown {key}"})
                 self.heartbeats.append(body)
                 answer: dict = {"pollSeconds": 30, "uploadIntervalSeconds": 300, "heartbeatIntervalSeconds": self.heartbeat_interval_seconds, "expiresAt": iso_ms(now_ms() + self.heartbeat_interval_seconds * 3000)}
-                if body.get("protocol") == "2.0.0" and isinstance(body.get("capabilities"), list) and "audience" in body["capabilities"]:
-                    answer["protocol"] = "2.0.0"
-                    answer["capabilities"] = self.heartbeat_capabilities
                 if self.grant_base_url:
                     if self.grant_hold:
                         answer["retryAfterSeconds"] = self.grant_hold["retryAfterSeconds"]

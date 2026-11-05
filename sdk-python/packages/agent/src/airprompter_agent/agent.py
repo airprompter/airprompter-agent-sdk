@@ -36,7 +36,7 @@ import random as _random
 import re
 import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Optional, Sequence, TypeVar, Union
 
 import httpx
@@ -44,12 +44,13 @@ import httpx
 from airprompter_agent_core._util import instant, iso_ms, now_ms, random_id
 from airprompter_agent_sync.apply.window import UpdateWindow, parse_window, window_state
 from airprompter_agent_core.bundle.apbundle import DistributionKey, bundle_payload_bytes, open_bundle
-from airprompter_agent_core.protocol.assignment import ramp_weights_at
-from airprompter_agent_core.protocol.trust import experiment_for_tag, experiments_of, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
+from airprompter_agent_core.protocol.assignment import ramp_weights_at, servable_experiments, servable_slots
+from airprompter_agent_core.protocol.capabilities import SUPPORTED_CAPABILITIES
+from airprompter_agent_core.protocol.trust import AGENT_ID, TARGET_SLUG, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent_runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from airprompter_agent_runtime.wrap import WrapHooks, wrap_client
-from airprompter_agent_core.protocol.assignment import copy_audience_tags, valid_audience_label, AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION
-from airprompter_agent_core.render.run_ref import parse_run_ref
+from airprompter_agent_core.protocol.assignment import copy_audience_tags, valid_audience_label
+from airprompter_agent_core.render.run_ref import parse_run_ref, run_ref_key_from
 from airprompter_agent_core.render.template import Delimiters
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
 from airprompter_agent_telemetry.spool.manifest import read_daemon_discovery
@@ -74,7 +75,7 @@ from airprompter_agent_core import SDK_VERSION  # one constant, pinned to pyproj
 SDK_NAME = "agent-sdk-python"
 #: The protocol this SDK speaks; the heartbeat names it (the manifest carries its own). One constant, core's — a
 #: second copy here drifted a whole protocol bump behind it.
-from airprompter_agent_core import PROTOCOL_VERSION, protocol_at_least  # noqa: E402
+from airprompter_agent_core import PROTOCOL_VERSION  # noqa: E402
 # A vendored bundle this close to its notAfter logs vendored_bundle_expiring_soon at start (the platform warns at the same distance).
 VENDORED_BUNDLE_EXPIRY_WARNING_DAYS = 30
 _USER_AGENT = f"{SDK_NAME}/{SDK_VERSION}"
@@ -88,8 +89,7 @@ T = TypeVar("T")
 
 @dataclass
 class SyncOptions:
-    #: ``"resident"`` | ``"on_invoke"`` | ``"offline"``. ``"daemon"`` was removed in 0.3.0 — the telemetry daemon never
-    #: serves releases — and ``start()`` refuses it with ``invalid_options``.
+    #: ``"resident"`` | ``"on_invoke"`` | ``"offline"``.
     mode: str = "resident"
     poll_seconds: float = 30
     edge_pointer_url: Optional[str] = None
@@ -193,7 +193,6 @@ class AgentStatus:
     signing_key_id: Optional[str]
     lease_expires_at: Optional[str]
     lease_expired: bool
-    on_lease_expiry: Optional[str]
     last_contact_at: Optional[str]
     forced_downgrade: bool
     disabled: dict[str, Any]  # {"agent": bool, "slots": [tag]}
@@ -220,7 +219,7 @@ class AgentStatus:
     ramp: Optional[dict[str, Any]] = None
     #: S16: one entry per experiment the active manifest carries (per slot); ``ramp`` is the first of them.
     ramps: list[dict[str, Any]] = field(default_factory=list)
-    #: 0.2.11: prompt variables and where they come from — ``{"sources": [names this application can fill],
+    #: Prompt variables and where they come from — ``{"sources": [names this application can fill],
     #: "unsourced": [{"tag", "arm", "names"}]}``: per slot and arm, the required variables neither a literal nor a
     #: source fills, so the call site must. Declarations only; no payload is read.
     variables: dict[str, Any] = field(default_factory=lambda: {"sources": [], "unsourced": []})
@@ -235,51 +234,38 @@ class ReleaseChange:
     staged_generation: Optional[int]
 
 
-_HEALTHZ_LEVELS = {"ok": 0, "degraded": 1, "failing": 2}
-
-
 def healthz_of(status: AgentStatus, *, spool_budget_bytes: Optional[int], now_ms: float) -> dict[str, Any]:
-    """S14: what a probe asks, over any status document. ``ok`` is the liveness
-    answer; ``status`` adds the one degraded middle. The rules, each a vector (``tests/test_healthz.py``):
+    """S14: what a probe asks, over any status document. Nothing AirPrompter does stops an agent from serving, so ``ok``
+    stays True and ``status`` says whether anything needs a look. The rules, each a vector (``tests/test_healthz.py``):
 
-    - ``failing`` (ok False): nothing verified to serve (generation 0); the lease lapsed under ``on_lease_expiry="halt"``.
-    - ``degraded`` (ok True): the lease lapsed under ``degrade``; three or more consecutive sync failures; the uploader
-      backing off; a forced downgrade in force; the telemetry daemon's file went stale and nothing here uploads instead
-      (``upload_daemon_stale``); the spool at 80 % of its budget or more.
+    - ``degraded``: nothing verified to serve (generation 0); the lease lapsed (serving the last verified release); three
+      or more consecutive sync failures; the uploader backing off; a forced downgrade in force; the telemetry daemon's
+      file went stale and nothing here uploads instead (``upload_daemon_stale``); the spool at 80 % of its budget or more.
     - ``ok`` otherwise. ``reasons`` names every rule that fired, in that order. Keys are the wire document's (camelCase),
       the same as the TypeScript SDK's."""
     reasons: list[str] = []
-    level = "ok"
-
-    def raise_to(to: str, reason: str) -> None:
-        nonlocal level
-        reasons.append(reason)
-        if _HEALTHZ_LEVELS[to] > _HEALTHZ_LEVELS[level]:
-            level = to
-
+    # Generation 0 serves the agent's own prompt.
     if status.generation <= 0:
-        raise_to("failing", "no_verified_release")
-    if status.lease_expired and status.on_lease_expiry == "halt":
-        raise_to("failing", "lease_expired_halt")
-    if status.lease_expired and status.on_lease_expiry == "degrade":
-        raise_to("degraded", "lease_expired_degrade")
+        reasons.append("no_verified_release")
+    if status.lease_expired:
+        reasons.append("lease_expired")
     if status.consecutive_sync_failures >= 3:
-        raise_to("degraded", "sync_failing")
+        reasons.append("sync_failing")
     backoff_until = (status.upload or {}).get("backoffUntil")
     if backoff_until and instant(backoff_until) > now_ms:
-        raise_to("degraded", "upload_backing_off")
+        reasons.append("upload_backing_off")
     if status.forced_downgrade:
-        raise_to("degraded", "forced_downgrade")
+        reasons.append("forced_downgrade")
     telemetry = status.telemetry or {}
     daemon = telemetry.get("daemon")
     if daemon is not None and not daemon.get("live") and telemetry.get("uploaded_by") == "none":
-        raise_to("degraded", "upload_daemon_stale")
+        reasons.append("upload_daemon_stale")
     depth_bytes = int(status.spool.get("depth_bytes", 0))
     if spool_budget_bytes is not None and spool_budget_bytes > 0 and depth_bytes >= spool_budget_bytes * 0.8:
-        raise_to("degraded", "spool_near_budget")
+        reasons.append("spool_near_budget")
     return {
-        "ok": _HEALTHZ_LEVELS[level] < _HEALTHZ_LEVELS["failing"],
-        "status": level,
+        "ok": True,
+        "status": "degraded" if reasons else "ok",
         "reasons": reasons,
         "generation": status.generation,
         "stagedGeneration": status.staged_generation,
@@ -287,7 +273,6 @@ def healthz_of(status: AgentStatus, *, spool_budget_bytes: Optional[int], now_ms
         "source": status.source,
         "leaseExpiresAt": status.lease_expires_at,
         "leaseExpired": status.lease_expired,
-        "onLeaseExpiry": status.on_lease_expiry,
         "lastSyncAt": status.last_sync_at,
         "lastSyncOutcome": status.last_sync_outcome,
         "consecutiveSyncFailures": status.consecutive_sync_failures,
@@ -300,12 +285,12 @@ def healthz_of(status: AgentStatus, *, spool_budget_bytes: Optional[int], now_ms
 
 
 def healthz_response(healthz: Mapping[str, Any]) -> tuple[int, dict[str, str], str]:
-    """An HTTP answer for any framework: ``(200, headers, body)`` when ok, ``503`` otherwise."""
-    return (200 if healthz.get("ok") else 503, {"content-type": "application/json", "cache-control": "no-store"}, json.dumps(healthz, separators=(",", ":")))
+    """An HTTP answer for any framework: ``(200, headers, body)``."""
+    return (200, {"content-type": "application/json", "cache-control": "no-store"}, json.dumps(healthz, separators=(",", ":")))
 
 
 class RenderRefusedError(Exception):
-    """``render()`` refused by the control plane's standing instructions: a disable directive, or a lapsed lease on a ``halt`` target."""
+    """``render()`` refused by the control plane's standing instructions: a disable directive."""
 
     def __init__(self, reason: str, tag: str, generation: int):
         super().__init__(f"render {tag}: refused ({reason}) on generation {generation}")
@@ -471,6 +456,7 @@ class AirPrompterAgent:
         self._last_contact_ms: Optional[float] = None
         #: S3: the heartbeat named a generation the pointer has not shown; the next pass goes to the signed manifest.
         self._pointer_behind = False
+        self._stranded_tried: Optional[int] = None
         self._bundle_not_after: Optional[str] = None
         #: T40: what the last hydration from the customer's datastore found, and its poll timer.
         self._datastore_status: Optional[dict[str, Any]] = None
@@ -486,7 +472,6 @@ class AirPrompterAgent:
         self._last_heartbeat_ms: Optional[float] = None
         self._next_heartbeat_ms: Optional[float] = None
         self._last_heartbeat_refusal: Optional[str] = None
-        self._halt_without_contact_warned = False
         # T26 / S5: the runtime's own upload grant as the last heartbeat left it, the cadence it asked for, and a hold.
         self._upload_grant: Optional[UploadGrant] = None
         self._upload_interval_seconds = 300
@@ -505,14 +490,19 @@ class AirPrompterAgent:
         self._local_window: Optional[UpdateWindow] = parse_window(self._apply_options.window) if self._apply_options.window else None
         self._stamped_refusals: set[str] = set()
         self._stopped = False
-        # S6: the runRef key is derived from the STORE's id, which every process on the host shares, so a run_ref minted by one
-        # worker parses in another.
-        self._audience_server_capability: Optional[str] = None
         self._audience_tags = copy_audience_tags(options.get("tags") or {})
         self._audience_tag_keys = dict.fromkeys(self._audience_tags)
         self._audience_prompt_labels = {}
         for tag,label in (options.get("prompt_labels") or {}).items(): self._register_prompt_label(tag,label)
-        self._run_ref_key = hmac.new((run_ref_seed or own_instance_id).encode("utf-8"), b"runRef", hashlib.sha256).digest()
+        # The run reference key derives from a secret instances share, so a ref minted on one pod parses on another. With
+        # neither a secret nor an Agent key it falls back to the store's id, shared by every process on this host and nowhere else.
+        run_ref_secret = options.get("run_ref_secret") or options.get("api_key")
+        agent_id, target = options["agent_id"], options["target"]
+        self._run_ref_key = run_ref_key_from(run_ref_secret, agent_id, target) if run_ref_secret else hmac.new((run_ref_seed or own_instance_id).encode("utf-8"), b"runRef", hashlib.sha256).digest()
+        #: Every key a run reference may parse under: the current one, then a rotation's previous ones.
+        self._run_ref_keys = [self._run_ref_key, *[run_ref_key_from(secret, agent_id, target) for secret in options.get("run_ref_previous_secrets") or ()]]
+        if not run_ref_secret:
+            self._log({"event": "run_ref_key_store_scoped"})
         # T33: the last renders by text hash, so a wrapped client can tell which slot a call is.
         self._renders = RenderRegistry()
         #: The application's variable sources (``start(variables=...)``, ``ap.variables.provide()``).
@@ -541,6 +531,8 @@ class AirPrompterAgent:
         root: Mapping[str, Any],
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
+        run_ref_secret: Optional[str] = None,
+        run_ref_previous_secrets: Optional[Sequence[str]] = None,
         state_dir: Optional[str] = None,
         key_provider: Optional[KeyProvider] = None,
         countersign_root: Optional[Mapping[str, Any]] = None,
@@ -565,17 +557,19 @@ class AirPrompterAgent:
     ) -> "AirPrompterAgent":
         """``root`` is ``{"pinned": <P-256 public JWK>}`` for this environment, or a full root document (from the bundle or a previous accept).
         ``api_key`` absent means offline: serve the store or the vendored bundle, never call home.
+        ``run_ref_secret`` is what the run reference key derives from: instances of one agent and target must share it, so a
+        ref minted on one pod parses on another. Default: ``api_key``. A host with neither (offline, or a datastore runtime
+        holding only a distribution key) falls back to the store's id, which works on that one store only, and logs
+        ``run_ref_key_store_scoped``. ``run_ref_previous_secrets`` are secrets a ref may have been minted under before a
+        rotation: ``feedback`` still lands.
         ``variables`` is how this application fills prompt variables from its own system: a literal per name, or a
         source (``{"resolve": callable, "trust": "operator"|"end_user", ...}``) consulted for a declared variable the
         version's text uses and the call site did not pass. ``ap.variables.provide()`` adds more after start."""
-        raw_sync = sync if isinstance(sync, Mapping) else (vars(sync) if sync is not None else {})
-        if raw_sync.get("mode") == "daemon" or "daemon_socket_path" in raw_sync:
-            raise AgentStartError(
-                "invalid_options",
-                'sync mode "daemon" was removed in 0.3.0: the telemetry daemon (airprompterd) only ships telemetry and never serves a release. '
-                "Start with the default mode (resident) — each process loads its release from its own store, the datastore or a vendored bundle — "
-                "and keep the daemon running for telemetry (protocol/daemon.md)",
-            )
+        # The slug feeds store paths and spool directories, so anything else never reaches the filesystem.
+        if not isinstance(target, str) or not TARGET_SLUG.fullmatch(target):
+            raise AgentStartError("invalid_options", "target must be a lowercase slug: a letter, then up to 31 letters, digits or hyphens")
+        if not isinstance(agent_id, str) or not AGENT_ID.fullmatch(agent_id):
+            raise AgentStartError("invalid_options", "agent_id must be an agent id: a letter or digit, then up to 127 letters, digits, dots, underscores, colons or hyphens")
         sync_options = _coerce(SyncOptions, sync)
         options: dict[str, Any] = {
             "tags": tags,
@@ -585,6 +579,8 @@ class AirPrompterAgent:
             "target": target,
             "api_key": api_key,
             "base_url": base_url,
+            "run_ref_secret": run_ref_secret,
+            "run_ref_previous_secrets": run_ref_previous_secrets,
             "countersign_root": countersign_root,
             "require_countersign": require_countersign,
             "sync": sync_options,
@@ -693,6 +689,8 @@ class AirPrompterAgent:
             scope = {"organizationId": self._o["organization_id"], "agentId": self._o["agent_id"], "target": self._o["target"]}
             full = verify_manifest(manifest=contents["manifest"], root=self._trusted_root, now=now, scope=scope, stored_generation=int(store.state.get("generation", 0)) if updating else 0, payloads=payloads, countersign_root=self._o.get("countersign_root"), require_countersign=self._o.get("require_countersign"))
             if not full.ok:
+                if full.directives_stand:
+                    self._take_disables(contents["manifest"]["payload"])
                 self._log({"event": f"{source}_refused", "reason": full.reason, "bundleGeneration": generation})
                 self._last_refusal = full.reason
                 return {"outcome": "refused", "generation": generation, "reason": full.reason}
@@ -1262,6 +1260,7 @@ class AirPrompterAgent:
                 fetch_root=(lambda: self._fetch_root(root_url)) if root_url else None,
                 active=self._active,
                 etag=self._etag,
+                stranded_tried=self._stranded_tried,
                 edge_pointer_url=self._sync_options.edge_pointer_url,
                 edge_etag=self._edge_etag,
                 skip_pointer=self._pointer_behind,
@@ -1275,6 +1274,7 @@ class AirPrompterAgent:
             )
             with self._lock:
                 self._etag = result.etag
+                self._stranded_tried = result.stranded_tried
                 self._edge_etag = result.edge_etag
                 self._trusted_root = result.trusted_root
                 self._last_sync_ms = self._now_ms()
@@ -1306,8 +1306,12 @@ class AirPrompterAgent:
             return None
         return list(models_option) if isinstance(models_option, (list, tuple)) else list(models_option.keys())
 
-    def _take_verified(self, payload: Mapping[str, Any]) -> None:
-        """Every manifest whose envelope verified, before the pass decides anything: the policy pin, then the directives."""
+    def _take_verified(self, payload: Mapping[str, Any], *, reduce_only: bool = False) -> None:
+        """Every manifest whose envelope verified, before the pass decides anything: the policy pin, then the directives.
+        ``reduce_only``: a manifest refused for a capability this SDK lacks, of which only the disables stand."""
+        if reduce_only:
+            self._take_disables(payload)
+            return
         self._take_apply_policy(payload)
         self._take_directives(payload)
 
@@ -1373,9 +1377,28 @@ class AirPrompterAgent:
         if requests:
             self._log({"event": "unlock_requested", "generation": payload["generation"], "requests": [{"releaseDigest": r.get("releaseDigest"), "expiresAt": r.get("expiresAt"), "requestedBy": r.get("requestedBy")} for r in requests]})
 
+    def _take_disables(self, payload: Mapping[str, Any]) -> None:
+        """A manifest refused whole, whose signature, scope and generation verified: its disables stand and nothing else
+        moves, so an emergency disable reaches a host that cannot read the release. The active release's own directives
+        plus this manifest's disables: each refused manifest replaces the last, so a lift undoes what a refused generation
+        added and never what the active release says."""
+        with self._lock:
+            standing = self._standing_directives
+            if standing and standing[0] > payload["generation"]:
+                return
+            before = self._disabled_now()
+            own = list(self._active.manifest["payload"].get("directives") or []) if self._active else []
+            directives = payload.get("directives")
+            disables = [d for d in (directives if isinstance(directives, list) else []) if isinstance(d, Mapping) and d.get("kind") == "disable"]
+            seen = {json.dumps(d, sort_keys=True) for d in own}
+            self._standing_directives = (payload["generation"], [*own, *[d for d in disables if json.dumps(d, sort_keys=True) not in seen]])
+            after = self._disabled_now()
+        if before != after:
+            self._log({"event": "disabled_by_directive", "generation": payload["generation"], **after})
+
     def _ramp_statuses(self, manifest: Optional[Mapping[str, Any]]) -> list[dict[str, Any]]:
         """S9/S16: every experiment's plan as this host walks it — per slot, each on its own clock and retreat."""
-        return [self._ramp_status_of(experiment) for experiment in experiments_of(manifest or {})]
+        return [self._ramp_status_of(experiment) for experiment in servable_experiments(manifest or {})]
 
     def _ramp_status(self, manifest: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
         statuses = self._ramp_statuses(manifest)
@@ -1392,7 +1415,7 @@ class AirPrompterAgent:
         nxt = plan[step + 1] if step + 1 < len(plan) else None
         return {
             "experimentId": experiment["experimentId"],
-            "tag": experiment.get("tag"),
+            "tag": experiment["tag"],
             "weightBps": [arm["weightBps"] for arm in arms] if arms else ramp_weights_at(experiment["arms"], experiment.get("ramp"), now_ms),
             "arms": [arm["arm"] for arm in experiment["arms"]],
             "step": step,
@@ -1457,7 +1480,10 @@ class AirPrompterAgent:
         source_names = self.variables.names()
         body: dict[str, Any] = {
             "protocol": PROTOCOL_VERSION,
-            "capabilities": [AUDIENCE_CAPABILITY],
+            "capabilities": sorted(SUPPORTED_CAPABILITIES),
+            "registration": {"tagKeys": sorted(self._audience_tag_keys), "prompts": [{"tag": tag, "displayName": label} for tag,label in sorted(self._audience_prompt_labels.items())]},
+            # Cumulative since this process started, so a retried heartbeat cannot double count. Ticket 11a fills the map.
+            "runCounters": {"passthrough": {}},
             "instanceId": self._own_instance_id,
             "instanceClass": self._telemetry.instance_class or ("ephemeral" if mode == "on_invoke" else "resident"),
             "sdk": {"name": SDK_NAME, "version": SDK_VERSION},
@@ -1467,12 +1493,10 @@ class AirPrompterAgent:
             "generation": {"active": status.generation, **({"staged": status.staged_generation} if status.staged_generation is not None else {})},
             "applyState": apply_state,
             "storageProtection": status.storage_protection,
-            # 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
-            # can warn about a `source: runtime` variable no live instance fills before the promotion, not after. Sent only
-            # once the control plane has shown it speaks 0.3.4 (the active manifest's protocol): an older service refuses
-            # the whole heartbeat over an unknown key, and a refused heartbeat is worse than an unreported name. Past that
-            # gate the key is always sent — an empty list says "I fill nothing", which is a report; absence says nothing.
-            "catalog": {"models": list(dict.fromkeys(models))[:256], **({"variables": source_names[:256]} if protocol_at_least(str((self._active.manifest["payload"] if self._active else {}).get("protocol", "0.0.0")), "0.3.4") else {}), "reportedAt": self._now_iso()},
+            # The variable names this application can fill from its own sources, names and never values, so the seal can warn
+            # about a `source: runtime` variable no live instance fills before the promotion, not after. An empty list says
+            # "I fill nothing".
+            "catalog": {"models": list(dict.fromkeys(models))[:256], "variables": source_names[:256], "reportedAt": self._now_iso()},
             "lease": {**({"expiresAt": status.lease_expires_at} if status.lease_expires_at else {}), "expired": status.lease_expired},
             "spool": {
                 "depthSegments": status.spool["depth_segments"],
@@ -1491,8 +1515,6 @@ class AirPrompterAgent:
             body["activeReleaseDigest"] = active_digest
         if staged_digest:
             body["stagedReleaseDigest"] = staged_digest
-        if self._audience_server_capability == AUDIENCE_CAPABILITY:
-            body["registration"] = {"tagKeys": sorted(self._audience_tag_keys), "prompts": [{"tag": tag, "displayName": label} for tag,label in sorted(self._audience_prompt_labels.items())]}
         if status.apply_state == "refused" and status.last_refusal and _REFUSAL_WORD.match(status.last_refusal):
             body["refusal"] = status.last_refusal
             if status.last_refusal == "model_unavailable" and self._unavailable_models:
@@ -1514,14 +1536,6 @@ class AirPrompterAgent:
                     response = result.response or {}
                     behind = False
                     with self._lock:
-                        capabilities = response.get("capabilities", [])
-                        valid_capabilities = (
-                            isinstance(capabilities, list)
-                            and 1 <= len(capabilities) <= 16
-                            and all(isinstance(capability, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", capability) for capability in capabilities)
-                            and len(set(capabilities)) == len(capabilities)
-                        )
-                        self._audience_server_capability = AUDIENCE_CAPABILITY if response.get("protocol") == AUDIENCE_PROTOCOL_VERSION and valid_capabilities and AUDIENCE_CAPABILITY in capabilities else None
                         self._last_heartbeat_ms = self._now_ms()
                         self._last_heartbeat_refusal = None
                         self._last_contact_ms = self._now_ms()
@@ -1732,25 +1746,13 @@ class AirPrompterAgent:
             return iso_ms(instant(self._bundle_not_after))
         return iso_ms(instant(payload["issuedAt"]) + payload["leaseSeconds"] * 1000)
 
-    def _guard_lease(self, tag: str) -> LoadedSlot:
-        """The lease: the facade's rule (it knows the origin); the runtime knows nothing of contact."""
+    def _guard_lease(self) -> None:
+        """The lease: the facade's rule (it knows the origin); the runtime knows nothing of contact. A lapsed lease is staleness: the spool carries one row and rendering goes on."""
         active = self._active
         assert active is not None
-        payload = active.manifest["payload"]
         expires_at = self._lease_expires_at()
         if expires_at and instant(expires_at) <= self._now_ms():
-            # §6.4: degrade keeps serving and reports it; halt stops rendering. Either way the spool carries one row.
             self._stamp_refusal("lease_expired", active.generation, None)
-            if payload.get("onLeaseExpiry") == "halt":
-                # A runtime with no way to call home (no key, offline sync) can never renew: halt there is a self-inflicted
-                # outage, so it degrades and says so once. The console refuses to save halt on an offline environment too.
-                if self._client is None:
-                    if not self._halt_without_contact_warned:
-                        self._halt_without_contact_warned = True
-                        self._log({"event": "halt_without_contact_degraded", "generation": active.generation})
-                else:
-                    raise RenderRefusedError("lease_expired", tag, active.generation)
-        return active
 
     def _resolve_slot(self, tag: str, subject: Optional[str], return_resolved: bool = False, tags: Optional[Mapping[str,str]] = None):
         """S10: the runtime resolves; the facade turns a refusal into the spool row and the raised error, and guards the lease."""
@@ -1763,7 +1765,7 @@ class AirPrompterAgent:
                 raise KeyError(f"no slot {tag} on generation {active.generation}")
             self._stamp_refusal("disabled", active.generation, outcome.tag)
             raise RenderRefusedError("disabled", tag, active.generation)
-        self._guard_lease(tag)
+        self._guard_lease()
         assert outcome.slot is not None
         return outcome.slot if return_resolved else (outcome.slot.slot, outcome.slot.arm, outcome.slot.bucket)
 
@@ -1851,11 +1853,11 @@ class AirPrompterAgent:
             raise
 
     def _missing_row(self, row: Mapping[str, Any]) -> None:
-        self.spool.observe(Observation(tag=row["tag"], artifact_id=row.get("artifact_id"), version_id=row["version_id"], arm=row["arm"], model=row["model"], status="error", error_class="render_missing_variable", latency_ms=0, usage_source="unavailable", audience_ids=row.get("audience_ids"), run_minute=row.get("run_minute")), self._now_ms())
+        self._observe_guarded(Observation(tag=row["tag"], artifact_id=row.get("artifact_id"), version_id=row["version_id"], arm=row["arm"], model=row["model"], status="error", error_class="render_missing_variable", latency_ms=0, usage_source="unavailable", audience_ids=row.get("audience_ids"), run_minute=row.get("run_minute")))
 
     def _source_failed(self, error: BaseException, tag: str, row: Mapping[str, Any]) -> None:
         """A failed source is logged by name and reason only and counted as the same error row as a missing variable —
-        the window schema has no class for "a source failed" (a protocol 0.3.4 note), and to the board the outcome is
+        the window schema has no class for "a source failed", and to the board the outcome is
         the same: this host could not render the version."""
         if is_variable_source_error(error):
             self._log({"event": "variable_source_failed", "tag": tag, "name": getattr(error, "variable", None), "reason": getattr(error, "reason", None)})
@@ -1899,7 +1901,7 @@ class AirPrompterAgent:
             slot = resolved.slot
             workflow = resolver.workflow(resolved)
             for step in workflow.steps:
-                self._renders.register(step.text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute, step.artifact_id))
+                self._renders.register(step.text, Attribution(tag, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute, step.artifact_id, step.step_id))
         row = {"tag": tag, "artifact_id": slot["artifactId"], "version_id": slot["versionId"], "arm": workflow.arm, "model": workflow.model, "audience_ids": resolved.audience_ids, "run_minute": resolved.run_minute}
         declared = list(slot.get("variables", []))
 
@@ -1911,7 +1913,7 @@ class AirPrompterAgent:
 
         def finish(step: WorkflowStep, filled: FilledRender) -> str:
             text = self._render_observed(lambda: resolver.render_text(tag=step.step_id, text=step.text, variables=declared, values=filled.values, fenced=filled.fenced), row)
-            self._renders.register(text, Attribution(step.step_id, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute, step.artifact_id))
+            self._renders.register(text, Attribution(tag, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute, step.artifact_id, step.step_id))
             self._say_stricter(step.step_id, slot, filled)
             return text
 
@@ -1946,9 +1948,9 @@ class AirPrompterAgent:
             if names:
                 seen[f"{slot['tag']}\u0000{arm}"] = {"tag": slot["tag"], "arm": arm, "names": names}
 
-        for slot in payload["slots"]:
+        for slot in servable_slots(payload):
             consider(slot, "none")
-        for experiment in experiments_of(payload):
+        for experiment in servable_experiments(payload):
             for arm in experiment["arms"]:
                 for override in arm.get("overrides", []):
                     consider(override, str(arm["arm"]))
@@ -1957,27 +1959,43 @@ class AirPrompterAgent:
     # ------------------------------------------------------------------ telemetry
 
     def report(self, observation: Optional[Observation] = None, /, **kwargs: Any) -> None:
-        """Content-free measurements for one model call: an ``Observation``, or its fields as keywords."""
-        self.spool.observe(observation if observation is not None else Observation(**kwargs), self._now_ms())
+        """Content-free measurements for one one-call run: an ``Observation``, or its fields as keywords, with ``tool_calls`` and a ``step`` when the caller has them."""
+        try:
+            built = observation if observation is not None else Observation(**kwargs)
+        except Exception as error:  # noqa: BLE001 — telemetry never fails the caller
+            self._log({"event": "observation_dropped", "reason": str(error)})
+            return
+        self._observe_guarded(built)
 
-    def observe(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], call: Callable[[], T], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None) -> T:
+    def _observe_guarded(self, observation: Observation) -> None:
+        """A row that cannot be written is logged and dropped: telemetry never replaces what the caller is doing."""
+        try:
+            self.spool.observe(observation, self._now_ms())
+        except Exception as error:  # noqa: BLE001 — telemetry never fails the caller
+            self._log({"event": "observation_dropped", "reason": str(error)})
+
+    def _record_observation(self, tool_calls: Optional[Mapping[str, int]]) -> Callable[[Observation], None]:
+        """What ``observe`` hands the writer: the observation, with the tool counts the caller gave."""
+        return lambda observation: self.spool.observe(replace(observation, tool_calls=tool_calls) if tool_calls else observation, self._now_ms())
+
+    def observe(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], call: Callable[[], T], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, tool_calls: Optional[Mapping[str, int]] = None) -> T:
         """Time a model call against a rendered prompt (or a workflow step) and report it: latency, ``usage`` read off the
         provider's response (OpenAI, Anthropic, Bedrock shapes, dicts or SDK objects), a raised failure classified into the
         closed error set, and (T29) the slot's declared output checks evaluated on the answer here on the host — only their
         counts leave. The result comes back unchanged; an error is re-raised after it is counted."""
         target = self._target_of(rendered, model)
-        return observe_call(target, call, lambda o: self.spool.observe(o, self._now_ms()), checks=checks, model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
+        return observe_call(target, call, self._record_observation(tool_calls), checks=checks, model=model, now=self._now_ms, evaluate=self._check_evaluator(target), log=self._log)
 
-    async def observe_async(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], call: Callable[[], Union[Awaitable[T], T]], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None) -> T:
+    async def observe_async(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], call: Callable[[], Union[Awaitable[T], T]], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, tool_calls: Optional[Mapping[str, int]] = None) -> T:
         """``observe`` for a coroutine-returning call (``AsyncOpenAI``, ``AsyncAnthropic``)."""
         target = self._target_of(rendered, model)
-        return await observe_call_async(target, call, lambda o: self.spool.observe(o, self._now_ms()), checks=checks, model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
+        return await observe_call_async(target, call, self._record_observation(tool_calls), checks=checks, model=model, now=self._now_ms, evaluate=self._check_evaluator(target), log=self._log)
 
     def checks(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], output: Any, *, output_tokens: Optional[int] = None, record: bool = True) -> dict[str, Any]:
         """T29: run the slot's declared output checks on an output you already have (an app that calls the model without
         ``observe()``, or one that wants the per-check results) and count them on the window. Never raises."""
         target = self._target_of(rendered, None)
-        declared = self._declared_checks_for(target.tag, target.arm)
+        declared = self._declared_checks_of(target)
         text = output if isinstance(output, str) else output_text_of(output)
         if not declared or text is None:
             return {"passed": 0, "failed": 0, "results": []}
@@ -1986,22 +2004,21 @@ class AirPrompterAgent:
             self.spool.checks(tag=target.tag, artifact_id=getattr(rendered, "artifact_id", None), version_id=target.version_id, arm=target.arm, model=target.model, passed=outcome["passed"], failed=outcome["failed"], at_ms=self._now_ms(), audience_ids=target.audience_ids, run_minute=target.run_minute)
         return outcome
 
-    def _declared_checks_for(self, tag: str, arm: str) -> list[Mapping[str, Any]]:
-        """The active manifest's checks for a slot on an arm (the arm's override when it carries one)."""
-        active = self._active
-        if active is None:
+    def _slot_on(self, payload: Mapping[str, Any], tag: str, arm: str) -> Optional[Mapping[str, Any]]:
+        """A servable slot as an arm serves it: the arm's override when it carries one."""
+        experiment = next((entry for entry in servable_experiments(payload) if entry["tag"] == tag), None)
+        served = next((entry for entry in (experiment or {}).get("arms", []) if entry.get("arm") == arm), None)
+        override = next((entry for entry in (served or {}).get("overrides", []) if entry.get("tag") == tag), None)
+        return override or next((entry for entry in servable_slots(payload) if entry.get("tag") == tag), None)
+
+    def _declared_checks_of(self, target: ObserveTarget) -> list[Mapping[str, Any]]:
+        """T29: the active manifest's checks for a slot on an arm (the arm's override when it carries one). A step's output is not the slot's."""
+        if self._active is None or target.step is not None:
             return []
-        payload = active.manifest["payload"]
-        slot: Optional[Mapping[str, Any]] = None
-        for candidate in (experiment_for_tag(payload, tag) or {}).get("arms", []):
-            if candidate.get("arm") == arm:
-                slot = next((o for o in candidate.get("overrides", []) if o.get("tag") == tag), None)
-        if slot is None:
-            slot = next((s for s in payload.get("slots", []) if s.get("tag") == tag), None)
-        return list((slot or {}).get("outputChecks") or [])
+        return list((self._slot_on(self._active.manifest["payload"], target.tag, target.arm) or {}).get("outputChecks") or [])
 
     def _check_evaluator(self, target: ObserveTarget) -> Optional[Callable[[Any, Any], Optional[Mapping[str, int]]]]:
-        declared = self._declared_checks_for(target.tag, target.arm)
+        declared = self._declared_checks_of(target)
         if not declared:
             return None
 
@@ -2018,9 +2035,11 @@ class AirPrompterAgent:
         if isinstance(rendered, ObserveTarget):
             return rendered
         if isinstance(rendered, WorkflowStep):
-            facts = parse_run_ref(rendered.run_ref, self._run_ref_key)
-            return ObserveTarget(rendered.step_id, rendered.version_id, facts.arm if facts else "none", model or rendered.model or "unknown", rendered.audience_ids, rendered.run_minute, rendered.artifact_id)
-        return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model, rendered.audience_ids, rendered.run_minute, rendered.artifact_id)
+            # A workflow step reports under the slot tag with its step id in ``step``; its arm is the one its run reference carries (the workflow's).
+            entry = self._first_entry(rendered.run_ref)
+            tag = entry["tag"] if entry else rendered.step_id.split("#")[0]
+            return ObserveTarget(tag, rendered.version_id, entry["arm"] if entry else "none", model or rendered.model or "unknown", rendered.artifact_id, rendered.audience_ids, rendered.run_minute, rendered.step_id)
+        return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model, rendered.artifact_id, rendered.audience_ids, rendered.run_minute, getattr(rendered, "step", None))
 
     # ------------------------------------------------------------------ T33: wrapped clients
 
@@ -2037,7 +2056,7 @@ class AirPrompterAgent:
         """``with ap.attribute(rendered):`` — every wrapped call inside the block is that render's, whatever text it carries."""
         target = self._target_of(rendered, None)
         # The observe target carries no settings; the rendered prompt (or the workflow step) does.
-        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, copy_inference(getattr(rendered, "inference", None)), target.audience_ids, target.run_minute, target.artifact_id))
+        return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, copy_inference(getattr(rendered, "inference", None)), target.audience_ids, target.run_minute, target.artifact_id, target.step))
 
     def attribution_for(self, params: Any) -> Optional[Attribution]:
         """The render a request's parameters name: an explicit scope first, else a message whose text is a recent render."""
@@ -2047,7 +2066,7 @@ class AirPrompterAgent:
         return WrapHooks(attribute=self.attribution_for, begin=self._begin_observation, log=self._log)
 
     def _begin_observation(self, attribution: Attribution, model: str) -> PendingObservation:
-        target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model, attribution.audience_ids, attribution.run_minute, attribution.artifact_id)
+        target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model, attribution.artifact_id, attribution.audience_ids, attribution.run_minute, attribution.step)
         return PendingObservation(target, lambda o: self.spool.observe(o, self._now_ms()), model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
 
     def golden(self, *, invoke: Optional[GoldenInvoke] = None, tag: Optional[str] = None, staged: bool = False, concurrency: Optional[int] = None) -> list[GoldenReport]:
@@ -2071,8 +2090,8 @@ class AirPrompterAgent:
 
     def _run_golden_for(self, manifest: Mapping[str, Any], payloads: Mapping[str, bytes], invoke: GoldenInvoke, concurrency: Optional[int], only_tag: Optional[str] = None) -> list[GoldenReport]:
         payload = manifest["payload"]
-        targets: list[tuple[Mapping[str, Any], str]] = [(slot, "none") for slot in payload.get("slots", []) if slot.get("goldenSet") and (not only_tag or slot["tag"] == only_tag)]
-        for experiment in experiments_of(payload):
+        targets: list[tuple[Mapping[str, Any], str]] = [(slot, "none") for slot in servable_slots(payload) if slot.get("goldenSet") and (not only_tag or slot["tag"] == only_tag)]
+        for experiment in servable_experiments(payload):
             for arm in experiment.get("arms", []):
                 for override in arm.get("overrides", []):
                     if override.get("goldenSet") and (not only_tag or override["tag"] == only_tag):
@@ -2113,24 +2132,23 @@ class AirPrompterAgent:
         self._log({"event": "judged", "rubric": resolved.name, "criteria": len(resolved.criteria), "score": result.score, "flagged": result.flagged, "filed": filed})
         return result
 
+    def _first_entry(self, run_ref: str) -> Optional[Mapping[str, Any]]:
+        """The first slot a run reference names. None for a forged token, or one with no entries."""
+        facts = parse_run_ref(run_ref, self._run_ref_keys)
+        return facts.entries[0] if facts and facts.entries else None
+
     def _prompt_rubric_for(self, run_ref: str) -> JudgeRubric:
-        facts = parse_run_ref(run_ref, self._run_ref_key)
+        entry = self._first_entry(run_ref)
         payload = self._active.manifest["payload"] if self._active else None
-        slot = None
-        if facts and payload:
-            experiment = experiment_for_tag(payload, facts.tag)
-            if experiment:
-                arm = next((a for a in experiment["arms"] if a["arm"] == facts.arm), None)
-                slot = next((entry for entry in (arm or {}).get("overrides", []) if entry["tag"] == facts.tag), None)
-            slot = slot or next((entry for entry in payload["slots"] if entry["tag"] == facts.tag), None)
+        slot = self._slot_on(payload, entry["tag"], entry["arm"]) if entry and payload else None
         text = self._active.payloads.get(slot["contentHash"]) if (slot and self._active) else None
         criteria = rubric_from_prompt(text.decode("utf-8")) if text else []
         return JudgeRubric(name="prompt", criteria=tuple(criteria), protection=JUDGE_RUBRICS["protection"].criteria)
 
     def feedback(self, run_ref: str, signals: Optional[Mapping[str, Any]] = None, /, *, model: Optional[str] = None, **kwargs: Any) -> bool:
         """File bounded quality signals; ``model=`` names the actual provider model when it overrode the slot."""
-        facts = parse_run_ref(run_ref, self._run_ref_key)
-        if facts is None:
+        entry = self._first_entry(run_ref)
+        if entry is None:
             return False
         if model is not None and (not isinstance(model, str) or not 1 <= len(model) <= 128 or re.search(r"[\x00-\x1f\x7f]", model)):
             self._log({"event": "feedback_rejected", "rejected": {"model": "invalid_model"}})
@@ -2141,14 +2159,7 @@ class AirPrompterAgent:
         if not normalized.accepted:
             return False
         # Feedback rides on the run's window: same dimension set, no extra count (the run was already counted).
-        payload = self._active.manifest["payload"] if self._active else None
-        override = None
-        experiment = experiment_for_tag(payload, facts.tag) if payload else None
-        if experiment:
-            arm = next((a for a in experiment["arms"] if a["arm"] == facts.arm), None)
-            override = next((entry for entry in (arm or {}).get("overrides", []) if entry["tag"] == facts.tag), None)
-        slot = override or (next((entry for entry in payload["slots"] if entry["tag"] == facts.tag), None) if payload else None)
-        self.spool.outcomes(tag=facts.tag, artifact_id=facts.artifact_id, version_id=facts.version_id, arm=facts.arm, model=model or facts.model or (slot["model"] if slot and slot["versionId"] == facts.version_id else "unknown"), outcomes=normalized.outcomes, at_ms=self._now_ms(), audience_ids=facts.audience_ids, outcome_run_minute=facts.run_minute)
+        self.spool.outcomes(tag=entry["tag"], artifact_id=entry["artifactId"], version_id=entry["versionId"], arm=entry["arm"], model=model or entry["model"], outcomes=normalized.outcomes, at_ms=self._now_ms(), audience_ids=entry.get("audienceIds"), outcome_run_minute=entry["runMinute"])
         return True
 
     # ------------------------------------------------------------------ status
@@ -2192,7 +2203,6 @@ class AirPrompterAgent:
             signing_key_id=self._active.signing_key_id if self._active else None,
             lease_expires_at=lease_expires_at,
             lease_expired=instant(lease_expires_at) <= self._now_ms() if lease_expires_at else False,
-            on_lease_expiry=manifest.get("onLeaseExpiry") if manifest else None,
             last_contact_at=None if self._last_contact_ms is None else iso_ms(self._last_contact_ms),
             forced_downgrade=bool(state and state.get("forcedDowngrade") is True),
             disabled=self._disabled_now(),

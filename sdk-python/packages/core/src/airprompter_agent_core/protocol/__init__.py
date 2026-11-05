@@ -9,17 +9,24 @@ Example::
     verdict = verify_manifest(manifest=manifest, root=root, now=now_iso, scope=scope, stored_generation=held_generation)   # verdict.ok, or verdict.reason
 """
 
-from .assignment import ASSIGNMENT_MODULUS, RAMP_MAX_STEPS, RAMP_MIN_STEP_MS, Assignment, AssignmentError, StepError, arm_for_bucket, assign_arm, bucket_from_hash, effective_arms, ordered_steps, ramp_weights_at, subject_hash, validate_arms, validate_ramp
+from ._version import PROTOCOL_VERSION
+from .assignment import ASSIGNMENT_MODULUS, AUDIENCE_LIMITS, RAMP_MAX_STEPS, RAMP_MIN_STEP_MS, Assignment, AssignmentError, StepError, arm_for_bucket, assign_arm, bucket_from_hash, capabilities_implemented, effective_arms, ordered_steps, ramp_weights_at, servable_experiments, frozen_experiment, servable_overrides, servable_slots, subject_hash, validate_arms, validate_ramp
+from .capabilities import SUPPORTED_CAPABILITIES
 from .canonical_json import UNDEFINED, CanonicalJsonError, canonical_bytes, canonical_json, sha256_prefixed
 from .trust import (
+    AGENT_ID,
     SUPPORTED_PROTOCOL_MAJORS,
+    TARGET_SLUG,
     Verdict,
+    carried_payloads,
     generate_p256_jwk,
     key_thumbprint,
     public_jwk_of,
     referenced_payloads,
     release_digest,
     release_digest_input,
+    optional_payloads,
+    slot_hashes,
     sign_bytes,
     trusted_root_from_pinned_key,
     verify_bytes,
@@ -28,7 +35,20 @@ from .trust import (
 )
 
 __all__ = [
+    "AGENT_ID",
     "ASSIGNMENT_MODULUS",
+    "AUDIENCE_LIMITS",
+    "PROTOCOL_VERSION",
+    "SUPPORTED_CAPABILITIES",
+    "TARGET_SLUG",
+    "capabilities_implemented",
+    "carried_payloads",
+    "optional_payloads",
+    "slot_hashes",
+    "servable_experiments",
+    "servable_overrides",
+    "frozen_experiment",
+    "servable_slots",
     "Assignment",
     "AssignmentError",
     "StepError",

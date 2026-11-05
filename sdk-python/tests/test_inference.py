@@ -1,4 +1,4 @@
-"""Protocol 0.3.1 / 0.3.2: the slot's (and a workflow step's) inference settings — ``apply_inference`` on its own, the
+"""The slot's (and a workflow step's) inference settings — ``apply_inference`` on its own, the
 LiteLLM keyword arguments, the workflow step, the golden invocation, the digest projection."""
 
 from __future__ import annotations

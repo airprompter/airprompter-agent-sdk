@@ -10,6 +10,41 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+Both SDKs speak protocol 3.0.0 and no other. See the [protocol changelog](protocol/CHANGELOG.md) for the wire.
+
+### Added
+- `runRefSecret` and `runRefPreviousSecrets` on `start()` (Python: `run_ref_secret`, `run_ref_previous_secrets`). A run reference now works on any instance of an agent and target; the key derives from the secret, else the Agent key.
+- `recordRun` and `recordStep` on `SpoolWriter` (Python: `record_run`, `record_step`), and the `RunTotals`, `StepTotals`, `RunDimensions`, `TokenTotals`, `StepRow` and `STEP_BOUNDS` exports.
+- `step` on `ap.report`, `ap.observe` targets and `ap.attribute`; `toolCalls` on `ap.report` and `ap.observe` (Python: `tool_calls`).
+- `newRunId`, `runRefKeyFrom` and the `RUN_REF_*` bounds; `servableSlots`, `servableExperiments`, `servableOverrides`; `frozenExperiment`; `SUPPORTED_CAPABILITIES`; `capabilitiesImplemented`; `HostedEnvironment`; `TARGET_SLUG`; `AGENT_ID`; `countOf`; `SLOT_TAG`, `WINDOW_STATUSES`, `STEP_STATUSES`, `USAGE_SOURCES`, `ERROR_CLASSES`.
+- `slotHashes`, `carriedPayloads`, `optionalPayloads`, and `carrying` and `absentRequires` on `verifyManifest` (Python: `slot_hashes`, `carried_payloads`, `optional_payloads`, `carrying`, `absent_requires`).
+
+### Changed
+- **`artifactId` is required on `ap.report`, `ap.observe` targets and spool observations** (Python: `artifact_id`). `ap.report` logs `observation_dropped` and drops a row it cannot write; it never throws.
+- **Telemetry never replaces a model result:** a failure to record is logged, and `ap.observe` returns the result or re-raises the provider's own error.
+- **`Target` is any lowercase slug**, and `start()` refuses anything else, or an `agentId` that is not an identifier, with `invalid_options`. `HostedEnvironment` names a deployment.
+- **`RunRefFacts` holds `runId` and `entries`.** `parseRunRef` takes one key or a list.
+- **An override this SDK cannot serve:** if an arm loses the override of the experiment's own tag, or the `subjectKey` is unknown, the host sits the experiment out (base text, arm `none`, bucket null); an unmet override of another tag goes alone. An experiment with every arm disabled stops a host that sits it out, and a pinned run.
+- **An audience selector this SDK cannot read loads and matches nothing.** An unknown `audienceId` and a fingerprint mismatch stay refused.
+- **`experimentConflict` refuses an arm-scoped disable with no `experimentId`**, and `status().ramps[].tag` is never null.
+- **Spool uploaders strip unknown fields, skip rows they cannot read and count those lines in a `dropped` row's new `lines` field.** Only corruption quarantines a segment. `inspectSegment` returns `skipped`, `stripped` and `payload`. Status is a closed list per row type; a later value is skipped, and a member of the other row form is refused.
+- **A spool writer drops a bad observation** with `telemetry_tag_invalid` and its siblings, so no writer input can quarantine a segment. A tag carrying `#N` is one of them.
+- **`airprompter dev`, `--environment` and every other target option take a slug.** `telemetry validate` reports what an uploader would clean up.
+- **Python `healthz` at generation 0 is `degraded`**, as TypeScript's is.
+- **`pullBundle` and `airprompter pull` carry every payload a release names**, including a slot this SDK cannot serve, and take a release with a capability they lack. `store.load` treats a missing payload named only under `requires` as an absent slot, so a host that gains a capability comes up serving and a sync picks the slot up at the same generation, trying once. A bundle host picks it up at its next generation.
+- **A manifest refused for a capability still delivers its disables**, on a sync pass, a bundle or a datastore read. They stack on the active release's own, and the next refused manifest replaces them. `onDirectives` takes `{ reduceOnly: true }` on that path (Python: `reduce_only`).
+- **`store.stage` refuses any entry whose name is not a content hash or whose bytes do not hash to it**, referenced or not.
+- **`ap.feedback` returns false for a token that is not a string.**
+- **`airprompterd`'s fallback report fills every field the heartbeat requires**, and `report.required` in the spool manifest equals the heartbeat's list minus `spool`.
+- **`airprompter telemetry validate` reports what an uploader would strip or skip**, and says `would not ship as written`.
+
+### Removed
+- `protocolAtLeast`, `AUDIENCE_CAPABILITY`, `AUDIENCE_PROTOCOL_VERSION`, `experimentForTag`, `experimentsOf`, the `experiment` manifest member and `ManagedCatalogue.experiment`, in both SDKs (Python: their snake_case names).
+- `onLeaseExpiry` and all halt behaviour: `status().onLeaseExpiry`, the `lease_expired` value of `RenderRefusedError` and `UnavailableReason`, and the healthz reason `lease_expired_halt`. A lapsed lease reports stale, degraded with reason `lease_expired`, and keeps serving.
+- The healthz `failing` level and the 503 answer: no rule stops an agent from serving.
+- `Disabled.arms` as an input. Arm-scoped disables are per experiment; the status and heartbeat view stays flat.
+- The `sync.mode: "daemon"` refusal.
+
 ## 0.6.0 — 2026-11-04 (protocol 2.0.0)
 
 TypeScript only. The Python SDK stays at 0.5.0 until AIR-2242 brings the same run session to it. No schema, vector or wire byte changed.

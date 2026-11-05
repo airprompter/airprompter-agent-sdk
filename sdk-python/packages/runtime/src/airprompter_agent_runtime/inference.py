@@ -1,4 +1,4 @@
-"""The slot's inference settings (protocol 0.3.1, ``slots[].inference``; 0.3.2 on a workflow step), applied to a
+"""The slot's inference settings (``slots[].inference``, and on a workflow step), applied to a
 wrapped provider call. The release owns them: a version's temperature, top-p, output cap, stop sequences and reasoning
 effort are reviewed and sealed with the prompt text, so the call goes out with those values whatever the call site
 wrote — and a call site that wrote a different value is told once, in the log, never failed. The wire carries integers
@@ -114,7 +114,7 @@ def apply_inference(kind: str, params: Mapping[str, Any], inference: Mapping[str
         if out.get(parameter) is not None and not _same(out[parameter], value):
             applied.overridden.append(parameter)
         out[parameter] = value
-        # OpenAI chat: the legacy cap is the same lever; a call site still writing it would otherwise send both.
+        # OpenAI chat: the older cap is the same lever; a call site still writing it would otherwise send both.
         if kind == "chat" and parameter == "max_completion_tokens" and out.get("max_tokens") is not None:
             del out["max_tokens"]
             if "max_tokens" not in applied.overridden:

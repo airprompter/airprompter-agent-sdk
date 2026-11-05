@@ -2,7 +2,7 @@
 
 Two slots split independently on their own salts (the protocol's perTag vectors, then the runtime end to end); a
 candidate may be another prompt under the same key (D79); an arm-scoped disable retreats one experiment and leaves the
-other alone; the conflicts are refused whole at verification (M15); a 0.2-shaped manifest still verifies.
+other alone; the conflicts are refused whole at verification (M15).
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import pytest
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import SyncOptions
 from airprompter_agent_core.protocol.assignment import assign_arm
-from airprompter_agent_core.protocol.trust import experiment_conflict, experiment_for_tag, experiments_of, public_jwk_of, release_digest, verify_manifest
+from airprompter_agent_core.protocol.trust import experiment_conflict, public_jwk_of, release_digest, verify_manifest
 
 from .control_plane import FakeControlPlane
 
@@ -40,14 +40,14 @@ def test_protocol_per_tag_vectors():
     for case in per_tag["cases"]:
         payload = {"experiments": [{**e, "subjectKey": "request", "arms": [{**a, "releaseDigest": "sha256:" + "0" * 64, "overrides": []} for a in e["arms"]]} for e in case["experiments"]]}
         for tag in case["tags"]:
-            experiment = experiment_for_tag(payload, tag)
+            experiment = next((entry for entry in payload["experiments"] if entry["tag"] == tag), None)
             expected = case["expected"][tag]
             if experiment is None:
                 assert expected == {"experimentId": None, "bucket": None, "arm": "none"}, f"{case['name']}: {tag}"
                 continue
             assigned = assign_arm(salt=experiment["salt"], subject=case["subject"], arms=experiment["arms"])
             assert {"experimentId": experiment["experimentId"], "bucket": assigned.bucket, "arm": assigned.arm["arm"]} == expected, f"{case['name']}: {tag}"
-    assert [r["reason"] for r in per_tag["refused"]] == ["experiment_conflict"] * 3
+    assert [r["reason"] for r in per_tag["refused"]] == ["experiment_conflict"] * 2
 
 
 def _experiment(plane: FakeControlPlane, experiment_id: str, tag: str, base: str, candidate_slots: list[dict], overrides: list[dict]) -> dict:
@@ -63,19 +63,17 @@ def _experiment(plane: FakeControlPlane, experiment_id: str, tag: str, base: str
     }
 
 
-def test_m15_conflicts_refused_and_legacy_verifies():
+def test_m15_conflicts_refused():
     plane = FakeControlPlane(SCOPE)
     triage = plane.slot(tag="support.triage", text="Triage A", version_id="a", variables=[])
     reply = plane.slot(tag="support.reply", text="Reply A", version_id="a", variables=[])
     triage_b = plane.slot(tag="support.triage", text="Triage B", version_id="b", variables=[])
     base = release_digest([triage, reply])
     exp = lambda experiment_id, tag, overrides=None: _experiment(plane, experiment_id, tag, base, [triage_b, reply], overrides or [])  # noqa: E731
-    untagged = lambda experiment: {k: v for k, v in experiment.items() if k != "tag"}  # noqa: E731
     payload = plane.promote([triage, reply], generation=1)["payload"]
     conflict = lambda patch: experiment_conflict({**payload, **patch})  # noqa: E731
 
     assert conflict({"experiments": [exp("exp_a", "support.triage", [triage_b]), exp("exp_b", "support.reply")]}) is None
-    assert conflict({"experiment": untagged(exp("exp_legacy", "x")), "experiments": [exp("exp_b", "support.reply")]}) == "experiment_conflict"
     assert conflict({"experiments": [exp("exp_a", "support.triage"), exp("exp_b", "support.triage")]}) == "experiment_conflict"
     assert conflict({"experiments": [exp("exp_a", "support.triage", [reply])]}) == "experiment_conflict"
     assert conflict({"experiments": [exp("exp_a", "docs.missing")]}) == "experiment_conflict"
@@ -90,10 +88,6 @@ def test_m15_conflicts_refused_and_legacy_verifies():
     bad = plane.promote([triage, reply], experiments=[exp("exp_a", "support.triage"), exp("exp_b", "support.triage")])
     verdict = verify(bad)
     assert (verdict.ok, verdict.reason) == (False, "experiment_conflict")
-    legacy = plane.promote([triage, reply], experiment=untagged(exp("exp_legacy", "support.triage", [triage_b])))
-    assert verify(legacy).ok
-    assert len(experiments_of(legacy["payload"])) == 1
-    assert experiment_for_tag(legacy["payload"], "support.reply")["experimentId"] == "exp_legacy"
 
 
 def test_two_prompts_split_independently_and_the_retreat_is_per_experiment(state_dir):

@@ -21,7 +21,7 @@ remedy? }] }`.
 | `root` (with `--root`) | the file is missing, is neither a pinned JWK nor a root document, or is a root document that has lapsed | — |
 | `store` | no store on this host, the store key cannot be obtained, `store.json` is unreadable | — |
 | `active_release` | no active release; the active slot does not re-verify as the runtime would on start (the reason is named) | — |
-| `lease` | — | the lease lapsed from issue and no runtime is in contact (`degrade` or `halt` named) |
+| `lease` | — | stale: the lease lapsed from issue and no runtime is in contact. The agent keeps serving |
 | `key_protection` | — | `file_key` (the store key is a file next to the store) |
 | `policy_pin` | — | no apply policy pinned yet |
 | `spool` / `quarantine` / `last_upload` | — | closed segments at ≥ 80 % of the budget, or at the budget (eviction); quarantined segments present; the last upload over a day old with segments waiting |
@@ -47,29 +47,28 @@ const { status, headers, body } = healthzResponse(ap.healthz());  // or build yo
 
 ```python
 # Python: any framework
-code, headers, body = ap.healthz_response()          # 200 / 503, {"content-type": …}, JSON
+code, headers, body = ap.healthz_response()          # 200, {"content-type": …}, JSON
 doc = ap.healthz()                                   # the document
 ```
 
 The document is the same in both SDKs, with `ok` as the liveness answer
-and `status` as the one degraded middle. Python 0.5.0 still answers `failing`
-at generation 0 until it takes the TypeScript rule below:
+and `status` as the one degraded middle:
 
-- **failing** (`ok: false`, 503): the lease lapsed under
-  `onLeaseExpiry: "halt"` (every render refuses).
 - **degraded** (`ok: true`, 200): nothing verified to serve (generation 0),
   so the agent runs its own prompt and a liveness probe must not restart it;
-  the lease lapsed under `degrade` (serving the last verified release); three or more consecutive sync failures; the
-  uploader is backing off; a forced downgrade is in force; the telemetry
-  daemon that shipped this process's spool has gone stale and nothing here
-  uploads instead (`upload_daemon_stale`); the spool is at 80 % of its
-  budget or more.
-- **ok** otherwise. `reasons` names every rule that fired, in that order,
-  and `failing` beats `degraded`.
+  the lease lapsed (`lease_expired`: stale, serving the last verified release);
+  three or more consecutive sync failures; the uploader is backing off; a
+  forced downgrade is in force; the telemetry daemon that shipped this
+  process's spool has gone stale and nothing here uploads instead
+  (`upload_daemon_stale`); the spool is at 80 % of its budget or more.
+- **ok** otherwise. `reasons` names every rule that fired, in that order.
+
+No rule stops an agent from serving, so the answer is always 200 and `ok` is
+always true.
 
 The rest of the document is what a probe dashboard wants next to the
 verdict: `generation`, `stagedGeneration`, `applyState`, `source`,
-`leaseExpiresAt` / `leaseExpired` / `onLeaseExpiry`, `lastSyncAt` /
+`leaseExpiresAt` / `leaseExpired`, `lastSyncAt` /
 `lastSyncOutcome` / `consecutiveSyncFailures`, `forcedDowngrade`,
 `telemetry` (`uploadedBy`: `daemon` / `self` / `none`, and the daemon's
 state: `live` / `stale` / `null`), `spool` (with `budgetBytes`),
@@ -89,11 +88,13 @@ airprompter telemetry validate spool/seg-i-abc123-29821660-0.ndjson [more…] [-
 Every line through the uploader's own inspection (`inspectSegment`), so a
 segment that passes here is never quarantined there. Reasons name the line
 and the field, never a value (`line 2: unknown_field:prompt`, `line 3:
-instance_mismatch`, `line 4: not_json`); a partial last line (a crashed
+instance_mismatch`, `line 4: not_json`). An unknown field the uploader
+would strip and a row it would skip are reported too; only corruption
+quarantines. A partial last line (a crashed
 writer) is skipped, not failed; a file not named
 `seg-<instanceId>-<epochMinute>-<n>.ndjson` needs `--instance-id`; a
 segment over the 1 MiB cap is refused. Exit `0` when every segment fits,
-`1` when any would be quarantined. Vector:
+`1` when any would not ship as written. Vector:
 `cli/test/telemetryValidate.test.ts`.
 
 ## The verify action — `airprompter verify` on every bundle a pull request commits

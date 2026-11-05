@@ -12,7 +12,7 @@ render is ignored: the callback never guesses which slot a call was.
     litellm.completion(model=rendered.model, messages=[...], metadata=litellm_metadata(rendered), **litellm_inference(rendered))
 
 A callback sees a call after the fact, so the release's inference settings
-(0.3.1) cannot be put on it there: ``litellm_inference(rendered)`` returns
+cannot be put on it there: ``litellm_inference(rendered)`` returns
 them as the keyword arguments of a ``litellm.completion`` call (OpenAI chat
 names — ``temperature``, ``top_p``, ``max_completion_tokens``, ``stop``,
 ``reasoning_effort``), empty when the version declares none.
@@ -47,7 +47,7 @@ METADATA_KEY = "airprompter"
 def litellm_metadata(rendered: Rendered | WorkflowStep, *, model: Optional[str] = None) -> dict[str, Any]:
     """The ``metadata=`` to pass to ``litellm.completion`` so the callback can attribute the call. Content-free: ids and the model only."""
     if isinstance(rendered, WorkflowStep):
-        return {METADATA_KEY: {"tag": rendered.step_id, "versionId": rendered.version_id, "arm": "none", "model": model or rendered.model or "unknown", "runRef": rendered.run_ref}}
+        return {METADATA_KEY: {"tag": rendered.step_id.split("#")[0], "step": rendered.step_id, "versionId": rendered.version_id, "arm": "none", "model": model or rendered.model or "unknown", "runRef": rendered.run_ref}}
     return {METADATA_KEY: {"tag": rendered.tag, "versionId": rendered.version_id, "arm": rendered.arm, "model": model or rendered.model, "runRef": rendered.run_ref}}
 
 
@@ -90,21 +90,19 @@ class AirPrompterLiteLLMCallback(_Base):
             matched = self._ap.attribution_for({"messages": kwargs.get("messages")})
             if matched is None:
                 return
-            attribution = {"tag": matched.tag, "versionId": matched.version_id, "arm": matched.arm, "model": matched.model, "artifactId": matched.artifact_id, "audienceIds": matched.audience_ids, "runMinute": matched.run_minute}
-        elif "runRef" in attribution:
-            # A supplied run reference is the only authority for cohort dimensions.
-            # Dropping malformed references prevents application metadata from
-            # forging artifact/audience attribution in the telemetry stream.
-            facts = parse_run_ref(str(attribution.get("runRef")), self._ap._run_ref_key)
-            if facts is None:
-                return
-            attribution = {"tag": facts.tag, "versionId": facts.version_id, "arm": facts.arm, "model": facts.model, "artifactId": facts.artifact_id, "audienceIds": facts.audience_ids, "runMinute": facts.run_minute}
+            attribution = {"tag": matched.tag, "step": matched.step, "versionId": matched.version_id, "arm": matched.arm, "model": matched.model, "artifactId": matched.artifact_id, "audienceIds": matched.audience_ids, "runMinute": matched.run_minute}
         else:
-            # Legacy metadata may identify a slot/version, but it is unsigned and
-            # therefore cannot add protocol-v3 cohort dimensions.
-            attribution = {"tag": attribution["tag"], "versionId": attribution["versionId"], "arm": attribution.get("arm", "none"), "model": attribution.get("model")}
+            # A supplied run reference is the only authority for the row's dimensions: a row needs an artifact id, and
+            # unsigned metadata cannot name one. Dropping anything else keeps application metadata from forging
+            # artifact or audience attribution in the telemetry stream.
+            facts = parse_run_ref(str(attribution.get("runRef")), self._ap._run_ref_keys)
+            if facts is None or not facts.entries:
+                return
+            entry = facts.entries[0]
+            attribution = {"tag": entry["tag"], "step": attribution.get("step"), "versionId": entry["versionId"], "arm": entry["arm"], "model": entry["model"], "artifactId": entry["artifactId"], "audienceIds": entry.get("audienceIds"), "runMinute": entry["runMinute"]}
         model = str(kwargs.get("model") or attribution.get("model") or "unknown")
         cohort = {
+            "step": attribution.get("step"),
             "artifact_id": attribution.get("artifactId"),
             "audience_ids": tuple(attribution["audienceIds"]) if attribution.get("audienceIds") is not None else None,
             "run_minute": attribution.get("runMinute"),

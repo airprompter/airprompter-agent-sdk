@@ -377,16 +377,11 @@ def test_agent_renders_from_sources_fenced_by_the_stricter_trust(state_dir):
         sourced = ap.prompt("support.triage", subject="cust-6").render()
         assert "<ticket>sourced &lt;/ticket> ticket</ticket>" in sourced.text
         ap.variables.revoke("ticket")
-        # 0.3.4: the heartbeat names what this application can fill — names only — once the release it serves was
-        # sealed at 0.3.4; a service still at 0.3.3 would refuse the whole heartbeat over the key, so it is withheld.
+        # The heartbeat names what this application can fill: names only.
         ap.heartbeat_now()
         assert plane.heartbeats[-1]["catalog"]["variables"] == ["customer_tier", "team"]
         assert "gold" not in json.dumps(plane.heartbeats[-1]), "never a value"
-        plane.promote(slots(plane, tier_in_text=True, version_id="ver_3"), protocol="0.3.3")
-        ap.sync_now()
-        ap.heartbeat_now()
-        assert "variables" not in plane.heartbeats[-1]["catalog"], "withheld from a 0.3.3 service"
-        # Past the gate the key is always there: an application with no sources reports an empty list, not silence.
+        # The key is always there: an application with no sources reports an empty list, not silence.
         plane.promote(slots(plane, tier_in_text=True, version_id="ver_4"))
         ap.sync_now()
         for name in ap.variables.names():
@@ -423,7 +418,7 @@ def test_failing_source_is_one_error_row_under_the_slot_and_status_names_the_arm
             asyncio.run(ap.prompt("support.triage").render_async(ticket="x"))
         assert len([e for e in events if e.get("event") == "variable_source_failed"]) == 2
         clock["ms"] += 60_000
-        ap.report(tag="support.triage", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=1)
+        ap.report(tag="support.triage", artifact_id="art_1", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=1)
         rows = error_rows(ap)
         assert [(r["tag"], r["versionId"], r["arm"], r["errorClass"]) for r in rows] == [("support.triage", "ver_1", "none", "render_missing_variable")]
         assert not any("customer_tier" in json.dumps(r) for r in rows), "a row never names a variable"
@@ -436,7 +431,7 @@ def test_failing_source_is_one_error_row_under_the_slot_and_status_names_the_arm
         # lands on the candidate writes its error row with the candidate's version and arm.
         control = slots(plane, tier_in_text=True, tier_required=True)[0]
         candidate = plane.slot(tag="support.triage", text="Candidate for {{team}} in {{region}}: {{ticket}}", model="gpt-5", variables=[*control["variables"], {"name": "region", "required": True, "trust": "operator"}], version_id="ver_c")
-        plane.promote([control], experiment={"experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 0, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 10000, "releaseDigest": release_digest([candidate]), "overrides": [candidate]}]})
+        plane.promote([control], experiments=[{"tag": control["tag"], "experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 0, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 10000, "releaseDigest": release_digest([candidate]), "overrides": [candidate]}]}])
         ap.sync_now()
         assert ap.status().variables["unsourced"] == [
             {"tag": "support.triage", "arm": "candidate", "names": ["ticket", "customer_tier", "region"]},
@@ -446,7 +441,7 @@ def test_failing_source_is_one_error_row_under_the_slot_and_status_names_the_arm
         with pytest.raises(MissingVariableError, match="missing required variable region"):
             ap.prompt("support.triage", subject="anyone").render(ticket="x")
         clock["ms"] += 60_000
-        ap.report(tag="support.triage", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=1)
+        ap.report(tag="support.triage", artifact_id="art_1", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=1)
         assert [(r["versionId"], r["arm"], r["errorClass"]) for r in error_rows(ap)] == [("ver_c", "candidate", "render_missing_variable")], "the override's version and arm"
     finally:
         ap.stop()

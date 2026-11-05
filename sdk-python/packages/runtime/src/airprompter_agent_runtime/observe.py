@@ -152,15 +152,17 @@ class ObserveTarget:
     version_id: str
     arm: str
     model: str
+    artifact_id: str
     audience_ids: Optional[tuple[str, ...]] = None
     run_minute: Optional[str] = None
-    artifact_id: Optional[str] = None
+    #: A workflow step's id, or a framework node or agent name.
+    step: Optional[str] = None
 
 
 def _observation(target: ObserveTarget, model: str, started: float, now: Callable[[], float], result: Any, error: Any, checks: Optional[Mapping[str, int]], evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> Observation:
     latency = max(0.0, now() - started)
     if error is not None:
-        return Observation(audience_ids=target.audience_ids, run_minute=target.run_minute, artifact_id=target.artifact_id, tag=target.tag, version_id=target.version_id, arm=target.arm, model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable", checks=checks)
+        return Observation(audience_ids=target.audience_ids, run_minute=target.run_minute, artifact_id=target.artifact_id, tag=target.tag, step=target.step, version_id=target.version_id, arm=target.arm, model=model, status="error", error_class=classify_error(error), latency_ms=latency, usage_source="unavailable", checks=checks)
     usage = normalize_usage(result)
     error_class = classify_result(result)
     if checks is None and evaluate is not None:
@@ -174,6 +176,7 @@ def _observation(target: ObserveTarget, model: str, started: float, now: Callabl
         run_minute=target.run_minute,
         artifact_id=target.artifact_id,
         tag=target.tag,
+        step=target.step,
         version_id=target.version_id,
         arm=target.arm,
         model=model,
@@ -222,22 +225,35 @@ class PendingObservation:
             pass
 
 
-def observe_call(target: ObserveTarget, call: Callable[[], T], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> T:
+Log = Callable[[dict[str, Any]], None]
+
+
+def _record_safely(record: Callable[[Observation], None], log: Optional[Log], *observed: Any) -> None:
+    """Telemetry never replaces a model result: a failure to record goes to ``log``."""
+    try:
+        record(_observation(*observed))
+    except Exception as error:  # noqa: BLE001
+        if log:
+            log({"event": "observation_dropped", "reason": str(error)})
+
+
+def observe_call(target: ObserveTarget, call: Callable[[], T], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None, log: Optional[Log] = None) -> T:
     """Time ``call``, then hand one observation to ``record``. The result is returned unchanged; a raised error is
-    re-raised after it is observed. Nothing about the result but its usage and finish reason is read."""
+    re-raised after it is observed. Nothing about the result but its usage and finish reason is read. A ``record`` that
+    fails goes to ``log`` and changes neither."""
     clock = now or now_ms
     started = clock()
     named = model or target.model
     try:
         result = call()
     except BaseException as error:
-        record(_observation(target, named, started, clock, None, error, checks))
+        _record_safely(record, log, target, named, started, clock, None, error, checks)
         raise
-    record(_observation(target, named, started, clock, result, None, checks, evaluate))
+    _record_safely(record, log, target, named, started, clock, result, None, checks, evaluate)
     return result
 
 
-async def observe_call_async(target: ObserveTarget, call: Callable[[], Union[Awaitable[T], T]], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None) -> T:
+async def observe_call_async(target: ObserveTarget, call: Callable[[], Union[Awaitable[T], T]], record: Callable[[Observation], None], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None, log: Optional[Log] = None) -> T:
     """``observe_call`` for a coroutine (an ``AsyncOpenAI`` / ``AsyncAnthropic`` call)."""
     clock = now or now_ms
     started = clock()
@@ -247,7 +263,7 @@ async def observe_call_async(target: ObserveTarget, call: Callable[[], Union[Awa
         if inspect.isawaitable(result):
             result = await result
     except BaseException as error:
-        record(_observation(target, named, started, clock, None, error, checks))
+        _record_safely(record, log, target, named, started, clock, None, error, checks)
         raise
-    record(_observation(target, named, started, clock, result, None, checks, evaluate))
+    _record_safely(record, log, target, named, started, clock, result, None, checks, evaluate)
     return result  # type: ignore[return-value]

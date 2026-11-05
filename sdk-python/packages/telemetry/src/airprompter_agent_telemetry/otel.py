@@ -102,7 +102,8 @@ def _sum_metric(name: str, unit: str, points: list[dict[str, Any]], description:
 
 def spool_rows_to_otlp(rows: list[Mapping[str, Any]], *, resource: Optional[Mapping[str, Union[str, int, float, bool]]] = None, sdk_version: str = SDK_VERSION) -> dict[str, Any]:
     """A segment's rows as one OTLP/HTTP JSON request. Empty rows give a request with no metrics."""
-    first = rows[0] if rows else None
+    # A step row is skipped on purpose: no metric reads one, and it does not name the resource either.
+    first = next((row for row in rows if row.get("type") != "step"), None)
     sdk_name, _, sdk_ver = str((first or {}).get("sdk") or "").partition("/")
     attributes: list[Attribute] = [otlp_attribute("service.instance.id", first["instanceId"])] if first else []
     if first and first.get("instanceClass"):
@@ -124,6 +125,8 @@ def spool_rows_to_otlp(rows: list[Mapping[str, Any]], *, resource: Optional[Mapp
     bounds = [edge / 1000 for edge in LATENCY_BUCKET_EDGES_MS[:-1]]
     for row in rows:
         kind = row.get("type")
+        if kind == "step":
+            continue
         if kind == "window":
             start = _nanos(row["minute"])
             end = _minute_end(start)

@@ -56,15 +56,15 @@ def _experiment(plane: FakeControlPlane):
     control = plane.slot(tag="support.reply", text="Reply A to {{name}}", version_id="a", variables=[{"name": "name", "required": False, "trust": "operator"}])
     candidate = plane.slot(tag="support.reply", text="Reply B to {{name}}", version_id="b", variables=[{"name": "name", "required": False, "trust": "operator"}])
     arms = [{"arm": "control", "weightBps": 10000, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 0, "releaseDigest": release_digest([candidate]), "overrides": [candidate]}]
-    return control, {"experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": arms}
+    return control, {"experimentId": "exp_1", "tag": control["tag"], "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": arms}
 
 
 def test_malformed_plan_refuses_the_manifest_whole():
     plane = FakeControlPlane(SCOPE)
     control, experiment = _experiment(plane)
-    good = plane.promote([control], experiment={**experiment, "ramp": [{"notBefore": "2026-09-14T02:00:00Z", "weightBps": [9500, 500]}, {"notBefore": "2026-09-14T03:00:00Z", "weightBps": [7500, 2500]}]})
+    good = plane.promote([control], experiments=[{**experiment, "ramp": [{"notBefore": "2026-09-14T02:00:00Z", "weightBps": [9500, 500]}, {"notBefore": "2026-09-14T03:00:00Z", "weightBps": [7500, 2500]}]}])
     assert verify_manifest(manifest=good, root=plane.root, now="2026-09-13T00:00:00Z", scope=SCOPE, stored_generation=0, payloads=None).ok
-    bad = plane.promote([control], experiment={**experiment, "ramp": [{"notBefore": "2026-09-14T02:00:00Z", "weightBps": [9500, 500]}, {"notBefore": "2026-09-14T02:20:00Z", "weightBps": [7500, 2500]}]})
+    bad = plane.promote([control], experiments=[{**experiment, "ramp": [{"notBefore": "2026-09-14T02:00:00Z", "weightBps": [9500, 500]}, {"notBefore": "2026-09-14T02:20:00Z", "weightBps": [7500, 2500]}]}])
     verdict = verify_manifest(manifest=bad, root=plane.root, now="2026-09-13T00:00:00Z", scope=SCOPE, stored_generation=0, payloads=None)
     assert (verdict.ok, verdict.reason) == (False, "ramp_invalid")
 
@@ -86,7 +86,7 @@ def test_runtime_walks_the_plan_and_the_retreat_lands_without_an_unlock(state_di
     events: list[dict] = []
     ap = AirPrompterAgent.start(**KW, api_key=plane.api_key, base_url="https://api.test", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, sync=SyncOptions(mode="resident", poll_seconds=3600, root_url="https://edge.test/roots/prod/root.json"), transport=plane.transport(), now=lambda: clock["ms"], telemetry={"sink": "memory"}, logger=events.append)
     try:
-        plane.promote([control], apply_policy="unlock_required", experiment=experiment)
+        plane.promote([control], apply_policy="unlock_required", experiments=[experiment])
         ap.sync_now()
         assert ap.status().staged_generation == 2
         assert ap.unlock() == {"generation": 2}
@@ -108,7 +108,7 @@ def test_runtime_walks_the_plan_and_the_retreat_lands_without_an_unlock(state_di
         assert len(plane.requests) == fetches, "not one request to the origin while the plan walked"
         assert all(ap.prompt("support.reply", subject=s).render(name="x").arm == "candidate" for s in on_candidate_at_25), "sticky and monotone"
 
-        plane.promote([control], apply_policy="unlock_required", experiment=experiment, directives=[{"kind": "disable", "scope": "arm", "arm": "candidate", "issuedAt": "2026-09-14T06:00:00Z", "reason": "p95 regressed"}])
+        plane.promote([control], apply_policy="unlock_required", experiments=[experiment], directives=[{"kind": "disable", "scope": "arm", "experimentId": "exp_1", "arm": "candidate", "issuedAt": "2026-09-14T06:00:00Z", "reason": "p95 regressed"}])
         ap.sync_now()
         assert ap.status().last_sync_outcome == "staged" and ap.generation == 2
         assert ap.status().disabled == {"agent": False, "slots": [], "arms": ["candidate"]}
@@ -117,7 +117,7 @@ def test_runtime_walks_the_plan_and_the_retreat_lands_without_an_unlock(state_di
         assert ap.status().ramp["weightBps"] == [10000, 0]
         assert ap.heartbeat_body()["disabled"]["arms"] == ["candidate"]
         assert any(e.get("event") == "disabled_by_directive" and "candidate" in (e.get("arms") or []) for e in events)
-        plane.promote([control], apply_policy="unlock_required", experiment=experiment, directives=[{"kind": "disable", "scope": "arm", "arm": "candidate", "issuedAt": "2026-09-14T06:00:00Z"}, {"kind": "disable", "scope": "arm", "arm": "control", "issuedAt": "2026-09-14T06:00:00Z"}])
+        plane.promote([control], apply_policy="unlock_required", experiments=[experiment], directives=[{"kind": "disable", "scope": "arm", "experimentId": "exp_1", "arm": "candidate", "issuedAt": "2026-09-14T06:00:00Z"}, {"kind": "disable", "scope": "arm", "experimentId": "exp_1", "arm": "control", "issuedAt": "2026-09-14T06:00:00Z"}])
         ap.sync_now()
         with pytest.raises(RenderRefusedError) as refused:
             ap.prompt("support.reply", subject="user-1").render(name="x")

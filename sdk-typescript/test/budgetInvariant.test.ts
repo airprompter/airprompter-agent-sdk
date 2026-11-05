@@ -32,7 +32,7 @@ const WRITER_B = "i-writerBBBBBBBB";
 const DIR = "/spool";
 
 function windowRow(instanceId: string, minute: string): SpoolRow {
-  return { type: "window", v: 1, minute, instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
+  return { type: "window", v: 4, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
 }
 
 function segment(fs: MemoryFs, instanceId: string, minuteMs: number, n: number, rows: SpoolRow[], open = false): string {
@@ -48,15 +48,15 @@ test("two writers over budget with a crash mid-open, sink absent: exactly the ol
   fs.clockMs = T0;
   fs.mkdirp(DIR, 0o700);
   const events: Record<string, unknown>[] = [];
-  const uploader = new SpoolUploader({ dir: DIR, instanceId: "i-hostprocess000", grantFor: async () => ({ kind: "unavailable", reason: "sink_absent" }), fetch: async () => { throw new Error("no registry"); }, fs, now: () => fs.clockMs, random: () => 0.5, logger: (e) => events.push(e), budgetBytes: 900, quarantineCapBytes: 4096, exportedCapBytes: 4096 });
-  // Five one-row segments alternate between two writers over five minutes; each is ~380 bytes, so three do not fit in 900.
+  const uploader = new SpoolUploader({ dir: DIR, instanceId: "i-hostprocess000", grantFor: async () => ({ kind: "unavailable", reason: "sink_absent" }), fetch: async () => { throw new Error("no registry"); }, fs, now: () => fs.clockMs, random: () => 0.5, logger: (e) => events.push(e), budgetBytes: 1500, quarantineCapBytes: 4096, exportedCapBytes: 4096 });
+  // Five one-row segments alternate between two writers over five minutes; each is ~575 bytes, so three do not fit in 1500.
   const names: string[] = [];
   for (let i = 0; i < 5; i += 1) {
     fs.clockMs = T0 + i * 60_000;
     names.push(segment(fs, i % 2 === 0 ? WRITER_A : WRITER_B, fs.clockMs, 0, [windowRow(i % 2 === 0 ? WRITER_A : WRITER_B, new Date(T0 + i * 60_000).toISOString().slice(0, 17) + "00Z")]));
   }
   const each = fs.stat(join(DIR, names[0]!)).size;
-  assert.ok(each * 3 > 900 && each * 2 <= 900, `segment ${each} bytes`);
+  assert.ok(each * 3 > 1500 && each * 2 <= 1500, `segment ${each} bytes`);
   // A crashed writer's .open from two hours ago, and a live writer's .open from this minute.
   fs.clockMs = T0 - 2 * 60 * 60_000;
   const abandoned = segment(fs, "i-crashed0000000", fs.clockMs, 0, [windowRow("i-crashed0000000", "2026-09-13T10:00:00Z")], true);
@@ -65,7 +65,7 @@ test("two writers over budget with a crash mid-open, sink absent: exactly the ol
 
   const result = uploader.runOnce();
   return result.then((pass) => {
-    // The reclaimed segment is the oldest of all (10:00): six closed segments, two fit in 900 — it and the three oldest of the five went.
+    // The reclaimed segment is the oldest of all (10:00): six closed segments, two fit in 1500 — it and the three oldest of the five went.
     assert.equal(uploader.status().reclaimedSegments, 1, "the abandoned .open was closed");
     assert.ok(events.some((e) => e.event === "open_segment_reclaimed" && e.segment === abandoned.slice(0, -".open".length)));
     assert.equal(pass.dropped, 4);
@@ -82,8 +82,8 @@ test("two writers over budget with a crash mid-open, sink absent: exactly the ol
     const tree = uploader.status().tree;
     assert.deepEqual({ open: tree.openSegments, quarantine: tree.quarantineBytes, exported: tree.exportedBytes }, { open: 1, quarantine: 0, exported: 0 });
     assert.ok(tree.totalBytes <= uploader.bound(1), `tree ${tree.totalBytes} ≤ bound ${uploader.bound(1)}`);
-    assert.ok(uploader.status().depth.bytes <= 900, "closed unsent within the budget");
-    assert.equal(uploader.bound(2), 900 + 2 * SEGMENT_MAX_BYTES + 4096 + 4096, "the formula, in numbers");
+    assert.ok(uploader.status().depth.bytes <= 1500, "closed unsent within the budget");
+    assert.equal(uploader.bound(2), 1500 + 2 * SEGMENT_MAX_BYTES + 4096 + 4096, "the formula, in numbers");
   });
 });
 
@@ -92,11 +92,11 @@ test("quarantine/ and exported/ are capped in bytes, oldest first; a buggy third
   fs.clockMs = T0;
   fs.mkdirp(DIR, 0o700);
   const uploader = new SpoolUploader({ dir: DIR, instanceId: "i-hostprocess000", grantFor: async () => ({ kind: "unavailable", reason: "sink_absent" }), fetch: async () => { throw new Error("no registry"); }, fs, now: () => fs.clockMs, random: () => 0.5, quarantineCapBytes: 1000, exportedCapBytes: 500 });
-  // Six malformed segments from a stranger (a field the contract has no place for), ~420 bytes each.
+  // Six corrupt segments from a stranger (a count that is no number), ~420 bytes each.
   const bad: string[] = [];
   for (let i = 0; i < 6; i += 1) {
     fs.clockMs = T0 + i * 60_000;
-    bad.push(segment(fs, "i-thirdparty0000", fs.clockMs, 0, [{ ...windowRow("i-thirdparty0000", "2026-09-13T12:00:00Z"), prompt: "You are a helpful assistant" } as unknown as SpoolRow]));
+    bad.push(segment(fs, "i-thirdparty0000", fs.clockMs, 0, [{ ...windowRow("i-thirdparty0000", "2026-09-13T12:00:00Z"), count: "You are a helpful assistant" } as unknown as SpoolRow]));
   }
   await uploader.runOnce();
   assert.equal(uploader.status().quarantinedSegments, 6, "every one was quarantined");
@@ -120,7 +120,7 @@ test("an idle writer's last minute closes on the stale-window sweep, never the c
   const sink = new MemorySink({ instanceId: WRITER_A });
   const writer = new SpoolWriter(sink, { instanceId: WRITER_A, instanceClass: "resident", sdk: "test/0" });
   let clock = T0;
-  writer.observe({ tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", latencyMs: 5, usageSource: "unavailable" }, clock);
+  writer.observe({ tag: "support.reply", artifactId: "art_1", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", latencyMs: 5, usageSource: "unavailable" }, clock);
   assert.equal(writer.openWindowCount, 1);
   writer.closeStaleWindows(clock + 10_000);
   assert.equal(writer.openWindowCount, 1, "the same minute: the window stays open, no split row");
@@ -150,7 +150,7 @@ test("every process is its own instance: two runtimes on one store report distin
     assert.deepEqual(new Set(plane.heartbeats.map((h) => h.instanceId)), new Set([a.instanceId, b.instanceId]), "the fleet sees both");
     for (const ap of [a, b]) {
       const r = ap.prompt("support.reply").render({});
-      ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 3 });
+      ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 3 });
       ap.spool.closeWindows(clock.ms);
     }
     const spool = join(SlotStore.path({ stateDir, ...scope }), "spool", "telemetry");

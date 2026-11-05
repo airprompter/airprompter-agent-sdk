@@ -1,5 +1,48 @@
 # Protocol changelog
 
+## 3.0.0 · One wire
+
+Breaking. 3.0.0 is the only wire: older manifests, heartbeats, rows and run references are refused, and no compatibility path remains. Any `3.x.y` is read; a feature a reader must understand is gated by a capability, never by the minor number.
+
+Added:
+
+- `requiredCapabilities`: an optional string array on the payload. A reader missing any value refuses the manifest with `protocol_unsupported`. New `capabilities.md` holds the registry and the naming rule; 3.0.0 registers nothing.
+- `slot.requires`: an optional string array. A reader missing any value treats the slot as absent: skipped, not validated, its payload not fetched, experiments naming its tag skipped too. Everything else loads, including disables. `$defs/slot` is a `oneOf` of the strict shape and an open shape with `tag`, `kind` and a non-empty `requires`. In the digest projection when present.
+- Audience selectors are a condition tree: `{ "mode": "when", "when": … }` with `all`, `any`, `not`, and the leaves `is`, `contains`, `in` and `range`. Depth at most 4, at most 32 leaves.
+- Window rows v4. `count` means runs. `artifactId` is required, and rows gain `modelCalls`, `agentRun`, `tools`, `tokensSq` (run rows) and `outcomes[*].sumSq`. `status` gains `interrupted`, and `errorClass` gains `model_unresolved`.
+- Step rows: `type: "step"`, `v: 1`, a row of their own. `STEP_BOUNDS` caps a step name at 64 characters and 32 per run; past either it is written as `other`.
+- Latency buckets: 23 edges, up to one hour.
+- One run reference body: `[agentId, target, runId, entries]`, holding at most 8 entries at mint and 32 at read, with a fixed `runId`. Readers keep a fifth body element and unknown entry keys. The key derives from a secret instances share (`runRefSecret`, else the Agent key), with `runRefPreviousSecrets` for rotation.
+- Heartbeat `capabilities` means what the SDK implements (0 to 32 values). Heartbeat `runCounters.passthrough` is an open, cumulative map.
+- Arm overrides carry `requires` too. If an arm loses the override of the experiment's own tag, or the `subjectKey` is unknown, the host sits the experiment out, and a frozen experiment stops it all the same: what a host cannot read never counts as evidence. An unmet override of another tag goes alone. A store or a carrier may go without a payload named only under `requires` (M9), and a store holding such a slot serves the rest and takes the same generation again, once, when it can read it. Every other reader keeps strict M9.
+- A manifest refused for a capability is refused after signature, scope and generation. Its `disable` directives apply on top of the active release's own, on a sync pass, a bundle or a datastore read, and the next refused manifest replaces them.
+- A pull path carries what a newer runtime needs: every `{contentHash, byteLength}` pair anywhere under the payload, verified without the capability refusal or the servable filter. The runtime verifies again at apply.
+- The reader rule is in `README.md` › Versioning. `vectors/heartbeat-readers.json` holds what a heartbeat reader must accept. Spool readers strip unknown fields, skip unknown row types, versions and row statuses line by line, count them in a `dropped` row's `lines`, take any slug of at most 32 characters as an `errorClass`, `usageSource` or refusal `reason`, and quarantine a segment only for corruption.
+- An audience selector a reader cannot read loads and matches nothing.
+- `canonical-json.md` defines what an open slot projects.
+- `target` is a slug (`^[a-z][a-z0-9-]{0,31}$`) wherever a field names an agent's stage. `hostedEnvironment` names a deployment and stays `dev`, `staging` or `prod`. A key set with purpose `countersign` takes a target; every other purpose takes a hosted environment.
+- Heartbeat `runCounters` keeps `passthrough` flat and takes other families as a counter map, and `sdk.name` is a slug. A `dropped` row gains `lines`. A key set's `protocol` is plain semver.
+- Range bounds in an audience selector are safe integers.
+- An arm-scoped disable requires `experimentId`, and is refused without one even with no experiments.
+- Arm checks run on every servable experiment, so bad weights are refused at verification with or without an audience.
+- Spool manifest `report` requires what the heartbeat request requires, minus `spool`.
+
+Removed:
+
+- Reading protocol majors 0 and 2.
+- The `audience` capability, and the fixed `requiredCapabilities: ["audience"]` envelope. Every 3.0.0 SDK speaks audiences. `observations` is optional.
+- The single `experiment` member. `experiments[]` is the only shape, and every entry names its `tag`.
+- `onLeaseExpiry` and all halt behaviour. A lapsed lease reports stale and keeps serving. Healthz says `lease_expired`.
+- Protocol version gates and `protocolAtLeast`, in both SDKs.
+- Heartbeat negotiation: `registration` no longer waits for a capability echo, and the `capabilities` `minItems` and `contains: audience` rules are gone. Fields that were absent on older runtimes are required: `instanceClass`, `heartbeatIntervalSeconds`, `unlockRequestsSeen`, `disabled`, `applyPolicy` and `catalog.variables`.
+- The heartbeat response echo of `protocol` and `capabilities`.
+- Window rows v1, v2 and v3, the `#N` step suffix in `tag`, and the 16-edge histogram.
+- The 7-part and 8-part run reference bodies, and the 4,096-character limit.
+- The store id as the default run reference key. It remains the fallback on a host with no secret, and works on that one store only.
+- The conformance operation that read the single experiment, the `refused` fixtures that tested dual-wire rules, and the compatibility table.
+
+Refused examples now name the code an SDK answers with and the instance path the schema refuses, and `conformance/run.mjs` asserts both.
+
 ## Unreleased (text only)
 
 - `assignment-hash.md`: an absent subject is a fresh id per call, and the instance id is used only through `subjectKey: "instance"`. No version change: no schema, vector or wire byte moved.

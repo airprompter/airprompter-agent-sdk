@@ -25,18 +25,18 @@
  * ```
  */
 
-import type { AudienceSelector, SlotInference, SlotVariable } from "@airprompter/agent-core";
+import type { AudienceSelector, SlotInference, SlotVariable, Target } from "@airprompter/agent-core";
 import { createHash } from "node:crypto";
 import { VariableSourceRegistry, type VariableSourceInput } from "../variables/sources.js";
 import { fillAsync, planFill, stricterSources, supplied, unsourced, type RenderValues } from "../variables/fill.js";
 import { VariableSourceError } from "../variables/sources.js";
-import { copyAudienceTags, errorNamed, matchesAudience } from "@airprompter/agent-core";
+import { AGENT_ID, TARGET_SLUG, copyAudienceTags, errorNamed, matchesAudience, servableSlots } from "@airprompter/agent-core";
 
 import { subjectHash as saltedSubjectHash } from "@airprompter/agent-core";
 
 export const MANAGED_SDK_USER_AGENT = "airprompter-agent-sdk-ts/managed";
 
-export type ManagedTarget = "dev" | "staging" | "prod";
+export type ManagedTarget = Target;
 
 export type ManagedFetchLike = (
   input: string,
@@ -79,11 +79,13 @@ export interface ManagedSlot {
   tag: string;
   kind: "prompt" | "workflow";
   model: string;
-  /** The slot's declarations as the catalogue names them (0.3.4: with `default` and `source` when the author set them). */
+  /** The slot's declarations as the catalogue names them, with `default` and `source` when the author set them. */
   variables: readonly SlotVariable[];
-  /** 0.3.1: how the model is called for the slot, as the release sealed it — what a hosted run uses. */
+  /** How the model is called for the slot, as the release sealed it: what a hosted run uses. */
   inference?: SlotInference;
   steps: ReadonlyArray<{ stepId: string; inference?: SlotInference }> | null;
+  /** Capabilities this slot needs; an SDK missing one treats the slot as absent. */
+  requires?: readonly string[];
 }
 
 export interface ManagedCatalogue {
@@ -93,10 +95,8 @@ export interface ManagedCatalogue {
   releaseDigest: string;
   capabilities?: readonly string[];
   slots: readonly ManagedSlot[];
-  /** The legacy single experiment (it covers every slot); S17: the first of `experiments` when the catalogue lists them. */
-  experiment: { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null;
-  /** S17: one entry per experiment, each naming the slot it splits (`tag` null on the legacy single one). */
-  experiments?: readonly { experimentId: string; tag: string | null; salt: string; subjectKey: "request" | "instance"; arms: readonly string[] }[];
+  /** S17: one entry per experiment, each naming the slot it splits. */
+  experiments?: readonly { experimentId: string; tag: string; salt: string; subjectKey: "request" | "instance"; arms: readonly string[] }[];
   /** Signed audience rules. Only matching opaque ids are returned on a run; tag values remain local. */
   observations?: readonly { audienceId: string; tag: string; selector: AudienceSelector }[];
 }
@@ -149,6 +149,7 @@ export interface ManagedRunFeedbackResponse {
 }
 
 export type ManagedRefusalCode =
+  | "invalid_options"
   | "unauthorized"
   | "forbidden"
   | "invalid_request"
@@ -273,6 +274,8 @@ export class ManagedAgent {
   static async start(options: ManagedStartOptions): Promise<ManagedAgent> {
     const fetchImpl = options.fetch ?? (globalThis.fetch as unknown as ManagedFetchLike);
     if (!fetchImpl) throw new Error("no fetch available: Node 20+ or pass options.fetch");
+    if (typeof options.target !== "string" || !TARGET_SLUG.test(options.target)) throw new ManagedRunError("invalid_options", 0, "target must be a lowercase slug: a letter, then up to 31 letters, digits or hyphens");
+    if (typeof options.agentId !== "string" || !AGENT_ID.test(options.agentId)) throw new ManagedRunError("invalid_options", 0, "agentId must be an agent id: a letter or digit, then up to 127 letters, digits, dots, underscores, colons or hyphens");
     const catalogue = await ManagedAgent.readCatalogue(fetchImpl, options);
     return new ManagedAgent(options, catalogue);
   }
@@ -310,16 +313,14 @@ export class ManagedAgent {
     return rules.flatMap((entry) => matchesAudience(entry.selector, local) ? [entry.audienceId] : []).sort();
   }
 
-  /** S17: the experiment that splits a slot — the per-prompt one by tag, else the legacy single one (it covers every slot), else null. */
+  /** S17: the experiment that splits a slot, else null. */
   experimentFor(tag: string): { salt: string; subjectKey: "request" | "instance"; arms: readonly string[] } | null {
-    const list = this.catalogue.experiments;
-    if (list && list.length > 0) return list.find((experiment) => experiment.tag === tag || experiment.tag === null) ?? null;
-    return this.catalogue.experiment;
+    return this.catalogue.experiments?.find((experiment) => experiment.tag === tag) ?? null;
   }
 
   /** The hash the route buckets on: the slot's experiment salt over the subject (or this instance when the experiment assigns by instance). Never the subject. */
   subjectHashFor(subject: string | undefined, tag?: string): string | undefined {
-    const experiment = tag === undefined ? this.catalogue.experiment : this.experimentFor(tag);
+    const experiment = tag === undefined ? (this.catalogue.experiments?.[0] ?? null) : this.experimentFor(tag);
     if (!experiment) return undefined;
     const value = experiment.subjectKey === "instance" || subject === undefined ? this.instanceId : subject;
     return saltedSubjectHash(experiment.salt, value);
@@ -353,7 +354,7 @@ export class ManagedAgent {
 
   /** A workflow slot: the customer executes tools between steps and calls `step()` for each. */
   workflow(tag: string, options: { subject?: string } = {}) {
-    const slot = this.catalogue.slots.find((s) => s.tag === tag);
+    const slot = servableSlots(this.catalogue).find((s) => s.tag === tag);
     return {
       steps: slot?.steps ?? [],
       step: (stepId: string, variables: Record<string, string>, stepOptions: Omit<ManagedRunOptions, "subject" | "stepId"> = {}) => this.run(tag, variables, { ...stepOptions, ...(options.subject !== undefined ? { subject: options.subject } : {}), stepId }),
@@ -362,7 +363,7 @@ export class ManagedAgent {
 
   /** The required declared variables a run of this slot would still lack after these values and the registered sources. */
   needs(tag: string, values: RenderValues = {}): string[] {
-    const slot = this.catalogue.slots.find((s) => s.tag === tag);
+    const slot = servableSlots(this.catalogue).find((s) => s.tag === tag);
     if (!slot) throw new Error(`no slot ${tag} in the catalogue`);
     return unsourced({ variables: slot.variables, values, registry: this.variables });
   }
@@ -375,7 +376,7 @@ export class ManagedAgent {
    * which is the safe direction. An aborted run is not filled.
    */
   private async fillForRun(tag: string, values: Record<string, string>, subject: string | undefined, signal: AbortSignal | undefined): Promise<Record<string, string>> {
-    const slot = this.catalogue.slots.find((s) => s.tag === tag);
+    const slot = servableSlots(this.catalogue).find((s) => s.tag === tag);
     if (!slot || this.variables.names().length === 0) return values;
     const declared = slot.variables;
     const plan = planFill({ tag, variables: declared, text: null, values, registry: this.variables });

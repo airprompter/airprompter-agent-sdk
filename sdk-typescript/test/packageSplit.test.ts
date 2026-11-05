@@ -22,7 +22,7 @@ import test from "node:test";
 
 import { createPlaintextBundle } from "../packages/core/src/bundle/apbundle.js";
 import { AssignmentError, isAssignmentError } from "../packages/core/src/protocol/assignment.js";
-import { publicJwkOf, trustedRootFromPinnedKey } from "../packages/core/src/protocol/trust.js";
+import { publicJwkOf, trustedRootFromPinnedKey, releaseDigest } from "../packages/core/src/protocol/trust.js";
 import { SDK_VERSION } from "../packages/core/src/protocol/version.js";
 import type { Bundle } from "../packages/core/src/protocol/types.js";
 import { BundleRelease } from "../packages/core/src/release/bundleRelease.js";
@@ -107,7 +107,7 @@ test("S10 core flow: agent-runtime alone renders and assigns over a bundle the c
   const control = plane.slot({ tag: "support.reply", text: "Reply A to {{name}}", versionId: "v1", variables: [{ name: "name", required: true, trust: "operator" }] });
   const candidate = plane.slot({ tag: "support.reply", text: "Reply B to {{name}}", versionId: "v2", variables: [{ name: "name", required: true, trust: "operator" }] });
   plane.promote([control], {
-    experiment: { experimentId: "exp_1", salt: "c2FsdHNhbHRzYWx0c2FsdHNhbHQ", subjectKey: "request", arms: [{ arm: "control", weightBps: 5000, releaseDigest: plane.manifest?.payload.releaseDigest ?? ("sha256:" + "0".repeat(64) as `sha256:${string}`), overrides: [] }, { arm: "candidate", weightBps: 5000, releaseDigest: ("sha256:" + "1".repeat(64)) as `sha256:${string}`, overrides: [candidate] }] },
+    experiments: [{ tag: "support.reply", experimentId: "exp_1", salt: "c2FsdHNhbHRzYWx0c2FsdHNhbHQ", subjectKey: "request", arms: [{ arm: "control", weightBps: 5000, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 5000, releaseDigest: ("sha256:" + "1".repeat(64)) as `sha256:${string}`, overrides: [candidate] }] }],
   });
   const bundle = bundleOf(plane);
   const pinned = trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: publicJwkOf(plane.rootKey) });
@@ -146,10 +146,10 @@ test("S10: the runtime walks the protocol's ramp vectors over a bundle release â
     const plane = new FakeControlPlane(scope);
     const control = plane.slot({ tag: "support.reply", text: "A", versionId: "v1", variables: [] });
     const candidate = plane.slot({ tag: "support.reply", text: "B", versionId: "v2", variables: [] });
-    const controlDigest = ("sha256:" + "0".repeat(64)) as `sha256:${string}`;
+    const controlDigest = releaseDigest([control]);
     plane.promote([control], {
-      experiment: { experimentId: "exp_ramp", salt: c.salt, subjectKey: "request", arms: c.arms.map((arm) => ({ arm: arm.arm, weightBps: arm.weightBps, releaseDigest: controlDigest, overrides: arm.arm === "candidate" ? [candidate] : [] })), ramp: c.ramp },
-      directives: c.directives.map((d) => ({ ...d, issuedAt: d.issuedAt ?? "2026-09-14T00:00:00Z" })) as never,
+      experiments: [{ tag: "support.reply", experimentId: "exp_ramp", salt: c.salt, subjectKey: "request", arms: c.arms.map((arm) => ({ arm: arm.arm, weightBps: arm.weightBps, releaseDigest: controlDigest, overrides: arm.arm === "candidate" ? [candidate] : [] })), ramp: c.ramp }],
+      directives: c.directives as never,
     });
     const loaded = BundleRelease.load({ bundle: bundleOf(plane), root: trustedRootFromPinnedKey({ purpose: "platform", environment: "prod", pinnedRoot: publicJwkOf(plane.rootKey) }), scope, now: "2026-09-13T00:00:00Z" });
     assert.ok(loaded.ok, `${c.name}: ${JSON.stringify(loaded)}`);

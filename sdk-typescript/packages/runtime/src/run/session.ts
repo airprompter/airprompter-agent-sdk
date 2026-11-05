@@ -6,7 +6,7 @@
  * even to a pinned slot. Ramp steps and rollbacks reach the next run.
  *
  * Counters only add up here. `end` writes one observation per slot that made a
- * model call, so `count` on a v3 row means runs.
+ * model call, so `count` on a window row means runs.
  *
  * @example
  * ```ts
@@ -92,7 +92,7 @@ export class Session implements RunSession {
     this.lastErrorClass = call.errorClass ?? null;
   }
 
-  /** Tool counts have no row until protocol 3.0.0. A tool call only keeps the run from looking idle. */
+  /** A tool call only keeps the run from looking idle: the run session reports tool counts from ticket 11a. */
   recordToolCall(_slot: string, _call: ToolCallRecord): void {
     this.touch();
   }
@@ -160,11 +160,11 @@ export class Session implements RunSession {
     const release = this.host.release();
     if (!("resolver" in release)) return null;
     const disabled = release.resolver.disabled();
-    if (disabled.agent || disabled.slots.includes(slot)) {
+    if (disabled.agent || disabled.slots.includes(slot) || release.resolver.frozen(slot, this.tags())) {
       this.host.stampDisabled(release.resolver.release.generation, disabled.agent ? null : slot);
       return { kind: "passthrough", slot, reason: "slot_disabled" };
     }
-    if (pin.rendered && this.host.leaseHalted(slot)) return { kind: "passthrough", slot, reason: "lease_expired" };
+    if (pin.rendered) this.host.stampLease();
     const arm = pin.rendered?.arm;
     if (!arm || arm === "none") return null;
     const experiment = release.resolver.experimentFor(slot);

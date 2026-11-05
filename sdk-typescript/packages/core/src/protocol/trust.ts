@@ -15,11 +15,12 @@
 
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
 
-import { isAssignmentError, validateRamp, validAudienceManifest } from "./assignment.js";
+import { capabilitiesImplemented, isAssignmentError, servableExperiments, servableSlots, validateRamp, validAudienceManifest } from "./assignment.js";
 import { canonicalBytes, canonicalJson, sha256Prefixed } from "./canonicalJson.js";
-import { DIRECTIVE_KINDS, experimentConflict, experimentsOf, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type SlotInference, type Target } from "./types.js";
+import { DIRECTIVE_KINDS, experimentConflict, type HostedEnvironment, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type SlotInference, type Target } from "./types.js";
 
-export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([0, 2]);
+export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([3]);
+const PROTOCOL_SHAPE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
 /** RFC 7638: sha256 over canonical {crv, kty, x, y}, lowercase hex. */
 export function keyThumbprint(jwk: P256PublicJwk): string {
@@ -55,14 +56,13 @@ export function instant(text: string): number {
 }
 
 /** The synthetic trusted document a runtime starts from: the pinned root key alone, in the root role. */
-export function trustedRootFromPinnedKey(input: { purpose: "platform" | "countersign"; environment: Target; pinnedRoot: P256PublicJwk }): RootMetadata {
+export function trustedRootFromPinnedKey(input: ({ purpose: "platform"; environment: HostedEnvironment } | { purpose: "countersign"; environment: Target }) & { pinnedRoot: P256PublicJwk }): RootMetadata {
   const keyId = keyThumbprint(input.pinnedRoot);
   return {
     signed: {
       type: "root",
       protocol: "0.0.0",
-      purpose: input.purpose,
-      environment: input.environment,
+      ...(input.purpose === "platform" ? { purpose: input.purpose, environment: input.environment } : { purpose: input.purpose, environment: input.environment }),
       version: 0,
       expires: "9999-12-31T23:59:59Z",
       keys: { [keyId]: { keyType: "ecdsa-p256", scheme: "ES256", publicKey: publicJwkOf(input.pinnedRoot) } },
@@ -87,7 +87,8 @@ function countValidSignatures(bytes: Uint8Array, signatures: readonly Signature[
   return valid;
 }
 
-export type Verdict<T = object> = ({ ok: true } & T) | { ok: false; reason: RefusalCode };
+/** `directivesStand`: refused, but its signature, scope and generation verified, so its disables reach this host (`capabilities.md`). */
+export type Verdict<T = object> = ({ ok: true } & T) | { ok: false; reason: RefusalCode; directivesStand?: true };
 
 /** R1–R5. */
 export function verifyRootMetadata(input: { candidate: RootMetadata; trusted: RootMetadata; now: string }): Verdict {
@@ -107,17 +108,79 @@ export function verifyRootMetadata(input: { candidate: RootMetadata; trusted: Ro
   return { ok: true };
 }
 
-/** Every content hash a manifest references, with the declared length: slots, steps, arm overrides. */
+/** Every hash one slot or override names, with its declared length: main, steps and golden set. */
+export function slotHashes(entry: ManifestSlot): Map<string, number> {
+  const hashes = new Map<string, number>();
+  const add = (pin: { contentHash?: unknown; byteLength?: unknown } | undefined) => {
+    if (pin && typeof pin.contentHash === "string") hashes.set(pin.contentHash, pin.byteLength as number);
+  };
+  add(entry);
+  for (const step of Array.isArray(entry.steps) ? entry.steps : []) add(step);
+  add(entry.goldenSet);
+  return hashes;
+}
+
+/** Every content hash a manifest references, with the declared length: servable slots, their steps, arm overrides. */
 export function referencedPayloads(payload: ManifestPayload): Map<string, number> {
   const hashes = new Map<string, number>();
   const add = (slot: ManifestSlot) => {
-    hashes.set(slot.contentHash, slot.byteLength);
-    for (const step of slot.steps ?? []) hashes.set(step.contentHash, step.byteLength);
-    if (slot.goldenSet) hashes.set(slot.goldenSet.contentHash, slot.goldenSet.byteLength);
+    for (const [hash, byteLength] of slotHashes(slot)) hashes.set(hash, byteLength);
   };
-  for (const slot of payload.slots) add(slot);
-  for (const experiment of experimentsOf(payload)) for (const arm of experiment.arms) for (const override of arm.overrides) add(override);
+  for (const slot of servableSlots(payload)) add(slot);
+  for (const experiment of servableExperiments(payload)) for (const arm of experiment.arms) for (const override of arm.overrides) add(override);
   return hashes;
+}
+
+const CONTENT_HASH = /^sha256:[0-9a-f]{64}$/;
+
+/** A well-formed `{contentHash, byteLength}` pair, or null. */
+function pairOf(value: object): [string, number] | null {
+  const { contentHash, byteLength } = value as { contentHash?: unknown; byteLength?: unknown };
+  return typeof contentHash === "string" && CONTENT_HASH.test(contentHash) && typeof byteLength === "number" && Number.isSafeInteger(byteLength) && byteLength >= 0 ? [contentHash, byteLength] : null;
+}
+
+/**
+ * Every `{contentHash, byteLength}` pair anywhere under a manifest payload, whatever holds it. Pull paths only: a
+ * puller carries a release for runtimes that may know more than it does, so it fetches what a newer runtime needs
+ * (a `slot.variants[*].pin`, an open slot) without being able to read it. A runtime reads `referencedPayloads`.
+ */
+export function carriedPayloads(payload: ManifestPayload): Map<string, number> {
+  const hashes = new Map<string, number>();
+  const pending: unknown[] = [payload];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (!value || typeof value !== "object") continue;
+    const pair = pairOf(value);
+    if (pair) hashes.set(pair[0], pair[1]);
+    for (const member of Object.values(value)) pending.push(member);
+  }
+  return hashes;
+}
+
+/**
+ * The hashes named only under a slot or an arm override carrying `requires`, by the same walk: the only payloads a store
+ * or a carrier may go without (M9). A hash named anywhere else is required, so a `requires` slot sharing it cannot excuse
+ * it, and a `requires` anywhere but those two positions excuses nothing.
+ */
+export function optionalPayloads(payload: ManifestPayload): Set<string> {
+  const positions = new Set<unknown>(Array.isArray(payload.slots) ? payload.slots : []);
+  for (const experiment of Array.isArray(payload.experiments) ? payload.experiments : []) {
+    for (const arm of Array.isArray(experiment?.arms) ? experiment.arms : []) {
+      for (const override of Array.isArray(arm?.overrides) ? arm.overrides : []) positions.add(override);
+    }
+  }
+  const plain = new Set<string>();
+  const underRequires = new Set<string>();
+  const pending: Array<[unknown, boolean]> = [[payload, false]];
+  while (pending.length > 0) {
+    const [value, under] = pending.pop()!;
+    if (!value || typeof value !== "object") continue;
+    const inside = under || (positions.has(value) && (value as { requires?: unknown }).requires !== undefined);
+    const pair = pairOf(value);
+    if (pair) (inside ? underRequires : plain).add(pair[0]);
+    for (const member of Object.values(value)) pending.push([member, inside]);
+  }
+  return new Set([...underRequires].filter((hash) => !plain.has(hash)));
 }
 
 function keyUsableAt(key: RootMetadataSigned["keys"][string], now: string): boolean {
@@ -138,6 +201,13 @@ export interface VerifyManifestInput {
   countersignRoot?: RootMetadata | null;
   /** The local side may be stricter than the manifest. */
   requireCountersign?: boolean;
+  /**
+   * A pull path's check: no capability refusal and no servable filter, so a puller carries a release it cannot read
+   * itself. M9 and M10 run over `carriedPayloads`. The runtime that opens the bundle verifies it again, in full.
+   */
+  carrying?: boolean;
+  /** M9 may go without `optionalPayloads`. A store and a carrier pass it; every other caller keeps strict M9. */
+  absentRequires?: boolean;
 }
 
 /** M1–M14. */
@@ -145,9 +215,12 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
   const { manifest, root } = input;
   const payload = manifest.payload;
   if (!(instant(root.signed.expires) > instant(input.now))) return { ok: false, reason: "root_expired" };
-  if (!validAudienceManifest(payload)) return { ok: false, reason: "protocol_unsupported" };
-  const major = Number(payload.protocol.split(".")[0]);
-  if (!SUPPORTED_PROTOCOL_MAJORS.has(major)) return { ok: false, reason: "protocol_unsupported" };
+  const version = typeof payload.protocol === "string" ? PROTOCOL_SHAPE.exec(payload.protocol) : null;
+  if (!version || !SUPPORTED_PROTOCOL_MAJORS.has(Number(version[1]))) return { ok: false, reason: "protocol_unsupported" };
+  if (payload.requiredCapabilities !== undefined && !Array.isArray(payload.requiredCapabilities)) return { ok: false, reason: "protocol_unsupported" };
+  // A manifest asking for a capability this SDK lacks may use shapes it cannot read, so only the envelope is checked.
+  const capable = capabilitiesImplemented(payload);
+  if (capable && !validAudienceManifest(payload)) return { ok: false, reason: "protocol_unsupported" };
 
   const targets = root.signed.roles.targets;
   const named = manifest.signatures.filter((signature) => targets.keyIds.includes(signature.keyId) && root.signed.keys[signature.keyId]);
@@ -162,34 +235,42 @@ export function verifyManifest(input: VerifyManifestInput): Verdict<{ signingKey
     return { ok: false, reason: "scope_mismatch" };
   }
   if (payload.generation < input.storedGeneration) return { ok: false, reason: "generation_rollback" };
-  // M13 (S4): the kinds a runtime honours are a closed set; one it does not know refuses the whole manifest before a byte is fetched.
-  if (!Array.isArray(payload.directives) || payload.directives.some((directive) => !directive || typeof directive !== "object" || !DIRECTIVE_KINDS.has((directive as { kind?: unknown }).kind as string))) {
-    return { ok: false, reason: "directive_unknown" };
-  }
-  // M15 (S16): the per-prompt shape is consistent, or the manifest is refused whole before any payload.
-  const conflict = experimentConflict(payload);
-  if (conflict) return { ok: false, reason: conflict };
-  // M14 (S9): every experiment's ramp plan, when present, is well-formed — a malformed one is refused whole rather than walked wrongly.
-  for (const experiment of experimentsOf(payload)) {
-    if (experiment.ramp === undefined) continue;
-    try {
-      validateRamp(experiment.ramp, experiment.arms.length);
-    } catch (error) {
-      if (isAssignmentError(error) && error.reason === "ramp_invalid") return { ok: false, reason: "ramp_invalid" };
-      throw error;
+  if (!capable && !input.carrying) return { ok: false, reason: "protocol_unsupported", directivesStand: true };
+  // What this SDK cannot read, it cannot judge: a carrier leaves M13 to M15 of such a manifest to the runtime.
+  if (capable) {
+    // M13 (S4): the kinds a runtime honours are a closed set; one it does not know refuses the whole manifest before a byte is fetched.
+    if (!Array.isArray(payload.directives) || payload.directives.some((directive) => !directive || typeof directive !== "object" || !DIRECTIVE_KINDS.has((directive as { kind?: unknown }).kind as string))) {
+      return { ok: false, reason: "directive_unknown" };
+    }
+    // M15 (S16): the per-prompt shape is consistent, or the manifest is refused whole before any payload.
+    const conflict = experimentConflict(payload);
+    if (conflict) return { ok: false, reason: conflict };
+    // M14 (S9): every experiment's ramp plan, when present, is well-formed — a malformed one is refused whole rather than walked wrongly.
+    for (const experiment of servableExperiments(payload)) {
+      if (experiment.ramp === undefined) continue;
+      try {
+        validateRamp(experiment.ramp, experiment.arms.length);
+      } catch (error) {
+        if (isAssignmentError(error) && error.reason === "ramp_invalid") return { ok: false, reason: "ramp_invalid" };
+        throw error;
+      }
     }
   }
 
   if (input.payloads) {
-    for (const [hash, byteLength] of referencedPayloads(payload)) {
+    const optional = input.absentRequires ? optionalPayloads(payload) : new Set<string>();
+    for (const [hash, byteLength] of input.carrying ? carriedPayloads(payload) : referencedPayloads(payload)) {
       const bytes = input.payloads.get(hash);
-      if (bytes === undefined) return { ok: false, reason: "payload_missing" };
+      if (bytes === undefined) {
+        if (optional.has(hash)) continue;
+        return { ok: false, reason: "payload_missing" };
+      }
       if (bytes.length !== byteLength || sha256Prefixed(bytes) !== hash) return { ok: false, reason: "payload_hash_mismatch" };
     }
   }
 
   if (payload.requireCountersign || input.requireCountersign) {
-    const digests = new Set<string>([payload.releaseDigest, ...experimentsOf(payload).flatMap((experiment) => experiment.arms.map((arm) => arm.releaseDigest))]);
+    const digests = new Set<string>([payload.releaseDigest, ...servableExperiments(payload).flatMap((experiment) => (Array.isArray(experiment.arms) ? experiment.arms.map((arm) => arm.releaseDigest) : []))]);
     const role = input.countersignRoot?.signed.roles.targets ?? { keyIds: [], threshold: 1 };
     const keys = input.countersignRoot?.signed.keys ?? {};
     for (const digest of digests) {
@@ -218,25 +299,30 @@ export function inferenceDigestInput(inference: SlotInference): Record<string, u
 export function releaseDigestInput(slots: readonly ManifestSlot[]): unknown[] {
   return [...slots]
     .sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
-    .map((slot) => ({
-      tag: slot.tag,
-      kind: slot.kind,
-      artifactId: slot.artifactId,
-      versionId: slot.versionId,
-      versionOrdinal: slot.versionOrdinal,
-      contentHash: slot.contentHash,
-      byteLength: slot.byteLength,
-      model: slot.model,
-      ...(slot.modelRequired === true ? { modelRequired: true } : {}),
-      ...(Array.isArray(slot.outputChecks) && slot.outputChecks.length > 0 ? { outputChecks: slot.outputChecks } : {}),
-      ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
-      ...(slot.inference ? { inference: inferenceDigestInput(slot.inference) } : {}),
-      // 0.3.4: `default` and `source` ride the digest only when the pin carries them, so a slot without them keeps its digest.
-      variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust, ...(v.default !== undefined && v.default !== null ? { default: v.default } : {}), ...(v.source !== undefined && v.source !== null ? { source: v.source } : {}) })),
-      ...(slot.steps
-        ? { steps: slot.steps.map((s) => ({ stepId: s.stepId, ordinal: s.ordinal, promptArtifactId: s.promptArtifactId, promptVersionId: s.promptVersionId, contentHash: s.contentHash, byteLength: s.byteLength, ...(s.inference ? { inference: inferenceDigestInput(s.inference) } : {}) })) }
-        : {}),
-    }));
+    .map((slot) => {
+      const pin = {
+        tag: slot.tag,
+        kind: slot.kind,
+        artifactId: slot.artifactId,
+        versionId: slot.versionId,
+        versionOrdinal: slot.versionOrdinal,
+        contentHash: slot.contentHash,
+        byteLength: slot.byteLength,
+        model: slot.model,
+        ...(slot.modelRequired === true ? { modelRequired: true } : {}),
+        ...(Array.isArray(slot.outputChecks) && slot.outputChecks.length > 0 ? { outputChecks: slot.outputChecks } : {}),
+        ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
+        ...(slot.inference ? { inference: inferenceDigestInput(slot.inference) } : {}),
+        // `default` and `source` ride the digest only when the pin carries them, so a slot without them keeps its digest.
+        variables: slot.variables?.map((v) => ({ name: v.name, required: v.required, trust: v.trust, ...(v.default !== undefined && v.default !== null ? { default: v.default } : {}), ...(v.source !== undefined && v.source !== null ? { source: v.source } : {}) })),
+        ...(slot.requires !== undefined && slot.requires !== null ? { requires: slot.requires } : {}),
+        ...(slot.steps
+          ? { steps: slot.steps.map((s) => ({ stepId: s.stepId, ordinal: s.ordinal, promptArtifactId: s.promptArtifactId, promptVersionId: s.promptVersionId, contentHash: s.contentHash, byteLength: s.byteLength, ...(s.inference ? { inference: inferenceDigestInput(s.inference) } : {}) })) }
+          : {}),
+      };
+      // An open slot projects the members it has: `canonical-json.md`.
+      return Object.fromEntries(Object.entries(pin).filter(([, value]) => value !== undefined));
+    });
 }
 
 export function releaseDigest(slots: readonly ManifestSlot[]): `sha256:${string}` {

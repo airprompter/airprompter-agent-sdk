@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.3/daemon.schema.json",
+  "$id": "https://airprompter.com/protocol/3/daemon.schema.json",
   "title": "AirPrompter telemetry daemon discovery file (format 1)",
   "description": "daemon.md › The discovery file: `<stateDir>/airprompter/<agentId>/<target>/daemon.json`, published by `airprompterd` (temp file + rename, mode 0600, refreshed at least every 60 s). An SDK process whose telemetry folder is `spoolDir` leaves the upload to the daemon while `heartbeatAt` is within 10 minutes and the scope is its own. Names a folder and a status — no key, no release.",
   "type": "object",
@@ -61,12 +61,7 @@
       "minLength": 1
     },
     "target": {
-      "type": "string",
-      "enum": [
-        "dev",
-        "staging",
-        "prod"
-      ]
+      "$ref": "https://airprompter.com/protocol/3/manifest.schema.json#/$defs/target"
     },
     "spoolDir": {
       "type": "string",

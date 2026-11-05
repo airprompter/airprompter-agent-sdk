@@ -56,7 +56,7 @@ function discovery(spoolDir: string, heartbeatAtMs: number, overrides: Partial<D
 }
 
 function windowRow(instanceId: string, minuteMs: number): SpoolRow {
-  return { type: "window", v: 1, minute: new Date(Math.floor(minuteMs / 60_000) * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z"), instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 4, output: 2 }, sdk: "agent-sdk-ts/0.3.0" };
+  return { type: "window", v: 4, artifactId: "art_1", minute: new Date(Math.floor(minuteMs / 60_000) * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z"), instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 4, output: 2 }, sdk: "agent-sdk-ts/0.3.0" };
 }
 
 function newPlane(clock: { ms: number }): FakeControlPlane {
@@ -72,29 +72,13 @@ async function onlineHost(stateDir: string, clock: { ms: number }, extra: Partia
   return { plane, ap };
 }
 
-test('sync.mode "daemon" is refused at start: the daemon never serves a release', async () => {
-  const stateDir = mkdtempSync(join(tmpdir(), "ap-tdaemon-"));
-  const plane = new FakeControlPlane(scope);
-  try {
-    for (const sync of [{ mode: "daemon" }, { daemonSocketPath: "/run/x.sock" }]) {
-      await assert.rejects(
-        AirPrompterAgent.start({ ...scope, stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: sync as NonNullable<StartOptions["sync"]> }),
-        (error: unknown) => isAgentStartError(error) && error.code === "invalid_options" && /removed in 0\.3\.0/.test(error.message),
-      );
-    }
-    assert.equal(existsSync(join(storeDirOf(stateDir), "store.json")), false, "refused before the store was touched");
-  } finally {
-    rmSync(stateDir, { recursive: true, force: true });
-  }
-});
-
 test("every closed segment gets a manifest: its size, digest and rows, the writer's scope, and its heartbeat report without spool", async () => {
   const stateDir = mkdtempSync(join(tmpdir(), "ap-tdaemon-"));
   const clock = { ms: T0 };
   const { ap } = await onlineHost(stateDir, clock, { telemetry: { upload: false } });
   try {
     const r = ap.prompt("support.reply").render({});
-    ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 });
+    ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 });
     ap.spool.closeWindows(clock.ms);
     const dir = join(storeDirOf(stateDir), "spool", "telemetry");
     const [segment] = segmentsIn(dir);
@@ -135,7 +119,7 @@ test("a live daemon's folder: the SDK writes there and runs no uploader; when th
     assert.equal(ap.status().upload, null, "no uploader of its own");
     assert.equal(await ap.uploadNow(), null);
     const r = ap.prompt("support.reply").render({});
-    ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 });
+    ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 });
     ap.spool.closeWindows(clock.ms);
     assert.equal(segmentsIn(shared).length, 1, "the segment is in the daemon's folder");
     assert.equal(manifestsIn(shared).length, 1, "with its manifest");
@@ -236,7 +220,7 @@ test("a process hydrated from the customer's datastore loads its release from th
     assert.equal(ap.status().datastore!.rowsFrom, "region");
     assert.equal(ap.prompt("support.reply").render({}).text, "From the datastore.");
     const r = ap.prompt("support.reply").render({});
-    ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 5 });
+    ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 5 });
     ap.spool.closeWindows(Date.now());
     assert.equal(ap.status().telemetry.uploadedBy, "daemon");
     const [manifest] = manifestsIn(shared);
@@ -269,7 +253,7 @@ test("the uploader honours manifests: another pair's left alone, a mismatch quar
     now: () => clock.ms,
     random: () => 0,
   });
-  const report = { protocol: "0.3.4", instanceId: "i-writerAAAAAAAA", sdk: { name: "agent-sdk-typescript", version: "0.3.0" }, syncMode: "offline", generation: { active: 3 }, applyState: "active", storageProtection: "file_key", catalog: { models: [] }, lease: { expired: false } };
+  const report = { protocol: "3.0.0", instanceId: "i-writerAAAAAAAA", sdk: { name: "agent-sdk-typescript", version: "0.3.0" }, syncMode: "offline", generation: { active: 3 }, applyState: "active", storageProtection: "file_key", catalog: { models: [] }, lease: { expired: false } };
   const write = (instanceId: string, n: number, manifestScope: { agentId: string; target: string } | null) => {
     const name = segmentName(instanceId, epochMinute(clock.ms), n);
     writeFileSync(join(dir, name), `${JSON.stringify(windowRow(instanceId, clock.ms))}\n`);
@@ -309,11 +293,11 @@ test("the uploader honours manifests: another pair's left alone, a mismatch quar
 test("the sink's own eviction takes each evicted segment's manifest with it", () => {
   const dir = mkdtempSync(join(tmpdir(), "ap-tdaemon-evict-"));
   try {
-    const context = { organizationId: scope.organizationId, agentId: scope.agentId, target: scope.target, report: { protocol: "0.3.4" } };
+    const context = { organizationId: scope.organizationId, agentId: scope.agentId, target: scope.target, report: { protocol: "3.0.0" } };
     const sink = new DirectorySink(dir, "i-writerAAAAAAAA", 900, nodeFs, { manifest: () => context, now: () => T0 });
     const writer = new SpoolWriter(sink, { instanceId: "i-writerAAAAAAAA", instanceClass: "resident", sdk: "agent-sdk-ts/0.3.0" });
     for (let i = 0; i < 4; i += 1) {
-      writer.observe({ tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", latencyMs: 10 }, T0 + i * 60_000);
+      writer.observe({ tag: "support.reply", artifactId: "art_1", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", latencyMs: 10 }, T0 + i * 60_000);
       writer.closeWindows(T0 + i * 60_000);
     }
     const segments = segmentsIn(dir);

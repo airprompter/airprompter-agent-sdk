@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.3/datastore-record.schema.json",
+  "$id": "https://airprompter.com/protocol/3/datastore-record.schema.json",
   "title": "AirPrompter datastore record (format 1)",
   "description": "One value in the customer's datastore (datastore-format.md): a sealed release, the pointer to the newest one, the puller's edge state, or the fleet's rollback. Canonical JSON in UTF-8; every record names its format and its kind. A reader refuses a format above its own and a record that does not match its kind.",
   "$defs": {

@@ -2,7 +2,7 @@
  * S14: `airprompter telemetry validate <segment>…` — a third-party writer's segments through the uploader's own
  * inspection. The reference example writer's segment passes; a row with a content-bearing field, a wrong instance id
  * and a malformed line are named by line and field (never by value); a partial last line is skipped, not failed; a
- * misnamed file needs --instance-id; the exit code is the contract (0 fits, 1 would be quarantined).
+ * misnamed file needs --instance-id; the exit code is the contract (0 fits, 1 would not ship as written).
  */
 
 import assert from "node:assert/strict";
@@ -14,7 +14,7 @@ import test from "node:test";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";
 
-const WINDOW = { type: "window", v: 1, minute: "2026-09-12T14:03:00Z", instanceId: "i-writer-a", instanceClass: "resident", tag: "support.triage", versionId: "rev-4", arm: "candidate", model: "claude-sonnet-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, latencyMs: { buckets: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 12 }, tokens: { input: 3, output: 4 }, sdk: "my-writer/1.0" };
+const WINDOW = { type: "window", v: 4, artifactId: "art_1", minute: "2026-09-12T14:03:00Z", instanceId: "i-writer-a", instanceClass: "resident", tag: "support.triage", versionId: "rev-4", arm: "candidate", model: "claude-sonnet-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 12 }, tokens: { input: 3, output: 4 }, sdk: "my-writer/1.0" };
 
 function ctx(work: string): { ctx: Context; stdout: string[]; stderr: string[] } {
   const stdout: string[] = [];
@@ -48,14 +48,14 @@ test("telemetry validate: a fitting segment passes; content, a foreign instance 
       { line: 4, reason: "not_json" },
     ]);
     assert.equal(doc.segments[0]!.partialTail, true, "the truncated last line is a crashed writer, not an invalid row");
-    assert.equal(doc.segments[0]!.rows, 1);
+    assert.equal(doc.segments[0]!.rows, 2, "the row with an unknown field ships without it");
     assert.doesNotMatch(c.stdout.join("\n"), /Reply warmly/, "a reason names the field, never the value");
 
     c = ctx(work);
     assert.equal(await run(["telemetry", "validate", bad], c.ctx), EXIT.refused);
-    assert.match(c.stdout.join("\n"), /FAIL .*seg-i-writer-a-29821661-0\.ndjson: 1 row of 5 lines.*partial last line skipped/);
+    assert.match(c.stdout.join("\n"), /FAIL .*seg-i-writer-a-29821661-0\.ndjson: 2 rows of 5 lines.*partial last line skipped/);
     assert.match(c.stdout.join("\n"), /line 2: unknown_field:prompt/);
-    assert.match(c.stdout.join("\n"), /1 of 1 segment would be quarantined/);
+    assert.match(c.stdout.join("\n"), /1 of 1 segment would not ship as written/);
     assert.doesNotMatch(c.stdout.join("\n"), /Reply warmly/);
 
     c = ctx(work);

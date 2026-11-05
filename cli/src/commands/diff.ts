@@ -61,7 +61,7 @@ const facts = (slot: ManifestSlot): SlotFacts => ({
   model: slot.model,
   contentHash: slot.contentHash,
   byteLength: slot.byteLength,
-  variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust })),
+  variables: slot.variables?.map((v) => ({ name: v.name, required: v.required, trust: v.trust })) ?? [],
   steps: slot.steps?.length ?? 0,
 });
 
@@ -89,9 +89,9 @@ export function diffManifests(from: Manifest | null, to: Manifest): { slots: Slo
   compare("releaseDigest", p?.releaseDigest ?? null, q.releaseDigest);
   compare("applyPolicy", p?.applyPolicy ?? null, q.applyPolicy);
   compare("leaseSeconds", p?.leaseSeconds ?? null, q.leaseSeconds);
-  compare("onLeaseExpiry", p?.onLeaseExpiry ?? null, q.onLeaseExpiry);
   compare("requireCountersign", p?.requireCountersign ?? null, q.requireCountersign);
-  compare("experiment", p?.experiment ? { experimentId: p.experiment.experimentId, arms: p.experiment.arms.map((arm) => ({ arm: arm.arm, weightBps: arm.weightBps, overrides: arm.overrides.map((o) => `${o.tag}@${o.versionId}`) })) } : null, q.experiment ? { experimentId: q.experiment.experimentId, arms: q.experiment.arms.map((arm) => ({ arm: arm.arm, weightBps: arm.weightBps, overrides: arm.overrides.map((o) => `${o.tag}@${o.versionId}`) })) } : null);
+  const experiments = (payload: typeof q | null) => (payload?.experiments ?? []).map((experiment) => ({ experimentId: experiment.experimentId, tag: experiment.tag, arms: experiment.arms.map((arm) => ({ arm: arm.arm, weightBps: arm.weightBps, overrides: arm.overrides.map((o) => `${o.tag}@${o.versionId}`) })) }));
+  compare("experiments", experiments(p), experiments(q));
   compare("directives", p?.directives ?? null, q.directives);
   return { slots, release };
 }

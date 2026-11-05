@@ -41,12 +41,12 @@
  */
 
 import { validAudienceMinute } from "@airprompter/agent-core";
-import { nodeFs } from "@airprompter/agent-core";
+import { nodeFs, SLOT_TAG, STEP_STATUSES, validStepName, WINDOW_STATUSES } from "@airprompter/agent-core";
 import { fsFailureCode, type FsPort } from "@airprompter/agent-core";
 import { join } from "node:path";
 
 import { MANIFEST_GRACE_MS, MANIFEST_NAME, manifestNameOf, readSegmentManifest, segmentNameOfManifest, sha256Hex } from "./spool/manifest.js";
-import { HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epochMinute, segmentName, type ErrorClass, type SpoolRow } from "./spool/writer.js";
+import { HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epochMinute, segmentName, type SpoolRow } from "./spool/writer.js";
 import type { FetchLike, UploadSink } from "@airprompter/agent-core";
 
 export const UPLOAD_BACKOFF_BASE_MS = 1000;
@@ -82,111 +82,183 @@ export type GrantDecision = { kind: "grant"; grant: UploadGrant; uploadIntervalS
 // ---------------------------------------------------------------------------
 
 const INSTANCE_ID = /^[A-Za-z0-9._~-]{8,64}$/;
-const TAG = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:#[1-9][0-9]{0,2})?$/;
-const ARM = /^[a-z0-9_-]{1,32}$/;
+const TAG = SLOT_TAG;
+const ARM = SLOT_TAG;
+const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const OUTCOME_NAME = /^[a-z][a-zA-Z0-9]{0,31}$/;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
-const ERROR_CLASSES: ReadonlySet<string> = new Set<ErrorClass>(["render_missing_variable", "context_length_exceeded", "output_schema_invalid", "truncated", "content_filter", "provider_error", "provider_timeout", "provider_rate_limited"]);
-const REFUSAL_REASONS: ReadonlySet<string> = new Set(["disabled", "lease_expired", "payload_verification_failed", "forced_downgrade", "model_unavailable", "unlock_refused"]);
-const USAGE_SOURCES: ReadonlySet<string> = new Set(["reported", "measured", "estimated", "unavailable"]);
+/** A later 3.x may add an error class, a usage source or a refusal reason: a reader takes the shape, not the list. */
+const SLUG = /^[a-z][a-z0-9_]{0,31}$/;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const isNonNegativeInt = (value: unknown, min = 0): value is number => typeof value === "number" && Number.isInteger(value) && value >= min;
 const isString = (value: unknown, max: number): value is string => typeof value === "string" && value.length <= max;
 const onlyKeys = (object: Record<string, unknown>, allowed: readonly string[]): string | null => Object.keys(object).find((key) => !allowed.includes(key)) ?? null;
 
-export type RowVerdict = { ok: true; row: SpoolRow } | { ok: false; reason: string };
+const ROW_VERSIONS: Readonly<Record<string, number>> = { window: 4, step: 1, refusal: 1, dropped: 1 };
+const TOKEN_MOMENTS = ["input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput"] as const;
+const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"] as const;
+const STEP_FIELDS = ["type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "modelCalls", "latencyMs", "tokens", "tools", "sdk"] as const;
+const WINDOW_ONLY_FIELDS = ["tokensSq", "count", "outcomes", "checks"] as const;
+const REFUSAL_FIELDS = ["type", "v", "at", "instanceId", "reason", "generation", "tag"] as const;
+const DROPPED_FIELDS = ["type", "v", "at", "instanceId", "segments", "lines", "bytes"] as const;
 
-/** One parsed line against the contract. The reason names the first field that does not fit — never the value. */
+/**
+ * `row`: the line as it may leave this host, holding only the fields this reader knows; `stripped` names the rest.
+ * `later`: a row this reader cannot read and a later 3.x may have written. It is skipped and counted, and only the line
+ * goes. Anything else refused is corruption, and quarantines the segment.
+ */
+export type RowVerdict = { ok: true; row: SpoolRow; stripped: string[] } | { ok: false; reason: string; later?: true };
+
+const isMoment = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const histogramFits = (latency: unknown): latency is { buckets: number[]; sum: number } => isObject(latency) && Array.isArray(latency.buckets) && latency.buckets.length === LATENCY_BUCKET_EDGES_MS.length && latency.buckets.every((b) => isNonNegativeInt(b)) && isNonNegativeInt(latency.sum);
+const tokensFit = (tokens: unknown): tokens is { input: number; cachedInput?: number; output: number } => isObject(tokens) && isNonNegativeInt(tokens.input) && isNonNegativeInt(tokens.output) && (tokens.cachedInput === undefined || isNonNegativeInt(tokens.cachedInput));
+const toolsFit = (tools: unknown): tools is { calls: number; errors: number } => isObject(tools) && isNonNegativeInt(tools.calls) && isNonNegativeInt(tools.errors);
+const audienceIdsFit = (ids: unknown): boolean => ids === undefined || (Array.isArray(ids) && ids.length <= 8 && ids.every((id, i) => typeof id === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(id) && (i === 0 || ids[i - 1] < id)));
+const histogramTotal = (latency: { buckets: number[] }): number => latency.buckets.reduce((sum, n) => sum + n, 0);
+
+/** Only the named fields survive; what went is named in `stripped`, path first. No value is ever read. */
+function pick(object: Record<string, unknown>, fields: readonly string[], path: string, stripped: string[]): Record<string, unknown> {
+  const kept: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(object)) {
+    if (fields.includes(key)) kept[key] = value;
+    else stripped.push(`${path}${key}`);
+  }
+  return kept;
+}
+
+/** The nested objects of a window or step row, down to what this reader knows. */
+function pickNested(row: Record<string, unknown>, stripped: string[]): Record<string, unknown> {
+  const nested: Record<string, unknown> = { ...row };
+  const within = (field: string, fields: readonly string[]) => {
+    if (isObject(row[field])) nested[field] = pick(row[field], fields, `${field}.`, stripped);
+  };
+  within("latencyMs", ["buckets", "sum"]);
+  within("tokens", ["input", "cachedInput", "output"]);
+  within("tools", ["calls", "errors"]);
+  within("tokensSq", TOKEN_MOMENTS);
+  within("checks", ["passed", "failed"]);
+  if (isObject(row.outcomes)) nested.outcomes = Object.fromEntries(Object.entries(row.outcomes).map(([name, entry]) => [name, isObject(entry) ? pick(entry, ["n", "sum", "sumSq"], `outcomes.${name}.`, stripped) : entry]));
+  return nested;
+}
+
+/** The fields a run dimension shares between window and step rows, in the order a reason names them. */
+function dimensionReason(value: Record<string, unknown>): string | null {
+  if (!isString(value.artifactId, 128) || !ARTIFACT_ID.test(value.artifactId)) return "artifactId";
+  if (!audienceIdsFit(value.audienceIds)) return "audienceIds";
+  if (!validAudienceMinute(value.minute)) return "minute";
+  if (value.instanceClass !== "resident" && value.instanceClass !== "ephemeral") return "instanceClass";
+  if (!isString(value.tag, 128) || !TAG.test(value.tag)) return "tag";
+  if (!isString(value.versionId, 128)) return "versionId";
+  if (!isString(value.arm, 32) || !ARM.test(value.arm)) return "arm";
+  if (!isString(value.model, 128)) return "model";
+  if (value.errorClass !== undefined && value.errorClass !== null && !(typeof value.errorClass === "string" && SLUG.test(value.errorClass))) return "errorClass";
+  if (typeof value.usageSource !== "string" || !SLUG.test(value.usageSource)) return "usageSource";
+  if (!isNonNegativeInt(value.modelCalls)) return "modelCalls";
+  if (!toolsFit(value.tools)) return "tools";
+  if (!histogramFits(value.latencyMs)) return "latencyMs";
+  if (!tokensFit(value.tokens)) return "tokens";
+  if (value.sdk !== undefined && !isString(value.sdk, 64)) return "sdk";
+  return null;
+}
+
+/** One parsed line against the contract. The reason names the first field that does not fit, never the value. */
 export function validateSpoolRow(value: unknown): RowVerdict {
   if (!isObject(value)) return { ok: false, reason: "not_an_object" };
-  if (value.v !== 1 && !((value.v === 2 || value.v === 3) && value.type === "window")) return { ok: false, reason: "v" };
+  if (typeof value.type !== "string" || !Object.prototype.hasOwnProperty.call(ROW_VERSIONS, value.type)) return { ok: false, reason: "unknown_type", later: true };
+  if (value.v !== ROW_VERSIONS[value.type]) return { ok: false, reason: "v", later: true };
   if (!isString(value.instanceId, 64) || !INSTANCE_ID.test(value.instanceId)) return { ok: false, reason: "instanceId" };
+  const stripped: string[] = [];
   switch (value.type) {
     case "window": {
-      const extra = onlyKeys(value, [...(value.v === 2 || value.v === 3 ? ["audienceIds", "outcomeRunMinute"] : []), ...(value.v === 3 ? ["artifactId"] : []), "type", "v", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "latencyMs", "tokens", "checks", "outcomes", "sdk"]);
-      if (extra) return { ok: false, reason: `unknown_field:${extra}` };
-      if (value.v === 2 || value.v === 3) {
-        if (value.v === 3 && (!isString(value.artifactId, 128) || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.artifactId))) return {ok:false,reason:"artifactId"};
-        const ids = value.audienceIds;
-        if (value.v === 2 && !Array.isArray(ids)) return {ok:false,reason:"audienceIds"};
-        if (ids !== undefined && (!Array.isArray(ids) || ids.length > 8 || !ids.every((id,i) => typeof id === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(id) && (i === 0 || ids[i-1] < id)))) return {ok:false,reason:"audienceIds"};
-        const minute = validAudienceMinute;
-        if (!minute(value.minute) || (value.outcomeRunMinute !== undefined && (!minute(value.outcomeRunMinute) || Date.parse(value.outcomeRunMinute) > Date.parse(value.minute)))) return {ok:false,reason:"outcomeRunMinute"};
-        if (value.count === 0 && (value.outcomeRunMinute === undefined || !isObject(value.outcomes) || Object.keys(value.outcomes).length === 0)) return {ok:false,reason:"outcomeRunMinute"};
-        if (typeof value.count === "number" && value.count > 0 && value.outcomeRunMinute !== undefined && Date.parse(String(value.outcomeRunMinute)) !== Date.parse(value.minute)) return {ok:false,reason:"outcomeRunMinute"};
-        if (value.count === 0 && (!isObject(value.latencyMs) || value.latencyMs.sum !== 0 || !isObject(value.tokens) || value.tokens.input !== 0 || value.tokens.output !== 0 || (value.tokens.cachedInput ?? 0) !== 0 || (isObject(value.checks) && ((value.checks.passed ?? 0) !== 0 || (value.checks.failed ?? 0) !== 0)))) return {ok:false,reason:"feedback_measurements"};
-        const thumbs = isObject(value.outcomes) ? value.outcomes.thumbs : undefined;
-        if (thumbs && (!isObject(thumbs) || !Number.isSafeInteger(thumbs.sum) || Number(thumbs.sum) < 0 || Number(thumbs.sum) > Number(thumbs.n))) return {ok:false,reason:"thumbs"};
-      }
-      if (!isString(value.minute, 64) || !DATE_TIME.test(value.minute)) return { ok: false, reason: "minute" };
-      if (value.instanceClass !== "resident" && value.instanceClass !== "ephemeral") return { ok: false, reason: "instanceClass" };
-      if (!isString(value.tag, 132) || !TAG.test(value.tag)) return { ok: false, reason: "tag" };
-      if (!isString(value.versionId, 128)) return { ok: false, reason: "versionId" };
-      if (!isString(value.arm, 32) || !(value.v === 2 || value.v === 3 ? /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/ : ARM).test(value.arm)) return { ok: false, reason: "arm" };
-      if (!isString(value.model, 128)) return { ok: false, reason: "model" };
-      if (value.status !== "ok" && value.status !== "error" && value.status !== "refused") return { ok: false, reason: "status" };
-      if (value.errorClass !== undefined && value.errorClass !== null && !(typeof value.errorClass === "string" && ERROR_CLASSES.has(value.errorClass))) return { ok: false, reason: "errorClass" };
-      if (typeof value.usageSource !== "string" || !USAGE_SOURCES.has(value.usageSource)) return { ok: false, reason: "usageSource" };
+      // A member of the other row form is a crossed row, not a later one: the two forms never mix.
+      if ("step" in value) return { ok: false, reason: "unknown_field:step" };
+      const dimension = dimensionReason(value);
+      if (dimension) return { ok: false, reason: dimension };
+      if (!WINDOW_STATUSES.includes(value.status as string)) return { ok: false, reason: "status", later: true };
       if (!isNonNegativeInt(value.count)) return { ok: false, reason: "count" };
-      const latency = value.latencyMs;
-      if (!isObject(latency) || onlyKeys(latency, ["buckets", "sum"]) || !Array.isArray(latency.buckets) || latency.buckets.length !== LATENCY_BUCKET_EDGES_MS.length || !latency.buckets.every((b) => isNonNegativeInt(b)) || !isNonNegativeInt(latency.sum)) return { ok: false, reason: "latencyMs" };
-      const tokens = value.tokens;
-      if (!isObject(tokens) || onlyKeys(tokens, ["input", "cachedInput", "output"]) || !isNonNegativeInt(tokens.input) || !isNonNegativeInt(tokens.output) || (tokens.cachedInput !== undefined && !isNonNegativeInt(tokens.cachedInput))) return { ok: false, reason: "tokens" };
+      if (!isNonNegativeInt(value.agentRun) || value.agentRun > value.count) return { ok: false, reason: "agentRun" };
+      if (value.outcomeRunMinute !== undefined && (!validAudienceMinute(value.outcomeRunMinute) || Date.parse(value.outcomeRunMinute) > Date.parse(value.minute as string))) return { ok: false, reason: "outcomeRunMinute" };
+      if (value.count === 0 && (value.outcomeRunMinute === undefined || !isObject(value.outcomes) || Object.keys(value.outcomes).length === 0)) return { ok: false, reason: "outcomeRunMinute" };
+      if (value.count > 0 && value.outcomeRunMinute !== undefined && Date.parse(String(value.outcomeRunMinute)) !== Date.parse(value.minute as string)) return { ok: false, reason: "outcomeRunMinute" };
+      const latency = value.latencyMs as { buckets: number[]; sum: number };
+      const tokens = value.tokens as { input: number; cachedInput?: number; output: number };
+      const tools = value.tools as { calls: number; errors: number };
+      if (value.count === 0 && (value.modelCalls !== 0 || tools.calls !== 0 || tools.errors !== 0 || latency.sum !== 0 || tokens.input !== 0 || tokens.output !== 0 || (tokens.cachedInput ?? 0) !== 0 || value.tokensSq !== undefined || (isObject(value.checks) && ((value.checks.passed ?? 0) !== 0 || (value.checks.failed ?? 0) !== 0)))) return { ok: false, reason: "feedback_measurements" };
+      if (value.count > 0) {
+        const moments = value.tokensSq;
+        if (!isObject(moments) || !TOKEN_MOMENTS.every((name) => isMoment(moments[name]))) return { ok: false, reason: "tokensSq" };
+      }
       if (value.checks !== undefined) {
         const checks = value.checks;
-        if (!isObject(checks) || onlyKeys(checks, ["passed", "failed"]) || (checks.passed !== undefined && !isNonNegativeInt(checks.passed)) || (checks.failed !== undefined && !isNonNegativeInt(checks.failed))) return { ok: false, reason: "checks" };
+        if (!isObject(checks) || (checks.passed !== undefined && !isNonNegativeInt(checks.passed)) || (checks.failed !== undefined && !isNonNegativeInt(checks.failed))) return { ok: false, reason: "checks" };
       }
       if (value.outcomes !== undefined) {
         const outcomes = value.outcomes;
         if (!isObject(outcomes)) return { ok: false, reason: "outcomes" };
         for (const [name, entry] of Object.entries(outcomes)) {
-          if (!OUTCOME_NAME.test(name) || !isObject(entry) || onlyKeys(entry, ["n", "sum"]) || !isNonNegativeInt(entry.n) || typeof entry.sum !== "number" || !Number.isFinite(entry.sum)) return { ok: false, reason: `outcomes:${name}` };
+          if (!OUTCOME_NAME.test(name) || !isObject(entry) || !isNonNegativeInt(entry.n) || typeof entry.sum !== "number" || !Number.isFinite(entry.sum) || !isMoment(entry.sumSq)) return { ok: false, reason: `outcomes:${name}` };
         }
+        const thumbs = outcomes.thumbs;
+        if (thumbs && (!isObject(thumbs) || !Number.isSafeInteger(thumbs.sum) || Number(thumbs.sum) < 0 || Number(thumbs.sum) > Number(thumbs.n))) return { ok: false, reason: "thumbs" };
       }
-      if ((value.v === 2 || value.v === 3) && (value.latencyMs as {buckets:number[]}).buckets.reduce((sum,n)=>sum+n,0) !== value.count) return {ok:false,reason:"histogram"};
-      if (value.sdk !== undefined && !isString(value.sdk, 64)) return { ok: false, reason: "sdk" };
-      return { ok: true, row: value as unknown as SpoolRow };
+      if (histogramTotal(latency) !== value.count) return { ok: false, reason: "histogram" };
+      return { ok: true, row: pickNested(pick(value, WINDOW_FIELDS, "", stripped), stripped) as unknown as SpoolRow, stripped };
+    }
+    case "step": {
+      const crossed = WINDOW_ONLY_FIELDS.find((name) => name in value);
+      if (crossed) return { ok: false, reason: `unknown_field:${crossed}` };
+      const dimension = dimensionReason(value);
+      if (dimension) return { ok: false, reason: dimension };
+      if (!validStepName(value.step)) return { ok: false, reason: "step" };
+      if (!STEP_STATUSES.includes(value.status as string)) return { ok: false, reason: "status", later: true };
+      if (histogramTotal(value.latencyMs as { buckets: number[] }) !== value.modelCalls) return { ok: false, reason: "histogram" };
+      return { ok: true, row: pickNested(pick(value, STEP_FIELDS, "", stripped), stripped) as unknown as SpoolRow, stripped };
     }
     case "refusal": {
-      const extra = onlyKeys(value, ["type", "v", "at", "instanceId", "reason", "generation", "tag"]);
-      if (extra) return { ok: false, reason: `unknown_field:${extra}` };
       if (!isString(value.at, 64) || !DATE_TIME.test(value.at)) return { ok: false, reason: "at" };
-      if (typeof value.reason !== "string" || !REFUSAL_REASONS.has(value.reason)) return { ok: false, reason: "reason" };
+      if (typeof value.reason !== "string" || !SLUG.test(value.reason)) return { ok: false, reason: "reason" };
       if (!isNonNegativeInt(value.generation)) return { ok: false, reason: "generation" };
       if (!("tag" in value) || !(value.tag === null || (isString(value.tag, 128) && TAG.test(value.tag)))) return { ok: false, reason: "tag" };
-      return { ok: true, row: value as unknown as SpoolRow };
+      return { ok: true, row: pick(value, REFUSAL_FIELDS, "", stripped) as unknown as SpoolRow, stripped };
     }
-    case "dropped": {
-      const extra = onlyKeys(value, ["type", "v", "at", "instanceId", "segments", "bytes"]);
-      if (extra) return { ok: false, reason: `unknown_field:${extra}` };
+    default: {
       if (!isString(value.at, 64) || !DATE_TIME.test(value.at)) return { ok: false, reason: "at" };
-      if (!isNonNegativeInt(value.segments, 1)) return { ok: false, reason: "segments" };
+      if (value.lines !== undefined && !isNonNegativeInt(value.lines, 1)) return { ok: false, reason: "lines" };
+      if (!isNonNegativeInt(value.segments, value.lines === undefined ? 1 : 0)) return { ok: false, reason: "segments" };
       if (!isNonNegativeInt(value.bytes)) return { ok: false, reason: "bytes" };
-      return { ok: true, row: value as unknown as SpoolRow };
+      return { ok: true, row: pick(value, DROPPED_FIELDS, "", stripped) as unknown as SpoolRow, stripped };
     }
-    default:
-      return { ok: false, reason: "unknown_type" };
   }
 }
 
 export interface SegmentInspection {
+  /** What may leave this host: known rows, known fields, and one `dropped` row when lines were skipped. */
   rows: SpoolRow[];
-  /** Line numbers (1-based) and reasons; empty means the segment fits the contract. */
+  /** Corruption, by line (1-based) and reason; empty means the segment may ship. */
   invalid: Array<{ line: number; reason: string }>;
+  /** Lines a later 3.x may have written: skipped one by one, counted in the `dropped` row. */
+  skipped: Array<{ line: number; reason: string }>;
+  /** Fields this reader does not know, by line. They never leave the host. */
+  stripped: Array<{ line: number; field: string }>;
   /** A last line without its `\n` (a crashed writer): skipped, never counted as invalid. */
   partialTail: boolean;
+  /** The whole lines to send: the file's own bytes when nothing was changed, else `rows` serialised again. */
+  payload: Buffer;
 }
 
 /** Every line of a segment against the contract; `instanceId` (from the file name) is authoritative for every row. */
-export function inspectSegment(bytes: Uint8Array, instanceId: string): SegmentInspection {
-  const text = Buffer.from(bytes).toString("utf8");
+export function inspectSegment(bytes: Uint8Array, instanceId: string, nowMs: number = Date.now()): SegmentInspection {
+  const source = Buffer.from(bytes);
+  const text = source.toString("utf8");
   const partialTail = text.length > 0 && !text.endsWith("\n");
   const lines = text.split("\n");
-  if (partialTail) lines.pop();
-  else lines.pop(); // the empty string after the final newline
+  lines.pop(); // the partial tail, or the empty string after the final newline
   const rows: SpoolRow[] = [];
   const invalid: SegmentInspection["invalid"] = [];
+  const skipped: SegmentInspection["skipped"] = [];
+  const stripped: SegmentInspection["stripped"] = [];
+  let skippedBytes = 0;
   lines.forEach((line, index) => {
     if (!line.trim()) return;
     let parsed: unknown;
@@ -197,11 +269,21 @@ export function inspectSegment(bytes: Uint8Array, instanceId: string): SegmentIn
       return;
     }
     const verdict = validateSpoolRow(parsed);
-    if (!verdict.ok) invalid.push({ line: index + 1, reason: verdict.reason });
-    else if (verdict.row.instanceId !== instanceId) invalid.push({ line: index + 1, reason: "instance_mismatch" });
-    else rows.push(verdict.row);
+    if (verdict.ok) {
+      if (verdict.row.instanceId !== instanceId) invalid.push({ line: index + 1, reason: "instance_mismatch" });
+      else {
+        rows.push(verdict.row);
+        for (const field of verdict.stripped) stripped.push({ line: index + 1, field });
+      }
+    } else if (verdict.later) {
+      skipped.push({ line: index + 1, reason: verdict.reason });
+      skippedBytes += Buffer.byteLength(line, "utf8") + 1;
+    } else invalid.push({ line: index + 1, reason: verdict.reason });
   });
-  return { rows, invalid, partialTail };
+  if (skipped.length > 0) rows.push({ type: "dropped", v: 1, at: new Date(nowMs).toISOString().replace(/\.\d{3}Z$/, "Z"), instanceId, segments: 0, lines: skipped.length, bytes: skippedBytes });
+  const whole = partialTail ? source.subarray(0, source.lastIndexOf(0x0a) + 1) : source;
+  const payload = skipped.length === 0 && stripped.length === 0 ? Buffer.from(whole) : Buffer.from(rows.map((row) => `${JSON.stringify(row)}\n`).join(""), "utf8");
+  return { rows, invalid, skipped, stripped, partialTail, payload };
 }
 
 // ---------------------------------------------------------------------------
@@ -682,7 +764,8 @@ export class SpoolUploader {
           result.quarantined.push(name);
           continue;
         }
-        const inspection = inspectSegment(bytes, instanceId);
+        const inspection = inspectSegment(bytes, instanceId, this.now());
+        if (inspection.skipped.length > 0 || inspection.stripped.length > 0) this.log({ event: "segment_cleaned", segment: name, skippedRows: inspection.skipped.length, strippedFields: inspection.stripped.length });
         if (inspection.invalid.length > 0) {
           this.quarantine(name, "invalid_rows", inspection.invalid.slice(0, 5));
           result.quarantined.push(name);
@@ -693,9 +776,8 @@ export class SpoolUploader {
           if (this.guard("ack_segment", () => this.fs.unlink(path))) this.removeManifest(name);
           continue;
         }
-        // The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines.
-        const payload = inspection.partialTail ? Buffer.from(bytes.subarray(0, bytes.lastIndexOf(0x0a) + 1)) : bytes;
-        const outcome = await this.sink.ship({ instanceId, segment: name, rows: inspection.rows, bytes: payload, ...(report ? { report } : {}) });
+        // The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines, cleaned.
+        const outcome = await this.sink.ship({ instanceId, segment: name, rows: inspection.rows, bytes: inspection.payload, ...(report ? { report } : {}) });
         if (outcome.status === "hold") {
           this.backoffUntilMs = this.now() + outcome.retryAfterMs;
           this.lastError = `hold:${outcome.reason ?? "retry_after"}`;

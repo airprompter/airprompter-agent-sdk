@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { createEncryptedBundle, createPlaintextBundle, distributionKeyId } from "../../../sdk-typescript/packages/core/src/bundle/apbundle.js";
-import { referencedPayloads } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
+import { carriedPayloads, optionalPayloads } from "../../../sdk-typescript/packages/core/src/protocol/trust.js";
 import type { BundleContents, RootMetadata } from "../../../sdk-typescript/packages/core/src/protocol/types.js";
 import { ManagedAgent, isManagedRunError } from "../../../sdk-typescript/packages/runtime/src/managed/client.js";
 import { SyncClient } from "../../../sdk-typescript/packages/core/src/control/client.js";
@@ -97,7 +97,7 @@ export async function pull(argv: string[], ctx: Context): Promise<number> {
     out.field("generation", catalogue.generation);
     out.field("releaseDigest", catalogue.releaseDigest, "release");
     out.field("slots", catalogue.slots.map((s) => `${s.tag} (${s.kind}${s.steps ? `, ${s.steps.length} steps` : ""}, ${s.variables.length} vars)`));
-    out.field("experiment", catalogue.experiment ? `${catalogue.experiment.arms.join(" / ")} by ${catalogue.experiment.subjectKey}` : "none");
+    out.field("experiments", (catalogue.experiments ?? []).map((experiment) => `${experiment.tag}: ${experiment.arms.join(" / ")} by ${experiment.subjectKey}`));
     out.field("out", target);
     out.flush();
     return EXIT.ok;
@@ -153,15 +153,22 @@ export async function pull(argv: string[], ctx: Context): Promise<number> {
     keySet = JSON.parse(await response.text()) as RootMetadata;
   }
 
+  // The envelope first: the walk below reads whatever the manifest holds, so it reads only a signed one.
+  const now = new Date(ctx.now()).toISOString();
+  const envelope = verifyChain({ manifest, keySet, payloads: null, root, scope, now, storedGeneration: 0, carrying: true });
+  if (!envelope.ok) throw new CliError(EXIT.refused, `refused at ${envelope.step}: ${envelope.reason}`, { step: envelope.step, reason: envelope.reason, root: envelope.root });
+
   const payloads = new Map<string, Uint8Array>();
-  for (const [hash, byteLength] of referencedPayloads(manifest.payload)) {
+  // Carried, not served here: a newer runtime may need what this CLI cannot read. Only a payload named solely under `requires` may be absent (M9).
+  const optional = optionalPayloads(manifest.payload);
+  for (const [hash, byteLength] of carriedPayloads(manifest.payload)) {
     const bytes = await client.payload(hash);
+    if (!bytes && optional.has(hash)) continue;
     if (!bytes) throw refused(`payload ${hash} was not served`, { reason: "payload_missing", contentHash: hash });
     if (bytes.length !== byteLength) throw refused(`payload ${hash}: ${bytes.length} bytes, manifest says ${byteLength}`, { reason: "payload_length_mismatch", contentHash: hash });
     payloads.set(hash, bytes);
   }
-  const now = new Date(ctx.now()).toISOString();
-  const report = verifyChain({ manifest, keySet, payloads, root, scope, now, storedGeneration: 0 });
+  const report = verifyChain({ manifest, keySet, payloads, root, scope, now, storedGeneration: 0, carrying: true });
   if (!report.ok) throw new CliError(EXIT.refused, `refused at ${report.step}: ${report.reason}`, { step: report.step, reason: report.reason, root: report.root });
 
   const days = Number(str(parsed, "not-after-days") ?? "90");
@@ -198,7 +205,7 @@ export async function pull(argv: string[], ctx: Context): Promise<number> {
   out.field("generation", summary.generation);
   out.field("releaseDigest", summary.releaseDigest, "release");
   out.field("slots", summary.slots);
-  out.field("payloads", summary.payloads);
+  out.field("payloads", payloads.size);
   out.field("signingKeyId", report.signingKeyId, "signed by");
   out.field("encryption", sidecar.encryption);
   out.field("recipientKeyId", sidecar.recipientKeyId, "recipient key");

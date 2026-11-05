@@ -1,27 +1,36 @@
 /**
- * Wire types for the protocol (0.2 through 0.3.x) — hand-written to match `protocol/schemas/*`.
+ * Wire types for the protocol (3.x), hand-written to match `protocol/schemas/*`.
  * The conformance vectors, not these types, are what proves agreement; keep
  * them narrow and let the schema tests catch drift.
  *
  * @example
  * ```ts
  * const slot: ManifestSlot | undefined = manifest.payload.slots.find((entry) => entry.tag === "support.triage");
- * const experiment: Experiment | null = experimentForTag(manifest.payload, "support.triage"); // null: the slot renders with arm "none"
+ * const experiment: Experiment | undefined = manifest.payload.experiments?.find((entry) => entry.tag === "support.triage"); // undefined: the slot renders with arm "none"
  * const fenced = slot?.variables.filter((variable: SlotVariable) => variable.trust === "end_user"); // rendered inside delimiters
  * if (bundle.encryption.scheme === "none") bundle.encryption.contents.manifest; // the union narrows on `scheme`
  * ```
  */
 
-export type Target = "dev" | "staging" | "prod";
+import { servableOverrides } from "./assignment.js";
+
+/** An agent's stage: an immutable lowercase slug (`^[a-z][a-z0-9-]{0,31}$`). An SDK never branches on it, except that a plaintext bundle stays `dev` only. */
+export type Target = string;
+/** The shape of a stage: the only check a target gets. It feeds store paths and spool directories, so a start refuses anything else. */
+export const TARGET_SLUG = /^[a-z][a-z0-9-]{0,31}$/;
+/** An agent id as the control plane mints it (`manifest.schema.json` › identifier). It feeds store paths and spool directories. */
+export const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+/** One AirPrompter deployment: what a root document belongs to, never an agent's stage. */
+export type HostedEnvironment = "dev" | "staging" | "prod";
 export type Sha256 = `sha256:${string}`;
 
 export interface SlotVariable {
   name: string;
   required: boolean;
   trust: "operator" | "end_user";
-  /** 0.3.4: rendered when neither the call site nor a source supplies a value; only meaningful on an optional `operator` variable. */
+  /** Rendered when neither the call site nor a source supplies a value; only meaningful on an optional `operator` variable. */
   default?: string;
-  /** 0.3.4: who the author expects to fill it — the code that renders, or a source the application registers. A hint; a runtime does not act on it. */
+  /** Who the author expects to fill it: the code that renders, or a source the application registers. A hint; a runtime does not act on it. */
   source?: "caller" | "runtime";
 }
 
@@ -32,7 +41,7 @@ export interface SlotStep {
   promptVersionId: string;
   contentHash: Sha256;
   byteLength: number;
-  /** 0.3.2: how the model is called for this step, as its prompt version declared it; digest-bound when present. */
+  /** How the model is called for this step, as its prompt version declared it; digest-bound when present. */
   inference?: SlotInference;
 }
 
@@ -54,7 +63,8 @@ export interface SlotInference {
 
 export interface ManifestSlot {
   tag: string;
-  kind: "prompt" | "workflow";
+  /** Any string on a slot with `requires`; a servable slot is `prompt` or `workflow`. */
+  kind: "prompt" | "workflow" | (string & {});
   artifactId: string;
   versionId: string;
   versionOrdinal: number | null;
@@ -65,12 +75,14 @@ export interface ManifestSlot {
   modelRequired?: boolean;
   /** T29: the slot's enabled output checks (checks.md), sorted by name; in the digest input only when present. */
   outputChecks?: OutputCheck[];
-  /** 0.3.1: how the model is called for this slot, as the version declared it; in the digest when present. */
+  /** How the model is called for this slot, as the version declared it; in the digest when present. */
   inference?: SlotInference;
   /** T34: the slot's golden set (golden-sets.md) — a reference to a payload the runtime opens and runs before activation; in the digest input only when present. */
   goldenSet?: GoldenSetRef;
   variables: SlotVariable[];
   steps?: SlotStep[];
+  /** Capabilities a reader needs to serve this slot (`capabilities.md`); a reader missing one treats the slot as absent. In the digest input when present. */
+  requires?: string[];
 }
 
 /** T34: what the pin carries — the cases themselves are the payload under `contentHash`. */
@@ -97,11 +109,11 @@ export interface RampStep {
 }
 
 export interface Experiment {
-  /** 0.4.0: absence is legacy fleet allocation. */
+  /** Absent: the experiment allocates across the whole fleet. */
   audience?: import("./assignment.js").AudienceSnapshot;
   experimentId: string;
-  /** S16: the one slot this experiment splits — required on every `experiments[]` entry, absent on the legacy single one. */
-  tag?: string;
+  /** S16: the one slot this experiment splits. */
+  tag: string;
   salt: string;
   subjectKey: "request" | "instance";
   arms: ExperimentArm[];
@@ -139,45 +151,27 @@ export interface ManifestPayload {
   previousReleaseDigest?: Sha256;
   issuedAt: string;
   leaseSeconds: number;
-  onLeaseExpiry: "degrade" | "halt";
   applyPolicy: "auto" | "unlock_required";
   /** T9: the console's update window (advisory; a local `apply.window` wins). Only with `unlock_required`. */
   unlockWindow?: { timezone: string; start: string; end: string; days?: Array<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"> };
   requireCountersign: boolean;
   slots: ManifestSlot[];
-  /** The legacy single split (protocol 0.2): applies to every slot its arms override. Never beside `experiments`. */
-  experiment?: Experiment;
-  /** S16: one split per slot, each independent — own salt, arms, ramp and share. Never beside `experiment`. */
+  /** S16: one split per slot, each independent: own salt, arms, ramp and share. */
   experiments?: Experiment[];
   directives: Directive[];
 }
 
-/** S16: every experiment a manifest carries — `experiments[]`, else the legacy single one, else none. */
-export function experimentsOf(payload: Pick<ManifestPayload, "experiment" | "experiments">): Experiment[] {
-  if (Array.isArray(payload.experiments)) return payload.experiments;
-  return payload.experiment ? [payload.experiment] : [];
-}
-
 /**
- * S16: the experiment that decides a slot — the `experiments[]` entry naming its tag, else the legacy single one
- * (which applies to every slot), else null (the slot renders from `slots[]` with arm `none`).
- */
-export function experimentForTag(payload: Pick<ManifestPayload, "experiment" | "experiments">, tag: string): Experiment | null {
-  if (Array.isArray(payload.experiments)) return payload.experiments.find((experiment) => experiment.tag === tag) ?? null;
-  return payload.experiment ?? null;
-}
-
-/**
- * M15 (S16): the per-prompt shape is consistent — never both keys; every `experiments[]` entry names a slot of the
- * release, no slot twice; each arm's overrides name that slot only; an arm-scoped disable names one of the
+ * M15 (S16): the per-prompt shape is consistent: every `experiments[]` entry names a slot of the release, no slot twice; each arm's overrides name that slot only; an arm-scoped disable names one of the
  * experiments. Null when it holds.
  */
-export function experimentConflict(payload: Pick<ManifestPayload, "experiment" | "experiments" | "slots" | "directives">): "experiment_conflict" | null {
+export function experimentConflict(payload: Pick<ManifestPayload, "experiments" | "slots" | "directives">): "experiment_conflict" | null {
+  const disables = (payload.directives ?? []).filter((directive) => directive && directive.kind === "disable" && directive.scope === "arm") as Array<Extract<Directive, { kind: "disable" }>>;
+  if (disables.some((directive) => typeof directive.experimentId !== "string")) return "experiment_conflict";
   const list = payload.experiments;
   if (list === undefined || list === null) return null;
-  if (payload.experiment !== undefined && payload.experiment !== null) return "experiment_conflict";
   if (!Array.isArray(list) || list.length === 0) return "experiment_conflict";
-  const slotTags = new Set((payload.slots ?? []).map((slot) => slot.tag));
+  const slotTags = new Set((payload.slots ?? []).map((slot) => slot?.tag));
   const seen = new Set<string>();
   const ids = new Set<string>();
   for (const experiment of list) {
@@ -185,12 +179,10 @@ export function experimentConflict(payload: Pick<ManifestPayload, "experiment" |
     if (!slotTags.has(experiment.tag) || seen.has(experiment.tag)) return "experiment_conflict";
     seen.add(experiment.tag);
     ids.add(experiment.experimentId);
-    for (const arm of experiment.arms ?? []) for (const override of arm.overrides ?? []) if (override.tag !== experiment.tag) return "experiment_conflict";
+    // An override this SDK cannot serve is dropped before the check: a rubric override of another tag must not refuse the manifest.
+    for (const arm of Array.isArray(experiment.arms) ? experiment.arms : []) for (const override of servableOverrides(arm ?? {})) if (override.tag !== experiment.tag) return "experiment_conflict";
   }
-  for (const directive of payload.directives ?? []) {
-    if (directive && directive.kind === "disable" && directive.scope === "arm" && (directive.experimentId === undefined || !ids.has(directive.experimentId))) return "experiment_conflict";
-  }
-  return null;
+  return disables.every((directive) => ids.has(directive.experimentId!)) ? null : "experiment_conflict";
 }
 
 export interface Signature {
@@ -234,16 +226,15 @@ export interface RootRole {
   threshold: number;
 }
 
-export interface RootMetadataSigned {
+/** A platform root belongs to a deployment; a customer's countersign root belongs to the stage it signs for. */
+export type RootMetadataSigned = {
   type: "root";
   protocol: string;
-  purpose: "platform" | "countersign";
-  environment: Target;
   version: number;
   expires: string;
   keys: Record<string, RootKeyEntry>;
   roles: { root: RootRole; targets: RootRole };
-}
+} & ({ purpose: "platform"; environment: HostedEnvironment } | { purpose: "countersign"; environment: Target });
 
 export interface RootMetadata {
   signed: RootMetadataSigned;

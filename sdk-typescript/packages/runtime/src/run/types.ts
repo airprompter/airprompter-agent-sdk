@@ -30,7 +30,7 @@ export interface RunInput {
   resume?: string;
 }
 
-export type UnavailableReason = "no_verified_release" | "awaiting_unlock" | "slot_disabled" | "no_slot" | "slot_kind_unsupported" | "lease_expired" | "variables_unfilled";
+export type UnavailableReason = "no_verified_release" | "awaiting_unlock" | "slot_disabled" | "no_slot" | "slot_kind_unsupported" | "variables_unfilled";
 
 export type Placement =
   | { kind: "approved"; slot: string; instructions: string; model: string; settings: Readonly<SlotInference> }

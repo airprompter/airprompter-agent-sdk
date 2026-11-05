@@ -187,16 +187,11 @@ test("on the agent: a version without the placeholder never calls the source; th
   const sourcedTicket = await ap.prompt("support.triage", { subject: "cust-4" }).renderAsync({});
   assert.match(sourcedTicket.text, /<ticket>sourced &lt;\/ticket> ticket<\/ticket>/);
   ap.variables.revoke("ticket");
-  // 0.3.4: the heartbeat names what this application can fill — names only — once the release it serves was sealed
-  // at 0.3.4; a service still at 0.3.3 would refuse the whole heartbeat over the key, so it is withheld until then.
+  // The heartbeat names what this application can fill: names only.
   await ap.heartbeatNow();
   assert.deepEqual((plane.heartbeats.at(-1) as { catalog: { variables?: string[] } }).catalog.variables, ["customer_tier", "team"]);
   assert.ok(!JSON.stringify(plane.heartbeats.at(-1)).includes("gold"), "never a value");
-  plane.promote(slots(plane, { tierInText: true, versionId: "ver_3" }), { protocol: "0.3.3" });
-  await ap.syncNow();
-  await ap.heartbeatNow();
-  assert.equal((plane.heartbeats.at(-1) as { catalog: { variables?: string[] } }).catalog.variables, undefined, "withheld from a 0.3.3 service");
-  // Past the gate the key is always there: an application with no sources reports an empty list, not silence.
+  // The key is always there: an application with no sources reports an empty list, not silence.
   plane.promote(slots(plane, { tierInText: true, versionId: "ver_4" }));
   await ap.syncNow();
   for (const name of ap.variables.names()) ap.variables.revoke(name);
@@ -220,7 +215,7 @@ test("a failing source is a named error and one content-free error row; needs() 
   assert.deepEqual(ap.status().variables, { sources: ["team"], unsourced: [{ tag: "support.triage", arm: "none", names: ["ticket", "customer_tier"] }] });
   assert.throws(() => ap.prompt("support.triage").render({ ticket: "x" }), /missing required variable customer_tier/);
   clock += 60_000; // the minute closes on the next observation
-  ap.report({ tag: "support.triage", versionId: "ver_2", arm: "none", model: "gpt-5", status: "ok", latencyMs: 1 });
+  ap.report({ tag: "support.triage", artifactId: "art_1", versionId: "ver_2", arm: "none", model: "gpt-5", status: "ok", latencyMs: 1 });
   const missingRows = (ap.drainMemorySink().filter((r) => (r as { type: string }).type === "window") as WindowRow[]).filter((r) => r.status === "error");
   assert.deepEqual(missingRows.map((r) => [r.status, r.errorClass, r.count]), [["error", "render_missing_variable", 1]], "the board sees a version this host cannot render");
   assert.equal(JSON.stringify(missingRows).includes("customer_tier"), false, "never a name in a row");
@@ -234,7 +229,7 @@ test("a failing source is a named error and one content-free error row; needs() 
   assert.deepEqual([failed?.tag, failed?.name, failed?.reason], ["support.triage", "customer_tier", "threw"]);
   assert.equal(JSON.stringify(events).includes("abc123"), false, "the cause never reaches the log");
   clock += 60_000;
-  ap.report({ tag: "support.triage", versionId: "ver_2", arm: "none", model: "gpt-5", status: "ok", latencyMs: 1 });
+  ap.report({ tag: "support.triage", artifactId: "art_1", versionId: "ver_2", arm: "none", model: "gpt-5", status: "ok", latencyMs: 1 });
   const rows = (ap.drainMemorySink().filter((r) => (r as { type: string }).type === "window") as WindowRow[]).filter((r) => r.status === "error");
   assert.deepEqual(rows.map((r) => r.errorClass), ["render_missing_variable"]);
   // Revoked: unsourced again.
@@ -245,7 +240,7 @@ test("a failing source is a named error and one content-free error row; needs() 
   // on the candidate writes its error row with the candidate's version and arm.
   const control = slots(plane, { tierInText: true, tierRequired: true })[0]!;
   const candidate = plane.slot({ tag: "support.triage", text: "Candidate for {{team}} in {{region}}: {{ticket}}", model: "gpt-5", variables: [...control.variables, { name: "region", required: true, trust: "operator" }], versionId: "ver_c" });
-  plane.promote([control], { experiment: { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 0, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 10000, releaseDigest: releaseDigest([candidate]), overrides: [candidate] }] } });
+  plane.promote([control], { experiments: [{ tag: control.tag, experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 0, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 10000, releaseDigest: releaseDigest([candidate]), overrides: [candidate] }] }] });
   await ap.syncNow();
   assert.deepEqual(ap.status().variables.unsourced, [
     { tag: "support.triage", arm: "candidate", names: ["ticket", "customer_tier", "region"] },
@@ -254,7 +249,7 @@ test("a failing source is a named error and one content-free error row; needs() 
   ap.variables.provide("customer_tier", "gold");
   assert.throws(() => ap.prompt("support.triage", { subject: "anyone" }).render({ ticket: "x" }), /missing required variable region/);
   clock += 60_000;
-  ap.report({ tag: "support.triage", versionId: "ver_2", arm: "none", model: "gpt-5", status: "ok", latencyMs: 1 });
+  ap.report({ tag: "support.triage", artifactId: "art_1", versionId: "ver_2", arm: "none", model: "gpt-5", status: "ok", latencyMs: 1 });
   const candidateRows = (ap.drainMemorySink().filter((r) => (r as { type: string }).type === "window") as WindowRow[]).filter((r) => r.status === "error");
   assert.deepEqual(candidateRows.map((r) => [r.versionId, r.arm, r.errorClass]), [["ver_c", "candidate", "render_missing_variable"]], "the override's version and arm");
   await ap.stop();
@@ -347,7 +342,7 @@ test("the managed client fills required declared variables from its sources befo
   assert.equal(looked, 0);
 });
 
-test("0.3.4: a source that answers nothing yields to the declared default; managed mode fills a source: runtime variable, required or not", async () => {
+test("a source that answers nothing yields to the declared default; managed mode fills a source: runtime variable, required or not", async () => {
   const variables = [
     { name: "ticket", required: true, trust: "end_user" as const },
     { name: "tone", required: false, trust: "operator" as const, default: "warm", source: "runtime" as const },

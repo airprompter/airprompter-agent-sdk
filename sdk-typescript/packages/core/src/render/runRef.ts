@@ -1,94 +1,108 @@
 /**
- * `runRef`: a compact, content-free token a customer keeps beside their own
- * trace to attach feedback later. Its legacy seven-part body remains readable; Team runs add an authenticated JSON
- * extension with the atomic artifact/model pair and, when targeted, opaque audience IDs plus the original run minute.
- * The per-store HMAC prevents forged feedback. The token carries no subject, tag values, or prompt text.
+ * `runRef`: a compact, content-free token a customer keeps beside their own trace to attach feedback later. One body
+ * form: `JSON.stringify([agentId, target, runId, entries])`, base64url, then the same 22-character HMAC. One entry per
+ * slot the run used, so a one-slot run is a list of one. `runId` is fixed, because a token that grows cannot be the
+ * run's identity. The token carries no subject, tag values, or prompt text.
+ *
+ * Readers are tolerant so a host can grow a ref a later SDK wrote: a body element past the fourth lands in `extra`,
+ * unknown keys stay on their entry, and both survive `mintRunRef`. Readers accept more than minting writes. A hosted
+ * run's ref (prompt-haven) is a different token and is never parsed here.
  *
  * @example
  * ```ts
- * const runRef = mintRunRef({ agentId, target: "prod", tag: "support.triage", artifactId, model, versionId, arm: "none", generation: 7, bucket: null, audienceIds, runMinute }, runRefKey);
+ * const key = runRefKeyFrom(apiKey, agentId, target); // the same on every instance of this agent and target
+ * const runRef = mintRunRef({ agentId, target, runId: newRunId(), entries: [{ tag, artifactId, versionId, model, arm: "none", bucket: null, runMinute }] }, key);
  * // Later, beside the customer's own trace: null for a ref minted under another key or edited in transit.
- * const facts = parseRunRef(runRef, runRefKey); // authenticated facts, or null for a forged/malformed token
+ * const facts = parseRunRef(runRef, [key, previousKey]); // tries each key
  * ```
  */
 
-import { validAudienceIds, validAudienceMinute } from "../protocol/assignment.js";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-interface RunRefBaseFacts {
+import { validAudienceIds, validAudienceMinute } from "../protocol/assignment.js";
+
+export const RUN_REF_MAX_ENTRIES = 8;
+/** Eight worst-case entries are about 9,500 characters. */
+export const RUN_REF_MAX_TOKEN_LENGTH = 12288;
+/** Reading stays above minting, so a later minor can raise what is minted. */
+export const RUN_REF_READ_MAX_ENTRIES = 32;
+export const RUN_REF_READ_MAX_TOKEN_LENGTH = 40960;
+
+export interface RunRefEntry {
+  tag: string;
+  artifactId: string;
+  versionId: string;
+  model: string;
+  arm: string;
+  bucket: number | null;
+  runMinute: string;
+  audienceIds?: readonly string[];
+}
+
+export interface RunRefFacts {
   agentId: string;
   target: string;
-  tag: string;
-  versionId: string;
-  arm: string;
-  generation: number;
-  bucket: number | null;
+  runId: string;
+  /** Tags are unique. */
+  entries: readonly RunRefEntry[];
+  /** Body elements past the fourth, kept for a later re-mint. */
+  extra?: readonly unknown[];
 }
 
-/** Team artifact identity and its configured model are authenticated as one atomic extension. */
-export type RunRefFacts = RunRefBaseFacts & (
-  | { artifactId: string; model: string; audienceIds?: never; runMinute?: string }
-  | { artifactId: string; model: string; audienceIds: readonly string[]; runMinute: string }
-  | { artifactId?: never; model?: never; audienceIds?: never; runMinute?: never }
-  | { artifactId?: never; model?: never; audienceIds: readonly string[]; runMinute: string }
-);
-
-const SEP = "·";
 const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const nonEmpty = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 
-export function mintRunRef(facts: RunRefFacts, key: Uint8Array): string {
-  if ([facts.agentId, facts.target, facts.tag, facts.versionId, facts.arm].some((value) => typeof value !== "string" || value.includes(SEP))) throw new Error("run_ref_facts_invalid");
-  if (!Number.isSafeInteger(facts.generation) || facts.generation < 1 || facts.bucket !== null && (!Number.isInteger(facts.bucket) || facts.bucket < 0 || facts.bucket > 9999)) throw new Error("run_ref_facts_invalid");
-  const hasArtifact = facts.artifactId !== undefined, hasModel = facts.model !== undefined;
-  if (hasArtifact !== hasModel || (hasArtifact && (typeof facts.artifactId !== "string" || !ARTIFACT_ID.test(facts.artifactId) || typeof facts.model !== "string" || !MODEL_ID.test(facts.model)))) throw new Error("run_ref_facts_invalid");
-  if (facts.runMinute !== undefined && (!validAudienceMinute(facts.runMinute) || !hasArtifact && facts.audienceIds === undefined) || facts.audienceIds !== undefined && (!validAudienceIds(facts.audienceIds) || facts.runMinute === undefined)) throw new Error("run_ref_facts_invalid");
-  const legacyBody = [facts.agentId, facts.target, facts.tag, facts.versionId, facts.arm, String(facts.generation), facts.bucket === null ? "-" : String(facts.bucket)].join(SEP);
-  // The negotiated extension authenticates artifact identity, opaque memberships and the ORIGINAL minute. No raw tags.
-  const extension = facts.artifactId ? { artifactId: facts.artifactId, model: facts.model, ...(facts.runMinute ? { runMinute: facts.runMinute } : {}), ...(facts.audienceIds ? { audienceIds: facts.audienceIds } : {}) } : facts.audienceIds ? [facts.audienceIds, facts.runMinute] : null;
-  const body = extension ? legacyBody + SEP + JSON.stringify(extension) : legacyBody;
-  // 22 base64url characters (132 bits) of the MAC: a forgery stays infeasible and the ref stays short enough to keep beside a trace.
-  const mac = createHmac("sha256", key).update(body, "utf8").digest("base64url").slice(0, 22);
-  return `${Buffer.from(body, "utf8").toString("base64url")}.${mac}`;
+function validEntry(entry: unknown): entry is RunRefEntry {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+  const e = entry as Record<string, unknown>;
+  if (!nonEmpty(e.tag) || !nonEmpty(e.versionId) || !nonEmpty(e.arm)) return false;
+  if (typeof e.artifactId !== "string" || !ARTIFACT_ID.test(e.artifactId) || typeof e.model !== "string" || !MODEL_ID.test(e.model)) return false;
+  if (e.bucket !== null && (!Number.isInteger(e.bucket) || (e.bucket as number) < 0 || (e.bucket as number) > 9999)) return false;
+  return validAudienceMinute(e.runMinute) && (e.audienceIds === undefined || validAudienceIds(e.audienceIds));
 }
 
-export function parseRunRef(token: string, key: Uint8Array): RunRefFacts | null {
+const macOf = (body: string, key: Uint8Array): string => createHmac("sha256", key).update(body, "utf8").digest("base64url").slice(0, 22);
+
+/** 22 base64url characters from 16 random bytes. */
+export function newRunId(): string {
+  return randomBytes(16).toString("base64url");
+}
+
+/** The key instances of one agent and target share: derived, so the secret itself never keys a token. */
+export function runRefKeyFrom(secret: string, agentId: string, target: string): Uint8Array {
+  return createHmac("sha256", Buffer.from(secret, "utf8")).update(`airprompter runRef v1\0${agentId}\0${target}`, "utf8").digest();
+}
+
+/** Throws `run_ref_facts_invalid` past either minting bound, on repeated tags, or on an entry that does not fit. */
+export function mintRunRef(facts: RunRefFacts, key: Uint8Array): string {
+  const { agentId, target, runId, entries, extra } = facts;
+  if (!nonEmpty(agentId) || !nonEmpty(target) || !nonEmpty(runId) || !Array.isArray(entries) || entries.length > RUN_REF_MAX_ENTRIES) throw new Error("run_ref_facts_invalid");
+  if (!entries.every(validEntry) || new Set(entries.map((entry) => entry.tag)).size !== entries.length) throw new Error("run_ref_facts_invalid");
+  const body = JSON.stringify([agentId, target, runId, entries, ...(extra ?? [])]);
+  const token = `${Buffer.from(body, "utf8").toString("base64url")}.${macOf(body, key)}`;
+  if (token.length > RUN_REF_MAX_TOKEN_LENGTH) throw new Error("run_ref_facts_invalid");
+  return token;
+}
+
+/** The authenticated facts, or null for a forged or malformed token. `keys` is tried in order, so a rotation keeps older refs working. */
+export function parseRunRef(token: string, keys: Uint8Array | readonly Uint8Array[]): RunRefFacts | null {
   const dot = token.lastIndexOf(".");
-  if (dot <= 0 || token.length > 4096) return null;
-  const body = Buffer.from(token.slice(0, dot), "base64url").toString("utf8");
+  if (dot <= 0 || token.length > RUN_REF_READ_MAX_TOKEN_LENGTH) return null;
   const mac = token.slice(dot + 1);
   // timingSafeEqual throws when decoded byte lengths differ. Check the protocol's exact base64url MAC shape first.
   if (!/^[A-Za-z0-9_-]{22}$/.test(mac)) return null;
-  const expected = createHmac("sha256", key).update(body, "utf8").digest("base64url").slice(0, 22);
-  if (mac.length !== expected.length || !timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
-  const parts = body.split(SEP);
-  if (parts.length !== 7 && parts.length !== 8) return null;
-  const [agentId, target, tag, versionId, arm, generationText, bucketText] = parts as [string, string, string, string, string, string, string];
-  if (!/^[1-9][0-9]*$/.test(generationText) || bucketText !== "-" && !/^(?:0|[1-9][0-9]{0,3})$/.test(bucketText)) return null;
-  const generation = Number(generationText), bucket = bucketText === "-" ? null : Number(bucketText);
-  if (!Number.isSafeInteger(generation) || generation < 1 || bucket !== null && (!Number.isInteger(bucket) || bucket < 0 || bucket > 9999)) return null;
-  let extensionFacts: {artifactId?: string;model?: string;audienceIds?: string[];runMinute?: string} = {};
-  if (parts.length === 8) {
-    try {
-      const extension = JSON.parse(parts[7]!);
-      if (Array.isArray(extension)) {
-        if (extension.length !== 2) return null;
-        const [ids,minute] = extension;
-        if (!validAudienceIds(ids) || !validAudienceMinute(minute)) return null;
-        extensionFacts = {audienceIds: ids,runMinute: minute};
-      } else if (extension && typeof extension === "object" && !Array.isArray(extension)) {
-        const value = extension as Record<string,unknown>;
-        if (Object.keys(value).some((key) => !["artifactId","model","audienceIds","runMinute"].includes(key)) || typeof value.artifactId !== "string" || !ARTIFACT_ID.test(value.artifactId) || typeof value.model !== "string" || !MODEL_ID.test(value.model)) return null;
-        if (value.runMinute !== undefined && !validAudienceMinute(value.runMinute)) return null;
-        if (value.audienceIds !== undefined && (!validAudienceIds(value.audienceIds) || value.runMinute === undefined)) return null;
-        extensionFacts = {
-          artifactId: value.artifactId,
-          model: value.model,
-          ...(value.audienceIds !== undefined ? { audienceIds: value.audienceIds } : {}),
-          ...(value.runMinute !== undefined ? { runMinute: value.runMinute } : {}),
-        };
-      } else return null;
-    } catch {return null;}
+  const body = Buffer.from(token.slice(0, dot), "base64url").toString("utf8");
+  const candidates = keys instanceof Uint8Array ? [keys] : keys;
+  if (!candidates.some((key) => timingSafeEqual(Buffer.from(mac), Buffer.from(macOf(body, key))))) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
   }
-  return { agentId, target, tag, versionId, arm, generation, bucket, ...extensionFacts } as RunRefFacts;
+  if (!Array.isArray(parsed) || parsed.length < 4) return null;
+  const [agentId, target, runId, entries, ...extra] = parsed as [unknown, unknown, unknown, unknown, ...unknown[]];
+  if (!nonEmpty(agentId) || !nonEmpty(target) || !nonEmpty(runId) || !Array.isArray(entries) || entries.length > RUN_REF_READ_MAX_ENTRIES || !entries.every(validEntry)) return null;
+  return { agentId, target, runId, entries, ...(extra.length > 0 ? { extra } : {}) };
 }

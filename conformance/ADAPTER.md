@@ -65,13 +65,19 @@ bytes travel base64url. `→` is the arguments object, `←` the result object;
 | ramp | `rampWeightsAt` | `{ arms, ramp, nowMs }` | `{ weightBps: [n…] }` |
 | ramp | `effectiveArms` | `{ arms, ramp, disabledArms: [name…], nowMs }` | `{ arms: [{ arm, weightBps }] }` — the arms in force now, a disabled arm's share back on the control |
 | trust-root | `verifyRootMetadata` | `{ candidate, now, trusted? , pinned?: { purpose, environment, pinnedRoot } }` — one of `trusted` (a root document) or `pinned` (derive the trusted root from the pinned key) | `{ ok, reason? }` |
-| trust-manifest | `verifyManifest` | `{ manifest, root, now, scope, storedGeneration, payloads: [{ contentHash, bytes }] \| null, countersignRoot \| null, requireCountersign }` | `{ ok, signingKeyId?, generation?, reason? }` |
+| trust-carry | `carriedPayloads` | `{ payload }` | `{ carried: [[contentHash, byteLength]…], optional: [contentHash…] }`, sorted by hash: every pair anywhere under the payload, and those named only under `requires` |
+| trust-manifest | `verifyManifest` | `{ manifest, root, now, scope, storedGeneration, payloads: [{ contentHash, bytes }] \| null, countersignRoot \| null, requireCountersign, carrying, absentRequires }` | `{ ok, signingKeyId?, generation?, reason? }` |
 | spool-basics | `latencyBucketIndex` | `{ latencyMs }` | `{ bucket }` |
 | spool-basics | `minuteOf` | `{ epochMs }` | `{ minute, epochMinute }` |
 | spool-basics | `segmentName` | `{ instanceId, epochMs, n }` | `{ name }` |
 | spool-rotation | `planSegments` | `{ instanceId, appends: [{ epochMs, lineBytes }] }` | `{ plan: [{ segment, rotated }] }` — one entry per append, in order, from one planner |
-| spool-windows | `aggregateWindows` | `{ instanceId, instanceClass, sdk, events: [{ kind: observe \| feedback \| close, at, observation? \| feedback? }] }` | `{ windows: [row…] }` — the window rows the spool writer emitted, any order |
+| spool-windows | `aggregateWindows` | `{ instanceId, instanceClass, sdk, events: [{ kind: observe \| recordRun \| recordStep \| feedback \| close, at, observation? \| run? \| step? \| feedback? }] }` | `{ windows: [row…], steps: [row…] }` — the window rows the spool writer emitted, any order |
 | feedback | `normalizeFeedback` | `{ signals }` | `{ normalized: { accepted, outcomes, rejected } }` |
+| slot-requires, frozen-runs | `servableSlots` | `{ payload, tags? }` | `{ frozen: [tag…], tags: [tag…], overrides: { experimentId: { arm: [tag…] } } }`: the slots this SDK can serve, in manifest order, and the overrides it keeps |
+| spool-tolerance | `inspectSegment` | `{ instanceId, lines: [text…], nowMs }` | `{ rows, invalid, skipped, stripped }`: lines a later 3.x wrote are skipped and counted, unknown fields stripped, only corruption refused |
+| run-ref | `runRefKeyFrom` | `{ secret, agentId, target }` | `{ keyHex }` |
+| run-ref | `mintRunRef` | `{ facts, keyHex }` | `{ token }`, or the refusal `run_ref_facts_invalid` |
+| run-ref | `parseRunRef` | `{ token, keysHex: [hex…] }` | `{ facts }`, null for a token no key verifies |
 | checks | `evaluateChecks` | `{ checks, input: { text, outputTokens } }` | `{ evaluation: { passed, failed, results } }` |
 | checks | `patternRefusal` | `{ pattern }` | `{ refusal }` — a reason or `null` |
 | checks | `checksRefusals` | `{ checks }` | `{ refusals: [{ name, reason }] }` |

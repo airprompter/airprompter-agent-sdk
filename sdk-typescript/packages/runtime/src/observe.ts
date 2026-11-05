@@ -23,7 +23,7 @@
  * @example
  * ```ts
  * const reply = await observeCall(
- *   { tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model },
+ *   { tag: r.tag, artifactId: r.artifactId, versionId: r.versionId, arm: r.arm, model: r.model },
  *   () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }),
  *   (observation) => writer.observe(observation, Date.now()), // content-free: status, errorClass, latency, tokens
  * );
@@ -85,8 +85,10 @@ export function classifyError(error: unknown): ErrorClass {
 export interface ObserveTarget {
   runMinute?: string;
   audienceIds?: readonly string[];
-  artifactId?: string;
+  artifactId: string;
   tag: string;
+  /** A workflow step's id, or a framework node or agent name. */
+  step?: string;
   versionId: string;
   arm: string;
   model: string;
@@ -97,6 +99,10 @@ export interface ObserveOptions {
   checks?: { passed?: number; failed?: number };
   /** Override the model the window names (a router that picked another model than the slot's). */
   model?: string;
+  /** Where a failure to record goes. Telemetry never replaces a model result. */
+  log?: (event: Record<string, unknown>) => void;
+  /** Tool calls this call made, and how many failed. Counts only. */
+  toolCalls?: { calls: number; errors: number };
   /**
    * T29: the slot's declared checks, evaluated on the result before the observation is recorded. Given the raw
    * provider result and its normalised usage; returns the counters, or undefined when there is nothing to count
@@ -114,8 +120,33 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
   const now = options.now ?? (() => Date.now());
   const started = now();
   const model = options.model ?? target.model;
+  const safely = (observation: Observation): void => {
+    try {
+      record(observation);
+    } catch (error) {
+      options.log?.({ event: "observation_dropped", reason: (error as Error).message });
+    }
+  };
+  let result: T;
   try {
-    const result = await call();
+    result = await call();
+  } catch (error) {
+    safely({
+      ...(target.audienceIds ? {audienceIds: target.audienceIds} : {}), ...(target.runMinute ? {runMinute: target.runMinute} : {}), artifactId: target.artifactId, tag: target.tag,
+      ...(target.step !== undefined ? { step: target.step } : {}),
+      versionId: target.versionId,
+      arm: target.arm,
+      model,
+      status: "error",
+      errorClass: classifyError(error),
+      latencyMs: Math.max(0, now() - started),
+      usageSource: "unavailable",
+      ...(options.toolCalls ? { toolCalls: options.toolCalls } : {}),
+      ...(options.checks ? { checks: options.checks } : {}),
+    });
+    throw error;
+  }
+  try {
     const usage = normalizeUsage(result);
     const errorClass = classifyResult(result);
     let checks = options.checks;
@@ -126,8 +157,9 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
         checks = undefined;
       }
     }
-    record({
-      ...(target.audienceIds ? {audienceIds: target.audienceIds} : {}), ...(target.runMinute ? {runMinute: target.runMinute} : {}), ...(target.artifactId ? {artifactId: target.artifactId} : {}), tag: target.tag,
+    safely({
+      ...(target.audienceIds ? {audienceIds: target.audienceIds} : {}), ...(target.runMinute ? {runMinute: target.runMinute} : {}), artifactId: target.artifactId, tag: target.tag,
+      ...(target.step !== undefined ? { step: target.step } : {}),
       versionId: target.versionId,
       arm: target.arm,
       model,
@@ -136,21 +168,11 @@ export async function observeCall<T>(target: ObserveTarget, call: () => Promise<
       latencyMs: Math.max(0, now() - started),
       tokens: { input: usage.input, cachedInput: usage.cachedInput, output: usage.output },
       usageSource: usage.source,
+      ...(options.toolCalls ? { toolCalls: options.toolCalls } : {}),
       ...(checks ? { checks } : {}),
     });
-    return result;
   } catch (error) {
-    record({
-      ...(target.audienceIds ? {audienceIds: target.audienceIds} : {}), ...(target.runMinute ? {runMinute: target.runMinute} : {}), ...(target.artifactId ? {artifactId: target.artifactId} : {}), tag: target.tag,
-      versionId: target.versionId,
-      arm: target.arm,
-      model,
-      status: "error",
-      errorClass: classifyError(error),
-      latencyMs: Math.max(0, now() - started),
-      usageSource: "unavailable",
-      ...(options.checks ? { checks: options.checks } : {}),
-    });
-    throw error;
+    options.log?.({ event: "observation_dropped", reason: (error as Error).message });
   }
+  return result;
 }

@@ -17,7 +17,7 @@ import { generateX25519KeyPair } from "../packages/core/src/bundle/hpke.js";
 import { createEncryptedBundle } from "../packages/core/src/bundle/apbundle.js";
 import { AgentStartError } from "../packages/sdk/src/agent.js";
 import { SyncClient } from "../packages/core/src/control/client.js";
-import { publicJwkOf, trustedRootFromPinnedKey } from "../packages/core/src/protocol/trust.js";
+import { publicJwkOf, releaseDigest, trustedRootFromPinnedKey } from "../packages/core/src/protocol/trust.js";
 import { pullBundle, nextPullDelayMs } from "../packages/sync/src/sync/pullBundle.js";
 import { FakeControlPlane, newKey } from "./helpers/controlPlane.js";
 
@@ -71,7 +71,7 @@ test("puller → your store → applyBundle: a dial lands on every runtime, an o
 
   // A dial-up on the board: generation 2 carries an experiment. The puller writes the row; each runtime applies it.
   const candidate = plane.slot({ tag: "support.reply", text: "Reply warmly to {{name}}.", variables: [{ name: "name", required: false, trust: "operator" }], versionId: "ver_2" });
-  plane.promote([control], { experiment: { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 5000, releaseDigest: `sha256:${"0".repeat(64)}`, overrides: [] }, { arm: "candidate", weightBps: 5000, releaseDigest: `sha256:${"1".repeat(64)}`, overrides: [candidate] }] } });
+  plane.promote([control], { experiments: [{ tag: control.tag, experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 5000, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 5000, releaseDigest: `sha256:${"1".repeat(64)}`, overrides: [candidate] }] }] });
   assert.equal(await pull(), 2);
   const changes: number[] = [];
   a.onChange((change) => { if (change.generation !== undefined) changes.push(change.generation); });

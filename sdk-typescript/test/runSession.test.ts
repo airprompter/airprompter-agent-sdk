@@ -450,25 +450,26 @@ test("a tool call keeps a run from looking idle", async () => {
   await ap.stop();
 });
 
-test("a lapsed lease under halt stops a first placement and a pinned one", async () => {
+test("a lapsed lease keeps serving a first placement and a pinned one, and stamps once", async () => {
   const { plane, clock, start, slotOf } = fixture();
-  plane.promote([slotOf("Version A", "ver_a")], { leaseSeconds: 60, onLeaseExpiry: "halt" });
+  plane.promote([slotOf("Version A", "ver_a")], { leaseSeconds: 60 });
   const ap = await start();
   const run = ap.openRun();
   assert.equal((await run.place(TAG)).kind, "approved");
   clock.ms += 120_000;
-  assert.deepEqual(await run.place(TAG), { kind: "passthrough", slot: TAG, reason: "lease_expired" });
-  assert.deepEqual(await ap.openRun().place(TAG), { kind: "passthrough", slot: TAG, reason: "lease_expired" });
+  assert.equal((await run.place(TAG)).kind, "approved");
+  assert.equal((await ap.openRun().place(TAG)).kind, "approved");
   await ap.stop();
+  const refusals = ap.drainMemorySink().filter((row) => (row as { type: string }).type === "refusal");
+  assert.deepEqual(refusals.map((row) => (row as { reason: string }).reason), ["lease_expired"]);
 });
 
 test("run tags reach the experiment's audience, and their names reach the heartbeat", async () => {
   const { plane, start, slotOf, experiment } = fixture();
   const a = slotOf("Version A", "ver_a");
   const b = slotOf("Version B", "ver_b");
-  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, conditions: [{ key: "plan", operator: "is" as const, value: "pro" }] } };
-  const manifest = plane.promote([a], { protocol: "2.0.0", experiments: [{ ...experiment(a, b, 10_000), audience }] });
-  manifest.payload.requiredCapabilities = ["audience"];
+  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "when" as const, when: { key: "plan", is: "pro" } } };
+  const manifest = plane.promote([a], { experiments: [{ ...experiment(a, b, 10_000), audience }] });
   manifest.payload.observations = [{ ...audience, tag: TAG, observeFrom: "2026-01-01T00:00:00Z" }];
   manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
   (plane as unknown as { current: { bytes: Buffer } }).current.bytes = Buffer.from(JSON.stringify(manifest));

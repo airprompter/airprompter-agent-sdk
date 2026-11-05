@@ -15,7 +15,7 @@ import { parseArgs } from "node:util";
 import { fileKey } from "../../sdk-typescript/packages/sync/src/store/keyProvider.js";
 import { CLI_VERSION } from "./version.js";
 import { SlotStore } from "../../sdk-typescript/packages/sync/src/store/slotStore.js";
-import type { Target } from "../../sdk-typescript/packages/core/src/protocol/types.js";
+import { TARGET_SLUG, type HostedEnvironment, type Target } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import { join } from "node:path";
 import type { Scope } from "./chain.js";
 import { requireOption, usage, type Context } from "./io.js";
@@ -26,7 +26,7 @@ export type OptionSpec = Record<string, { type: "string" | "boolean"; short?: st
 export const SCOPE_OPTIONS: OptionSpec = {
   org: { type: "string", help: "Organization id (org_…)" },
   agent: { type: "string", help: "Agent id (agt_…)" },
-  environment: { type: "string", help: "dev | staging | prod" },
+  environment: { type: "string", help: "The agent's stage: a slug such as dev, qa or prod" },
   "hosted-environment": { type: "string", help: "Which AirPrompter deployment a pinned --root belongs to: prod (the public service, default), staging or dev — not this app's --environment" },
 };
 
@@ -70,14 +70,24 @@ export function flag(parsed: Parsed, name: string): boolean {
   return parsed.values[name] === true;
 }
 
+/** An agent's stage is a slug: the CLI checks the shape, not the names. */
+export const TARGET = TARGET_SLUG;
+export const TARGET_USAGE = "--environment must be a lowercase slug: a letter, then up to 31 letters, digits or hyphens";
+
 export function scopeOf(parsed: Parsed): Scope {
   const target = requireOption(str(parsed, "environment"), "environment");
-  if (target !== "dev" && target !== "staging" && target !== "prod") throw usage("--environment must be dev, staging or prod");
+  if (!TARGET.test(target)) throw usage(TARGET_USAGE);
   return { organizationId: requireOption(str(parsed, "org"), "org"), agentId: requireOption(str(parsed, "agent"), "agent"), target: target as Target };
 }
 
+export function hostedEnvironmentOf(parsed: Parsed): HostedEnvironment {
+  const hosted = str(parsed, "hosted-environment") ?? "prod";
+  if (hosted !== "dev" && hosted !== "staging" && hosted !== "prod") throw usage("--hosted-environment must be dev, staging or prod");
+  return hosted;
+}
+
 export function rootOf(parsed: Parsed, target: Target): RootSource {
-  return loadRoot(requireOption(str(parsed, "root"), "root"), (str(parsed, "hosted-environment") as Target | undefined) ?? "prod");
+  return loadRoot(requireOption(str(parsed, "root"), "root"), hostedEnvironmentOf(parsed));
 }
 
 export function defaultStateDir(ctx: Context): string {

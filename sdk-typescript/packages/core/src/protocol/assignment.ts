@@ -13,7 +13,8 @@
 
 import { createHash } from "node:crypto";
 
-import type { ExperimentArm, RampStep } from "./types.js";
+import { SUPPORTED_CAPABILITIES } from "./capabilities.js";
+import type { Experiment, ExperimentArm, ManifestPayload, RampStep } from "./types.js";
 
 export const ASSIGNMENT_MODULUS = 10000;
 // 128 bits of salt: a bucket that leaks cannot be reversed by hashing candidate subjects.
@@ -149,13 +150,20 @@ export function orderedSteps<S extends { stepId: string; ordinal: number }>(slot
   return sorted;
 }
 
-/** Protocol 2: local predicates with required operators and implicit AND. */
-export type AudienceCondition = { key: string; operator: "is" | "contains"; value: string };
-export type AudienceSelector = { mode: "all" } | { mode: "tags"; conditions: AudienceCondition[] };
+/** Audience targeting (`protocol/audiences.md`): a condition tree evaluated locally. Values never leave this process. */
+export type AudienceCondition =
+  | { all: readonly AudienceCondition[] }
+  | { any: readonly AudienceCondition[] }
+  | { not: AudienceCondition }
+  | { key: string; is: string }
+  | { key: string; contains: string }
+  | { key: string; in: readonly string[] }
+  | { key: string; range: { gte?: number; lt?: number } };
+export type AudienceSelector = { mode: "all" } | { mode: "when"; when: AudienceCondition };
 export interface AudienceSnapshot { audienceId: string; selector: AudienceSelector }
 export interface AudienceObservation extends AudienceSnapshot { tag: string; observeFrom: string }
-export const AUDIENCE_CAPABILITY = "audience";
-export const AUDIENCE_PROTOCOL_VERSION = "2.0.0";
+/** A leaf alone is depth 1; each `all`, `any` or `not` adds one. */
+export const AUDIENCE_LIMITS = { maxDepth: 4, maxLeaves: 32, maxGroupItems: 16, maxInValues: 64 } as const;
 const audienceObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const audienceKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every(k => keys.includes(k));
 const audienceString = (v: unknown, max: number) => typeof v === "string" && [...v].length <= max && !/[\u0000-\u001f\u007f]/u.test(v) && !/[\uD800-\uDFFF]/u.test(v);
@@ -171,56 +179,124 @@ export const validAudienceMinute = (v:unknown):v is string => typeof v === "stri
 export const validAudienceKey = (v: unknown): v is string => audienceString(v,64) && (v as string).trim().length > 0;
 export const validAudienceLabel = (v: unknown): v is string => audienceString(v,128) && (v as string).trim().length > 0;
 export const validAudienceIds = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((id,i) => typeof id === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(id) && (i === 0 || v[i-1] < id));
+const AUDIENCE_DECIMAL = /^-?[0-9]+(?:\.[0-9]+)?$/;
+const own = (v: object, key: string) => Object.prototype.hasOwnProperty.call(v, key);
+function validAudienceCondition(c: unknown, depth: number, leaves: { count: number }): boolean {
+  if (!audienceObject(c) || depth > AUDIENCE_LIMITS.maxDepth) return false;
+  const names = Object.keys(c);
+  if (names.length === 1 && (names[0] === "all" || names[0] === "any")) {
+    const items = c[names[0]];
+    return Array.isArray(items) && items.length >= 1 && items.length <= AUDIENCE_LIMITS.maxGroupItems && items.every((item) => validAudienceCondition(item, depth + 1, leaves));
+  }
+  if (names.length === 1 && names[0] === "not") return validAudienceCondition(c.not, depth + 1, leaves);
+  if (names.length !== 2 || !validAudienceKey(c.key)) return false;
+  leaves.count += 1;
+  if (own(c, "is")) return audienceString(c.is, 256);
+  if (own(c, "contains")) return audienceString(c.contains, 256) && (c.contains as string).length > 0;
+  if (own(c, "in")) return Array.isArray(c.in) && c.in.length >= 1 && c.in.length <= AUDIENCE_LIMITS.maxInValues && c.in.every((value) => audienceString(value, 256)) && new Set(c.in).size === c.in.length;
+  if (!own(c, "range") || !audienceObject(c.range) || !audienceKeys(c.range, ["gte", "lt"])) return false;
+  const bounds = Object.values(c.range);
+  return bounds.length >= 1 && bounds.every((bound) => Number.isSafeInteger(bound));
+}
 export function validAudienceSelector(v: unknown): v is AudienceSelector {
   if (!audienceObject(v)) return false;
-  if (v.mode === "all") return audienceKeys(v,["mode"]);
-  if (v.mode !== "tags" || !audienceKeys(v,["mode","conditions"]) || !Array.isArray(v.conditions) || v.conditions.length < 1 || v.conditions.length > 16) return false;
-  const pairs = new Set<string>();
-  return v.conditions.every(c => {
-    if (!audienceObject(c) || !audienceKeys(c,["key","operator","value"]) || !validAudienceKey(c.key) || (c.operator !== "is" && c.operator !== "contains") || !audienceString(c.value,256) || (c.operator === "contains" && (c.value as string).length === 0)) return false;
-    const pair = JSON.stringify([c.key,c.operator,c.value]);
-    if (pairs.has(pair)) return false;
-    pairs.add(pair); return true;
-  });
+  if (v.mode === "all") return audienceKeys(v, ["mode"]);
+  if (v.mode !== "when" || !audienceKeys(v, ["mode", "when"])) return false;
+  const leaves = { count: 0 };
+  return validAudienceCondition(v.when, 1, leaves) && leaves.count <= AUDIENCE_LIMITS.maxLeaves;
+}
+function conditionMatches(c: AudienceCondition, tags: Readonly<Record<string, string>>): boolean {
+  if ("all" in c) return c.all.every((item) => conditionMatches(item, tags));
+  if ("any" in c) return c.any.some((item) => conditionMatches(item, tags));
+  if ("not" in c) return !conditionMatches(c.not, tags);
+  // A missing key is false for every leaf.
+  if (!own(tags, c.key) || !audienceString(tags[c.key], 256)) return false;
+  const value = tags[c.key]!;
+  if ("is" in c) return value === c.is;
+  if ("contains" in c) return value.includes(c.contains);
+  if ("in" in c) return c.in.includes(value);
+  if (!AUDIENCE_DECIMAL.test(value)) return false;
+  const number = Number(value);
+  return Number.isFinite(number) && (c.range.gte === undefined || number >= c.range.gte) && (c.range.lt === undefined || number < c.range.lt);
 }
 /** Invalid/missing values never broaden targeting. Values never leave this local operation. */
 export function matchesAudience(selector: AudienceSelector, tags: Readonly<Record<string,string>>): boolean {
   if (!validAudienceSelector(selector)) return false;
-  if (selector.mode === "all") return true;
-  const matches = (c: AudienceCondition) => {
-    if (!Object.prototype.hasOwnProperty.call(tags,c.key) || !audienceString(tags[c.key],256)) return false;
-    return c.operator === "contains" ? tags[c.key]!.includes(c.value) : tags[c.key] === c.value;
-  };
-  return selector.conditions.every(matches);
+  return selector.mode === "all" || conditionMatches(selector.when, tags);
 }
 export function copyAudienceTags(tags: Readonly<Record<string,string>>): Readonly<Record<string,string>> {
   if (!audienceObject(tags) || Object.keys(tags).length > 64 || Object.entries(tags).some(([k,v]) => !validAudienceKey(k) || !audienceString(v,256))) throw new Error("audience_tags_invalid");
   return Object.freeze(Object.fromEntries(Object.entries(tags)));
 }
-/** Refuse any targeted wire other than the canonical protocol-2 audience envelope. */
-export function validAudienceManifest(p: import("./types.js").ManifestPayload): boolean {
-  if (p.experiments !== undefined && !Array.isArray(p.experiments)) return false;
-  const experiments = p.experiments ?? [];
-  if (experiments.some(e => !audienceObject(e))) return false;
-  const targeted = p.requiredCapabilities !== undefined || p.observations !== undefined || experiments.some(e => e.audience !== undefined) || (audienceObject(p.experiment) && p.experiment.audience !== undefined);
-  // Existing major-0 non-audience manifests remain readable; protocol 2 is audience-only.
-  if (!targeted) return /^0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(String(p.protocol));
-  const supportedEnvelope = p.protocol === AUDIENCE_PROTOCOL_VERSION && JSON.stringify(p.requiredCapabilities) === JSON.stringify([AUDIENCE_CAPABILITY]);
-  if (!supportedEnvelope || p.experiment !== undefined || !Array.isArray(p.observations) || p.observations.length < 1 || p.observations.length > 8 || !Array.isArray(p.slots) || experiments.length > 32) return false;
-  const selectors = [...p.observations, ...experiments.map((entry) => entry.audience)].map((entry) => audienceObject(entry) ? entry.selector : null);
-  if (selectors.some((selector) => !validAudienceSelector(selector))) return false;
+const capabilitiesMet = (entry: { requires?: readonly string[] }) => entry.requires === undefined || (Array.isArray(entry.requires) && entry.requires.every((name) => SUPPORTED_CAPABILITIES.has(name)));
+/**
+ * A slot whose `requires` this SDK does not fully implement is absent: skipped, not validated, its payload not fetched
+ * (`protocol/trust-chain.md` › Slots a reader cannot serve). Every read of `payload.slots` for serving goes through this.
+ */
+export function servableSlots<S extends { requires?: readonly string[] }>(payload: { slots: readonly S[] }): readonly S[] {
+  return payload.slots.filter((slot) => audienceObject(slot) && capabilitiesMet(slot));
+}
+/** An arm's overrides this SDK can serve. An unmet override of another tag goes alone; one of the experiment's own tag takes the experiment with it (`servableExperiments`). */
+export function servableOverrides<O extends { requires?: readonly string[] }>(arm: { overrides?: readonly O[] }): readonly O[] {
+  return Array.isArray(arm.overrides) ? arm.overrides.filter((override) => audienceObject(override) && capabilitiesMet(override)) : [];
+}
+/**
+ * An arm that loses the override of the experiment's own tag has nothing to serve. Relabelling its share as control, or
+ * keeping the candidate label over base text, would skew gate and SRM evidence on a mixed fleet, so the host sits the
+ * experiment out: base text, arm none, bucket null, never evidence. A subject key it does not know does the same.
+ */
+function sitsOut(experiment: Experiment): boolean {
+  // A subject key this reader does not know: it must not guess, and it must never hash by run.
+  if (experiment.subjectKey !== "request" && experiment.subjectKey !== "instance") return true;
+  return Array.isArray(experiment.arms) && experiment.arms.some((arm) => audienceObject(arm) && Array.isArray(arm.overrides) && arm.overrides.some((override) => audienceObject(override) && override.tag === experiment.tag && !capabilitiesMet(override)));
+}
+/** The experiments this SDK acts on: those naming a servable slot it does not sit out, each arm holding its servable overrides. */
+export function servableExperiments(payload: Pick<ManifestPayload, "slots" | "experiments">): readonly Experiment[] {
+  const tags = new Set(servableSlots(payload).map((slot) => slot.tag));
+  const listed = Array.isArray(payload.experiments) ? payload.experiments : [];
+  return listed.filter((experiment) => audienceObject(experiment) && tags.has(experiment.tag) && !sitsOut(experiment)).map((experiment) => (Array.isArray(experiment.arms) ? { ...experiment, arms: experiment.arms.map((arm) => (audienceObject(arm) ? { ...arm, overrides: [...servableOverrides(arm)] } : arm)) } : experiment));
+}
+/**
+ * Every arm of the experiment naming this tag is disabled and this run is in its audience. Read from the raw list, so a
+ * freeze stops a host that sits the experiment out too. An audience this reader cannot read matches nothing.
+ */
+export function frozenExperiment(payload: Pick<ManifestPayload, "experiments">, arms: (experimentId: string) => ReadonlySet<string>, tag: string, tags: Readonly<Record<string, string>>): boolean {
+  const raw = (Array.isArray(payload.experiments) ? payload.experiments : []).find((experiment) => audienceObject(experiment) && experiment.tag === tag);
+  if (!raw || !Array.isArray(raw.arms) || raw.arms.length === 0) return false;
+  const off = arms(raw.experimentId);
+  if (!raw.arms.every((arm) => audienceObject(arm) && off.has(arm.arm))) return false;
+  return raw.audience === undefined || matchesAudience(raw.audience?.selector, tags);
+}
+/** Every capability a manifest asks for is one this SDK implements (`capabilities.md`). */
+export function capabilitiesImplemented(payload: Pick<ManifestPayload, "requiredCapabilities">): boolean {
+  return (payload.requiredCapabilities ?? []).every((name) => SUPPORTED_CAPABILITIES.has(name));
+}
+/** The arms as this SDK will assign over them: well-formed weights, one control first, one override at most. */
+function validArms(e: Experiment, p: ManifestPayload): boolean {
+  if (!Array.isArray(e.arms) || e.arms.some(arm => !audienceObject(arm) || !Number.isInteger(arm.weightBps) || arm.weightBps < 0 || arm.weightBps > 10000 || typeof arm.arm !== "string" || !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(arm.arm) || arm.arm.length > 32 || !Array.isArray(arm.overrides))) return false;
+  return e.arms.length >= 2 && e.arms.length <= 8 && e.arms.reduce((sum,arm)=>sum+arm.weightBps,0) === 10000 && new Set(e.arms.map(arm=>arm.arm)).size === e.arms.length && e.arms[0]!.releaseDigest === p.releaseDigest && e.arms[0]!.overrides.length === 0 && e.arms.every(arm => arm.overrides.length <= 1);
+}
+/** The envelope: well-formed audiences and arms on the slots this SDK can serve. A manifest asking for a capability it lacks is refused after the signature instead. */
+export function validAudienceManifest(p: ManifestPayload): boolean {
+  if (p.experiments !== undefined && (!Array.isArray(p.experiments) || p.experiments.length > 32 || p.experiments.some(e => !audienceObject(e)))) return false;
+  if (!Array.isArray(p.slots) || p.observations !== undefined && (!Array.isArray(p.observations) || p.observations.length < 1 || p.observations.length > 8)) return false;
+  const served = servableSlots(p);
+  // An observation on a skipped slot is skipped with it; one naming no slot at all is refused below.
+  const observations = (p.observations ?? []).filter((o) => !audienceObject(o) || served.some((s) => s.tag === o.tag) || !p.slots.some((s) => audienceObject(s) && s.tag === o.tag));
   const ids = new Set<string>();
-  for (const o of p.observations) {
-    if (!audienceObject(o) || !audienceKeys(o,["audienceId","selector","tag","observeFrom"]) || !validAudienceIds([o.audienceId]) || !validAudienceSelector(o.selector) || ids.has(o.audienceId) || !p.slots.some(s => audienceObject(s) && s.tag === o.tag) || !validAudienceInstant(o.observeFrom)) return false;
+  for (const o of observations) {
+    if (!audienceObject(o) || !validAudienceIds([o.audienceId]) || ids.has(o.audienceId) || !served.some(s => s.tag === o.tag) || !validAudienceInstant(o.observeFrom)) return false;
     ids.add(o.audienceId);
   }
+  // A selector this reader cannot read loads and matches nothing (`matchesAudience`): unknown is not malformed. The id and the fingerprint stay integrity checks.
   const fingerprint = (s: AudienceSelector) => JSON.stringify(s);
-  return experiments.every(e => {
-    if (!Array.isArray(e.arms) || e.arms.some(arm => !audienceObject(arm) || !Number.isInteger(arm.weightBps) || arm.weightBps < 0 || arm.weightBps > 10000 || typeof arm.arm !== "string" || !/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(arm.arm) || arm.arm.length > 32 || !Array.isArray(arm.overrides))) return false;
+  return servableExperiments(p).every(e => {
+    if (!validArms(e, p)) return false;
+    if (e.audience === undefined) return true;
     const a = e.audience;
-    if (!a || !audienceObject(a) || !audienceKeys(a,["audienceId","selector"]) || !validAudienceSelector(a.selector)) return false;
-    const o = p.observations!.find(o => o.audienceId === a.audienceId && o.tag === e.tag);
-    return !!o && fingerprint(o.selector) === fingerprint(a.selector) && e.arms.length >= 2 && e.arms.length <= 8 && e.arms.reduce((sum,arm)=>sum+arm.weightBps,0) === 10000 && new Set(e.arms.map(arm=>arm.arm)).size === e.arms.length && e.arms[0]!.releaseDigest === p.releaseDigest && e.arms[0]!.overrides.length === 0 && e.arms.every(arm => arm.overrides.every(pin => audienceObject(pin) && pin.tag === e.tag) && arm.overrides.length <= 1);
+    if (!a || !audienceObject(a)) return false;
+    const o = observations.find(o => o.audienceId === a.audienceId && o.tag === e.tag);
+    return !!o && fingerprint(o.selector) === fingerprint(a.selector);
   });
 }
 /** Multiple memberships annotate one run; fleet folding must not add them together. */
@@ -236,21 +312,19 @@ export function ambiguousAudienceAttribution(previous: {tag:string;artifactId?:s
   return JSON.stringify([previous.tag,previous.artifactId,previous.versionId,previous.arm,previous.audienceIds]) !== JSON.stringify([next.tag,next.artifactId,next.versionId,next.arm,next.audienceIds]);
 }
 
-/** What `disable` directives say, as data. */
-export function disabledFrom(directives: readonly import("./types.js").Directive[]): {agent:boolean;slots:string[];arms:string[];armsByExperiment:Record<string,string[]>} {
+/** What `disable` directives say, as data. An arm-scoped disable always names its experiment (M15). */
+export function disabledFrom(directives: readonly import("./types.js").Directive[]): {agent:boolean;slots:string[];armsByExperiment:Record<string,string[]>} {
   const slots: string[] = [];
-  const arms: string[] = [];
   const armsByExperiment: Record<string, string[]> = {};
   let agent = false;
   for (const directive of directives) {
     if (directive.kind !== "disable") continue;
     if (directive.scope === "agent") agent = true;
-    else if (directive.scope === "arm" && directive.arm) {
-      if (directive.experimentId) (armsByExperiment[directive.experimentId] ??= []).push(directive.arm);
-      else arms.push(directive.arm);
+    else if (directive.scope === "arm") {
+      if (directive.arm && directive.experimentId) (armsByExperiment[directive.experimentId] ??= []).push(directive.arm);
     } else if (directive.tag) slots.push(directive.tag);
   }
-  return { agent, slots, arms, armsByExperiment };
+  return { agent, slots, armsByExperiment };
 }
 
 

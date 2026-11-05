@@ -115,7 +115,6 @@ doc = {
         "refused": [
             {"name": "a tag in two experiments", "experiments": [{"experimentId": "exp_a", "tag": "support.triage", "salt": SALT_A, "arms": two}, {"experimentId": "exp_b", "tag": "support.triage", "salt": SALT_B, "arms": half}], "reason": "experiment_conflict"},
             {"name": "an override naming another experiment's tag", "experiments": [{"experimentId": "exp_a", "tag": "support.triage", "salt": SALT_A, "arms": two, "overrideTags": {"candidate": ["support.reply"]}}], "reason": "experiment_conflict"},
-            {"name": "experiment beside experiments[]", "experiment": {"experimentId": "exp_legacy", "salt": SALT_A, "arms": two}, "experiments": [{"experimentId": "exp_a", "tag": "support.triage", "salt": SALT_B, "arms": half}], "reason": "experiment_conflict"},
         ],
     },
     "refused": [

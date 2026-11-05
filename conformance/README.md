@@ -47,5 +47,4 @@ protocol's pure functions (canonical JSON, sticky assignment, step
 ordering). SDKs may copy them; they must pass the same vectors either way.
 Manifest signature verification with real keys joins this runner with the
 trust-chain ticket, and each SDK's spool writer and feedback validator are
-exercised here once they exist. The compatibility table in the root README
-is generated from this run.
+exercised here once they exist.

@@ -17,7 +17,6 @@
     "lint:imports": "node scripts/lint-imports.mjs",
     "test": "npm run lint:imports && node --import tsx --test \"test/**/*.test.ts\"",
     "size": "node scripts/size-budget.mjs",
-    "compat-table": "node scripts/compat-table.mjs",
     "test:wrap-live": "WRAP_LIVE=1 node --import tsx --test test/wrapLive.test.ts",
     "version:lockstep": "node scripts/version-lockstep.mjs"
   },
@@ -29,6 +28,8 @@
     "@langchain/openai": "1.8.0",
     "@types/node": "^22.16.5",
     "@types/pg": "^8.23.1",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
     "ioredis": "^5.11.1",
     "langchain": "1.6.1",
     "pg": "^8.23.0",

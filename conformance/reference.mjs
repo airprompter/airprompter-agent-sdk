@@ -8,7 +8,7 @@
 //   sha256Prefixed(Buffer.from(canonicalJson(doc)));                // "sha256:…"
 //   assignArm({ salt, subject: "user_42", arms: [{ arm: "control", weightBps: 9000 }, { arm: "candidate", weightBps: 1000 }] });   // { subjectHash, bucket, arm }
 
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 export class CanonicalJsonError extends Error {
   constructor(reason, path) {
@@ -96,8 +96,9 @@ export function releaseDigestInput(slots) {
       ...(slot.goldenSet ? { goldenSet: { setId: slot.goldenSet.setId, cases: slot.goldenSet.cases, contentHash: slot.goldenSet.contentHash, byteLength: slot.goldenSet.byteLength, minPassBps: slot.goldenSet.minPassBps } } : {}),
       // 0.3.1: the inference block is digest-bound when present — its known keys, each only when set (a JSON null is unset).
       ...(slot.inference ? { inference: inferenceDigestInput(slot.inference) } : {}),
-      // 0.3.4: `default` and `source` ride the digest only when the pin carries them, so a slot without them keeps its digest.
-      variables: slot.variables.map((v) => ({ name: v.name, required: v.required, trust: v.trust, ...(v.default !== undefined && v.default !== null ? { default: v.default } : {}), ...(v.source !== undefined && v.source !== null ? { source: v.source } : {}) })),
+      // `default` and `source` ride the digest only when the pin carries them, so a slot without them keeps its digest.
+      variables: slot.variables?.map((v) => ({ name: v.name, required: v.required, trust: v.trust, ...(v.default !== undefined && v.default !== null ? { default: v.default } : {}), ...(v.source !== undefined && v.source !== null ? { source: v.source } : {}) })),
+      ...(slot.requires !== undefined && slot.requires !== null ? { requires: slot.requires } : {}),
       ...(slot.steps
         ? {
             steps: slot.steps.map((s) => ({
@@ -115,8 +116,11 @@ export function releaseDigestInput(slots) {
     }));
 }
 
+/** An open slot projects the listed members it has (canonical-json.md); undefined never reaches the encoder. */
+const present = (pin) => Object.fromEntries(Object.entries(pin).filter(([, value]) => value !== undefined));
+
 export function releaseDigest(slots) {
-  return sha256Prefixed(Buffer.from(canonicalJson(releaseDigestInput(slots)), "utf8"));
+  return sha256Prefixed(Buffer.from(canonicalJson(releaseDigestInput(slots).map(present)), "utf8"));
 }
 
 // ---------------------------------------------------------------------------
@@ -236,25 +240,49 @@ export function effectiveArms({ arms, ramp, disabledArms, nowMs }) {
   return effective;
 }
 
-/** Audience vectors use an independent reference predicate: case-sensitive is/contains, bounded closed selectors. */
+/** Audience vectors use an independent reference predicate: the condition tree of audiences.md, bounded and closed. */
 export function audiencePredicate({selector,tags}) {
   const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
   const only = (v,keys) => Object.keys(v).every(k=>keys.includes(k));
   const str = (v,n) => typeof v === "string" && [...v].length <= n && !/[\u0000-\u001f\u007f]/u.test(v) && !/[\uD800-\uDFFF]/u.test(v);
+  let leaves = 0;
+  const validCondition = (c,depth) => {
+    if (!object(c) || depth > 4) return false;
+    const names = Object.keys(c);
+    if (names.length === 1 && (names[0] === "all" || names[0] === "any")) {
+      const list = c[names[0]];
+      return Array.isArray(list) && list.length >= 1 && list.length <= 16 && list.every(item => validCondition(item,depth+1));
+    }
+    if (names.length === 1 && names[0] === "not") return validCondition(c.not,depth+1);
+    if (names.length !== 2 || !str(c.key,64) || !c.key.trim()) return false;
+    leaves += 1;
+    if (Object.hasOwn(c,"is")) return str(c.is,256);
+    if (Object.hasOwn(c,"contains")) return str(c.contains,256) && c.contains.length > 0;
+    if (Object.hasOwn(c,"in")) return Array.isArray(c.in) && c.in.length >= 1 && c.in.length <= 64 && c.in.every(v => str(v,256)) && new Set(c.in).size === c.in.length;
+    if (Object.hasOwn(c,"range")) {
+      const bounds = c.range;
+      return object(bounds) && only(bounds,["gte","lt"]) && Object.keys(bounds).length >= 1 && Object.values(bounds).every(v => Number.isSafeInteger(v));
+    }
+    return false;
+  };
   let valid = object(selector);
   if (valid && selector.mode === "all") valid = only(selector,["mode"]);
-  else if (valid) {
-    valid = selector.mode === "tags" && only(selector,["mode","conditions"]) && Array.isArray(selector.conditions) && selector.conditions.length > 0 && selector.conditions.length <= 16;
-    const seenPairs = new Set();
-    if (valid) for (const c of selector.conditions) {
-      if (!object(c) || !only(c,["key","operator","value"]) || !str(c.key,64) || !c.key.trim() || !str(c.value,256) || !["is","contains"].includes(c.operator) || (c.operator === "contains" && c.value.length === 0)) {valid=false;break;}
-      const pair=JSON.stringify([c.key,c.operator,c.value]);
-      if (seenPairs.has(pair)) {valid=false;break;}
-      seenPairs.add(pair);
-    }
-  }
-  const matches = c => Object.hasOwn(tags,c.key) && str(tags[c.key],256) && (c.operator === "contains" ? tags[c.key].includes(c.value) : tags[c.key] === c.value);
-  return {valid, matches:valid && (selector.mode === "all" || selector.conditions.every(matches))};
+  else if (valid) valid = selector.mode === "when" && only(selector,["mode","when"]) && validCondition(selector.when,1) && leaves <= 32;
+  const decimal = /^-?[0-9]+(?:\.[0-9]+)?$/;
+  const matches = c => {
+    if (c.all) return c.all.every(matches);
+    if (c.any) return c.any.some(matches);
+    if (c.not) return !matches(c.not);
+    if (!Object.hasOwn(tags,c.key) || !str(tags[c.key],256)) return false;
+    const value = tags[c.key];
+    if (Object.hasOwn(c,"is")) return value === c.is;
+    if (Object.hasOwn(c,"contains")) return value.includes(c.contains);
+    if (Object.hasOwn(c,"in")) return c.in.includes(value);
+    if (!decimal.test(value)) return false;
+    const number = Number(value);
+    return Number.isFinite(number) && (c.range.gte === undefined || number >= c.range.gte) && (c.range.lt === undefined || number < c.range.lt);
+  };
+  return {valid, matches:valid && (selector.mode === "all" || matches(selector.when))};
 }
 
 /** Independent future-audience scalar validators; expectations share vectors with both SDKs. */
@@ -266,4 +294,50 @@ export function audienceValidator({kind,value}) {
   if (offset && (Number(offset[1]) > 23 || Number(offset[2]) > 59)) return {valid:false};
   const date=value.slice(0,10), midnight=Date.parse(date+"T00:00:00Z");
   return {valid:Number.isFinite(midnight) && new Date(midnight).toISOString().slice(0,10)===date && Number(value.slice(11,13))<24 && Number(value.slice(14,16))<60 && Number(value.slice(17,19))<60};
+}
+
+// ---------------------------------------------------------------------------
+// Run references (spool-format.md › Run reference): an independent reference, written from the prose.
+// ---------------------------------------------------------------------------
+
+const RUN_REF_MINT = { entries: 8, length: 12288 };
+const RUN_REF_READ = { entries: 32, length: 40960 };
+const runRefMac = (body, key) => createHmac("sha256", key).update(body, "utf8").digest("base64url").slice(0, 22);
+const runRefEntryValid = (entry) => {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
+  const text = (value) => typeof value === "string" && value.length > 0;
+  const minute = typeof entry.runMinute === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:\.000)?Z$/.test(entry.runMinute) && Number.isFinite(Date.parse(entry.runMinute));
+  const bucket = entry.bucket === null || (Number.isInteger(entry.bucket) && entry.bucket >= 0 && entry.bucket <= 9999);
+  const audience = entry.audienceIds === undefined || (Array.isArray(entry.audienceIds) && entry.audienceIds.length <= 8 && entry.audienceIds.every((id) => typeof id === "string" && /^aud_[A-Za-z0-9_-]{22}$/.test(id)));
+  return text(entry.tag) && text(entry.versionId) && text(entry.arm) && typeof entry.artifactId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(entry.artifactId) && typeof entry.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(entry.model) && bucket && minute && audience;
+};
+
+export function runRefKeyFrom(secret, agentId, target) {
+  return createHmac("sha256", Buffer.from(secret, "utf8")).update(`airprompter runRef v1\0${agentId}\0${target}`, "utf8").digest();
+}
+
+export function mintRunRef(facts, key) {
+  const { agentId, target, runId, entries, extra = [] } = facts;
+  if (![agentId, target, runId].every((value) => typeof value === "string" && value.length > 0) || !Array.isArray(entries) || entries.length > RUN_REF_MINT.entries || !entries.every(runRefEntryValid) || new Set(entries.map((entry) => entry.tag)).size !== entries.length) throw new Error("run_ref_facts_invalid");
+  const body = JSON.stringify([agentId, target, runId, entries, ...extra]);
+  const token = `${Buffer.from(body, "utf8").toString("base64url")}.${runRefMac(body, key)}`;
+  if (token.length > RUN_REF_MINT.length) throw new Error("run_ref_facts_invalid");
+  return token;
+}
+
+export function parseRunRef(token, keys) {
+  const dot = token.lastIndexOf(".");
+  if (dot <= 0 || token.length > RUN_REF_READ.length || !/^[A-Za-z0-9_-]{22}$/.test(token.slice(dot + 1))) return null;
+  const body = Buffer.from(token.slice(0, dot), "base64url").toString("utf8");
+  if (!keys.some((key) => runRefMac(body, key) === token.slice(dot + 1))) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed) || parsed.length < 4) return null;
+  const [agentId, target, runId, entries, ...extra] = parsed;
+  if (![agentId, target, runId].every((value) => typeof value === "string" && value.length > 0) || !Array.isArray(entries) || entries.length > RUN_REF_READ.entries || !entries.every(runRefEntryValid)) return null;
+  return { agentId, target, runId, entries, ...(extra.length > 0 ? { extra } : {}) };
 }

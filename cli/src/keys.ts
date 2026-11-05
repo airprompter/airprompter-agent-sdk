@@ -32,7 +32,7 @@ import { distributionKeyId } from "../../sdk-typescript/packages/core/src/bundle
 import { generateX25519KeyPair, x25519PrivateKeyFromRaw } from "../../sdk-typescript/packages/core/src/bundle/hpke.js";
 import { canonicalJson } from "../../sdk-typescript/packages/core/src/protocol/canonicalJson.js";
 import { keyThumbprint, trustedRootFromPinnedKey } from "../../sdk-typescript/packages/core/src/protocol/trust.js";
-import type { P256PrivateJwk, P256PublicJwk, RootMetadata, Target } from "../../sdk-typescript/packages/core/src/protocol/types.js";
+import type { HostedEnvironment, P256PrivateJwk, P256PublicJwk, RootMetadata } from "../../sdk-typescript/packages/core/src/protocol/types.js";
 import { refused, usage } from "./io.js";
 
 export interface DistributionPrivateFile {
@@ -153,7 +153,7 @@ export function loadDistributionPrivateKey(path: string): DistributionKey & { ke
 export type RootSource = { kind: "pinned"; jwk: P256PublicJwk; trusted: RootMetadata } | { kind: "document"; document: RootMetadata };
 
 /** `--root`: a pinned public JWK or a signed root document; the shape decides. A pinned key is scoped to the HOSTED environment (`--hosted-environment`, default prod), never to the app's target. */
-export function loadRoot(value: string, environment: Target): RootSource {
+export function loadRoot(value: string, environment: HostedEnvironment): RootSource {
   const document = readJson(value) as Record<string, unknown>;
   if (document.kty === "EC" && document.crv === "P-256" && typeof document.x === "string" && typeof document.y === "string") {
     const jwk: P256PublicJwk = { kty: "EC", crv: "P-256", x: document.x, y: document.y };

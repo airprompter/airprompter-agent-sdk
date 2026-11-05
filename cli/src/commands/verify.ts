@@ -47,8 +47,8 @@ function printReport(out: Output, report: ChainReport): void {
   if (report.manifest) {
     out.set("manifest", report.manifest);
     const m = report.manifest;
-    out.line(`manifest: generation ${m.generation}, release ${m.releaseDigest}, ${m.slots} slot${m.slots === 1 ? "" : "s"} (${m.workflows} workflow${m.workflows === 1 ? "" : "s"}), ${m.payloads} payload${m.payloads === 1 ? "" : "s"}, policy ${m.applyPolicy}, lease ${m.leaseSeconds}s → ${m.onLeaseExpiry}`);
-    if (m.experiment) out.line(`experiment: ${m.experiment.experimentId} (${m.experiment.arms.map((arm) => `${arm.arm} ${arm.weightBps / 100}%`).join(", ")})`);
+    out.line(`manifest: generation ${m.generation}, release ${m.releaseDigest}, ${m.slots} slot${m.slots === 1 ? "" : "s"} (${m.workflows} workflow${m.workflows === 1 ? "" : "s"}), ${m.payloads} payload${m.payloads === 1 ? "" : "s"}, policy ${m.applyPolicy}, lease ${m.leaseSeconds}s`);
+    for (const experiment of m.experiments) out.line(`experiment: ${experiment.experimentId} on ${experiment.tag} (${experiment.arms.map((arm) => `${arm.arm} ${arm.weightBps / 100}%`).join(", ")})`);
     if (m.directives.length) out.line(`directives: ${m.directives.map((d) => `${d.kind}${d.scope ? ` ${d.scope}` : ""}${d.tag ? ` ${d.tag}` : ""}`).join(", ")}`);
   }
   out.field("signingKeyId", report.signingKeyId, "signed by");

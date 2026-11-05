@@ -4,7 +4,7 @@
 // Deterministic.
 //
 //   $ node protocol/tools/gen_datastore_vectors.mjs protocol/vectors/datastore.json
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,7 +24,8 @@ const keys = scopes.map(({ name, prefix, key, generation }) => {
   return { name, prefix, key, generation, expect: { releasesPrefix: k.releasesPrefix, release: k.release(generation), latest: k.latest, edge: k.edge, control: k.control } };
 });
 
-const bundle = { format: "apbundle", version: 1, protocol: "0.3.4", agentId: "agt_1", target: "prod", encryption: { scheme: "hpke-x25519-aes256gcm", recipientKeyId: "dk_0123456789abcdef", enc: "q83vEjRWeJA", ciphertext: "3q2-7wABAgMEBQYHCAkKCw" } };
+const PROTOCOL = readFileSync(join(here, "..", "VERSION"), "utf8").trim();
+const bundle = { format: "apbundle", version: 1, protocol: PROTOCOL, agentId: "agt_1", target: "prod", encryption: { scheme: "hpke-x25519-aes256gcm", recipientKeyId: "dk_0123456789abcdef", enc: "q83vEjRWeJA", ciphertext: "3q2-7wABAgMEBQYHCAkKCw" } };
 const rollout = {
   applyPolicy: "auto",
   experiments: [{ experimentId: "exp_1", tag: "support.reply", arms: [{ arm: "control", weightBps: 9000 }, { arm: "candidate", weightBps: 1000 }], ramp: [{ notBefore: "2026-09-20T02:00:00Z", weightBps: [7500, 2500] }, { notBefore: "2026-09-21T02:00:00Z", weightBps: [5000, 5000] }] }],

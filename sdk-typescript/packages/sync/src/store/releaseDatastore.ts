@@ -41,7 +41,7 @@
  * ```
  */
 
-import { experimentsOf } from "@airprompter/agent-core";
+import { servableExperiments } from "@airprompter/agent-core";
 import type { ApplyPolicy, Manifest, Target } from "@airprompter/agent-core";
 import type { PullEdgeState } from "../sync/pullBundle.js";
 import { datastoreKeys, decodeDatastoreRecord, encodeDatastoreRecord, generationOfReleaseKey, type DatastoreRecord } from "./datastoreRecords.js";
@@ -58,7 +58,7 @@ export interface ReleaseKey {
 /** S9/S16 as data: one experiment's arms, their base weights (the dial-up percentages) and the signed ramp plan. */
 export interface RolloutExperiment {
   experimentId: string;
-  /** The slot it splits; null on the legacy single experiment. */
+  /** The slot it splits. */
   tag: string | null;
   arms: Array<{ arm: string; weightBps: number }>;
   ramp: Array<{ notBefore: string; weightBps: number[] }>;
@@ -125,9 +125,9 @@ export interface ReleaseDatastore {
 /** The rollout summary of a manifest — what the signed payload says, copied as data. */
 export function rolloutOf(manifest: Manifest): ReleaseRollout {
   const payload = manifest.payload;
-  const experiments: RolloutExperiment[] = experimentsOf(payload).map((experiment) => ({
+  const experiments: RolloutExperiment[] = servableExperiments(payload).map((experiment) => ({
     experimentId: experiment.experimentId,
-    tag: experiment.tag ?? null,
+    tag: experiment.tag,
     arms: experiment.arms.map((arm) => ({ arm: arm.arm, weightBps: arm.weightBps })),
     ramp: (experiment.ramp ?? []).map((step) => ({ notBefore: step.notBefore, weightBps: [...step.weightBps] })),
   }));

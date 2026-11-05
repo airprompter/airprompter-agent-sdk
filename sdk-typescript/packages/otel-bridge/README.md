@@ -31,7 +31,7 @@ function behind the sink.
 
 Optional and released in lockstep with the five `@airprompter/agent-*`
 packages; depends on `@airprompter/agent-core` alone, and the facade never
-pulls it in. The full README and the compatibility table are in
+pulls it in. The full README is in
 [`sdk-typescript/README.md`](https://github.com/airprompter/airprompter-agent-sdk/tree/main/sdk-typescript);
 the mapping's prose is [`docs/telemetry.md`](https://github.com/airprompter/airprompter-agent-sdk/blob/main/docs/telemetry.md).
 BSD-3-Clause.

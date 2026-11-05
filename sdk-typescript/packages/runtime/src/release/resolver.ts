@@ -23,12 +23,12 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { snapshotInference, disabledFrom, matchesAudience, capturedAudienceIds, minuteOf, assignArm, effectiveArms, experimentForTag, experimentsOf, mintRunRef, orderedSteps, renderTemplate, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";
+import { frozenExperiment, slotHashes, snapshotInference, disabledFrom, matchesAudience, capturedAudienceIds, minuteOf, assignArm, effectiveArms, mintRunRef, newRunId, orderedSteps, renderTemplate, servableExperiments, servableSlots, type Delimiters, type Directive, type Experiment, type ExperimentArm, type LoadedRelease, type Manifest, type ManifestSlot, type ReleaseSlot, type RunRefFacts, type SlotInference, type SlotVariable, type Target } from "@airprompter/agent-core";
 
 export interface Rendered {
   text: string;
   model: string;
-  /** 0.3.1: how the model is called for this slot, as the version declared it — the wrappers apply it. */
+  /** How the model is called for this slot, as the version declared it: the wrappers apply it. */
   inference?: SlotInference;
   artifactId: string;
   versionId: string;
@@ -44,24 +44,19 @@ export interface Rendered {
 export interface Disabled {
   agent: boolean;
   slots: string[];
-  /** Arm names disabled by directives that name no experiment (the legacy single experiment) — the heartbeat's shape. */
-  arms: string[];
-}
-
-/** S16: `Disabled` plus the arm names disabled per experiment id (a directive without an id counts for every experiment). */
-export interface DisabledDetail extends Disabled {
+  /** S16: the arm names disabled per experiment id. */
   armsByExperiment: Record<string, string[]>;
 }
 
-/** S16: the arms disabled for one experiment — those named with its id, plus any named without one. */
-export function disabledArmsFor(disabled: DisabledDetail, experimentId: string): Set<string> {
-  return new Set([...disabled.arms, ...(disabled.armsByExperiment[experimentId] ?? [])]);
+/** S16: the arms disabled for one experiment. */
+export function disabledArmsFor(disabled: Disabled, experimentId: string): Set<string> {
+  return new Set(disabled.armsByExperiment[experimentId] ?? []);
 }
 
 export interface ResolverInput {
   release: LoadedRelease;
   tags?: () => Readonly<Record<string,string>>;
-  /** The run reference key (an HMAC key derived from the store's id, so run refs stay stable across processes). */
+  /** The run reference key (`runRefKeyFrom`), so a ref minted on one instance parses on another. */
   runRefKey: Uint8Array;
   agentId: string;
   target: Target;
@@ -103,24 +98,29 @@ export class ReleaseResolver {
     return this.payload.directives;
   }
 
-  disabled(): DisabledDetail {
+  disabled(): Disabled {
     return disabledFrom(this.directives());
   }
 
-  /** S16: every experiment this release carries — one per slot, or the legacy single one. */
-  experiments(): Experiment[] {
-    return experimentsOf(this.payload);
+  /** S16: every experiment this host acts on: one per slot it can serve. */
+  experiments(): readonly Experiment[] {
+    return servableExperiments(this.payload);
   }
 
-  /** S16: the experiment that decides a slot, by tag — the entry naming it, else the legacy single one, else null. */
+  /** A run this experiment would decide, with every arm disabled: refused, on a host that sits the experiment out too. */
+  frozen(tag: string, tags: Readonly<Record<string, string>>): boolean {
+    return frozenExperiment(this.payload, (experimentId) => disabledArmsFor(this.disabled(), experimentId), tag, tags);
+  }
+
+  /** S16: the experiment that decides a slot, by tag, else null. */
   experimentFor(tag: string): Experiment | null {
-    return experimentForTag(this.payload, tag);
+    return this.experiments().find((experiment) => experiment.tag === tag) ?? null;
   }
 
   /**
    * S9: an experiment's arms as they stand now — the signed plan walked on this host's clock, then any disabled arm's
    * share handed to the control. Null when there is no such experiment, or when every arm is disabled (a freeze for
-   * that slot). Without an argument: the legacy single experiment, or the first of `experiments[]`.
+   * that slot). Without an argument: the first of `experiments[]`.
    */
   arms(experimentOrTag?: Experiment | string): ExperimentArm[] | null {
     const experiment = typeof experimentOrTag === "string" ? this.experimentFor(experimentOrTag) : (experimentOrTag ?? this.experiments()[0] ?? null);
@@ -137,10 +137,19 @@ export class ReleaseResolver {
     const disabled = this.disabled();
     if (disabled.agent) return { ok: false, reason: "disabled", tag: null };
     if (disabled.slots.includes(tag)) return { ok: false, reason: "disabled", tag };
-    let slot = payload.slots.find((entry) => entry.tag === tag);
-    if (!slot) return { ok: false, reason: "no_slot", tag };
+    // A slot carrying `requires` whose payload this release does not hold is absent (trust-chain.md M9).
+    const present = (entry: ManifestSlot) => {
+      if (entry.requires === undefined) return true;
+      const hashes = [...slotHashes(entry).keys()];
+      return hashes.length > 0 && hashes.every((hash) => this.input.release.payloads.has(hash));
+    };
+    let slot = servableSlots(payload).find((entry) => entry.tag === tag);
+    if (!slot || !present(slot)) return { ok: false, reason: "no_slot", tag };
     // S16: the experiment for this slot — its own salt and arms, so two slots split independently.
     const experiment = this.experimentFor(tag);
+    if (this.frozen(tag, tags)) return { ok: false, reason: "disabled", tag };
+    // An own-tag override this release does not hold: sit out before assignment, so control runs here keep no candidate share.
+    if (experiment?.arms.some((arm) => arm.overrides.some((entry) => entry.tag === tag && !present(entry)))) return { ok: true, slot, arm: "none", bucket: null, ...cohort };
     if (!experiment || (experiment.audience && !matchesAudience(experiment.audience.selector,tags))) return { ok: true, slot, arm: "none", bucket: null, ...cohort };
     const subjectValue = experiment.subjectKey === "instance" ? this.input.instanceId : subject ?? newSubject();
     const arms = this.arms(experiment);
@@ -165,7 +174,7 @@ export class ReleaseResolver {
     if (resolved.audienceIds && !resolved.runMinute) throw new Error("audience_cohort_invalid");
     const cohort = {runMinute: resolved.runMinute ?? minuteOf(this.input.nowMs()), ...(resolved.audienceIds ? {audienceIds: resolved.audienceIds} : {})};
     const text = this.renderText({ tag: slot.tag, text: options.text ?? this.textOf(slot), variables: slot.variables, values, fenced: options.fenced });
-    const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, tag: slot.tag, artifactId: slot.artifactId, model: slot.model, versionId: slot.versionId, arm, generation, bucket, ...cohort };
+    const facts: RunRefFacts = { agentId: this.input.agentId, target: this.input.target, runId: newRunId(), entries: [{ tag: slot.tag, artifactId: slot.artifactId, versionId: slot.versionId, model: slot.model, arm, bucket, ...cohort }] };
     return { text, model: slot.model, ...(slot.inference ? { inference: snapshotInference(slot.inference) } : {}), artifactId: slot.artifactId, versionId: slot.versionId, arm, generation, runRef: mintRunRef(facts, Buffer.from(this.input.runRefKey)), tag: slot.tag, ...cohort };
   }
 
@@ -179,9 +188,10 @@ export class ReleaseResolver {
   workflow(resolved: ReleaseSlot & {audienceIds?: readonly string[];runMinute?: string}): { model: string; arm: string; steps: Array<{ stepId: string; ordinal: number; artifactId: string; versionId: string; text: string; runRef: string; model: string; inference?: SlotInference; audienceIds?: readonly string[]; runMinute?: string }>; variables: ManifestSlot["variables"] } {
     const { slot, arm, bucket } = resolved;
     if (slot.kind !== "workflow" || !slot.steps) throw new Error(`${slot.tag} is not a workflow slot`);
-    const generation = this.input.release.generation;
     if (resolved.audienceIds && !resolved.runMinute) throw new Error("audience_cohort_invalid");
     const cohort = {runMinute: resolved.runMinute ?? minuteOf(this.input.nowMs()), ...(resolved.audienceIds ? {audienceIds: resolved.audienceIds} : {})};
+    // One ref per step, one entry each, sharing one run id. The entry's tag is the slot's: rows never carry a step in `tag`.
+    const runId = newRunId();
     const steps = orderedSteps(slot.tag, slot.steps).map((step) => ({
       stepId: step.stepId,
       ordinal: step.ordinal,
@@ -191,9 +201,9 @@ export class ReleaseResolver {
         const bytes = this.input.release.payloads.get(step.contentHash);
         return bytes ? Buffer.from(bytes).toString("utf8") : "";
       })(),
-      runRef: mintRunRef({ agentId: this.input.agentId, target: this.input.target, tag: step.stepId, artifactId: step.promptArtifactId, model: slot.model, versionId: step.promptVersionId, arm, generation, bucket, ...cohort }, Buffer.from(this.input.runRefKey)),
+      runRef: mintRunRef({ agentId: this.input.agentId, target: this.input.target, runId, entries: [{ tag: slot.tag, artifactId: step.promptArtifactId, versionId: step.promptVersionId, model: slot.model, arm, bucket, ...cohort }] }, Buffer.from(this.input.runRefKey)),
       ...cohort,
-      // The workflow's pinned model (every step runs on it), and — 0.3.2 — the step's own settings for it.
+      // The workflow's pinned model (every step runs on it), and the step's own settings for it.
       model: slot.model,
       ...(step.inference ? { inference: snapshotInference(step.inference) } : {}),
     }));

@@ -7,9 +7,9 @@
 //   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs --only canonical-json,trust-manifest --json
 
 import { audiencePredicate, audienceValidator } from "../reference.mjs";
-import { AssignmentError, CanonicalJsonError, assignArm, canonicalJson, effectiveArms, orderedSteps, rampWeightsAt, sha256Prefixed, validateRamp } from "../reference.mjs";
-import { experimentConflict, experimentsOf, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../trust.mjs";
-import { SegmentPlanner, WindowAggregator, epochMinute, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "../spool.mjs";
+import { AssignmentError, CanonicalJsonError, assignArm, canonicalJson, effectiveArms, mintRunRef, orderedSteps, parseRunRef, rampWeightsAt, runRefKeyFrom, sha256Prefixed, validateRamp } from "../reference.mjs";
+import { carriedHashes, frozenTags, optionalHashes, experimentConflict, servableExperiments, servableSlots, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "../trust.mjs";
+import { SegmentPlanner, WindowAggregator, epochMinute, inspectLines, latencyBucketIndex, minuteOf, normalizeFeedback, segmentName } from "../spool.mjs";
 import { checksRefusals, evaluateChecks, patternRefusal, projectChecks } from "../checks.mjs";
 import { spoolRowsToOtlp } from "../otel.mjs";
 
@@ -66,15 +66,31 @@ export const ops = {
     const trustedRoot = trusted ?? trustedRootFromPinnedKey({ purpose: pinned.purpose, environment: pinned.environment, pinnedRootJwk: pinned.pinnedRoot });
     return verifyRootMetadata({ candidate, trusted: trustedRoot, now });
   },
-  experimentForTag({ payload, tag }) {
-    const listed = Array.isArray(payload.experiments) ? payload.experiments.find((e) => e.tag === tag) ?? null : (experimentsOf(payload)[0] ?? null);
-    return { experiment: listed };
+  servableSlots({ payload, tags }) {
+    return { frozen: frozenTags(payload, tags ?? {}), tags: servableSlots(payload).map((slot) => slot.tag), overrides: Object.fromEntries(servableExperiments(payload).map((experiment) => [experiment.experimentId, Object.fromEntries(experiment.arms.map((arm) => [arm.arm, arm.overrides.map((override) => override.tag)]))])) };
+  },
+  inspectSegment: inspectLines,
+  runRefKeyFrom({ secret, agentId, target }) {
+    return { keyHex: runRefKeyFrom(secret, agentId, target).toString("hex") };
+  },
+  mintRunRef({ facts, keyHex }) {
+    try {
+      return { token: mintRunRef(facts, Buffer.from(keyHex, "hex")) };
+    } catch (error) {
+      throw Object.assign(error, { reason: error.message });
+    }
+  },
+  parseRunRef({ token, keysHex }) {
+    return { facts: parseRunRef(token, keysHex.map((hex) => Buffer.from(hex, "hex"))) };
   },
   experimentConflict({ payload }) {
     return { reason: experimentConflict(payload) };
   },
-  verifyManifest({ manifest, root, now, scope, storedGeneration, payloads, countersignRoot, requireCountersign }) {
-    return verifyManifest({ manifest, root, now, scope, storedGeneration, payloads: payloads ? new Map(payloads.map((p) => [p.contentHash, Buffer.from(p.bytes, "base64url")])) : null, countersignRoot: countersignRoot ?? null, requireCountersign: requireCountersign ?? false });
+  verifyManifest({ manifest, root, now, scope, storedGeneration, payloads, countersignRoot, requireCountersign, carrying, absentRequires }) {
+    return verifyManifest({ manifest, root, now, scope, storedGeneration, payloads: payloads ? new Map(payloads.map((p) => [p.contentHash, Buffer.from(p.bytes, "base64url")])) : null, countersignRoot: countersignRoot ?? null, requireCountersign: requireCountersign ?? false, carrying: carrying === true, absentRequires: absentRequires === true });
+  },
+  carriedPayloads({ payload }) {
+    return { carried: [...carriedHashes(payload)].sort(([a], [b]) => (a < b ? -1 : 1)), optional: [...optionalHashes(payload)].sort() };
   },
   latencyBucketIndex({ latencyMs }) {
     return { bucket: latencyBucketIndex(latencyMs) };
@@ -93,10 +109,12 @@ export const ops = {
     const aggregator = new WindowAggregator({ instanceId, instanceClass, sdk });
     for (const event of events) {
       if (event.kind === "observe") aggregator.observe(event.at, event.observation);
+      else if (event.kind === "recordRun") aggregator.recordRun(event.at, event.run);
+      else if (event.kind === "recordStep") aggregator.recordStep(event.at, event.step);
       else if (event.kind === "feedback") aggregator.outcomes(event.at, event.feedback);
       else if (event.kind === "close") aggregator.close(event.at);
     }
-    return { windows: aggregator.emitted };
+    return { windows: aggregator.emitted, steps: aggregator.emittedSteps };
   },
   normalizeFeedback({ signals }) {
     return { normalized: normalizeFeedback(signals) };

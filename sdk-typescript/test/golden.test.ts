@@ -132,7 +132,7 @@ test("on stage the runtime runs the set before deciding: below the floor the rel
   await ap.stop();
   const windows = ap.drainMemorySink().filter((r) => (r as { type: string }).type === "window") as WindowRow[];
   const byVersion = Object.fromEntries(windows.map((w) => [w.versionId, w.outcomes?.goldenPass]));
-  assert.deepEqual(byVersion, { ver_1: { n: 3, sum: 2 }, ver_3: { n: 6, sum: 6 } }, "one goldenPass per case, on the version and arm that ran");
+  assert.deepEqual(byVersion, { ver_1: { n: 3, sum: 2, sumSq: 2 }, ver_3: { n: 6, sum: 6, sumSq: 6 } }, "one goldenPass per case, on the version and arm that ran");
   assert.equal(windows.every((w) => w.count === 0), true, "a golden run is not a run");
   assert.equal(JSON.stringify(windows).includes("guarantee"), false);
   rmSync(stateDir, { recursive: true, force: true });
@@ -161,7 +161,7 @@ test("ap.judge() asks the customer's model with the rubric and files only the sc
   await ap.stop();
   const windows = ap.drainMemorySink().filter((r) => (r as { type: string }).type === "window") as WindowRow[];
   assert.equal(windows.length, 1);
-  assert.deepEqual(windows[0]!.outcomes, { judgeScore: { n: 3, sum: 2 }, flagged: { n: 4, sum: 1 } }, "three resolved scores (0.5 + 0.5 + 1), four flag verdicts");
+  assert.deepEqual(windows[0]!.outcomes, { judgeScore: { n: 3, sum: 2, sumSq: 1.5 }, flagged: { n: 4, sum: 1, sumSq: 1 } }, "three resolved scores (0.5 + 0.5 + 1), four flag verdicts");
   assert.equal(JSON.stringify(windows).includes("shipping"), false, "no output on the wire");
   rmSync(stateDir, { recursive: true, force: true });
 });

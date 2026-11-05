@@ -32,7 +32,7 @@ export function vectorsDir(override) {
   throw new Error("no protocol/vectors directory: pass --vectors <dir>");
 }
 
-export const OPERATIONS = ["audiencePredicate", "audienceValidator", "canonicalJson", "orderedSteps", "assignArm", "experimentForTag", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
+export const OPERATIONS = ["audiencePredicate", "audienceValidator", "canonicalJson", "orderedSteps", "assignArm", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "servableSlots", "carriedPayloads", "inspectSegment", "runRefKeyFrom", "mintRunRef", "parseRunRef", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
 
 /** Which operations each section needs; a section runs only when its adapter has them all. */
 export const SECTIONS = {
@@ -41,13 +41,18 @@ export const SECTIONS = {
   "workflow-steps": ["orderedSteps"],
   assignment: ["assignArm"],
   // S16: which experiment decides a slot, and the shape rule (M15).
-  "assignment-per-tag": ["assignArm", "experimentForTag", "experimentConflict"],
+  "assignment-per-tag": ["assignArm", "experimentConflict"],
   ramp: ["validateRamp", "rampWeightsAt", "effectiveArms", "assignArm"],
   "trust-root": ["verifyRootMetadata"],
   "trust-manifest": ["verifyManifest"],
+  "trust-carry": ["carriedPayloads"],
   "spool-basics": ["latencyBucketIndex", "minuteOf", "segmentName"],
   "spool-rotation": ["planSegments"],
   "spool-windows": ["aggregateWindows"],
+  "spool-tolerance": ["inspectSegment"],
+  "slot-requires": ["verifyManifest", "servableSlots"],
+  "frozen-runs": ["servableSlots"],
+  "run-ref": ["runRefKeyFrom", "mintRunRef", "parseRunRef"],
   feedback: ["normalizeFeedback"],
   checks: ["evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks"],
   otel: ["spoolRowsToOtlp"],
@@ -206,10 +211,6 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
         const payload = { experiments: c.experiments.map((e) => ({ ...e, subjectKey: "request", arms: e.arms.map((a) => ({ ...a, releaseDigest: `sha256:${"0".repeat(64)}`, overrides: [] })) })) };
         for (const tag of c.tags) {
           const expected = c.expected[tag];
-          await expectOk(`${c.name} · ${tag}`, "experimentForTag", { payload, tag }, (r) => {
-            if (!r.experiment) return expected.arm === "none" && expected.experimentId === null ? true : `got no experiment, expected ${short(expected)}`;
-            return r.experiment.experimentId === expected.experimentId ? true : `got ${r.experiment.experimentId}, expected ${expected.experimentId}`;
-          });
           if (expected.arm === "none") continue;
           const e = payload.experiments.find((x) => x.tag === tag);
           await expectOk(`${c.name} · ${tag} arm`, "assignArm", { salt: e.salt, subject: c.subject, arms: e.arms }, (r) => (r.bucket === expected.bucket && r.arm === expected.arm ? true : `got ${short(r)}, expected ${short(expected)}`));
@@ -219,7 +220,6 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
         const payload = {
           slots: [{ tag: "support.triage" }, { tag: "support.reply" }],
           directives: [],
-          ...(r.experiment ? { experiment: r.experiment } : {}),
           experiments: r.experiments.map((e) => ({ ...e, subjectKey: "request", arms: e.arms.map((a) => ({ ...a, releaseDigest: `sha256:${"0".repeat(64)}`, overrides: (e.overrideTags?.[a.arm] ?? []).map((tag) => ({ tag })) })) })),
         };
         await expectOk(`refused: ${r.name}`, "experimentConflict", { payload }, (res) => (res.reason === r.reason ? true : `got ${short(res)}, expected ${r.reason}`));
@@ -265,8 +265,11 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
     },
     "trust-manifest": async () => {
       const tv = readJson("manifest-verify.json");
-      const matches = (result, expected) => result.ok === expected.ok && (expected.ok ? (expected.signingKeyId === undefined || result.signingKeyId === expected.signingKeyId) && (expected.generation === undefined || result.generation === expected.generation) : result.reason === expected.reason);
-      for (const c of tv.manifests) await expectOk(c.name, "verifyManifest", { manifest: c.manifest, root: c.root, now: c.now, scope: c.scope, storedGeneration: c.storedGeneration, payloads: c.payloads ?? null, countersignRoot: c.countersignRoot ?? null, requireCountersign: c.requireCountersign ?? false }, (r) => (matches(r, c.expected) ? true : `got ${short(r)}, expected ${short(c.expected)}`));
+      const matches = (result, expected) => result.ok === expected.ok && (expected.ok ? (expected.signingKeyId === undefined || result.signingKeyId === expected.signingKeyId) && (expected.generation === undefined || result.generation === expected.generation) : result.reason === expected.reason && (result.directivesStand === true) === (expected.directivesStand === true));
+      for (const c of tv.manifests) await expectOk(c.name, "verifyManifest", { manifest: c.manifest, root: c.root, now: c.now, scope: c.scope, storedGeneration: c.storedGeneration, payloads: c.payloads ?? null, countersignRoot: c.countersignRoot ?? null, requireCountersign: c.requireCountersign ?? false, carrying: c.carrying === true, absentRequires: c.absentRequires === true }, (r) => (matches(r, c.expected) ? true : `got ${short(r)}, expected ${short(c.expected)}`));
+    },
+    "trust-carry": async () => {
+      for (const c of readJson("manifest-verify.json").carriers) await expectOk(`carried: ${c.name}`, "carriedPayloads", { payload: c.payload }, (r) => (sameJson(r.carried, c.carried) && sameJson(r.optional, c.optional) ? true : `got ${short(r)}, expected ${short({ carried: c.carried, optional: c.optional })}`));
     },
     "spool-basics": async () => {
       const sp = readJson("spool.json");
@@ -289,13 +292,46 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
     },
     "spool-windows": async () => {
       const sp = readJson("spool.json");
-      const key = (row) => JSON.stringify([row.minute, row.tag, row.artifactId ?? null, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null, row.audienceIds ?? null, row.outcomeRunMinute ?? null]);
+      const key = (row) => JSON.stringify([row.minute, row.tag, row.artifactId ?? null, row.versionId, row.arm, row.model, row.status, row.errorClass ?? null, row.audienceIds ?? null, row.outcomeRunMinute ?? null, row.step ?? null]);
       const sortRows = (rows) => [...rows].sort((a, b) => (key(a) < key(b) ? -1 : 1));
       for (const c of sp.windows) await expectOk(`windows: ${c.name}`, "aggregateWindows", { instanceId: c.instanceId, instanceClass: c.instanceClass, sdk: c.sdk, events: c.events.filter((e) => e.kind !== "refusal") }, (r) => {
         const got = sortRows(r.windows ?? []);
         const expected = sortRows(c.expectedWindows);
-        return got.length === expected.length && got.every((row, i) => sameJson(row, expected[i])) ? true : `got ${short(got)}\n       expected ${short(expected)}`;
+        const gotSteps = sortRows(r.steps ?? []);
+        const expectedSteps = sortRows(c.expectedSteps);
+        return got.length === expected.length && got.every((row, i) => sameJson(row, expected[i])) && sameJson(gotSteps, expectedSteps) ? true : `got ${short(got)} ${short(gotSteps)}\n       expected ${short(expected)} ${short(expectedSteps)}`;
       });
+    },
+    "spool-tolerance": async () => {
+      const ordered = (entry) => ({ ...entry, stripped: [...entry.stripped].sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1)) });
+      for (const c of readJson("spool.json").tolerance) await expectOk(`tolerance: ${c.name}`, "inspectSegment", { instanceId: c.instanceId, lines: c.lines, nowMs: c.nowMs }, (r) => (sameJson(ordered(r), ordered(c.expected)) ? true : `got ${short(r)}, expected ${short(c.expected)}`));
+    },
+    "slot-requires": async () => {
+      for (const c of readJson("manifest-verify.json").manifests.filter((entry) => entry.servableTags)) {
+        await expectOk(`servable: ${c.name}`, "servableSlots", { payload: c.manifest.payload }, (r) => {
+          if (!sameJson(r.tags, c.servableTags)) return `got ${short(r)}, expected ${short(c.servableTags)}`;
+          if (c.frozenTags && !sameJson(r.frozen, c.frozenTags)) return `frozen ${short(r.frozen)}, expected ${short(c.frozenTags)}`;
+          return !c.servableOverrides || sameJson(r.overrides, c.servableOverrides) ? true : `got ${short(r.overrides)}, expected ${short(c.servableOverrides)}`;
+        });
+      }
+    },
+    "frozen-runs": async () => {
+      for (const c of readJson("manifest-verify.json").manifests.filter((entry) => entry.frozenRuns)) {
+        for (const entry of c.frozenRuns) await expectOk(`frozen: ${c.name}: ${entry.name}`, "servableSlots", { payload: c.manifest.payload, tags: entry.tags }, (r) => (sameJson(r.frozen, entry.frozenTags) ? true : `got ${short(r.frozen)}, expected ${short(entry.frozenTags)}`));
+      }
+    },
+    "run-ref": async () => {
+      const rr = readJson("feedback.json").runRef;
+      for (const c of rr.keys) await expectOk(`key: ${c.name}`, "runRefKeyFrom", { secret: c.secret, agentId: c.agentId, target: c.target }, (r) => (r.keyHex === c.keyHex ? true : `got ${r.keyHex}`));
+      for (const c of rr.tokens) {
+        await expectOk(`parse: ${c.name}`, "parseRunRef", { token: c.token, keysHex: [rr.keyHex] }, (r) => (sameJson(r.facts, c.facts) ? true : `got ${short(r.facts)}`));
+        if (c.mintRefused) await expectRefusal(`mint: ${c.name}`, "mintRunRef", { facts: c.facts, keyHex: rr.keyHex }, "run_ref_facts_invalid");
+        else await expectOk(`mint: ${c.name}`, "mintRunRef", { facts: c.facts, keyHex: rr.keyHex }, (r) => (r.token === c.token ? true : "the token differs from the vector"));
+      }
+      for (const c of rr.mintRefused) await expectRefusal(`mint: ${c.name}`, "mintRunRef", { facts: c.facts, keyHex: rr.keyHex }, "run_ref_facts_invalid");
+      await expectOk(rr.rotation.name, "parseRunRef", { token: rr.rotation.token, keysHex: [rr.rotation.currentKeyHex, rr.rotation.previousKeyHex] }, (r) => (sameJson(r.facts, rr.rotation.facts) ? true : `got ${short(r.facts)}`));
+      await expectOk(`${rr.rotation.name}: without it, null`, "parseRunRef", { token: rr.rotation.token, keysHex: [rr.rotation.currentKeyHex] }, (r) => (r.facts === null ? true : `got ${short(r.facts)}`));
+      for (const c of rr.refused) await expectOk(`refused: ${c.name}`, "parseRunRef", { token: c.token, keysHex: [rr.keyHex] }, (r) => (r.facts === null ? true : `got ${short(r.facts)}`));
     },
     feedback: async () => {
       for (const c of readJson("feedback.json").cases) await expectOk(`feedback: ${c.name}`, "normalizeFeedback", { signals: c.signals }, (r) => (sameJson(r.normalized, c.expected) ? true : `got ${short(r.normalized)}, expected ${short(c.expected)}`));

@@ -27,7 +27,7 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
-import { errorNamed, experimentForTag, experimentsOf, nodeFs, protocolAtLeast } from "@airprompter/agent-core";
+import { AGENT_ID, errorNamed, nodeFs, runRefKeyFrom, servableExperiments, servableSlots, SUPPORTED_CAPABILITIES, TARGET_SLUG } from "@airprompter/agent-core";
 import type { FsPort } from "@airprompter/agent-core";
 import { realpathSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
@@ -35,8 +35,8 @@ import { join, resolve as resolvePath } from "node:path";
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "@airprompter/agent-core";
 import { rampWeightsAt } from "@airprompter/agent-core";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "@airprompter/agent-core";
-import type { ApplyPolicy, Bundle, Directive, Manifest, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, SlotVariable, Target, UploadSink } from "@airprompter/agent-core";
-import { copyAudienceTags, validAudienceKey, validAudienceLabel, AUDIENCE_CAPABILITY, AUDIENCE_PROTOCOL_VERSION, parseRunRef } from "@airprompter/agent-core";
+import type { ApplyPolicy, Bundle, Directive, HostedEnvironment, Manifest, ManifestPayload, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, SlotVariable, Target, UploadSink } from "@airprompter/agent-core";
+import { copyAudienceTags, validAudienceKey, validAudienceLabel, parseRunRef } from "@airprompter/agent-core";
 import type { Delimiters } from "@airprompter/agent-core";
 import { normalizeFeedback } from "@airprompter/agent-core";
 import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "@airprompter/agent-telemetry";
@@ -93,6 +93,14 @@ export interface StartOptions {
   /** The Agent key (distribution kind). Absent means offline: serve the store or the vendored bundle, never call home. */
   apiKey?: string;
   baseUrl?: string;
+  /**
+   * What the run reference key derives from. Instances of one agent and target must share it, so a ref minted on one
+   * pod parses on another. Default: `apiKey`. A host with neither (offline, or a datastore runtime holding only a
+   * distribution key) falls back to the store's id, which works on that one store only, and logs `run_ref_key_store_scoped`.
+   */
+  runRefSecret?: string;
+  /** Secrets a run reference may have been minted under before a rotation: `feedback` still lands. */
+  runRefPreviousSecrets?: readonly string[];
   stateDir?: string;
   keyProvider?: KeyProvider;
   /** The pinned root for this environment, or a full root document (from the bundle or a previous accept). */
@@ -101,14 +109,11 @@ export interface StartOptions {
    * service is `prod`; `dev` / `staging` are AirPrompter's own stages), or an already-trusted root document. The root is
    * scoped to the HOSTED environment, never to this app's `target` — one platform key signs every target's manifests.
    */
-  root: { pinned: P256PublicJwk; hostedEnvironment?: Target } | RootMetadata;
+  root: { pinned: P256PublicJwk; hostedEnvironment?: HostedEnvironment } | RootMetadata;
   /** The customer's countersign root, when the target requires countersign. */
   countersignRoot?: RootMetadata;
   requireCountersign?: boolean;
-  /**
-   * How this process syncs releases. `"daemon"` was removed in 0.3.0 — the telemetry daemon never serves releases — and
-   * `start()` refuses it with `invalid_options`.
-   */
+  /** How this process syncs releases. */
   sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string };
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */
   vendoredBundle?: { bundle: Bundle | string; distributionKey?: DistributionKey };
@@ -202,7 +207,7 @@ export interface StartOptions {
   runIdleTimeoutMs?: number;
   /**
    * T26: who reports on the heartbeat — this SDK by default; the telemetry daemon names itself `airprompterd`, the CLI
-   * `airprompter-cli`. It names the *reporting software*, never the customer's app (the heartbeat schema is an enum,
+   * `airprompter-cli`. It names the *reporting software*, never the customer's app (the SDK keeps it to the four reporters,
    * so any other name is refused by the control plane); `start()` refuses it up front with `invalid_options`.
    */
   sdk?: { name: HeartbeatReporterName; version: string };
@@ -230,8 +235,8 @@ export type { Rendered };
 /** S9/S16: a ramp plan as this host walks it — one per experiment. */
 export interface AgentRampStatus {
   experimentId: string;
-  /** S16: the slot the experiment splits; null on the legacy single experiment. */
-  tag: string | null;
+  /** S16: the slot the experiment splits. */
+  tag: string;
   weightBps: number[];
   arms: string[];
   step: number;
@@ -250,7 +255,6 @@ export interface AgentStatus {
   /** When the lease runs out: last successful contact + leaseSeconds (a vendored bundle's notAfter when nothing ever synced). */
   leaseExpiresAt: string | null;
   leaseExpired: boolean;
-  onLeaseExpiry: "degrade" | "halt" | null;
   lastContactAt: string | null;
   forcedDowngrade: boolean;
   /** Emergency disable from the manifest (§6.5): the whole agent, named slots, or (S9) named arms whose share went back to the control. */
@@ -330,18 +334,17 @@ export interface ReleaseChange {
 }
 
 /**
- * S14: what a probe asks. `ok` is the liveness answer (serve this process traffic?); `status` adds the one degraded
- * middle. The rules, each a vector (`test/healthz.test.ts`, `sdk-python/tests/test_healthz.py`):
- * - `failing` (ok: false): nothing verified to serve (generation 0); the lease lapsed under `onLeaseExpiry: "halt"`
- *   (every render refuses).
- * - `degraded` (ok: true): the lease lapsed under `degrade` (serving the last verified release); three or more
- *   consecutive sync failures; the uploader backing off; a forced downgrade in force; the telemetry daemon's file has
- *   gone stale and nothing here uploads instead (`upload_daemon_stale`); the spool at 80 % of its budget or more.
+ * S14: what a probe asks. Nothing AirPrompter does stops an agent from serving, so `ok` stays true and `status` says
+ * whether anything needs a look. The rules, each a vector (`test/healthz.test.ts`, `sdk-python/tests/test_healthz.py`):
+ * - `degraded` (ok: true): nothing verified to serve (generation 0); the lease lapsed (serving the last verified
+ *   release); three or more consecutive sync failures; the uploader backing off; a forced downgrade in force; the
+ *   telemetry daemon's file has gone stale and nothing here uploads instead (`upload_daemon_stale`); the spool at
+ *   80 % of its budget or more.
  * - `ok` otherwise. `reasons` names every rule that fired, in that order.
  */
 export interface Healthz {
-  ok: boolean;
-  status: "ok" | "degraded" | "failing";
+  ok: true;
+  status: "ok" | "degraded";
   reasons: string[];
   generation: number;
   stagedGeneration: number | null;
@@ -349,7 +352,6 @@ export interface Healthz {
   source: ReleaseSource;
   leaseExpiresAt: string | null;
   leaseExpired: boolean;
-  onLeaseExpiry: "degrade" | "halt" | null;
   lastSyncAt: string | null;
   lastSyncOutcome: string | null;
   consecutiveSyncFailures: number;
@@ -363,18 +365,10 @@ export interface Healthz {
 /** The same rules on any status document. */
 export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: number | null; nowMs: number }): Healthz {
   const reasons: string[] = [];
-  const levels = { ok: 0, degraded: 1, failing: 2 } as const;
-  let level: Healthz["status"] = "ok";
-  const raise = (to: Healthz["status"], reason: string) => {
-    reasons.push(reason);
-    if (levels[to] > levels[level]) level = to;
-  };
-  const failing = (reason: string) => raise("failing", reason);
-  const degraded = (reason: string) => raise("degraded", reason);
-  // Generation 0 serves the agent's own prompt: a 503 here would have a liveness probe restart a working agent.
+  const degraded = (reason: string) => void reasons.push(reason);
+  // Generation 0 serves the agent's own prompt.
   if (status.generation <= 0) degraded("no_verified_release");
-  if (status.leaseExpired && status.onLeaseExpiry === "halt") failing("lease_expired_halt");
-  if (status.leaseExpired && status.onLeaseExpiry === "degrade") degraded("lease_expired_degrade");
+  if (status.leaseExpired) degraded("lease_expired");
   if (status.consecutiveSyncFailures >= 3) degraded("sync_failing");
   const backoffUntil = status.upload?.backoffUntil ?? null;
   if (backoffUntil && instant(backoffUntil) > input.nowMs) degraded("upload_backing_off");
@@ -383,10 +377,9 @@ export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: numbe
   if (telemetry?.daemon && !telemetry.daemon.live && telemetry.uploadedBy === "none") degraded("upload_daemon_stale");
   const budgetBytes = input.spoolBudgetBytes ?? null;
   if (budgetBytes !== null && budgetBytes > 0 && status.spool.depthBytes >= budgetBytes * 0.8) degraded("spool_near_budget");
-  const status_: Healthz["status"] = level;
   return {
-    ok: levels[status_] < levels.failing,
-    status: status_,
+    ok: true,
+    status: reasons.length > 0 ? "degraded" : "ok",
     reasons,
     generation: status.generation,
     stagedGeneration: status.stagedGeneration,
@@ -394,7 +387,6 @@ export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: numbe
     source: status.source,
     leaseExpiresAt: status.leaseExpiresAt,
     leaseExpired: status.leaseExpired,
-    onLeaseExpiry: status.onLeaseExpiry,
     lastSyncAt: status.lastSyncAt,
     lastSyncOutcome: status.lastSyncOutcome,
     consecutiveSyncFailures: status.consecutiveSyncFailures,
@@ -406,16 +398,15 @@ export function healthzOf(status: AgentStatus, input: { spoolBudgetBytes?: numbe
   };
 }
 
-/** An HTTP answer for any framework: 200 with the document when `ok`, 503 otherwise. */
-export function healthzResponse(healthz: Healthz): { status: 200 | 503; headers: Record<string, string>; body: string } {
-  const body = JSON.stringify(healthz);
-  return { status: healthz.ok ? 200 : 503, headers: { "content-type": "application/json", "cache-control": "no-store" }, body };
+/** An HTTP answer for any framework: 200 with the document. */
+export function healthzResponse(healthz: Healthz): { status: 200; headers: Record<string, string>; body: string } {
+  return { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" }, body: JSON.stringify(healthz) };
 }
 
-/** `render()` refused by the control plane's standing instructions: a disable directive, or a lapsed lease on a `halt` target. */
+/** `render()` refused by the control plane's standing instructions: a disable directive. */
 export class RenderRefusedError extends Error {
   constructor(
-    readonly reason: "disabled" | "lease_expired",
+    readonly reason: "disabled",
     readonly tag: string,
     readonly generation: number,
   ) {
@@ -492,6 +483,7 @@ export class AirPrompterAgent implements AgentRuntime {
    * held back, or ignored as the generation already held. A Freeze reaches a fleet that never unlocks.
    */
   private standingDirectives: { generation: number; directives: Directive[] } | null = null;
+  private strandedTried: number | null = null;
   private resolverFor: { release: LoadedSlot; standing: { generation: number; directives: Directive[] } | null; resolver: ReleaseResolver } | null = null;
   /** S4: what the latest verified manifest asked for, and the generation whose advisory mismatch was already logged. */
   private manifestApplyPolicy: { generation: number; value: ApplyPolicy } | null = null;
@@ -505,7 +497,6 @@ export class AirPrompterAgent implements AgentRuntime {
   private nextHeartbeatMs: number | null = null;
   private lastHeartbeatRefusal: string | null = null;
   private heartbeating: Promise<void> | null = null;
-  private haltWithoutContactWarned = false;
   private readonly localWindow: UpdateWindow | null;
   private readonly stampedRefusals = new Set<string>();
   /** T26: the runtime's own upload grant (serverless flushes under it) and the cadence the last heartbeat asked for. */
@@ -523,8 +514,10 @@ export class AirPrompterAgent implements AgentRuntime {
   private flushSegmentN = 0;
   private lastFlushMinute: number | null = null;
   private trustedRoot: RootMetadata;
+  /** The key a new run reference is minted under. */
   private readonly runRefKey: Buffer;
-  private audienceServerCapability: typeof AUDIENCE_CAPABILITY | null = null;
+  /** Every key a run reference may parse under: the current one, then a rotation's previous ones. */
+  private readonly runRefKeys: readonly Buffer[];
   private audienceTags: Readonly<Record<string,string>> = {};
   /** Bounded, names-only registration; active keys are kept ahead of recent stale names. */
   private readonly audienceTagKeys = new Set<string>();
@@ -549,10 +542,7 @@ export class AirPrompterAgent implements AgentRuntime {
     /** The writer identity (S6): this PROCESS's own id, fresh at every start; never a hostname, never the store's. */
     private readonly ownInstanceId: string,
     placement: { dir: string; from: SpoolDirSource; discovery: DiscoveryResult | null },
-    /**
-     * S6: what the runRef key is derived from — the STORE's id (store.json), which every process on the host shares, so a
-     * runRef minted by one worker parses in another (feedback lands wherever the request lands).
-     */
+    /** The fallback when no secret is set: the store's id, shared by every process on this host and nowhere else. */
     runRefSeed: string = ownInstanceId,
   ) {
     this.spoolDir = placement.dir;
@@ -561,7 +551,10 @@ export class AirPrompterAgent implements AgentRuntime {
     this.trustedRoot = trustedRoot;
     this.setTags(options.tags ?? {});
     for (const [tag,label] of Object.entries(options.promptLabels ?? {})) this.registerPromptLabel(tag,label);
-    this.runRefKey = createHmac("sha256", Buffer.from(runRefSeed, "utf8")).update("runRef").digest();
+    const runRefSecret = options.runRefSecret || options.apiKey;
+    this.runRefKey = runRefSecret ? Buffer.from(runRefKeyFrom(runRefSecret, options.agentId, options.target)) : createHmac("sha256", Buffer.from(runRefSeed, "utf8")).update("runRef").digest();
+    this.runRefKeys = [this.runRefKey, ...(options.runRefPreviousSecrets ?? []).map((secret) => Buffer.from(runRefKeyFrom(secret, options.agentId, options.target)))];
+    if (!runRefSecret) this.log({ event: "run_ref_key_store_scoped" });
     this.localWindow = options.apply?.window ? parseWindow(options.apply.window) : null;
     this.heartbeatIntervalSeconds = Math.min(3600, Math.max(30, Math.round(options.heartbeatSeconds ?? 300)));
     const serverless = (options.sync?.mode ?? "resident") === "on_invoke";
@@ -580,16 +573,9 @@ export class AirPrompterAgent implements AgentRuntime {
       },
       registerLabel: (tag) => this.registerPromptLabel(tag, this.audiencePromptLabels.get(tag) ?? tag),
       variables: this.variables,
-      leaseHalted: (tag) => {
-        try {
-          this.guardLease(tag);
-          return false;
-        } catch {
-          return true;
-        }
-      },
+      stampLease: () => this.guardLease(),
       stampDisabled: (generation, tag) => this.stampRefusal("disabled", generation, tag),
-      recordRun: (observation, nowMs) => this.spool.observe(observation, nowMs),
+      recordRun: (observation, nowMs) => this.observeGuarded(observation, nowMs),
       log: (event) => this.log(event),
       now: () => this.nowMs(),
       idleTimeoutMs: options.runIdleTimeoutMs ?? DEFAULT_RUN_IDLE_TIMEOUT_MS,
@@ -611,14 +597,15 @@ export class AirPrompterAgent implements AgentRuntime {
         );
       }
     }
+    // The slug feeds store paths and spool directories, so anything else never reaches the filesystem.
+    if (typeof options.target !== "string" || !TARGET_SLUG.test(options.target)) {
+      throw new AgentStartError("invalid_options", "options.target must be a lowercase slug: a letter, then up to 31 letters, digits or hyphens");
+    }
+    if (typeof options.agentId !== "string" || !AGENT_ID.test(options.agentId)) {
+      throw new AgentStartError("invalid_options", "options.agentId must be an agent id: a letter or digit, then up to 127 letters, digits, dots, underscores, colons or hyphens");
+    }
     const stateDir = options.stateDir ?? defaultStateDir();
     const pinnedRoot = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.root.hostedEnvironment ?? "prod", pinnedRoot: options.root.pinned }) : options.root;
-    if ((options.sync?.mode as string | undefined) === "daemon" || (options.sync as { daemonSocketPath?: unknown } | undefined)?.daemonSocketPath !== undefined) {
-      throw new AgentStartError(
-        "invalid_options",
-        'sync.mode "daemon" was removed in 0.3.0: the telemetry daemon (airprompterd) only ships telemetry and never serves a release. Start with the default mode (resident) — each process loads its release from its own store, the datastore or a vendored bundle — and keep the daemon running for telemetry (protocol/daemon.md)',
-      );
-    }
     const keyProvider = options.keyProvider ?? fileKey(join(SlotStore.path({ stateDir, agentId: options.agentId, target: options.target }), "store.key"), options.fs ?? nodeFs);
     let store: SlotStore;
     try {
@@ -712,6 +699,7 @@ export class AirPrompterAgent implements AgentRuntime {
       // fresh host then refused every legitimate release below it: a compromised store could brick a fleet's runtimes.
       const verdict = verifyManifest({ manifest: contents.manifest, root: this.trustedRoot, now, scope: { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target }, storedGeneration: updating ? store.state.generation : 0, payloads, countersignRoot: this.options.countersignRoot ?? null, ...(this.options.requireCountersign !== undefined ? { requireCountersign: this.options.requireCountersign } : {}) });
       if (!verdict.ok) {
+        if (verdict.directivesStand) this.takeDisables(contents.manifest.payload);
         this.log({ event: `${source}_refused`, reason: verdict.reason, bundleGeneration: generation });
         this.lastRefusal = verdict.reason;
         return { outcome: "refused", generation, reason: verdict.reason };
@@ -1293,6 +1281,7 @@ export class AirPrompterAgent implements AgentRuntime {
         ...(this.options.sync?.rootUrl ? { fetchRoot: () => this.fetchRoot(this.options.sync!.rootUrl!) } : {}),
         active: this.active,
         etag: this.etag,
+        strandedTried: this.strandedTried,
         edgePointerUrl: this.options.sync?.edgePointerUrl ?? null,
         edgeEtag: this.edgeEtag,
         skipPointer: this.pointerBehind,
@@ -1308,12 +1297,14 @@ export class AirPrompterAgent implements AgentRuntime {
           this.lastRefusal = reason;
           this.log({ event: "sync_refused", reason, generation });
         },
-        onDirectives: (payload) => {
+        onDirectives: (payload, options) => {
+          if (options?.reduceOnly) return this.takeDisables(payload);
           this.takeApplyPolicy(payload);
           this.takeDirectives(payload);
         },
       });
       this.etag = result.etag;
+      this.strandedTried = result.strandedTried;
       this.edgeEtag = result.edgeEtag;
       this.trustedRoot = result.trustedRoot;
       this.lastSyncMs = this.nowMs();
@@ -1410,12 +1401,30 @@ export class AirPrompterAgent implements AgentRuntime {
     if (requests.length) this.log({ event: "unlock_requested", generation: payload.generation, requests: requests.map((r) => ({ releaseDigest: r.releaseDigest, expiresAt: r.expiresAt, requestedBy: r.requestedBy })) });
   }
 
+  /**
+   * A manifest refused for a capability this SDK lacks, whose signature, scope and generation verified: its disables
+   * join what is in force and nothing else moves, so an emergency disable reaches a host that cannot read the release.
+   * Only reductions: a disable lifted there stays in force here until a manifest this SDK can read lifts it.
+   */
+  private takeDisables(payload: Manifest["payload"]): void {
+    if (this.standingDirectives && this.standingDirectives.generation > payload.generation) return;
+    const before = this.disabledNow();
+    // The active release's own directives plus this manifest's disables: each refused manifest replaces the last, so a
+    // lift undoes what a refused generation added and never what the active release says.
+    const own = this.active?.manifest.payload.directives ?? [];
+    const disables = (Array.isArray(payload.directives) ? payload.directives : []).filter((directive) => directive?.kind === "disable");
+    const seen = new Set(own.map((directive) => JSON.stringify(directive)));
+    this.standingDirectives = { generation: payload.generation, directives: [...own, ...disables.filter((directive) => !seen.has(JSON.stringify(directive)))] };
+    const after = this.disabledNow();
+    if (JSON.stringify(before) !== JSON.stringify(after)) this.log({ event: "disabled_by_directive", generation: payload.generation, ...after });
+  }
+
   /** What is disabled right now: the standing directives when they are as new as the active manifest, else the active manifest's own. */
   private disabledNow(): { agent: boolean; slots: string[]; arms: string[] } {
     // The public shape (status, heartbeat) is agent / slots / arms; the per-experiment detail stays in the resolver.
     const detail = !this.active ? (this.standingDirectives ? disabledFrom(this.standingDirectives.directives) : null) : this.resolver().disabled();
     if (!detail) return { agent: false, slots: [], arms: [] };
-    return { agent: detail.agent, slots: detail.slots, arms: [...detail.arms, ...Object.values(detail.armsByExperiment).flat()] };
+    return { agent: detail.agent, slots: detail.slots, arms: Object.values(detail.armsByExperiment).flat() };
   }
 
   /** S10: the runtime over the active release — resolution, the ramp walk and rendering live in `@airprompter/agent-runtime`. */
@@ -1480,10 +1489,10 @@ export class AirPrompterAgent implements AgentRuntime {
     const report = this.spoolReporter?.() ?? null;
     return {
       protocol: PROTOCOL_VERSION,
-      capabilities: [AUDIENCE_CAPABILITY],
-      ...(this.audienceServerCapability === AUDIENCE_CAPABILITY ? {
-        registration: {tagKeys: [...this.audienceTagKeys].sort(), prompts: [...this.audiencePromptLabels].sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0).map(([tag,displayName])=>({tag,displayName}))},
-      } : {}),
+      capabilities: [...SUPPORTED_CAPABILITIES],
+      registration: {tagKeys: [...this.audienceTagKeys].sort(), prompts: [...this.audiencePromptLabels].sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0).map(([tag,displayName])=>({tag,displayName}))},
+      // Cumulative since this process started, so a retried heartbeat cannot double count. Ticket 11a fills the map.
+      runCounters: { passthrough: {} },
       instanceId: this.ownInstanceId,
       instanceClass: this.options.telemetry?.instanceClass ?? ((this.options.sync?.mode ?? "resident") === "on_invoke" ? "ephemeral" : "resident"),
       sdk: this.options.sdk ?? { name: "agent-sdk-typescript", version: SDK_VERSION },
@@ -1498,12 +1507,10 @@ export class AirPrompterAgent implements AgentRuntime {
       ...(status.applyState === "refused" && status.lastRefusal === "model_unavailable" && this.unavailableModels.length > 0 ? { unavailableModels: this.unavailableModels.slice(0, 16) } : {}),
       ...(status.signingKeyId ? { signingKeyId: status.signingKeyId } : {}),
       storageProtection: status.storageProtection,
-      // 0.3.4: the variable names this application can fill from its own sources — names, never values — so the seal
-      // can warn about a `source: runtime` variable no live instance fills before the promotion, not after. Sent only
-      // once the control plane has shown it speaks 0.3.4 (the active manifest's protocol): an older service refuses
-      // the whole heartbeat over an unknown key, and a refused heartbeat is worse than an unreported name. Past that
-      // gate the key is always sent — an empty list says "I fill nothing", which is a report; absence says nothing.
-      catalog: { models: [...new Set(models)].slice(0, 256), ...(protocolAtLeast(this.active?.manifest.payload.protocol ?? "0.0.0", "0.3.4") ? { variables: this.variables.names().slice(0, 256) } : {}), reportedAt: this.nowIso() },
+      // The variable names this application can fill from its own sources, names and never values, so the seal can warn
+      // about a `source: runtime` variable no live instance fills before the promotion, not after. An empty list says
+      // "I fill nothing".
+      catalog: { models: [...new Set(models)].slice(0, 256), variables: this.variables.names().slice(0, 256), reportedAt: this.nowIso() },
       lease: { ...(status.leaseExpiresAt ? { expiresAt: status.leaseExpiresAt } : {}), expired: status.leaseExpired },
       ...(store ? { localRollback: { active: store.heldBackBelow !== undefined, forced: store.forcedDowngrade === true } } : {}),
       spool: {
@@ -1565,13 +1572,6 @@ export class AirPrompterAgent implements AgentRuntime {
 
   /** T26: the heartbeat's answer carries the grant (or a hold) and the upload cadence. */
   private takeGrant(response: Record<string, unknown>): void {
-    const capabilities = response.capabilities;
-    const validCapabilities = Array.isArray(capabilities)
-      && capabilities.length >= 1
-      && capabilities.length <= 16
-      && capabilities.every((entry) => typeof entry === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(entry))
-      && new Set(capabilities).size === capabilities.length;
-    this.audienceServerCapability = response.protocol === AUDIENCE_PROTOCOL_VERSION && validCapabilities && capabilities.includes(AUDIENCE_CAPABILITY) ? AUDIENCE_CAPABILITY : null;
     const interval = Number(response.uploadIntervalSeconds);
     if (Number.isFinite(interval) && interval >= 1) this.uploadIntervalSeconds = interval;
     const grant = response.uploadGrant as UploadGrant | undefined;
@@ -1741,25 +1741,11 @@ export class AirPrompterAgent implements AgentRuntime {
     return new Date(instant(manifest.issuedAt) + manifest.leaseSeconds * 1000).toISOString();
   }
 
-  /** The lease: the facade's rule (it knows the origin); the runtime knows nothing of contact. */
-  private guardLease(tag: string): void {
+  /** The lease: the facade's rule (it knows the origin); the runtime knows nothing of contact. A lapsed lease is staleness: the spool carries one row and rendering goes on. */
+  private guardLease(): void {
     const active = this.active!;
-    const payload = active.manifest.payload;
     const expiresAt = this.leaseExpiresAt();
-    if (expiresAt && instant(expiresAt) <= this.nowMs()) {
-      // §6.4: degrade keeps serving and reports it; halt stops rendering. Either way the spool carries one row.
-      this.stampRefusal("lease_expired", active.generation, null);
-      if (payload.onLeaseExpiry === "halt") {
-        // A runtime with no way to call home (no key, offline sync) can never renew: halt there is a self-inflicted
-        // outage, so it degrades and says so once. The console refuses to save halt on an offline environment too.
-        if (!this.client) {
-          if (!this.haltWithoutContactWarned) {
-            this.haltWithoutContactWarned = true;
-            this.log({ event: "halt_without_contact_degraded", generation: active.generation });
-          }
-        } else throw new RenderRefusedError("lease_expired", tag, active.generation);
-      }
-    }
+    if (expiresAt && instant(expiresAt) <= this.nowMs()) this.stampRefusal("lease_expired", active.generation, null);
   }
 
   /** S10: the runtime resolves; the facade turns a refusal into the spool row and the thrown error, and guards the lease. */
@@ -1772,7 +1758,7 @@ export class AirPrompterAgent implements AgentRuntime {
       this.stampRefusal("disabled", active.generation, outcome.tag);
       throw new RenderRefusedError("disabled", tag, active.generation);
     }
-    this.guardLease(tag);
+    this.guardLease();
     return { slot: outcome.slot, arm: outcome.arm, bucket: outcome.bucket, ...(outcome.audienceIds ? {audienceIds: outcome.audienceIds} : {}), runMinute: outcome.runMinute! };
   }
 
@@ -1848,7 +1834,7 @@ export class AirPrompterAgent implements AgentRuntime {
     try {
       return render();
     } catch (error) {
-      if (errorNamed(error, "MissingVariableError")) this.spool.observe({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
+      if (errorNamed(error, "MissingVariableError")) this.observeGuarded({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
       throw error;
     }
   }
@@ -1860,7 +1846,7 @@ export class AirPrompterAgent implements AgentRuntime {
     } catch (error) {
       if (isVariableSourceError(error)) {
         this.log({ event: "variable_source_failed", tag: context.tag, name: error.variable, reason: error.reason });
-        this.spool.observe({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
+        this.observeGuarded({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
       }
       throw error;
     }
@@ -1884,7 +1870,7 @@ export class AirPrompterAgent implements AgentRuntime {
   workflow(tag: string, options: { subject?: string } = {}) {
     const resolved = this.resolveSlot(tag, options.subject);
     const workflow = this.resolver().workflow(resolved);
-    for (const step of workflow.steps) this.renders.register(step.text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
+    for (const step of workflow.steps) this.renders.register(step.text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag, step: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
     /** Render one workflow step with the workflow's variable rules. */
     const resolver = this.resolver();
     const row = { tag, artifactId: resolved.slot.artifactId, versionId: resolved.slot.versionId, arm: workflow.arm, model: workflow.model, ...(resolved.audienceIds ? { audienceIds: resolved.audienceIds } : {}), ...(resolved.runMinute ? { runMinute: resolved.runMinute } : {}) };
@@ -1894,7 +1880,7 @@ export class AirPrompterAgent implements AgentRuntime {
       const plan = planFill({ tag: step.stepId, variables: resolved.slot.variables, text: step.text, values, registry: this.variables });
       const filled = await this.fillObserved(plan, { tag: step.stepId, subject: options.subject, versionId: step.versionId, arm: workflow.arm }, row);
       const text = this.renderObserved(() => resolver.renderText({ tag: step.stepId, text: step.text, variables: resolved.slot.variables, values: filled.values, fenced: filled.fenced }), row);
-      this.renders.register(text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
+      this.renders.register(text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag, step: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
       this.sayStricter(step.stepId, resolved.slot, filled);
       return text;
     };
@@ -1929,15 +1915,24 @@ export class AirPrompterAgent implements AgentRuntime {
     }
   }
 
-  /** Content-free measurements for one model call. */
+  /** Content-free measurements for one one-call run, with `toolCalls` and a `step` when the caller has them. */
   report(observation: Observation): void {
-    this.spool.observe(observation, this.nowMs());
+    this.observeGuarded(observation, this.nowMs());
+  }
+
+  /** A row that cannot be written is logged and dropped: telemetry never replaces what the caller is doing. */
+  private observeGuarded(observation: Observation, nowMs: number): void {
+    try {
+      this.spool.observe(observation, nowMs);
+    } catch (error) {
+      this.log({ event: "observation_dropped", reason: (error as Error).message });
+    }
   }
 
   /** Observe a provider call without changing its return or error. */
-  async observe<T>(rendered: Pick<Rendered, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "runMinute"> & { artifactId?: string }, call: () => Promise<T> | T, options: ObserveOptions = {}): Promise<T> {
-    // T29: the slot's declared output checks run on the result here, on the host, and only their counts leave.
-    const declared = this.declaredChecksFor(rendered.tag, rendered.arm);
+  async observe<T>(rendered: Pick<Rendered, "tag" | "artifactId" | "versionId" | "arm" | "model" | "audienceIds" | "runMinute"> & { step?: string }, call: () => Promise<T> | T, options: ObserveOptions = {}): Promise<T> {
+    // T29: the slot's declared output checks run on the result here, on the host, and only their counts leave. A step's output is not the slot's.
+    const declared = rendered.step === undefined ? this.declaredChecksFor(rendered.tag, rendered.arm) : [];
     const evaluate: ObserveOptions["evaluate"] | undefined =
       declared.length > 0
         ? (result, usage) => {
@@ -1947,7 +1942,7 @@ export class AirPrompterAgent implements AgentRuntime {
             return { passed: outcome.passed, failed: outcome.failed };
           }
         : undefined;
-    return observeCall(rendered, call, (observation) => this.spool.observe(observation, this.nowMs()), { ...options, ...(evaluate ? { evaluate } : {}), now: () => this.nowMs() });
+    return observeCall(rendered, call, (observation) => this.spool.observe(observation, this.nowMs()), { ...options, ...(evaluate ? { evaluate } : {}), now: () => this.nowMs(), log: (event) => this.log(event) });
   }
 
   /**
@@ -1965,13 +1960,17 @@ export class AirPrompterAgent implements AgentRuntime {
     return outcome;
   }
 
+  /** A servable slot as an arm serves it: the arm's override when it carries one. */
+  private slotOn(payload: ManifestPayload, tag: string, arm: string): ManifestSlot | undefined {
+    const override = servableExperiments(payload).find((experiment) => experiment.tag === tag)?.arms.find((entry) => entry.arm === arm)?.overrides.find((entry) => entry.tag === tag);
+    return override ?? servableSlots(payload).find((entry) => entry.tag === tag);
+  }
+
   /** The active manifest's checks for a slot on an arm (the arm's override when it carries one). */
   private declaredChecksFor(tag: string, arm: string): NonNullable<ManifestSlot["outputChecks"]> {
     const payload = this.active?.manifest.payload;
     if (!payload) return [];
-    const override = experimentForTag(payload, tag)?.arms.find((entry) => entry.arm === arm)?.overrides.find((entry) => entry.tag === tag);
-    const slot = override ?? payload.slots.find((entry) => entry.tag === tag);
-    return slot?.outputChecks ?? [];
+    return this.slotOn(payload, tag, arm)?.outputChecks ?? [];
   }
 
   // ------------------------------------------------------------------ T33: wrapped clients
@@ -1983,12 +1982,13 @@ export class AirPrompterAgent implements AgentRuntime {
 
   /** Run `fn` with every wrapped call inside it (across awaits) attributed to `rendered`, whatever text it carries. */
   attribute<T>(rendered: Pick<Rendered, "tag" | "artifactId" | "versionId" | "arm" | "model" | "inference" | "audienceIds" | "runMinute"> | (Pick<Rendered, "artifactId" | "versionId" | "model" | "inference"> & { stepId: string; arm?: string; runRef?: string }), fn: () => T): T {
-    // A workflow step attributes under its step id (`<tag>#<n>`); its arm is the one its run reference carries (the
-    // workflow's), unless the caller names one.
-    const tag = "stepId" in rendered ? rendered.stepId : rendered.tag;
-    const arm = rendered.arm ?? ("runRef" in rendered && rendered.runRef ? parseRunRef(rendered.runRef, this.runRefKey)?.arm : undefined) ?? "none";
-    const cohort = "audienceIds" in rendered ? rendered : ("runRef" in rendered && rendered.runRef ? parseRunRef(rendered.runRef, this.runRefKey) : null);
-    return withAttribution({ ...(cohort?.audienceIds ? {audienceIds: cohort.audienceIds} : {}), runMinute: cohort?.runMinute!, artifactId: cohort?.artifactId ?? rendered.artifactId, tag, versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
+    // A workflow step attributes under the slot tag with its step id in `step`; its arm is the one its run reference
+    // carries (the workflow's), unless the caller names one.
+    const entry = "runRef" in rendered && rendered.runRef ? parseRunRef(rendered.runRef, this.runRefKeys)?.entries[0] : undefined;
+    const tag = "stepId" in rendered ? (entry?.tag ?? rendered.stepId.split("#")[0]!) : rendered.tag;
+    const arm = rendered.arm ?? entry?.arm ?? "none";
+    const cohort = "audienceIds" in rendered ? rendered : entry;
+    return withAttribution({ ...(cohort?.audienceIds ? {audienceIds: cohort.audienceIds} : {}), runMinute: cohort?.runMinute!, artifactId: entry?.artifactId ?? rendered.artifactId, tag, ...("stepId" in rendered ? { step: rendered.stepId } : {}), versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
   }
 
   /** A Vercel AI SDK middleware for `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })`. */
@@ -2025,8 +2025,8 @@ export class AirPrompterAgent implements AgentRuntime {
 
   private async runGoldenFor(manifest: Manifest, payloads: ReadonlyMap<string, Uint8Array>, invoke: GoldenInvoke, concurrency: number | undefined, onlyTag?: string): Promise<GoldenReport[]> {
     const payload = manifest.payload;
-    const targets: Array<{ slot: ManifestSlot; arm: string }> = payload.slots.filter((slot) => slot.goldenSet && (!onlyTag || slot.tag === onlyTag)).map((slot) => ({ slot, arm: "none" }));
-    for (const experiment of experimentsOf(payload)) {
+    const targets: Array<{ slot: ManifestSlot; arm: string }> = servableSlots(payload).filter((slot) => slot.goldenSet && (!onlyTag || slot.tag === onlyTag)).map((slot) => ({ slot, arm: "none" }));
+    for (const experiment of servableExperiments(payload)) {
       for (const arm of experiment.arms) {
         for (const override of arm.overrides) if (override.goldenSet && (!onlyTag || override.tag === onlyTag)) targets.push({ slot: override, arm: arm.arm });
       }
@@ -2068,10 +2068,9 @@ export class AirPrompterAgent implements AgentRuntime {
   }
 
   private promptRubricFor(runRef: string): JudgeRubric {
-    const facts = parseRunRef(runRef, this.runRefKey);
+    const entry = parseRunRef(runRef, this.runRefKeys)?.entries[0];
     const payload = this.active?.manifest.payload;
-    const override = facts && payload ? experimentForTag(payload, facts.tag)?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag) : undefined;
-    const slot = override ?? (facts ? payload?.slots.find((entry) => entry.tag === facts.tag) : undefined);
+    const slot = entry && payload ? this.slotOn(payload, entry.tag, entry.arm) : undefined;
     const text = slot ? this.active?.payloads.get(slot.contentHash) : undefined;
     const criteria = text ? rubricFromPrompt(Buffer.from(text).toString("utf8")) : [];
     return { name: "prompt", criteria, protection: [...JUDGE_RUBRICS.protection.criteria] };
@@ -2079,7 +2078,8 @@ export class AirPrompterAgent implements AgentRuntime {
 
   /** File bounded quality signals; `options.model` names the actual provider model when it overrode the slot. */
   feedback(runRef: string, signals: Record<string, unknown>, options: { model?: string } = {}): boolean {
-    const facts = parseRunRef(runRef, this.runRefKey);
+    if (typeof runRef !== "string") return false;
+    const facts = parseRunRef(runRef, this.runRefKeys)?.entries[0];
     if (!facts) return false;
     if (options.model !== undefined && (typeof options.model !== "string" || options.model.length < 1 || options.model.length > 128 || /[\u0000-\u001f\u007f]/u.test(options.model))) {
       this.log({ event: "feedback_rejected", rejected: { model: "invalid_model" } });
@@ -2089,10 +2089,7 @@ export class AirPrompterAgent implements AgentRuntime {
     if (Object.keys(normalized.rejected).length) this.log({ event: "feedback_rejected", rejected: normalized.rejected });
     if (!normalized.accepted) return false;
     // Feedback rides on the run's window: same dimension set, no extra count (the run was already counted).
-    const payload = this.active?.manifest.payload;
-    const override = payload ? experimentForTag(payload, facts.tag)?.arms.find((arm) => arm.arm === facts.arm)?.overrides.find((entry) => entry.tag === facts.tag) : undefined;
-    const slot = override ?? payload?.slots.find((entry) => entry.tag === facts.tag);
-    this.spool.outcomes({ tag: facts.tag, ...(facts.artifactId ? {artifactId: facts.artifactId} : {}), versionId: facts.versionId, arm: facts.arm, model: options.model ?? facts.model ?? (slot?.versionId === facts.versionId ? slot.model : "unknown"), ...(facts.audienceIds ? {audienceIds: facts.audienceIds} : {}), ...(facts.runMinute ? {outcomeRunMinute: facts.runMinute} : {}) }, normalized.outcomes, this.nowMs());
+    this.spool.outcomes({ tag: facts.tag, artifactId: facts.artifactId, versionId: facts.versionId, arm: facts.arm, model: options.model ?? facts.model, ...(facts.audienceIds ? {audienceIds: facts.audienceIds} : {}), outcomeRunMinute: facts.runMinute }, normalized.outcomes, this.nowMs());
     return true;
   }
 
@@ -2102,7 +2099,7 @@ export class AirPrompterAgent implements AgentRuntime {
   }
 
   /**
-   * S14: a request handler for Node's `http` (or any framework with `(req, res)`): `GET /healthz` → 200 / 503 with the
+   * S14: a request handler for Node's `http` (or any framework with `(req, res)`): `GET /healthz` → 200 with the
    * document. Mount it where your probes look; nothing else is served.
    */
   healthzHandler(): (request: { method?: string }, response: { writeHead(status: number, headers: Record<string, string>): unknown; end(body?: string): unknown }) => void {
@@ -2133,8 +2130,8 @@ export class AirPrompterAgent implements AgentRuntime {
       const names = unsourced({ variables: slot.variables, values: {}, registry: this.variables });
       if (names.length > 0) seen.set(`${slot.tag}\u0000${arm}`, { tag: slot.tag, arm, names });
     };
-    for (const slot of payload.slots) consider(slot, "none");
-    for (const experiment of experimentsOf(payload)) for (const arm of experiment.arms) for (const override of arm.overrides) consider(override, arm.arm);
+    for (const slot of servableSlots(payload)) consider(slot, "none");
+    for (const experiment of servableExperiments(payload)) for (const arm of experiment.arms) for (const override of arm.overrides) consider(override, arm.arm);
     return { sources, unsourced: [...seen.values()].sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : a.arm < b.arm ? -1 : 1)) };
   }
 
@@ -2145,14 +2142,14 @@ export class AirPrompterAgent implements AgentRuntime {
     const depth = this.sink.depth?.() ?? { segments: 0, bytes: 0 };
     // S9/S16: every experiment's plan as this host walks it — per slot, each on its own clock and retreat.
     const ramps: AgentRampStatus[] = manifest
-      ? experimentsOf(manifest).map((experiment) => {
+      ? servableExperiments(manifest).map((experiment) => {
           const arms = this.resolver().arms(experiment);
           const nowMs = this.nowMs();
           const plan = experiment.ramp ?? [];
           let step = -1;
           for (let i = 0; i < plan.length; i += 1) if (instant(plan[i]!.notBefore) <= nowMs) step = i;
           const next = plan[step + 1] ?? null;
-          return { experimentId: experiment.experimentId, tag: experiment.tag ?? null, weightBps: arms ? arms.map((arm) => arm.weightBps) : rampWeightsAt(experiment.arms, experiment.ramp, nowMs), arms: experiment.arms.map((arm) => arm.arm), step, nextStepAt: next ? next.notBefore : null, plan: plan.map((entry) => ({ notBefore: entry.notBefore, weightBps: [...entry.weightBps] })) };
+          return { experimentId: experiment.experimentId, tag: experiment.tag, weightBps: arms ? arms.map((arm) => arm.weightBps) : rampWeightsAt(experiment.arms, experiment.ramp, nowMs), arms: experiment.arms.map((arm) => arm.arm), step, nextStepAt: next ? next.notBefore : null, plan: plan.map((entry) => ({ notBefore: entry.notBefore, weightBps: [...entry.weightBps] })) };
         })
       : [];
     return {
@@ -2165,7 +2162,6 @@ export class AirPrompterAgent implements AgentRuntime {
       signingKeyId: this.active?.signingKeyId ?? null,
       leaseExpiresAt,
       leaseExpired: leaseExpiresAt ? instant(leaseExpiresAt) <= this.nowMs() : false,
-      onLeaseExpiry: manifest?.onLeaseExpiry ?? null,
       lastContactAt: this.lastContactMs === null ? null : new Date(this.lastContactMs).toISOString(),
       forcedDowngrade: state?.forcedDowngrade === true,
       disabled: this.disabledNow(),
@@ -2297,5 +2293,5 @@ function defaultStateDir(): string {
 /** T34: whether any slot (or arm override) of a manifest carries a golden set. */
 function manifestHasGolden(manifest: Manifest): boolean {
   const payload = manifest.payload;
-  return payload.slots.some((slot) => !!slot.goldenSet) || experimentsOf(payload).some((experiment) => experiment.arms.some((arm) => arm.overrides.some((override) => !!override.goldenSet)));
+  return servableSlots(payload).some((slot) => !!slot.goldenSet) || servableExperiments(payload).some((experiment) => experiment.arms.some((arm) => arm.overrides.some((override) => !!override.goldenSet)));
 }

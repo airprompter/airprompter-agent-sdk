@@ -18,12 +18,11 @@ import { generateKeyPairSync } from "node:crypto";
 
 import { canonicalBytes, sha256Prefixed } from "../protocol/canonicalJson.js";
 import { keyThumbprint, publicJwkOf, releaseDigest, signBytes } from "../protocol/trust.js";
-import { experimentsOf } from "../protocol/types.js";
-import type { Manifest, ManifestPayload, ManifestSlot, P256PrivateJwk, RootMetadata, RootMetadataSigned, Target } from "../protocol/types.js";
+import { PROTOCOL_VERSION } from "../protocol/version.js";
+import type { HostedEnvironment, Manifest, ManifestPayload, ManifestSlot, P256PrivateJwk, RootMetadata, RootMetadataSigned, Target } from "../protocol/types.js";
 import type { FetchLike } from "../control/client.js";
 
-/** Baseline fixtures stay on the established non-audience wire unless a test opts into protocol 2 explicitly. */
-export const PROTOCOL = "0.3.4";
+export const PROTOCOL = PROTOCOL_VERSION;
 
 export function newKey(): P256PrivateJwk {
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
@@ -31,7 +30,7 @@ export function newKey(): P256PrivateJwk {
   return { kty: "EC", crv: "P-256", x: jwk.x!, y: jwk.y!, d: jwk.d! };
 }
 
-export function rootDocument(input: { rootKey: P256PrivateJwk; signingKeys: P256PrivateJwk[]; environment: Target; version?: number; expires?: string; purpose?: "platform" | "countersign" }): RootMetadata {
+export function rootDocument(input: { rootKey: P256PrivateJwk; signingKeys: P256PrivateJwk[]; environment: HostedEnvironment; version?: number; expires?: string; purpose?: "platform" | "countersign" }): RootMetadata {
   const keys: RootMetadataSigned["keys"] = {};
   const rootId = keyThumbprint(input.rootKey);
   keys[rootId] = { keyType: "ecdsa-p256", scheme: "ES256", publicKey: publicJwkOf(input.rootKey) };
@@ -74,8 +73,6 @@ export class FakeControlPlane {
   generation = 0;
   edgeEtag = 0;
   requireCountersign = false;
-  /** Authenticated capability echo; tests may add unrelated future capabilities. */
-  heartbeatCapabilities: unknown = ["audience"];
 
   /**
    * Fresh keys by default (a test). `airprompter dev` (S12) hands in the keys it persisted, so the root a customer
@@ -85,12 +82,12 @@ export class FakeControlPlane {
     readonly scope: { organizationId: string; agentId: string; target: Target },
     readonly apiKey = "apa_live_testkey",
     keys: { rootKey?: P256PrivateJwk; signingKey?: P256PrivateJwk } = {},
-    /** The hosted environment the root governs; by default the scope's target (the common test shape). */
-    options: { hostedEnvironment?: Target } = {},
+    /** The hosted environment the root governs; by default the one named like the stage, else `dev`. */
+    options: { hostedEnvironment?: HostedEnvironment } = {},
   ) {
     this.rootKey = keys.rootKey ?? newKey();
     this.signingKey = keys.signingKey ?? newKey();
-    this.root = rootDocument({ rootKey: this.rootKey, signingKeys: [this.signingKey], environment: options.hostedEnvironment ?? scope.target });
+    this.root = rootDocument({ rootKey: this.rootKey, signingKeys: [this.signingKey], environment: options.hostedEnvironment ?? (scope.target === "staging" || scope.target === "prod" ? scope.target : "dev") });
   }
 
   slot(spec: SlotSpec): ManifestSlot {
@@ -207,7 +204,7 @@ export class FakeControlPlane {
     return { status: 204, body: "" };
   }
 
-  promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiment" | "experiments" | "directives" | "onLeaseExpiry" | "unlockWindow">> & { signWith?: P256PrivateJwk; generation?: number; /** Seal as an older service would (same major): what a runtime sends depends on it. */ protocol?: string } = {}): Manifest {
+  promote(slots: ManifestSlot[], options: Partial<Pick<ManifestPayload, "applyPolicy" | "leaseSeconds" | "experiments" | "directives" | "unlockWindow" | "observations" | "requiredCapabilities">> & { signWith?: P256PrivateJwk; generation?: number; /** Seal as an older service would (same major): what a runtime sends depends on it. */ protocol?: string } = {}): Manifest {
     const sorted = [...slots].sort((a, b) => (a.tag < b.tag ? -1 : 1));
     this.generation = options.generation ?? this.generation + 1;
     const payload: ManifestPayload = {
@@ -217,12 +214,12 @@ export class FakeControlPlane {
       releaseDigest: releaseDigest(sorted),
       issuedAt: new Date().toISOString(),
       leaseSeconds: options.leaseSeconds ?? 3600,
-      onLeaseExpiry: options.onLeaseExpiry ?? "degrade",
       applyPolicy: options.applyPolicy ?? "auto",
       ...(options.unlockWindow ? { unlockWindow: options.unlockWindow } : {}),
       requireCountersign: this.requireCountersign,
       slots: sorted,
-      ...(options.experiment ? { experiment: options.experiment } : {}),
+      ...(options.requiredCapabilities ? { requiredCapabilities: options.requiredCapabilities } : {}),
+      ...(options.observations ? { observations: options.observations } : {}),
       ...(options.experiments ? { experiments: options.experiments } : {}),
       directives: options.directives ?? [],
     };
@@ -280,7 +277,7 @@ export class FakeControlPlane {
         if (slotsMatch[1] !== this.scope.agentId || slotsMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "Forbidden", code: "forbidden", detail: slotsMatch[1] !== this.scope.agentId ? "agent_mismatch" : "target_mismatch" }));
         if (!this.current) return respond(404, JSON.stringify({ error: "nothing is promoted to this environment", code: "nothing_promoted" }));
         const payload = this.current.manifest.payload;
-        return respond(200, JSON.stringify({ agentId: payload.agentId, target: payload.target, generation: payload.generation, releaseDigest: payload.releaseDigest, slots: payload.slots.map((pin) => ({ tag: pin.tag, kind: pin.kind, model: pin.model, variables: pin.variables, ...(pin.inference ? { inference: pin.inference } : {}), steps: pin.steps ? pin.steps.map((s) => ({ stepId: s.stepId, ...(s.inference ? { inference: s.inference } : {}) })) : null })), experiment: payload.experiment ? { salt: payload.experiment.salt, subjectKey: payload.experiment.subjectKey, arms: payload.experiment.arms.map((a) => a.arm) } : null, experiments: experimentsOf(payload).map((e) => ({ experimentId: e.experimentId, tag: e.tag ?? null, salt: e.salt, subjectKey: e.subjectKey, arms: e.arms.map((a) => a.arm) })) }), { "x-agent-generation": String(payload.generation) });
+        return respond(200, JSON.stringify({ agentId: payload.agentId, target: payload.target, generation: payload.generation, releaseDigest: payload.releaseDigest, slots: payload.slots.map((pin) => ({ tag: pin.tag, kind: pin.kind, model: pin.model, variables: pin.variables, ...(pin.inference ? { inference: pin.inference } : {}), steps: pin.steps ? pin.steps.map((s) => ({ stepId: s.stepId, ...(s.inference ? { inference: s.inference } : {}) })) : null })), experiments: (payload.experiments ?? []).map((e) => ({ experimentId: e.experimentId, tag: e.tag, salt: e.salt, subjectKey: e.subjectKey, arms: e.arms.map((a) => a.arm) })) }), { "x-agent-generation": String(payload.generation) });
       }
       // T9: the heartbeat — the protocol schema's required keys, content-free; answers the cadence and the expiry.
       const heartbeatMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/heartbeat$/.exec(parsed.pathname);
@@ -297,14 +294,10 @@ export class FakeControlPlane {
           if (!(key in body)) return respond(400, JSON.stringify({ error: `heartbeat: missing ${key}` }));
         }
         for (const key of Object.keys(body)) {
-          if (!["protocol", "capabilities", "registration", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
+          if (!["protocol", "capabilities", "registration", "runCounters", "instanceId", "instanceClass", "sdk", "host", "syncMode", "heartbeatIntervalSeconds", "generation", "activeReleaseDigest", "stagedReleaseDigest", "applyState", "refusal", "signingKeyId", "storageProtection", "catalog", "lease", "localRollback", "spool", "unlockRequestsSeen", "disabled", "applyPolicy"].includes(key)) return respond(400, JSON.stringify({ error: `heartbeat: unknown ${key}` }));
         }
         this.heartbeats.push(body);
         const answer: Record<string, unknown> = { pollSeconds: 30, uploadIntervalSeconds: this.uploadIntervalSeconds, heartbeatIntervalSeconds: this.heartbeatIntervalSeconds, expiresAt: new Date(Date.now() + this.heartbeatIntervalSeconds * 3000).toISOString() };
-        if (body.protocol === "2.0.0" && Array.isArray(body.capabilities) && body.capabilities.includes("audience")) {
-          answer.protocol = "2.0.0";
-          answer.capabilities = this.heartbeatCapabilities;
-        }
         // S3: the authenticated answer names the origin's generation; a runtime whose pointer says less goes to the manifest.
         if (this.heartbeatLatestGeneration) answer.latestGeneration = this.current?.manifest.payload.generation ?? 0;
         if (this.grantBaseUrl) {

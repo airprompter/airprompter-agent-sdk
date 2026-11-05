@@ -17,9 +17,12 @@ import test from "node:test";
 import { AirPrompterAgent, AgentStartError, RenderRefusedError } from "../packages/sdk/src/agent.js";
 import { createEncryptedBundle, createPlaintextBundle } from "../packages/core/src/bundle/apbundle.js";
 import { generateX25519KeyPair } from "../packages/core/src/bundle/hpke.js";
-import { keyThumbprint, publicJwkOf, releaseDigest } from "../packages/core/src/protocol/trust.js";
+import { keyThumbprint, publicJwkOf, referencedPayloads, releaseDigest } from "../packages/core/src/protocol/trust.js";
+import type { ManifestSlot } from "../packages/core/src/protocol/types.js";
+import { requiredModelsMissing } from "../packages/sync/src/sync/loop.js";
+import { PROTOCOL_VERSION } from "../packages/core/src/protocol/version.js";
 import { MissingVariableError } from "../packages/core/src/render/template.js";
-import { mintRunRef, parseRunRef, type RunRefFacts } from "../packages/core/src/render/runRef.js";
+import { mintRunRef, newRunId, parseRunRef, type RunRefEntry, type RunRefFacts } from "../packages/core/src/render/runRef.js";
 import type { WindowRow } from "../packages/telemetry/src/spool/writer.js";
 import { FakeControlPlane, newKey } from "./helpers/controlPlane.js";
 
@@ -33,33 +36,22 @@ test("runRef rejects malformed non-ASCII MAC input without throwing", () => {
   assert.equal(parseRunRef(`${body}.${"A".repeat(21)}é`, key), null);
 });
 
-test("artifact-aware runRef facts round-trip as an atomic artifact and model pair", () => {
+test("runRef facts round-trip, and every entry field is checked at mint and at parse", () => {
   const key = Buffer.alloc(32);
-  const facts: RunRefFacts = { agentId: "agt_1", target: "prod", tag: "support.reply", versionId: "ver_1", arm: "none", generation: 1, bucket: null, artifactId: "prm_1", model: "gpt-5" };
+  const entry: RunRefEntry = { tag: "support.reply", artifactId: "prm_1", versionId: "ver_1", model: "gpt-5", arm: "none", bucket: null, runMinute: "2026-09-12T14:03:00Z" };
+  const facts: RunRefFacts = { agentId: "agt_1", target: "prod", runId: newRunId(), entries: [entry] };
+  assert.equal(facts.runId.length, 22);
   assert.deepEqual(parseRunRef(mintRunRef(facts, key), key), facts);
-  assert.throws(() => mintRunRef({ ...facts, model: undefined } as unknown as RunRefFacts, key), /run_ref_facts_invalid/);
-  assert.throws(() => mintRunRef({ ...facts, artifactId: 123 } as unknown as RunRefFacts, key), /run_ref_facts_invalid/);
-  assert.throws(() => mintRunRef({ ...facts, artifactId: "prm_😀" }, key), /run_ref_facts_invalid/);
-  assert.throws(() => mintRunRef({ ...facts, model: "gpt·5" }, key), /run_ref_facts_invalid/);
-  for (const field of ["agentId", "target", "tag", "versionId", "arm"] as const) {
-    assert.throws(() => mintRunRef({ ...facts, [field]: `${facts[field]}·extra` }, key), /run_ref_facts_invalid/, field);
+  assert.deepEqual(parseRunRef(mintRunRef({ ...facts, entries: [{ ...entry, bucket: 9999 }] }, key), key), { ...facts, entries: [{ ...entry, bucket: 9999 }] });
+  const bad = (change: Record<string, unknown>) => ({ ...facts, entries: [{ ...entry, ...change }] }) as unknown as RunRefFacts;
+  for (const change of [{ model: undefined }, { artifactId: 123 }, { artifactId: "prm_😀" }, { model: "gpt 5" }, { tag: "" }, { versionId: "" }, { arm: "" }, { runMinute: "2026-09-12T14:03:10Z" }, { audienceIds: ["raw-device"] }, { bucket: Number.NaN }, { bucket: Number.POSITIVE_INFINITY }, { bucket: 1.5 }, { bucket: -1 }, { bucket: 10000 }]) {
+    assert.throws(() => mintRunRef(bad(change), key), /run_ref_facts_invalid/, JSON.stringify(change));
   }
-  assert.deepEqual(parseRunRef(mintRunRef({ ...facts, generation: Number.MAX_SAFE_INTEGER, bucket: 9999 }, key), key), { ...facts, generation: Number.MAX_SAFE_INTEGER, bucket: 9999 });
-  for (const generation of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, 0, -1, Number.MAX_SAFE_INTEGER + 1]) {
-    assert.throws(() => mintRunRef({ ...facts, generation }, key), /run_ref_facts_invalid/, `generation ${generation}`);
-  }
-  for (const bucket of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1, 10000]) {
-    assert.throws(() => mintRunRef({ ...facts, bucket }, key), /run_ref_facts_invalid/, `bucket ${bucket}`);
-  }
+  for (const field of ["agentId", "target", "runId"] as const) assert.throws(() => mintRunRef({ ...facts, [field]: "" }, key), /run_ref_facts_invalid/, field);
   const signed = (body: string) => `${Buffer.from(body).toString("base64url")}.${createHmac("sha256", key).update(body).digest("base64url").slice(0, 22)}`;
-  for (const generation of ["0", "01", "+1", "1.5", "NaN", "Infinity", "9007199254740992"]) {
-    assert.equal(parseRunRef(signed(`agt_1·prod·support.reply·ver_1·none·${generation}·-`), key), null, `generation ${generation}`);
+  for (const body of ["{}", "not json", '["agt_1","prod","run_1"]', '["agt_1","prod","run_1",{}]', JSON.stringify(["agt_1", "prod", "run_1", [{ ...entry, bucket: 10000 }]]), JSON.stringify(["agt_1", "prod", "", [entry]]), "agt_1·prod·support.reply·ver_1·none·1·-"]) {
+    assert.equal(parseRunRef(signed(body), key), null, body);
   }
-  for (const bucket of ["-1", "00", "+1", "1.5", "NaN", "Infinity", "10000"]) {
-    assert.equal(parseRunRef(signed(`agt_1·prod·support.reply·ver_1·none·1·${bucket}`), key), null, `bucket ${bucket}`);
-  }
-  assert.throws(() => mintRunRef({ ...facts, audienceIds: ["aud_AAAAAAAAAAAAAAAAAAAAAA"], runMinute: undefined } as unknown as RunRefFacts, key), /run_ref_facts_invalid/);
-  assert.throws(() => mintRunRef({ agentId: "agt_1", target: "prod", tag: "support.reply", versionId: "ver_1", arm: "none", generation: 1, bucket: null, runMinute: "2026-09-12T14:03:00Z" } as unknown as RunRefFacts, key), /run_ref_facts_invalid/);
 });
 
 function triageSlots(plane: FakeControlPlane) {
@@ -191,8 +183,7 @@ test("workflows yield steps in order with their texts; telemetry and feedback la
   const plane = new FakeControlPlane(scope);
   const wf = plane.slot({ tag: "docs.flow", text: "flow", steps: [{ text: "Summarise {{doc}}" }, { text: "Translate to {{lang}}" }], variables: [{ name: "doc", required: true, trust: "end_user" }, { name: "lang", required: true, trust: "operator" }] });
   const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "all" as const } };
-  const manifest = plane.promote([wf, ...triageSlots(plane)], { protocol: "2.0.0" });
-  manifest.payload.requiredCapabilities = ["audience"];
+  const manifest = plane.promote([wf, ...triageSlots(plane)], {});
   manifest.payload.observations = [{ ...audience, tag: wf.tag, observeFrom: "2026-09-12T14:00:00Z" }];
   manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
   (plane as any).current.bytes = Buffer.from(JSON.stringify(manifest));
@@ -212,7 +203,7 @@ test("workflows yield steps in order with their texts; telemetry and feedback la
   assert.equal(ap.feedback(rendered.runRef, { thumbs: "up", rating: 4, freeText: "should be dropped", accepted: true }), true);
   assert.equal(ap.feedback("forged.token", { rating: 5 }), false);
   clock += 60_000; // the minute closes on the next observation
-  ap.report({ tag: "support.reply", versionId: "ver_support.reply_1", arm: "none", model: "gpt-5", status: "ok", latencyMs: 5 });
+  ap.report({ tag: "support.reply", artifactId: "art_1", versionId: "ver_support.reply_1", arm: "none", model: "gpt-5", status: "ok", latencyMs: 5 });
   await ap.stop();
 
   const spoolDir = join(stateDir, "airprompter", "agt_1", "prod", "spool", "telemetry");
@@ -228,7 +219,7 @@ test("workflows yield steps in order with their texts; telemetry and feedback la
   assert.equal(triageOk.latencyMs.buckets[10], 1, "812 ms → the ≤1024 bucket");
   assert.equal(triageOk.latencyMs.buckets[11], 1, "1201 ms → the ≤2048 bucket");
   assert.deepEqual(triageOk.checks, { passed: 1, failed: 0 });
-  assert.deepEqual(triageOk.outcomes, { thumbs: { n: 1, sum: 1 }, rating: { n: 1, sum: 4 }, accepted: { n: 1, sum: 1 } });
+  assert.deepEqual(triageOk.outcomes, { thumbs: { n: 1, sum: 1, sumSq: 1 }, rating: { n: 1, sum: 4, sumSq: 16 }, accepted: { n: 1, sum: 1, sumSq: 1 } });
   assert.equal(triageOk.outcomeRunMinute, undefined, "same-minute feedback merges into the observed row");
   const timeout = rows.find((r) => r.type === "window" && r.errorClass === "provider_timeout")!;
   assert.equal(timeout.count, 1);
@@ -267,7 +258,7 @@ test("offline: with no key the store serves what it last verified; with the stor
   assert.equal(fromBundle.status().applyState, "vendored_fallback");
   assert.equal(fromBundle.prompt("support.reply").render({ name: "Bo" }).text, "Reply politely to Bo.");
   // A serverless invocation: sync before, telemetry to the memory sink, flushed at the end.
-  await fromBundle.invoke(async () => fromBundle.report({ tag: "support.reply", versionId: "v", arm: "none", model: "gpt-5", status: "ok", latencyMs: 3 }));
+  await fromBundle.invoke(async () => fromBundle.report({ tag: "support.reply", artifactId: "art_1", versionId: "v", arm: "none", model: "gpt-5", status: "ok", latencyMs: 3 }));
   assert.equal(fromBundle.drainMemorySink().length, 1);
   await fromBundle.stop();
   // T16: a vendored bundle inside the platform's 30-day warning logs how long it has left; past it, the existing event.
@@ -294,7 +285,7 @@ test("experiment arms are sticky per subject and the runRef carries the arm and 
   const control = plane.slot({ tag: "support.reply", text: "control", versionId: "ver_c" });
   const candidate = plane.slot({ tag: "support.reply", text: "candidate", versionId: "ver_x" });
   plane.promote([control], {
-    experiment: { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 5000, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 5000, releaseDigest: releaseDigest([candidate]), overrides: [candidate] }] },
+    experiments: [{ tag: control.tag, experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 5000, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 5000, releaseDigest: releaseDigest([candidate]), overrides: [candidate] }] }],
   });
   const ap = await start(plane, stateDir);
   const seen = new Map<string, string>();
@@ -304,7 +295,7 @@ test("experiment arms are sticky per subject and the runRef carries the arm and 
     assert.equal(first.arm, again.arm, "sticky");
     assert.equal(first.text, first.arm === "candidate" ? "candidate" : "control");
     seen.set(subject, first.arm);
-    const facts = parseRunRef(first.runRef, (ap as unknown as { runRefKey: Buffer }).runRefKey)!;
+    const facts = parseRunRef(first.runRef, (ap as unknown as { runRefKey: Buffer }).runRefKey)!.entries[0]!;
     assert.equal(facts.arm, first.arm);
     assert.ok(facts.bucket !== null && facts.bucket >= 0 && facts.bucket < 10000);
   }
@@ -356,7 +347,7 @@ test("a disable directive stops rendering the slot (or the agent) and stamps one
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("the lease counts from the last successful contact: the origin's 304 keeps it fresh, the pointer's does not; without contact it lapses — degrade keeps serving and stamps once, halt refuses", async () => {
+test("the lease counts from the last successful contact: the origin's 304 keeps it fresh, the pointer's does not; without contact it lapses, keeps serving and stamps once", async () => {
   const stateDir = tempDir();
   const plane = new FakeControlPlane(scope);
   const [triage, reply] = triageSlots(plane);
@@ -371,29 +362,13 @@ test("the lease counts from the last successful contact: the origin's 304 keeps 
   assert.equal(ap.status().leaseExpiresAt, leaseAtStart, "a pointer 304 does not move the lease");
   await ap.heartbeatNow(); // the authenticated answer does
   assert.equal(ap.status().leaseExpiresAt, new Date(clock + 600_000).toISOString());
-  assert.equal(ap.status().onLeaseExpiry, "degrade");
   clock += 601_000;
   assert.equal(ap.status().leaseExpired, true);
-  assert.equal(ap.prompt("support.reply").render({}).text, "Reply politely to .", "degrade: keeps serving");
+  assert.equal(ap.prompt("support.reply").render({}).text, "Reply politely to .", "a lapsed lease keeps serving");
   ap.prompt("support.reply").render({});
   await ap.stop();
   assert.deepEqual(ap.drainMemorySink().filter((r) => (r as { type: string }).type === "refusal").map((r) => (r as { reason: string }).reason), ["lease_expired"], "stamped once");
-
-  // A halt target refuses to render once the lease lapses, and serves again after contact.
-  const haltPlane = new FakeControlPlane(scope);
-  const [t2, r2] = triageSlots(haltPlane);
-  haltPlane.promote([t2!, r2!], { leaseSeconds: 60, onLeaseExpiry: "halt" });
-  const haltDir = tempDir();
-  const halt = await start(haltPlane, haltDir, { now: () => clock });
-  clock += 61_000;
-  assert.throws(() => halt.prompt("support.reply").render({}), (e: unknown) => e instanceof RenderRefusedError && e.reason === "lease_expired");
-  await halt.syncNow(); // the pointer's 304 is not contact (S3): still halted
-  assert.throws(() => halt.prompt("support.reply").render({}), (e: unknown) => e instanceof RenderRefusedError && e.reason === "lease_expired");
-  await halt.heartbeatNow(); // the origin's authenticated answer is
-  assert.equal(halt.prompt("support.reply").render({}).text, "Reply politely to .");
-  await halt.stop();
   rmSync(stateDir, { recursive: true, force: true });
-  rmSync(haltDir, { recursive: true, force: true });
 });
 
 test("a staged release survives a restart as staged: it is reported, unlockable, and never served as the fallback", async () => {
@@ -441,7 +416,7 @@ test("feedback on a candidate-arm run lands on the window of the model that ran"
   const plane = new FakeControlPlane(scope);
   const control = plane.slot({ tag: "support.reply", text: "control", versionId: "ver_c" });
   const candidate = plane.slot({ tag: "support.reply", text: "candidate", versionId: "ver_x", model: "gpt-5" });
-  plane.promote([control], { experiment: { experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 5000, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 5000, releaseDigest: releaseDigest([candidate]), overrides: [candidate] }] } });
+  plane.promote([control], { experiments: [{ tag: control.tag, experimentId: "exp_1", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request", arms: [{ arm: "control", weightBps: 5000, releaseDigest: releaseDigest([control]), overrides: [] }, { arm: "candidate", weightBps: 5000, releaseDigest: releaseDigest([candidate]), overrides: [candidate] }] }] });
   const ap = await start(plane, stateDir, { telemetry: { sink: "memory" } });
   let subject = "user-1";
   let rendered = ap.prompt("support.reply", { subject }).render({});
@@ -459,7 +434,7 @@ test("feedback on a candidate-arm run lands on the window of the model that ran"
   assert.equal(windows.length, 1, "one window: the feedback merged into the run's");
   assert.equal(windows[0]!.model, "gpt-5-mini");
   assert.equal(windows[0]!.count, 1);
-  assert.deepEqual(windows[0]!.outcomes, { rating: { n: 1, sum: 5 } });
+  assert.deepEqual(windows[0]!.outcomes, { rating: { n: 1, sum: 5, sumSq: 25 } });
   rmSync(stateDir, { recursive: true, force: true });
 });
 
@@ -538,9 +513,8 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   const plane = new FakeControlPlane(scope);
   const base = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
   const candidate = plane.slot({tag:"support.reply",text:"Candidate",versionId:"ver_candidate"});
-  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"tags" as const,conditions:[{key:"device_id",operator:"is" as const,value:"private-device-042"}]}};
-  const manifest = plane.promote([base],{protocol:"2.0.0",experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
-  manifest.payload.requiredCapabilities=["audience"];
+  const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector: { mode: "when" as const, when: { key: "device_id", is: "private-device-042" } }};
+  const manifest = plane.promote([base],{experiments:[{tag:base.tag,experimentId:"exp_1",salt:"AAECAwQFBgcICQoLDA0ODw",subjectKey:"instance",audience,arms:[{arm:"control",weightBps:0,releaseDigest:releaseDigest([base]),overrides:[]},{arm:"candidate",weightBps:10000,releaseDigest:releaseDigest([candidate]),overrides:[candidate]}]}]});
   manifest.payload.observations=[{...audience,tag:base.tag,observeFrom:"2026-09-12T14:00:00Z"}];
   manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
   (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));
@@ -552,8 +526,8 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
     assert.equal(rendered.text,"Candidate");
     assert.deepEqual(rendered.audienceIds,[audience.audienceId]);
     const heartbeatBody=ap.heartbeatBody();
-    assert.equal(heartbeatBody.protocol,"2.0.0");
-    assert.deepEqual(heartbeatBody.capabilities,["audience"]);
+    assert.equal(heartbeatBody.protocol,PROTOCOL_VERSION);
+    assert.deepEqual(heartbeatBody.capabilities,[]);
     const heartbeat=JSON.stringify(heartbeatBody);
     assert.equal(heartbeat.includes("private-device-042"),false);
     assert.equal(heartbeat.includes("secret-west"),false);
@@ -572,9 +546,9 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   const spoolDir=join(stateDir,"airprompter","agt_1","prod","spool","telemetry");
   const rows=readdirSync(spoolDir).filter(n=>n.endsWith(".ndjson")).flatMap(n=>readFileSync(join(spoolDir,n),"utf8").trim().split("\n").map(line=>JSON.parse(line)));
   const feedback=rows.find(r=>r.type==="window" && r.outcomes?.thumbs);
-  assert.equal(feedback.v,3);
+  assert.equal(feedback.v,4);
   assert.equal(feedback.artifactId,candidate.artifactId);
-  assert.deepEqual(feedback.outcomes.thumbs,{n:1,sum:1});
+  assert.deepEqual(feedback.outcomes.thumbs,{n:1,sum:1,sumSq:1});
   assert.equal(feedback.count,0);
   assert.equal(feedback.versionId,"ver_candidate");
   assert.equal(feedback.arm,"candidate");
@@ -583,7 +557,7 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   rmSync(stateDir,{recursive:true,force:true});
 });
 
-test("audience registration stays bounded after capability negotiation without limiting prompt serving", async () => {
+test("audience registration stays bounded without limiting prompt serving", async () => {
   const stateDir = tempDir();
   const plane = new FakeControlPlane(scope);
   const slots = Array.from({ length: 33 }, (_, index) => {
@@ -599,9 +573,10 @@ test("audience registration stays bounded after capability negotiation without l
       assert.equal(ap.prompt(tag, { displayName: `Prompt ${index}` }).render().text, `Text ${index}`);
     }
     const firstHeartbeat = plane.heartbeats[0] as any;
-    assert.equal(firstHeartbeat.protocol, "2.0.0");
-    assert.deepEqual(firstHeartbeat.capabilities, ["audience"]);
-    assert.equal(firstHeartbeat.registration, undefined, "registration follows the authenticated capability echo");
+    assert.equal(firstHeartbeat.protocol, PROTOCOL_VERSION);
+    assert.deepEqual(firstHeartbeat.capabilities, []);
+    assert.deepEqual(firstHeartbeat.runCounters, { passthrough: {} });
+    assert.ok(firstHeartbeat.registration, "registration rides every heartbeat");
     const registration = ap.heartbeatBody().registration as any;
     assert.equal(registration.prompts.length, 32);
     assert.ok(registration.prompts.some((entry: any) => entry.tag === "prompt.slot32"));
@@ -613,27 +588,125 @@ test("audience registration stays bounded after capability negotiation without l
   }
 });
 
-test("only a well-formed authenticated capability echo unlocks audience registration", async () => {
-  const cases: Array<{ capabilities: unknown; negotiated: boolean }> = [
-    { capabilities: "audience", negotiated: false },
-    { capabilities: ["audience", "audience"], negotiated: false },
-    { capabilities: ["audience", "Bad-Capability"], negotiated: false },
-    { capabilities: ["future_feature"], negotiated: false },
-    { capabilities: ["future_feature", "audience"], negotiated: true },
-  ];
-  for (const [index, entry] of cases.entries()) {
-    const stateDir = tempDir();
-    const plane = new FakeControlPlane(scope);
-    plane.heartbeatCapabilities = entry.capabilities;
-    plane.promote([plane.slot({ tag: "support.reply", text: "Published" })]);
-    const ap = await start(plane, stateDir, { tags: { device_id: "private-device" } });
-    try {
-      ap.prompt("support.reply", { displayName: "Support reply" });
-      assert.equal(ap.heartbeatBody().registration !== undefined, entry.negotiated, `case ${index}`);
-    } finally {
-      await ap.stop();
-      rmSync(stateDir, { recursive: true, force: true });
-    }
+test("a run reference minted on one store parses on another with the same secret, and feedback lands", async () => {
+  const plane = new FakeControlPlane(scope);
+  plane.promote(triageSlots(plane));
+  const dirs = [tempDir(), tempDir()];
+  const a = await start(plane, dirs[0]!, { runRefSecret: "shared-fleet-secret" });
+  const b = await start(plane, dirs[1]!, { runRefSecret: "shared-fleet-secret" });
+  try {
+    const rendered = a.prompt("support.reply").render({});
+    assert.equal(b.feedback(rendered.runRef, { thumbs: "up" }), true, "the second store reads the first store's ref");
+  } finally {
+    await a.stop();
+    await b.stop();
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("instances holding one Agent key share run references with no new setting", async () => {
+  const plane = new FakeControlPlane(scope);
+  plane.promote(triageSlots(plane));
+  const dirs = [tempDir(), tempDir()];
+  const a = await start(plane, dirs[0]!);
+  const b = await start(plane, dirs[1]!);
+  try {
+    assert.equal(b.feedback(a.prompt("support.reply").render({}).runRef, { thumbs: "down" }), true);
+  } finally {
+    await a.stop();
+    await b.stop();
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a ref minted under a previous secret still lands after a rotation; with no shared secret it fails and the store-scoped key is logged", async () => {
+  const plane = new FakeControlPlane(scope);
+  plane.promote(triageSlots(plane));
+  const dirs = [tempDir(), tempDir(), tempDir()];
+  const events: Array<Record<string, unknown>> = [];
+  const before = await start(plane, dirs[0]!, { runRefSecret: "old-secret" });
+  const rotated = await start(plane, dirs[1]!, { runRefSecret: "new-secret", runRefPreviousSecrets: ["old-secret"] });
+  const offlineOptions = { ...scope, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "offline" as const }, logger: (event: Record<string, unknown>) => void events.push(event) };
+  const lonely = await AirPrompterAgent.start({ ...offlineOptions, stateDir: dirs[2]! });
+  try {
+    const old = before.prompt("support.reply").render({}).runRef;
+    assert.equal(rotated.feedback(old, { thumbs: "up" }), true, "the previous key is tried");
+    assert.equal(lonely.feedback(old, { thumbs: "up" }), false, "no shared secret, no feedback");
+    assert.equal(events.filter((event) => event.event === "run_ref_key_store_scoped").length, 1, "said once");
+    assert.equal(before.feedback(rotated.prompt("support.reply").render({}).runRef, { thumbs: "up" }), false, "minting uses the current key");
+  } finally {
+    for (const ap of [before, rotated, lonely]) await ap.stop();
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("feedback on a ref with no entries answers false", async () => {
+  const plane = new FakeControlPlane(scope);
+  plane.promote(triageSlots(plane));
+  const dir = tempDir();
+  const ap = await start(plane, dir);
+  try {
+    const runRef = mintRunRef({ agentId: scope.agentId, target: scope.target, runId: newRunId(), entries: [] }, (ap as unknown as { runRefKey: Buffer }).runRefKey);
+    assert.equal(ap.feedback(runRef, { thumbs: "up" }), false);
+  } finally {
+    await ap.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a slot with an unmet requires is absent from prompt, the status, golden runs and the payload list; the rest loads and a disable applies", async () => {
+  const plane = new FakeControlPlane(scope);
+  const [triage, reply] = triageSlots(plane);
+  const rubric = { ...plane.slot({ tag: "support.rubric", text: "never fetched", model: "not-here", variables: [{ name: "needed", required: true, trust: "operator" }] }), kind: "rubric", requires: ["rubric_slots"], contentHash: `sha256:${"e".repeat(64)}`, goldenSet: { setId: "gs", cases: 1, contentHash: `sha256:${"f".repeat(64)}`, byteLength: 1, minPassBps: 10000 }, modelRequired: true } as ManifestSlot;
+  const experiment = { experimentId: "exp_rubric", tag: "support.rubric", salt: "AAECAwQFBgcICQoLDA0ODw", subjectKey: "request" as const, arms: [{ arm: "control", weightBps: 9000, releaseDigest: `sha256:${"0".repeat(64)}` as const, overrides: [] }, { arm: "candidate", weightBps: 1000, releaseDigest: `sha256:${"1".repeat(64)}` as const, overrides: [rubric] }] };
+  const manifest = plane.promote([triage!, reply!, rubric], { experiments: [experiment], directives: [{ kind: "disable", scope: "slot", tag: "support.reply", issuedAt: "2026-09-12T10:00:00Z" }, { kind: "disable", scope: "arm", arm: "candidate", experimentId: "exp_rubric", issuedAt: "2026-09-12T10:00:00Z" }] });
+  assert.equal([...referencedPayloads(manifest.payload).keys()].includes(rubric.contentHash), false, "its payload is not fetched");
+  assert.deepEqual(requiredModelsMissing(manifest.payload, ["gpt-5"]).includes("not-here"), false, "a skipped slot's required model refuses nothing");
+  const dir = tempDir();
+  const ap = await start(plane, dir, { models: [triage!.model, reply!.model] });
+  try {
+    assert.equal(ap.generation, 1, "the release loads");
+    assert.equal(ap.prompt("support.triage").render({ team: "a", ticket: "b" }).text.length > 0, true, "other slots serve");
+    assert.throws(() => ap.prompt("support.rubric").render({}), /no slot support\.rubric/, "as a slot the release does not have");
+    assert.throws(() => ap.prompt("support.reply").render({}), RenderRefusedError, "a disable still applies");
+    const status = ap.status();
+    assert.deepEqual(status.ramps, [], "its experiment is ignored");
+    assert.equal(status.variables.unsourced.some((entry) => entry.tag === "support.rubric"), false);
+    assert.deepEqual(await ap.golden({ invoke: async () => "never" }), [], "the golden run skips it");
+    assert.equal((await ap.openRun().place("support.rubric")).kind, "passthrough");
+  } finally {
+    await ap.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ap.attribute on a workflow step and ap.report with step write the slot tag in tag and the step id in step", async () => {
+  const plane = new FakeControlPlane(scope);
+  const step = plane.slot({ tag: "docs.flow", text: "Step one" });
+  const workflow = { ...step, kind: "workflow" as const, steps: [{ stepId: "docs.flow#1", ordinal: 1, promptArtifactId: "prm_step", promptVersionId: "ver_step", contentHash: step.contentHash, byteLength: step.byteLength }] };
+  plane.promote([workflow]);
+  const dir = tempDir();
+  const ap = await start(plane, dir, { telemetry: { sink: "memory" } });
+  try {
+    const flow = ap.workflow("docs.flow");
+    const stepOne = flow.steps[0]!;
+    const inner = ap.attribute({ stepId: stepOne.stepId, artifactId: stepOne.artifactId, versionId: stepOne.versionId, model: stepOne.model, runRef: stepOne.runRef }, () => ap.attributionFor({}));
+    assert.deepEqual([inner?.tag, inner?.step, inner?.arm], ["docs.flow", "docs.flow#1", "none"]);
+    await ap.observe(inner!, async () => ({ usage: { input_tokens: 3, output_tokens: 2 } }), { toolCalls: { calls: 3, errors: 0 } });
+    ap.report({ tag: "docs.flow", step: "docs.flow#1", artifactId: stepOne.artifactId, versionId: stepOne.versionId, arm: "none", model: stepOne.model, status: "ok", latencyMs: 5, toolCalls: { calls: 2, errors: 1 } });
+    ap.spool.closeWindows(Date.now());
+    const rows = ap.drainMemorySink() as Array<{ type: string; tag?: string; step?: string; count?: number; tools?: unknown; modelCalls?: number }>;
+    const window = rows.find((row) => row.type === "window")!;
+    assert.equal(window.tag, "docs.flow");
+    assert.equal(window.step, undefined, "a window row never carries step");
+    assert.equal(window.count, 2);
+    assert.deepEqual(window.tools, { calls: 5, errors: 1 });
+    const steps = rows.filter((row) => row.type === "step");
+    assert.deepEqual(steps.map((row) => [row.tag, row.step, row.modelCalls]), [["docs.flow", "docs.flow#1", 2]]);
+    assert.equal(ap.feedback(stepOne.runRef, { thumbs: "up" }), true, "a step's ref names the slot tag too");
+  } finally {
+    await ap.stop();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -643,9 +716,8 @@ test("audience registration evicts stale names, keeps active names, and serves o
   const tags = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`old_key_${String(index).padStart(2, "0")}`, `private_value_${index}`]));
   const base = plane.slot({ tag: "support.reply", text: "Published" });
   const slots = [base, ...Array.from({ length: 32 }, (_, index) => plane.slot({ tag: `prompt.slot${String(index).padStart(2, "0")}`, text: `Prompt ${index}` }))];
-  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "tags" as const, conditions: [{ key: "new_key", operator: "is" as const, value: "new_value" }] } };
-  const manifest = plane.promote(slots, { protocol: "2.0.0" });
-  manifest.payload.requiredCapabilities = ["audience"];
+  const audience = { audienceId: "aud_AAAAAAAAAAAAAAAAAAAAAA", selector: { mode: "when" as const, when: { key: "new_key", is: "new_value" } } };
+  const manifest = plane.promote(slots, {});
   manifest.payload.observations = [{ ...audience, tag: base.tag, observeFrom: "2026-09-12T14:00:00Z" }];
   manifest.signatures[0]!.sig = signBytes(canonicalBytes(manifest.payload), plane.signingKey);
   (plane as any).current.bytes = Buffer.from(JSON.stringify(manifest));
@@ -686,7 +758,6 @@ test("audience registration evicts stale names, keeps active names, and serves o
   try {
     assert.deepEqual(ap.prompt("support.reply").render().audienceIds, [audience.audienceId]);
     const offlineHeartbeat = ap.heartbeatBody();
-    assert.equal(offlineHeartbeat.registration, undefined, "an offline runtime has no authenticated capability echo");
     assert.equal(JSON.stringify(offlineHeartbeat).includes("new_value"), false);
   } finally {
     await ap.stop();
@@ -698,7 +769,7 @@ import { RenderRegistry, withAttribution, currentAttribution } from "../packages
 import { validAudienceInstant } from "../packages/core/src/protocol/assignment.js";
 test("identical text never guesses different captured cohorts; explicit attribution remains available", () => {
   const registry=new RenderRegistry(2);
-  const a={tag:"support.reply",versionId:"ver_a",arm:"control",model:"gpt-5",audienceIds:["aud_AAAAAAAAAAAAAAAAAAAAAA"],runMinute:"2026-09-12T14:03:00Z"};
+  const a={tag:"support.reply",artifactId:"prm_1",versionId:"ver_a",arm:"control",model:"gpt-5",audienceIds:["aud_AAAAAAAAAAAAAAAAAAAAAA"],runMinute:"2026-09-12T14:03:00Z"};
   const b={...a,audienceIds:[]};
   registry.register("identical",a);assert.deepEqual(registry.match(["identical"]),a);
   registry.register("identical",b);assert.equal(registry.match(["identical"]),undefined);
@@ -728,8 +799,7 @@ test("manual output checks retain audience attribution only on an open measured 
   const plain = plane.slot({tag:"support.reply",text:"Published",versionId:"ver_base"});
   const checked = {...plain,outputChecks:[{name:"category",kind:"enum" as const,path:"category",values:["ok"]}]};
   const audience = {audienceId:"aud_AAAAAAAAAAAAAAAAAAAAAA",selector:{mode:"all" as const}};
-  const manifest=plane.promote([checked],{protocol:"2.0.0"});
-  manifest.payload.requiredCapabilities=["audience"];
+  const manifest=plane.promote([checked],{});
   manifest.payload.observations=[{...audience,tag:checked.tag,observeFrom:"2026-09-12T14:00:00Z"}];
   manifest.signatures[0]!.sig=signBytes(canonicalBytes(manifest.payload),plane.signingKey);
   (plane as any).current.bytes=Buffer.from(JSON.stringify(manifest));
@@ -743,7 +813,7 @@ test("manual output checks retain audience attribution only on an open measured 
     await ap.stop();
     const rows=ap.drainMemorySink().filter((r:any)=>r.type==="window") as any[];
     assert.equal(rows.length,1);
-    assert.equal(rows[0].v,3);
+    assert.equal(rows[0].v,4);
     assert.equal(rows[0].artifactId,checked.artifactId);
     assert.equal(rows[0].count,1);
     assert.deepEqual(rows[0].audienceIds,[audience.audienceId]);

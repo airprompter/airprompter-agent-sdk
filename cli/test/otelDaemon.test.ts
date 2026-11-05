@@ -86,9 +86,9 @@ test("airprompterd --upload-sink otlp: an offline host's windows reach the colle
     try {
       assert.deepEqual([sdkA.status().telemetry.uploadedBy, sdkB.status().telemetry.uploadedBy], ["daemon", "daemon"]);
       const r = sdkA.prompt("support.reply").render({ name: "Ada" });
-      sdkA.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12, tokens: { input: 3, output: 4 } });
+      sdkA.report({ tag: r.tag, artifactId: r.artifactId, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12, tokens: { input: 3, output: 4 } });
       sdkA.spool.closeWindows(Date.now());
-      sdkB.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "error", errorClass: "provider_timeout", latencyMs: 30_000 });
+      sdkB.report({ tag: r.tag, artifactId: r.artifactId, versionId: r.versionId, arm: r.arm, model: r.model, status: "error", errorClass: "provider_timeout", latencyMs: 30_000 });
       sdkB.spool.closeWindows(Date.now());
       // The first export meets a 500: dropped and counted; the second writer's segment still ships.
       await until(() => otlp.requests.length >= 2, () => `two exports (got ${otlp.requests.length}; daemon: ${daemon.stderr.slice(-4).join(" | ")})`, 30_000);

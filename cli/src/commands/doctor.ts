@@ -28,7 +28,7 @@ import { nodeFs } from "../../../sdk-typescript/packages/core/src/ports/node.js"
 import { readDaemonDiscovery } from "../../../sdk-typescript/packages/telemetry/src/spool/manifest.js";
 import { HOST_SPOOL_BUDGET_BYTES } from "../../../sdk-typescript/packages/telemetry/src/spool/writer.js";
 import { LAST_UPLOAD_MARKER } from "../../../sdk-typescript/packages/telemetry/src/uploader.js";
-import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, parse, scopeOf, str, type OptionSpec } from "../args.js";
+import { COMMON_OPTIONS, SCOPE_OPTIONS, STORE_OPTIONS, defaultStateDir, flag, helpFor, hostedEnvironmentOf, parse, scopeOf, str, type OptionSpec } from "../args.js";
 import { summarizeManifest } from "../chain.js";
 import { EXIT, Output, usage, type Context } from "../io.js";
 import { loadRoot } from "../keys.js";
@@ -126,7 +126,7 @@ export async function doctor(argv: string[], ctx: Context): Promise<number> {
   else if (!existsSync(rootPath)) checks.push(check("root", "fail", `${rootPath} does not exist`, "download the environment's root (a pinned public JWK or a signed root.json) from the console and pin it where the runtime reads it"));
   else {
     try {
-      const root = loadRoot(rootPath, scope.target);
+      const root = loadRoot(rootPath, hostedEnvironmentOf(parsed));
       if (root.kind === "pinned") checks.push(check("root", "ok", `${rootPath}: a pinned root public key`));
       else {
         const expires = root.document.signed.expires;
@@ -160,8 +160,8 @@ export async function doctor(argv: string[], ctx: Context): Promise<number> {
         const summary = summarizeManifest(loaded.manifest);
         checks.push(check("active_release", "ok", `slot ${state.active} verifies: generation ${summary.generation}, release ${summary.releaseDigest.slice(0, 19)}…, ${summary.slots} slots, signed by ${loaded.signingKeyId}`));
         const leaseFromIssue = instant(summary.issuedAt) + summary.leaseSeconds * 1000;
-        if (leaseFromIssue <= now) checks.push(check("lease", "warn", `the lease (${summary.leaseSeconds}s) lapsed from issue at ${new Date(leaseFromIssue).toISOString()} → ${summary.onLeaseExpiry}; only a runtime in contact renews it`, summary.onLeaseExpiry === "halt" ? "a runtime with no contact refuses every render under halt: restore the source (above) or apply a fresh release" : "a runtime with no contact serves this release degraded: restore the source (above) or apply a fresh release"));
-        else checks.push(check("lease", "ok", `${summary.leaseSeconds}s from the last contact (from issue it lapses ${new Date(leaseFromIssue).toISOString()}) → ${summary.onLeaseExpiry}`));
+        if (leaseFromIssue <= now) checks.push(check("lease", "warn", `stale: the lease (${summary.leaseSeconds}s) lapsed from issue at ${new Date(leaseFromIssue).toISOString()}; only a runtime in contact renews it, and the agent keeps serving`, "restore the source (above) so the runtime can renew it"));
+        else checks.push(check("lease", "ok", `${summary.leaseSeconds}s from the last contact (from issue it lapses ${new Date(leaseFromIssue).toISOString()})`));
       } catch (error) {
         const reason = isStoreError(error) ? `${error.code}${error.detail ? `/${error.detail}` : ""}` : (error as Error).message;
         checks.push(check("active_release", "fail", `slot ${state.active} does not verify (${reason})`, "the runtime refuses this slot on start and falls back to the other slot or a vendored bundle: airprompter verify <state-dir> for the chain, then apply a fresh release"));

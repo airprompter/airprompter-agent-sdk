@@ -18,8 +18,8 @@ export interface RunHost {
   tagsFor(overrides?: Readonly<Record<string, string>>): Readonly<Record<string, string>>;
   registerLabel(tag: string): void;
   variables: VariableSourceRegistry;
-  /** Stamps a lapsed lease and says whether it stops rendering. */
-  leaseHalted(tag: string): boolean;
+  /** Stamps a lapsed lease. A lapsed lease never stops rendering. */
+  stampLease(): void;
   stampDisabled(generation: number, tag: string | null): void;
   recordRun(observation: Observation, nowMs: number): void;
   log(event: Record<string, unknown>): void;

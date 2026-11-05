@@ -39,7 +39,7 @@ def attr(key, value):
 
 
 def resource_of(rows, extra):
-    first = rows[0]
+    first = next(row for row in rows if row["type"] != "step")  # a step row names no resource
     sdk = str(first.get("sdk") or "")
     name, _, version = sdk.partition("/")
     attrs = [attr("service.instance.id", first["instanceId"])]
@@ -81,6 +81,8 @@ def to_otlp(rows, resource_extra=None, sdk_version="0.1.0"):
     resource_extra = resource_extra or {}
     duration, tokens, checks, feedback_n, feedback_sum, refusals, dropped_segments, dropped_bytes = [], [], [], [], [], [], [], []
     for row in rows:
+        if row["type"] == "step":
+            continue  # deliberate: no metric reads a step row
         if row["type"] == "window":
             start = nanos(row["minute"])
             end = str(int(start) + 60 * 1_000_000_000)
@@ -137,21 +139,31 @@ def main(out_path: str) -> None:
     buckets[5] = 2
     buckets[7] = 1
     window = {
-        "type": "window", "v": 1, "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
+        "type": "window", "v": 4, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
         "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "status": "ok", "errorClass": None,
-        "usageSource": "reported", "count": 3, "latencyMs": {"buckets": buckets, "sum": 250}, "tokens": {"input": 900, "cachedInput": 300, "output": 210},
-        "checks": {"passed": 5, "failed": 1}, "outcomes": {"accepted": {"n": 2, "sum": 2}, "rating": {"n": 1, "sum": 4}}, "sdk": "agent-sdk-ts/0.1.0",
+        "usageSource": "reported", "count": 3, "modelCalls": 7, "agentRun": 3, "tools": {"calls": 2, "errors": 0}, "latencyMs": {"buckets": buckets, "sum": 250}, "tokens": {"input": 900, "cachedInput": 300, "output": 210},
+        "tokensSq": {"input": 270000, "cachedInput": 30000, "output": 14700, "inputOutput": 63000, "inputCached": 90000, "cachedOutput": 21000},
+        "checks": {"passed": 5, "failed": 1}, "outcomes": {"accepted": {"n": 2, "sum": 2, "sumSq": 2}, "rating": {"n": 1, "sum": 4, "sumSq": 16}}, "sdk": "agent-sdk-ts/0.1.0",
     }
     error_window = {
-        "type": "window", "v": 1, "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
+        "type": "window", "v": 4, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
         "tag": "support.triage", "versionId": "rev-4", "arm": "control", "model": "claude-sonnet-5", "status": "error", "errorClass": "provider_timeout",
-        "usageSource": "unavailable", "count": 1, "latencyMs": {"buckets": [0] * 15 + [1], "sum": 30000}, "tokens": {"input": 0, "output": 0}, "sdk": "agent-sdk-ts/0.1.0",
+        "usageSource": "unavailable", "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"buckets": [0] * (len(EDGES) - 1) + [1], "sum": 30000}, "tokens": {"input": 0, "output": 0},
+        "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "sdk": "agent-sdk-ts/0.1.0",
+    }
+    step_buckets = [0] * len(EDGES)
+    step_buckets[8] = 2
+    step = {
+        "type": "step", "v": 1, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
+        "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "step": "support.triage#2", "status": "ok", "errorClass": None,
+        "usageSource": "reported", "modelCalls": 2, "latencyMs": {"buckets": step_buckets, "sum": 400}, "tokens": {"input": 300, "output": 70}, "tools": {"calls": 1, "errors": 0}, "sdk": "agent-sdk-ts/0.1.0",
     }
     refusal = {"type": "refusal", "v": 1, "at": "2026-09-12T14:03:07Z", "instanceId": "i-writer-a", "reason": "lease_expired", "generation": 41, "tag": None}
     dropped = {"type": "dropped", "v": 1, "at": "2026-09-12T14:04:00Z", "instanceId": "i-writer-a", "segments": 2, "bytes": 1048576}
     cases = [
         {"name": "one window with every field: the duration histogram in seconds, the three token sums, checks, feedback count and sum", "rows": [window], "resource": {"service.name": "support-bot"}, "expected": to_otlp([window], {"service.name": "support-bot"})},
         {"name": "an error window: error.type carries the class; unavailable usage; the overflow bucket", "rows": [error_window], "resource": {}, "expected": to_otlp([error_window])},
+        {"name": "step rows change no metric: the same request as the windows alone, even with a step row first", "rows": [step, window, step], "resource": {"service.name": "support-bot"}, "expected": to_otlp([window], {"service.name": "support-bot"})},
         {"name": "a segment of mixed rows: two windows, a refusal, a dropped row — one request, one resource, one scope", "rows": [window, error_window, refusal, dropped], "resource": {"service.name": "support-bot", "deployment.environment": "prod"}, "expected": to_otlp([window, error_window, refusal, dropped], {"service.name": "support-bot", "deployment.environment": "prod"})},
     ]
     doc = {

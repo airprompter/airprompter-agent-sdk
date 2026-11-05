@@ -40,7 +40,7 @@ export const TELEMETRY_VERIFY_OPTIONS: OptionSpec = {
 const DIR = "/spool";
 
 function windowRow(instanceId: string, minute: string): SpoolRow {
-  return { type: "window", v: 1, minute, instanceId, instanceClass: "resident", tag: "verify.budget", versionId: "ver_verify", arm: "none", model: "verify", status: "ok", errorClass: null, usageSource: "unavailable", count: 1, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 0, output: 0 }, sdk: "airprompter-cli/verify" };
+  return { type: "window", v: 4, artifactId: "prm_verify", minute, instanceId, instanceClass: "resident", tag: "verify.budget", versionId: "ver_verify", arm: "none", model: "verify", status: "ok", errorClass: null, usageSource: "unavailable", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 0, output: 0 }, sdk: "airprompter-cli/verify" };
 }
 
 export async function telemetryVerify(argv: string[], ctx: Context): Promise<number> {

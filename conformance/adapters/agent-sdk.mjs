@@ -52,9 +52,23 @@ export const ops = {
   rampWeightsAt: ({ arms, ramp, nowMs }) => ({ weightBps: core.rampWeightsAt(arms, ramp, nowMs) }),
   effectiveArms: ({ arms, ramp, disabledArms, nowMs }) => ({ arms: core.effectiveArms({ arms, ramp, disabledArms: new Set(disabledArms ?? []), nowMs }) }),
   verifyRootMetadata: ({ candidate, trusted, pinned, now }) => core.verifyRootMetadata({ candidate, trusted: trusted ?? core.trustedRootFromPinnedKey({ purpose: pinned.purpose, environment: pinned.environment, pinnedRoot: pinned.pinnedRoot }), now }),
-  experimentForTag: ({ payload, tag }) => ({ experiment: core.experimentForTag(payload, tag) }),
+  servableSlots: ({ payload, tags }) => ({ frozen: (Array.isArray(payload.experiments) ? payload.experiments : []).map((experiment) => experiment.tag).filter((tag) => core.frozenExperiment(payload, (id) => new Set(core.disabledFrom(payload.directives).armsByExperiment[id] ?? []), tag, tags ?? {})).sort(), tags: core.servableSlots(payload).map((slot) => slot.tag), overrides: Object.fromEntries(core.servableExperiments(payload).map((experiment) => [experiment.experimentId, Object.fromEntries(experiment.arms.map((arm) => [arm.arm, arm.overrides.map((override) => override.tag)]))])) }),
+  inspectSegment: ({ instanceId, lines, nowMs }) => {
+    const { rows, invalid, skipped, stripped } = telemetry.inspectSegment(Buffer.from(lines.map((line) => `${line}\n`).join(""), "utf8"), instanceId, nowMs);
+    return { rows, invalid, skipped, stripped };
+  },
+  runRefKeyFrom: ({ secret, agentId, target }) => ({ keyHex: Buffer.from(core.runRefKeyFrom(secret, agentId, target)).toString("hex") }),
+  mintRunRef: refusing(({ facts, keyHex }) => {
+    try {
+      return { token: core.mintRunRef(facts, Buffer.from(keyHex, "hex")) };
+    } catch (error) {
+      throw Object.assign(error, { reason: error.message });
+    }
+  }),
+  parseRunRef: ({ token, keysHex }) => ({ facts: core.parseRunRef(token, keysHex.map((hex) => Buffer.from(hex, "hex"))) }),
   experimentConflict: ({ payload }) => ({ reason: core.experimentConflict(payload) }),
-  verifyManifest: ({ manifest, root, now, scope, storedGeneration, payloads, countersignRoot, requireCountersign }) => core.verifyManifest({ manifest, root, now, scope, storedGeneration, payloads: payloads ? new Map(payloads.map((p) => [p.contentHash, Buffer.from(p.bytes, "base64url")])) : null, countersignRoot: countersignRoot ?? null, requireCountersign: requireCountersign ?? false }),
+  carriedPayloads: ({ payload }) => ({ carried: [...core.carriedPayloads(payload)].sort(([a], [b]) => (a < b ? -1 : 1)), optional: [...core.optionalPayloads(payload)].sort() }),
+  verifyManifest: ({ manifest, root, now, scope, storedGeneration, payloads, countersignRoot, requireCountersign, carrying, absentRequires }) => core.verifyManifest({ manifest, root, now, scope, storedGeneration, carrying: carrying === true, absentRequires: absentRequires === true, payloads: payloads ? new Map(payloads.map((p) => [p.contentHash, Buffer.from(p.bytes, "base64url")])) : null, countersignRoot: countersignRoot ?? null, requireCountersign: requireCountersign ?? false }),
   latencyBucketIndex: ({ latencyMs }) => ({ bucket: core.latencyBucketIndex(latencyMs) }),
   minuteOf: ({ epochMs }) => ({ minute: core.minuteOf(epochMs), epochMinute: core.epochMinute(epochMs) }),
   segmentName: ({ instanceId, epochMs, n }) => ({ name: telemetry.segmentName(instanceId, core.epochMinute(epochMs), n) }),
@@ -67,10 +81,13 @@ export const ops = {
     const writer = new telemetry.SpoolWriter(sink, { instanceId, instanceClass, sdk });
     for (const event of events) {
       if (event.kind === "observe") writer.observe(event.observation, event.at);
+      else if (event.kind === "recordRun") writer.recordRun(event.run, event.at);
+      else if (event.kind === "recordStep") writer.recordStep(event.step, event.at);
       else if (event.kind === "feedback") writer.outcomes(event.feedback, event.feedback.outcomes, event.at);
       else if (event.kind === "close") writer.closeWindows(event.at);
     }
-    return { windows: sink.drain().filter((r) => r.type === "window") };
+    const rows = sink.drain();
+    return { windows: rows.filter((r) => r.type === "window"), steps: rows.filter((r) => r.type === "step") };
   },
   normalizeFeedback: ({ signals }) => ({ normalized: core.normalizeFeedback(signals) }),
   evaluateChecks: ({ checks, input }) => ({ evaluation: core.evaluateChecks(checks, input) }),

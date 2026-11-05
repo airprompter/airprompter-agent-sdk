@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/0.2/manifest.schema.json",
+  "$id": "https://airprompter.com/protocol/3/manifest.schema.json",
   "title": "AirPrompter signed release manifest",
   "description": "What a target is allowed to run, as a signed envelope. The platform signature covers the whole payload; countersignatures cover the releaseDigest of every release the manifest can activate (D58). No prompt text is ever in a manifest: slots name payloads by content hash and the runtime fetches them separately.",
   "type": "object",
@@ -33,8 +33,9 @@
   },
   "$defs": {
     "protocolVersion": {
+      "description": "Any 3.x.y. A feature a reader must understand is gated by requiredCapabilities, never by the minor number; an SDK checks the major and the capabilities only.",
       "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+      "pattern": "^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
     },
     "identifier": {
       "description": "A canonical team identifier as minted by the control plane.",
@@ -44,12 +45,9 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
     },
     "target": {
+      "description": "The stage of an agent: an immutable lowercase slug. It feeds the run reference key, bundle data, store paths and spool directories, so it never changes once used. An SDK never branches on it, except that a plaintext bundle stays `dev` only.",
       "type": "string",
-      "enum": [
-        "dev",
-        "staging",
-        "prod"
-      ]
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
     },
     "sha256": {
       "type": "string",
@@ -401,13 +399,13 @@
           ]
         },
         "default": {
-          "description": "0.3.4: the text rendered when neither the call site nor a source supplies a value. Only on an optional `operator` variable (the schema and the control plane refuse a default on a required or an end-user one; a runtime ignores it there), and never empty. In the digest input when present; a runtime treats a JSON null as unset, the schema refuses one.",
+          "description": "the text rendered when neither the call site nor a source supplies a value. Only on an optional `operator` variable (the schema and the control plane refuse a default on a required or an end-user one; a runtime ignores it there), and never empty. In the digest input when present; a runtime treats a JSON null as unset, the schema refuses one.",
           "type": "string",
           "minLength": 1,
           "maxLength": 4096
         },
         "source": {
-          "description": "0.3.4: who the author expects to fill the variable — `caller` (the code that renders passes it) or `runtime` (the application registers a source for it; `docs/variables.md`). A hint reviewers and the seal read; a runtime does not act on it. In the digest input when present.",
+          "description": "who the author expects to fill the variable — `caller` (the code that renders passes it) or `runtime` (the application registers a source for it; `docs/variables.md`). A hint reviewers and the seal read; a runtime does not act on it. In the digest input when present.",
           "type": "string",
           "enum": [
             "caller",
@@ -552,114 +550,146 @@
       }
     },
     "slot": {
-      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true, `outputChecks`, `goldenSet` and `inference` only when present.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "tag",
-        "kind",
-        "artifactId",
-        "versionId",
-        "versionOrdinal",
-        "contentHash",
-        "byteLength",
-        "model",
-        "variables"
-      ],
-      "properties": {
-        "tag": {
-          "$ref": "#/$defs/slotTag"
-        },
-        "kind": {
-          "type": "string",
-          "enum": [
-            "prompt",
-            "workflow"
-          ]
-        },
-        "artifactId": {
-          "$ref": "#/$defs/identifier"
-        },
-        "versionId": {
-          "$ref": "#/$defs/identifier"
-        },
-        "versionOrdinal": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 1
-        },
-        "contentHash": {
-          "$ref": "#/$defs/sha256"
-        },
-        "byteLength": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 65536
-        },
-        "model": {
-          "$ref": "#/$defs/modelId"
-        },
-        "modelRequired": {
-          "description": "The model is required: a runtime whose declared catalog lacks it refuses to activate the release (heartbeat refusal `model_unavailable`) instead of rendering the slot on another model. Omitted when false; in the digest input only when true.",
-          "type": "boolean"
-        },
-        "variables": {
-          "type": "array",
-          "maxItems": 64,
-          "items": {
-            "$ref": "#/$defs/variable"
-          }
-        },
-        "inference": {
-          "$ref": "#/$defs/inference"
-        },
-        "outputChecks": {
-          "description": "The slot's enabled output checks, sorted by name (checks.md). Omitted when none; in the digest input only when present.",
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 8,
-          "items": {
-            "$ref": "#/$defs/outputCheck"
-          }
-        },
-        "goldenSet": {
-          "description": "T34: the slot's golden set — 1–50 known inputs with the properties a right answer has, run by the runtime against the pinned model before a staged release activates (golden-sets.md). Omitted when none; in the digest input only when present.",
-          "$ref": "#/$defs/goldenSetRef"
-        },
-        "steps": {
-          "description": "Workflow slots only: ordered steps, 1-based and contiguous, tagged `<tag>#<ordinal>`.",
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 64,
-          "items": {
-            "$ref": "#/$defs/step"
-          }
-        }
-      },
-      "if": {
-        "properties": {
-          "kind": {
-            "const": "workflow"
-          }
-        },
-        "type": "object"
-      },
-      "then": {
-        "required": [
-          "steps"
-        ],
-        "type": "object"
-      },
-      "else": {
-        "not": {
+      "description": "One pinned slot. These members, sorted by `tag`, are exactly the release digest input (canonical-json.md); `modelRequired` is part of it only when true, `outputChecks`, `goldenSet` and `inference` only when present. `requires`, when present, is in the digest input too.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": [
-            "steps"
+            "tag",
+            "kind",
+            "artifactId",
+            "versionId",
+            "versionOrdinal",
+            "contentHash",
+            "byteLength",
+            "model",
+            "variables"
           ],
-          "type": "object"
+          "properties": {
+            "tag": {
+              "$ref": "#/$defs/slotTag"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "prompt",
+                "workflow"
+              ]
+            },
+            "artifactId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "versionId": {
+              "$ref": "#/$defs/identifier"
+            },
+            "versionOrdinal": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "contentHash": {
+              "$ref": "#/$defs/sha256"
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65536
+            },
+            "model": {
+              "$ref": "#/$defs/modelId"
+            },
+            "modelRequired": {
+              "description": "The model is required: a runtime whose declared catalog lacks it refuses to activate the release (heartbeat refusal `model_unavailable`) instead of rendering the slot on another model. Omitted when false; in the digest input only when true.",
+              "type": "boolean"
+            },
+            "variables": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/variable"
+              }
+            },
+            "inference": {
+              "$ref": "#/$defs/inference"
+            },
+            "outputChecks": {
+              "description": "The slot's enabled output checks, sorted by name (checks.md). Omitted when none; in the digest input only when present.",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/outputCheck"
+              }
+            },
+            "goldenSet": {
+              "description": "T34: the slot's golden set — 1–50 known inputs with the properties a right answer has, run by the runtime against the pinned model before a staged release activates (golden-sets.md). Omitted when none; in the digest input only when present.",
+              "$ref": "#/$defs/goldenSetRef"
+            },
+            "steps": {
+              "description": "Workflow slots only: ordered steps, 1-based and contiguous, tagged `<tag>#<ordinal>`.",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/step"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "workflow"
+              }
+            },
+            "type": "object"
+          },
+          "then": {
+            "required": [
+              "steps"
+            ],
+            "type": "object"
+          },
+          "else": {
+            "not": {
+              "required": [
+                "steps"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "description": "A slot an older reader may not understand: `tag`, any `kind` and a non-empty `requires`, open otherwise. A reader missing any value of `requires` treats the slot as absent and everything else in the manifest still loads (trust-chain.md › Slots a reader cannot serve).",
+          "type": "object",
+          "required": [
+            "tag",
+            "kind",
+            "requires"
+          ],
+          "properties": {
+            "tag": {
+              "$ref": "#/$defs/slotTag"
+            },
+            "kind": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "requires": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/capability"
+              }
+            }
+          }
         }
-      }
+      ]
     },
     "arm": {
       "type": "object",
@@ -702,6 +732,7 @@
       "additionalProperties": false,
       "required": [
         "experimentId",
+        "tag",
         "salt",
         "subjectKey",
         "arms"
@@ -711,7 +742,7 @@
           "$ref": "#/$defs/identifier"
         },
         "tag": {
-          "description": "S16: the one slot this experiment splits. Required on every entry of experiments[]; absent on the legacy top-level experiment, which applies to every slot its arms override. An arm's overrides under a tagged experiment name that tag only.",
+          "description": "The one slot this experiment splits. An arm's overrides name this tag only.",
           "$ref": "#/$defs/slotTag"
         },
         "salt": {
@@ -769,7 +800,7 @@
       }
     },
     "directive": {
-      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act — a reduction, it only ever stops serving (scope agent / slot) or hands an arm's share back to the control (scope arm, S9: the retreat from a ramp); `request_unlock` is a request the runtime surfaces and never grants. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58).",
+      "description": "Signed, advisory instructions from the control plane. The set of kinds is closed (S4): `disable` is the one kind a runtime acts on without a local act — a reduction, it only ever stops serving (scope agent / slot) or hands an arm's share back to the control (scope arm, S9: the retreat from a ramp); `request_unlock` is a request the runtime surfaces and never grants. A runtime that meets a kind it does not know refuses the whole manifest (`directive_unknown`), never obeys it by halves. A runtime may always be stricter than a directive asks; on countersign targets only `disable` is honoured from the manifest (D58). A manifest refused for naming a capability does deliver its disables (trust-chain.md M8b).",
       "oneOf": [
         {
           "type": "object",
@@ -831,7 +862,7 @@
               "pattern": "^[a-z0-9_-]{1,32}$"
             },
             "experimentId": {
-              "description": "S16: with scope arm, the experiment the arm belongs to — required once a manifest carries experiments[] (arm names are per experiment); a legacy manifest may omit it.",
+              "description": "S16: with scope arm, the experiment the arm belongs to (arm names are per experiment).",
               "$ref": "#/$defs/identifier"
             },
             "issuedAt": {
@@ -870,7 +901,8 @@
               },
               "then": {
                 "required": [
-                  "arm"
+                  "arm",
+                  "experimentId"
                 ],
                 "type": "object"
               }
@@ -891,7 +923,6 @@
         "releaseDigest",
         "issuedAt",
         "leaseSeconds",
-        "onLeaseExpiry",
         "applyPolicy",
         "requireCountersign",
         "slots",
@@ -931,14 +962,6 @@
           "type": "integer",
           "minimum": 60,
           "maximum": 2592000
-        },
-        "onLeaseExpiry": {
-          "description": "`degrade` keeps serving the last verified release and reports it; `halt` stops rendering. Advisory on countersign targets, where local configuration decides.",
-          "type": "string",
-          "enum": [
-            "degrade",
-            "halt"
-          ]
         },
         "applyPolicy": {
           "type": "string",
@@ -1005,27 +1028,13 @@
             "$ref": "#/$defs/slot"
           }
         },
-        "experiment": {
-          "description": "The legacy single split (protocol 0.2): applies to every slot its arms override. Written only while a fleet has not reported protocol 0.3; never beside experiments[] (refused as experiment_conflict).",
-          "$ref": "#/$defs/experiment"
-        },
         "experiments": {
-          "description": "S16: one split per slot, each independent — its own salt, arms, ramp and share (assignment-hash.md › Per-prompt experiments). Tags are unique across the array; each arm's overrides name that experiment's tag only. Never beside experiment (experiment_conflict).",
+          "description": "One split per slot, each independent: its own salt, arms, ramp and share (assignment-hash.md › Per-prompt experiments). Tags are unique across the array; each arm's overrides name that experiment's tag only.",
           "type": "array",
           "minItems": 1,
           "maxItems": 32,
           "items": {
-            "allOf": [
-              {
-                "$ref": "#/$defs/experiment"
-              },
-              {
-                "type": "object",
-                "required": [
-                  "tag"
-                ]
-              }
-            ]
+            "$ref": "#/$defs/experiment"
           }
         },
         "directives": {
@@ -1036,15 +1045,13 @@
           }
         },
         "requiredCapabilities": {
+          "description": "Capabilities a reader must implement to load this manifest at all (capabilities.md). A reader missing any value refuses the manifest with protocol_unsupported.",
           "type": "array",
-          "minItems": 1,
-          "maxItems": 1,
-          "prefixItems": [
-            {
-              "const": "audience"
-            }
-          ],
-          "items": false
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/capability"
+          }
         },
         "observations": {
           "type": "array",
@@ -1074,137 +1081,10 @@
                 "$ref": "#/$defs/timestamp"
               }
             }
-          }
-        }
-      },
-      "not": {
-        "type": "object",
-        "required": [
-          "experiment",
-          "experiments"
-        ]
-      },
-      "allOf": [
-        {
-          "if": {
-            "anyOf": [
-              {
-                "required": [
-                  "requiredCapabilities"
-                ],
-                "type": "object"
-              },
-              {
-                "required": [
-                  "observations"
-                ],
-                "type": "object"
-              },
-              {
-                "properties": {
-                  "experiments": {
-                    "type": "array",
-                    "contains": {
-                      "type": "object",
-                      "required": [
-                        "audience"
-                      ]
-                    }
-                  }
-                },
-                "required": [
-                  "experiments"
-                ],
-                "type": "object"
-              },
-              {
-                "properties": {
-                  "experiment": {
-                    "type": "object",
-                    "required": [
-                      "audience"
-                    ]
-                  }
-                },
-                "required": [
-                  "experiment"
-                ],
-                "type": "object"
-              },
-              {
-                "properties": {
-                  "protocol": {
-                    "const": "2.0.0"
-                  }
-                },
-                "required": [
-                  "protocol"
-                ],
-                "type": "object"
-              }
-            ]
           },
-          "then": {
-            "required": [
-              "requiredCapabilities",
-              "observations"
-            ],
-            "not": {
-              "required": [
-                "experiment"
-              ],
-              "type": "object"
-            },
-            "properties": {
-              "protocol": {
-                "const": "2.0.0"
-              },
-              "requiredCapabilities": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 1,
-                "prefixItems": [
-                  {
-                    "const": "audience"
-                  }
-                ],
-                "items": false
-              },
-              "experiments": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "tag",
-                    "audience"
-                  ]
-                }
-              },
-              "observations": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "selector": {
-                      "$ref": "#/$defs/audienceSelector"
-                    }
-                  }
-                }
-              }
-            },
-            "type": "object"
-          },
-          "else": {
-            "properties": {
-              "protocol": {
-                "type": "string",
-                "pattern": "^0\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
-              }
-            },
-            "type": "object"
-          }
+          "description": "Optional. The audiences observed on this release; an experiment naming an audience finds its observation here."
         }
-      ]
+      }
     },
     "signature": {
       "type": "object",
@@ -1277,70 +1157,14 @@
           "additionalProperties": false,
           "required": [
             "mode",
-            "conditions"
+            "when"
           ],
           "properties": {
             "mode": {
-              "const": "tags"
+              "const": "when"
             },
-            "conditions": {
-              "type": "array",
-              "minItems": 1,
-              "maxItems": 16,
-              "uniqueItems": true,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "key",
-                  "operator",
-                  "value"
-                ],
-                "properties": {
-                  "key": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 64,
-                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])+$"
-                  },
-                  "operator": {
-                    "type": "string",
-                    "enum": [
-                      "is",
-                      "contains"
-                    ]
-                  },
-                  "value": {
-                    "type": "string",
-                    "maxLength": 256,
-                    "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])*$"
-                  }
-                },
-                "allOf": [
-                  {
-                    "if": {
-                      "properties": {
-                        "operator": {
-                          "const": "contains"
-                        }
-                      },
-                      "required": [
-                        "operator"
-                      ],
-                      "type": "object"
-                    },
-                    "then": {
-                      "properties": {
-                        "value": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "type": "object"
-                    }
-                  }
-                ]
-              }
+            "when": {
+              "$ref": "#/$defs/audienceCondition"
             }
           }
         }
@@ -1362,6 +1186,288 @@
           "$ref": "#/$defs/audienceSelector"
         }
       }
+    },
+    "hostedEnvironment": {
+      "description": "One AirPrompter deployment. A root document names the deployment it belongs to, never an agent's stage.",
+      "type": "string",
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ]
+    },
+    "capability": {
+      "description": "A registered capability name (capabilities.md): snake_case, one noun phrase per feature.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "audienceKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])+$"
+    },
+    "audienceValue": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^(?:[^\\u0000-\\u001f\\u007f\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])*$"
+    },
+    "audienceLeaf": {
+      "description": "One tag test. A missing key is false for every leaf. Range bounds are safe integers, the only numbers canonical JSON can sign; a fractional tag value is fine.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "is"
+          ],
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/audienceKey"
+            },
+            "is": {
+              "$ref": "#/$defs/audienceValue"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "contains"
+          ],
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/audienceKey"
+            },
+            "contains": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/audienceValue"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "in"
+          ],
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/audienceKey"
+            },
+            "in": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/audienceValue"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "range"
+          ],
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/audienceKey"
+            },
+            "range": {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "gte": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "lt": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "audienceConditionDepth2": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/audienceLeaf"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "all"
+          ],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/audienceLeaf"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "any"
+          ],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/audienceLeaf"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "not"
+          ],
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/audienceLeaf"
+            }
+          }
+        }
+      ]
+    },
+    "audienceConditionDepth3": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/audienceLeaf"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "all"
+          ],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/audienceConditionDepth2"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "any"
+          ],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/audienceConditionDepth2"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "not"
+          ],
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/audienceConditionDepth2"
+            }
+          }
+        }
+      ]
+    },
+    "audienceCondition": {
+      "description": "The condition tree (audiences.md). A leaf is depth 1 and each all, any or not adds one, up to depth 4. Past the schema, a tree holds at most 32 leaves (validAudienceManifest refuses more).",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/audienceLeaf"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "all"
+          ],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/audienceConditionDepth3"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "any"
+          ],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/audienceConditionDepth3"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "not"
+          ],
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/audienceConditionDepth3"
+            }
+          }
+        }
+      ]
     }
   }
 }

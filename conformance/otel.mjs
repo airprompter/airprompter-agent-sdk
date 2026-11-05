@@ -26,15 +26,17 @@ const point = (value, attributes, start, end) => ({ attributes, startTimeUnixNan
 const sum = (name, unit, dataPoints, description, monotonic = true) => ({ name, description, unit, sum: { aggregationTemporality: DELTA, isMonotonic: monotonic, dataPoints } });
 
 export function spoolRowsToOtlp(rows, options = {}) {
-  const first = rows[0];
+  // A step row is skipped on purpose: no metric reads one, and it does not name the resource either.
+  const first = rows.find((row) => row.type !== "step");
   const [sdkName, sdkVersion] = String(first?.sdk ?? "").split("/");
-  const resource = [attr("service.instance.id", first.instanceId)];
-  if (first.instanceClass) resource.push(attr("airprompter.instance.class", first.instanceClass));
+  const resource = first ? [attr("service.instance.id", first.instanceId)] : [];
+  if (first?.instanceClass) resource.push(attr("airprompter.instance.class", first.instanceClass));
   if (sdkName) resource.push(attr("telemetry.sdk.name", sdkName));
   if (sdkVersion) resource.push(attr("telemetry.sdk.version", sdkVersion));
   for (const key of Object.keys(options.resource ?? {}).sort()) resource.push(attr(key, options.resource[key]));
   const duration = [], tokens = [], checks = [], feedbackN = [], feedbackSum = [], refusals = [], droppedSegments = [], droppedBytes = [];
   for (const row of rows) {
+    if (row.type === "step") continue;
     if (row.type === "window") {
       const start = nanos(row.minute);
       const end = String(BigInt(start) + 60_000_000_000n);

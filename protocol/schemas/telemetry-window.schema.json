@@ -1,13 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://airprompter.com/protocol/telemetry-window/1",
-  "title": "Telemetry window row (draft 1)",
-  "description": "One minute of one dimension set. Content-free by schema: additionalProperties is false everywhere, and no field can carry prompt text, model output or end-user identifiers. v2 preserves legacy audience membership; v3 requires stable prompt artifact identity and may also carry audience membership. Delayed feedback is a zero-run row naming its authenticated original run minute. Cross-field sums, sort order and timestamps are semantic conformance checks.",
+  "title": "Telemetry window row",
+  "description": "One minute of one dimension set. Content-free by schema: additionalProperties is false everywhere, and no field can carry prompt text, model output or end-user identifiers. `count` means runs. Two forms: a run row (`count` above 0) carries the run totals, and a feedback-only row (`count: 0` with `outcomeRunMinute`) carries outcomes and every measure zero. A window row is never a step (spool-format.md).",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "type",
     "v",
+    "artifactId",
     "minute",
     "instanceId",
     "instanceClass",
@@ -18,6 +19,9 @@
     "status",
     "usageSource",
     "count",
+    "modelCalls",
+    "agentRun",
+    "tools",
     "latencyMs",
     "tokens"
   ],
@@ -27,15 +31,21 @@
     },
     "v": {
       "enum": [
-        1,
-        2,
-        3
+        4
       ]
+    },
+    "artifactId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "Stable prompt artifact identity, so version ordinals cannot merge across prompts that occupied the same slot."
     },
     "minute": {
       "type": "string",
       "format": "date-time",
-      "description": "UTC minute boundary"
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:00(?:\\.000)?Z$",
+      "description": "UTC minute boundary: the minute the run ended."
     },
     "instanceId": {
       "type": "string",
@@ -49,26 +59,19 @@
     },
     "tag": {
       "type": "string",
-      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:#[1-9][0-9]{0,2})?$",
-      "maxLength": 132
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+      "maxLength": 128,
+      "description": "Always the slot tag."
     },
     "versionId": {
       "type": "string",
       "maxLength": 128
     },
     "arm": {
-      "anyOf": [
-        {
-          "type": "string",
-          "pattern": "^[a-z0-9_-]{1,32}$",
-          "description": "control, candidate, or a named arm; 'none' when no experiment"
-        },
-        {
-          "type": "string",
-          "maxLength": 32,
-          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
-        }
-      ]
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+      "description": "control, candidate, or a named arm; 'none' when no experiment"
     },
     "model": {
       "type": "string",
@@ -78,8 +81,10 @@
       "enum": [
         "ok",
         "error",
-        "refused"
-      ]
+        "refused",
+        "interrupted"
+      ],
+      "description": "`interrupted` counts as a run, not as an error."
     },
     "errorClass": {
       "anyOf": [
@@ -95,7 +100,8 @@
             "content_filter",
             "provider_error",
             "provider_timeout",
-            "provider_rate_limited"
+            "provider_rate_limited",
+            "model_unresolved"
           ]
         }
       ]
@@ -111,7 +117,36 @@
     "count": {
       "type": "integer",
       "minimum": 0,
-      "description": "Runs observed in this minute. 0 when the window carries only feedback filed against runs from an earlier minute."
+      "description": "Runs that ended in this minute. 0 when the window carries only feedback filed against runs from an earlier minute."
+    },
+    "modelCalls": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Model calls across this row's runs."
+    },
+    "agentRun": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many of this row's runs are the first slot of their run, so an agent-wide total counts a two-slot run once."
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calls",
+        "errors"
+      ],
+      "description": "Tool calls and how many failed. Counts only: no tool name ever travels.",
+      "properties": {
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     },
     "latencyMs": {
       "type": "object",
@@ -123,8 +158,8 @@
       "properties": {
         "buckets": {
           "type": "array",
-          "minItems": 16,
-          "maxItems": 16,
+          "minItems": 23,
+          "maxItems": 23,
           "items": {
             "type": "integer",
             "minimum": 0
@@ -159,6 +194,45 @@
         }
       }
     },
+    "tokensSq": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "cachedInput",
+        "output",
+        "inputOutput",
+        "inputCached",
+        "cachedOutput"
+      ],
+      "description": "The second moments of each run's token totals, summed over runs: three squares and three pairwise products. They give the variance of any weighted token total. Present exactly on run rows.",
+      "properties": {
+        "input": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cachedInput": {
+          "type": "number",
+          "minimum": 0
+        },
+        "output": {
+          "type": "number",
+          "minimum": 0
+        },
+        "inputOutput": {
+          "type": "number",
+          "minimum": 0
+        },
+        "inputCached": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cachedOutput": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
     "checks": {
       "type": "object",
       "additionalProperties": false,
@@ -175,7 +249,7 @@
     },
     "outcomes": {
       "type": "object",
-      "description": "Declared feedback signals only (see feedback-signals.schema.json), plus `goldenPass` written by the runtime's golden-set run (golden-sets.md); each as {n, sum}. Booleans count 1/0.",
+      "description": "Declared feedback signals only (see feedback-signals.schema.json), plus `goldenPass` written by the runtime's golden-set run (golden-sets.md); each as {n, sum, sumSq}. Booleans count 1/0.",
       "additionalProperties": false,
       "patternProperties": {
         "^[a-z][a-zA-Z0-9]{0,31}$": {
@@ -183,7 +257,8 @@
           "additionalProperties": false,
           "required": [
             "n",
-            "sum"
+            "sum",
+            "sumSq"
           ],
           "properties": {
             "n": {
@@ -192,6 +267,10 @@
             },
             "sum": {
               "type": "number"
+            },
+            "sumSq": {
+              "type": "number",
+              "minimum": 0
             }
           }
         }
@@ -200,7 +279,7 @@
     "sdk": {
       "type": "string",
       "maxLength": 64,
-      "description": "writer name/version, e.g. agent-sdk-ts/0.1.0 or a third-party writer"
+      "description": "writer name/version, e.g. agent-sdk-ts/1.0.0 or a third-party writer"
     },
     "audienceIds": {
       "type": "array",
@@ -215,185 +294,100 @@
       "type": "string",
       "format": "date-time",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:00(?:\\.000)?Z$"
-    },
-    "artifactId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 128,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
-      "description": "Stable Team prompt artifact identity. Required for v3 so version ordinals cannot merge across prompts that occupied the same slot."
     }
   },
   "allOf": [
     {
       "if": {
         "properties": {
-          "v": {
-            "enum": [
-              2,
-              3
-            ]
+          "count": {
+            "const": 0
           }
         },
         "required": [
-          "v"
+          "count"
         ],
         "type": "object"
       },
       "then": {
-        "required": [],
-        "properties": {
-          "minute": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:00(?:\\.000)?Z$"
-          },
-          "arm": {
-            "type": "string",
-            "maxLength": 32,
-            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
-          }
+        "required": [
+          "outcomes",
+          "outcomeRunMinute"
+        ],
+        "not": {
+          "required": [
+            "tokensSq"
+          ],
+          "type": "object"
         },
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "v": {
-                  "const": 2
-                }
+        "properties": {
+          "outcomes": {
+            "type": "object",
+            "minProperties": 1
+          },
+          "modelCalls": {
+            "const": 0
+          },
+          "agentRun": {
+            "const": 0
+          },
+          "tools": {
+            "properties": {
+              "calls": {
+                "const": 0
               },
-              "required": [
-                "v"
-              ],
-              "type": "object"
-            },
-            "then": {
-              "required": [
-                "audienceIds"
-              ],
-              "not": {
-                "required": [
-                  "artifactId"
-                ]
+              "errors": {
+                "const": 0
               }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "v": {
-                  "const": 3
-                }
-              },
-              "required": [
-                "v"
-              ],
-              "type": "object"
             },
-            "then": {
-              "required": [
-                "artifactId"
-              ]
-            }
+            "type": "object"
           },
-          {
-            "if": {
-              "properties": {
-                "count": {
+          "latencyMs": {
+            "properties": {
+              "sum": {
+                "const": 0
+              },
+              "buckets": {
+                "type": "array",
+                "items": {
                   "const": 0
                 }
-              },
-              "required": [
-                "count"
-              ],
-              "type": "object"
+              }
             },
-            "then": {
-              "required": [
-                "outcomes",
-                "outcomeRunMinute"
-              ],
-              "properties": {
-                "outcomes": {
-                  "type": "object",
-                  "minProperties": 1
-                },
-                "latencyMs": {
-                  "properties": {
-                    "sum": {
-                      "const": 0
-                    },
-                    "buckets": {
-                      "type": "array",
-                      "items": {
-                        "const": 0
-                      }
-                    }
-                  },
-                  "type": "object"
-                },
-                "tokens": {
-                  "properties": {
-                    "input": {
-                      "const": 0
-                    },
-                    "cachedInput": {
-                      "const": 0
-                    },
-                    "output": {
-                      "const": 0
-                    }
-                  },
-                  "type": "object"
-                },
-                "checks": {
-                  "properties": {
-                    "passed": {
-                      "const": 0
-                    },
-                    "failed": {
-                      "const": 0
-                    }
-                  },
-                  "type": "object"
-                }
+            "type": "object"
+          },
+          "tokens": {
+            "properties": {
+              "input": {
+                "const": 0
               },
-              "type": "object"
-            }
+              "cachedInput": {
+                "const": 0
+              },
+              "output": {
+                "const": 0
+              }
+            },
+            "type": "object"
+          },
+          "checks": {
+            "properties": {
+              "passed": {
+                "const": 0
+              },
+              "failed": {
+                "const": 0
+              }
+            },
+            "type": "object"
           }
-        ],
+        },
         "type": "object"
       },
       "else": {
-        "not": {
-          "anyOf": [
-            {
-              "required": [
-                "audienceIds"
-              ],
-              "type": "object"
-            },
-            {
-              "required": [
-                "outcomeRunMinute"
-              ],
-              "type": "object"
-            },
-            {
-              "required": [
-                "artifactId"
-              ],
-              "type": "object"
-            }
-          ]
-        },
-        "properties": {
-          "arm": {
-            "type": "string",
-            "pattern": "^[a-z0-9_-]{1,32}$",
-            "description": "control, candidate, or a named arm; 'none' when no experiment"
-          }
-        },
+        "required": [
+          "tokensSq"
+        ],
         "type": "object"
       }
     }

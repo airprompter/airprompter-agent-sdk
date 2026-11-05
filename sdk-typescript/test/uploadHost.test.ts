@@ -60,7 +60,7 @@ test("no daemon, grant present: a resident host uploads its own closed segments 
     assert.equal(ap.status().upload!.sentSegments, 0);
     assert.ok(ap.status().upload!.nextPassAt, "scheduled, off the request path");
     const r = ap.prompt("support.reply").render({ name: "x" });
-    ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12, tokens: { input: 3, output: 4 } });
+    ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12, tokens: { input: 3, output: 4 } });
     ap.spool.closeWindows(clock.ms);
     assert.equal(unsent(stateDir).length, 1, "one closed segment waits in the spool");
     const pass = await ap.uploadNow();
@@ -97,7 +97,7 @@ test("no daemon, no grant: the spool holds within its budget, the oldest segment
     // Six minutes of one-row windows, each its own closed segment.
     const r = ap.prompt("support.reply").render({ name: "x" });
     for (let i = 0; i < 6; i += 1) {
-      ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 10 + i });
+      ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 10 + i });
       clock.ms += 60_000;
       ap.spool.closeWindows(clock.ms);
     }
@@ -126,7 +126,7 @@ test("no daemon, no grant: the spool holds within its budget, the oldest segment
     assert.ok(pass!.uploaded >= 1, "everything left in the spool went, the dropped row with it");
     assert.equal(unsent(stateDir).length, 0);
     const grantsBefore = plane.grants.length;
-    ap.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 9 });
+    ap.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 9 });
     clock.ms += 16 * 60_000; // past the 15-minute grant
     ap.spool.closeWindows(clock.ms);
     pass = await ap.uploadNow();
@@ -149,7 +149,7 @@ test("telemetry.upload: false leaves the spool alone (a daemon or an operator's 
   assert.equal(off.status().upload, null);
   assert.equal(await off.uploadNow(), null);
   const r = off.prompt("support.reply").render({});
-  off.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 1 });
+  off.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 1 });
   off.spool.closeWindows(clock.ms);
   assert.equal(unsent(stateDir).length, 1, "the segment stays for whoever owns the spool");
   await off.stop();
@@ -169,7 +169,7 @@ test("serverless: the invocation's rows land before invoke() returns; flush: \"b
   const awaited = await host(plane, stateDir, clock, {}, "on_invoke");
   try {
     const r = awaited.prompt("support.reply").render({});
-    await awaited.invoke(async () => awaited.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 }));
+    await awaited.invoke(async () => awaited.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 }));
     assert.equal(plane.uploads.length, 1, "landed before the handler's caller got control back — a frozen process loses nothing");
     assert.ok(plane.uploads[0]!.startsWith(prefix(awaited.instanceId)));
     assert.deepEqual(awaited.drainMemorySink(), []);
@@ -179,7 +179,7 @@ test("serverless: the invocation's rows land before invoke() returns; flush: \"b
   const background = await host(plane, stateDir, clock, { flush: "background" }, "on_invoke");
   try {
     const r = background.prompt("support.reply").render({});
-    await background.invoke(async () => background.report({ tag: r.tag, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 }));
+    await background.invoke(async () => background.report({ tag: r.tag, artifactId: "art_1", versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs: 12 }));
     assert.equal(plane.uploads.length, 1, "background: the flush is still in flight when invoke() returns");
     const deadline = Date.now() + 5000;
     while (plane.uploads.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));

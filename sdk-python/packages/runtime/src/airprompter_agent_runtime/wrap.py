@@ -135,7 +135,7 @@ def _wrap_method(original: Callable[..., Any], kind: str, method: str, hooks: Wr
         if attribution is None:
             hooks.log({"event": "wrap_unattributed", "method": method})
             return original(*args, **kwargs)
-        # 0.3.1: the release owns the inference settings — applied here, on a call to the release's model, the call
+        # The release owns the inference settings — applied here, on a call to the release's model, the call
         # site told once when it disagreed (and told when it named another model, whose parameters it keeps).
         inference = getattr(attribution, "inference", None)
         if inference and isinstance(params, Mapping):

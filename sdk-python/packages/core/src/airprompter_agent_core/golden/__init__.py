@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional, Sequence, Union
 
 from ..checks import estimate_tokens, evaluate_checks
-from ..protocol.trust import experiments_of
+from ..protocol.assignment import servable_experiments, servable_slots
 from ..render.template import Delimiters, render_template
 
 GOLDEN_SET_FORMAT = "airprompter-golden-set"
@@ -101,7 +101,7 @@ class GoldenInvocation:
     model: str
     arm: str
     variables: Mapping[str, str]
-    #: 0.3.1: the slot's inference settings — the call is made as production makes it, or the gate measures something else.
+    #: The slot's inference settings — the call is made as production makes it, or the gate measures something else.
     inference: Optional[Mapping[str, Any]] = None
 
 
@@ -208,6 +208,6 @@ def golden_reports_meet(reports: Sequence[GoldenReport]) -> bool:
 
 def manifest_has_golden(manifest: Mapping[str, Any]) -> bool:
     payload = manifest["payload"]
-    if any(slot.get("goldenSet") for slot in payload.get("slots", [])):
+    if any(slot.get("goldenSet") for slot in servable_slots(payload)):
         return True
-    return any(override.get("goldenSet") for experiment in experiments_of(payload) for arm in experiment.get("arms", []) for override in arm.get("overrides", []))
+    return any(override.get("goldenSet") for experiment in servable_experiments(payload) for arm in experiment.get("arms", []) for override in arm.get("overrides", []))

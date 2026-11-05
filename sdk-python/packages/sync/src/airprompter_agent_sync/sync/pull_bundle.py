@@ -28,7 +28,7 @@ from typing import Any, Callable, Mapping, Optional
 
 from airprompter_agent_core.bundle.apbundle import create_encrypted_bundle, create_plaintext_bundle
 from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_core.protocol.trust import referenced_payloads, verify_manifest, verify_root_metadata
+from airprompter_agent_core.protocol.trust import carried_payloads, optional_payloads, verify_manifest, verify_root_metadata
 
 
 DEFAULT_MAX_POINTER_AGE_MS = 60 * 60 * 1000
@@ -176,17 +176,27 @@ def pull_bundle(
         if int(manifest["payload"]["generation"]) < minimum_generation:
             return PullBundleResult(status="refused", reason="generation_rollback", detail=f"the control plane answered generation {manifest['payload']['generation']}; the caller holds {minimum_generation}", held=minimum_generation, edge=given)
 
+        # No stored generation here: a puller has no host to move backwards. Anti-rollback is the store's rule, applied
+        # by every runtime that opens this bundle.
+        carrying: dict[str, Any] = {"manifest": manifest, "root": root, "now": at, "scope": scope, "stored_generation": 0, "countersign_root": countersign_root, "require_countersign": require_countersign, "carrying": True, "absent_requires": True}
+        # The envelope first: the walk below reads whatever the manifest holds, so it reads only a signed one.
+        envelope = verify_manifest(payloads=None, **carrying)
+        if not envelope.ok:
+            return PullBundleResult(status="refused", reason=envelope.reason, edge=given)
+
+        # A puller carries what a newer runtime needs, not what this SDK can serve. Only a payload named solely under `requires` may be absent (M9).
+        optional = optional_payloads(manifest["payload"])
         payloads: dict[str, bytes] = {}
-        for content_hash, byte_length in referenced_payloads(manifest["payload"]).items():
+        for content_hash, byte_length in carried_payloads(manifest["payload"]).items():
             data = client.payload(content_hash)
+            if data is None and content_hash in optional:
+                continue
             if data is None:
                 return PullBundleResult(status="refused", reason="payload_missing", content_hash=content_hash, edge=given)
             if len(data) != byte_length:
                 return PullBundleResult(status="refused", reason="payload_length_mismatch", content_hash=content_hash, edge=given)
             payloads[content_hash] = data
-        # No stored generation here: a puller has no host to move backwards. Anti-rollback is the store's rule, applied
-        # by every runtime that opens this bundle.
-        verdict = verify_manifest(manifest=manifest, root=root, now=at, scope=scope, stored_generation=0, payloads=payloads, countersign_root=countersign_root, require_countersign=require_countersign)
+        verdict = verify_manifest(payloads=payloads, **carrying)
         if not verdict.ok:
             return PullBundleResult(status="refused", reason=verdict.reason, edge=given)
         # The bundle is built: the manifest's ETag is the caller's to keep — with the row, never before it.

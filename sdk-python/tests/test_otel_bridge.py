@@ -76,7 +76,7 @@ class Collector:
         return httpx.MockTransport(handle)
 
 
-WINDOW = {"type": "window", "v": 1, "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident", "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "latencyMs": {"buckets": [0] * 16, "sum": 12}, "tokens": {"input": 3, "output": 4}, "sdk": "agent-sdk-py/0.1.0"}
+WINDOW = {"type": "window", "v": 4, "artifactId": "art_1", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident", "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 3, "output": 4}, "sdk": "agent-sdk-py/0.1.0"}
 
 
 def segment(name: str = "seg-i-writer-a-1-1.ndjson") -> UploadSegment:
@@ -146,7 +146,7 @@ def test_facade_runs_the_bridge_offline_with_no_key_and_asks_no_grant(state_dir)
         started = [e for e in events if e.get("event") == "uploader_started"]
         assert len(started) == 1 and started[0]["sink"] == "otlp", "no key, a vendored bundle: the uploader still runs, to the customer's sink"
         r = ap.prompt("support.reply").render(name="Ada")
-        ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12, tokens={"input": 3, "output": 4})
+        ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12, tokens={"input": 3, "output": 4})
         ap.spool.close_windows(clock["ms"])
         assert ap.upload_now() == {"uploaded": 1, "quarantined": 0, "dropped": 0, "held": False}
         assert len(collector.requests) == 1

@@ -89,7 +89,7 @@ def test_no_daemon_grant_present_uploads_own_segments(state_dir):
         assert ap.status().upload["sentSegments"] == 0
         assert ap.status().upload["nextPassAt"], "scheduled, off the request path"
         r = ap.prompt("support.reply").render(name="x")
-        ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12, tokens={"input": 3, "output": 4})
+        ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12, tokens={"input": 3, "output": 4})
         ap.spool.close_windows(clock.ms)
         assert len(unsent(state_dir)) == 1
         assert ap.upload_now() == {"uploaded": 1, "quarantined": 0, "dropped": 0, "held": False}
@@ -119,7 +119,7 @@ def test_no_daemon_no_grant_budget_holds_drops_count_and_lapsed_grant_is_replace
     try:
         r = ap.prompt("support.reply").render(name="x")
         for i in range(6):
-            ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=10 + i)
+            ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=10 + i)
             clock.ms += 60_000
             ap.spool.close_windows(clock.ms)
         assert len(unsent(state_dir)) == 6
@@ -145,7 +145,7 @@ def test_no_daemon_no_grant_budget_holds_drops_count_and_lapsed_grant_is_replace
         assert result["held"] is False and result["uploaded"] >= 1
         assert unsent(state_dir) == []
         grants_before = len(plane.grants)
-        ap.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=9)
+        ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=9)
         clock.ms += 16 * 60_000
         ap.spool.close_windows(clock.ms)
         result = ap.upload_now()
@@ -164,7 +164,7 @@ def test_upload_off_and_memory_sink_run_no_uploader(state_dir):
     off = host(plane, state_dir, clock, TelemetryOptions(upload=False))
     assert off.status().upload is None and off.upload_now() is None
     r = off.prompt("support.reply").render()
-    off.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=1)
+    off.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=1)
     off.spool.close_windows(clock.ms)
     assert len(unsent(state_dir)) == 1, "the segment stays for whoever owns the spool"
     off.stop()
@@ -182,14 +182,14 @@ def test_serverless_flush_is_awaited_and_background_is_the_opt_out(state_dir):
     awaited = host(plane, state_dir, clock, mode="on_invoke")
     try:
         r = awaited.prompt("support.reply").render()
-        awaited.invoke(lambda: awaited.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12))
+        awaited.invoke(lambda: awaited.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12))
         assert len(plane.uploads) == 1, "landed before the handler's caller got control back — a frozen process loses nothing"
         assert plane.uploads[0].startswith(prefix(awaited.instance_id))
         assert awaited.drain_memory_sink() == []
         # A hold keeps the rows for the next invocation.
         plane.grant_hold = {"retryAfterSeconds": 60}
         awaited._upload_grant = None
-        awaited.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=3)
+        awaited.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=3)
         awaited.spool.close_windows(clock.ms + 60_000)
         held = awaited.flush_telemetry()
         assert held["status"] == "held"
@@ -200,7 +200,7 @@ def test_serverless_flush_is_awaited_and_background_is_the_opt_out(state_dir):
     background = host(plane, state_dir, clock, TelemetryOptions(flush="background"), mode="on_invoke")
     try:
         r = background.prompt("support.reply").render()
-        background.invoke(lambda: background.report(tag=r.tag, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12))
+        background.invoke(lambda: background.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=12))
         deadline = time.time() + 5
         while len(plane.uploads) < 2 and time.time() < deadline:
             time.sleep(0.02)

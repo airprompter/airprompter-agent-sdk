@@ -210,10 +210,10 @@ rehearse its recipe before a release carries it. A resident SDK pointed at
 the registry with a short `pollSeconds` picks up every promotion within
 one poll (S3). A file's front matter names the slot's
 `model:`, `variables:` (`name!` required, `name?` end-user text — fenced
-exactly as in production; `name=default` and `name~` from 0.3.4; without
+exactly as in production; `name=default` and `name~`; without
 the line every `{{placeholder}}` is an optional operator variable) and
 `version:`; `release.json` carries the
-manifest's policy, lease, window, experiment and directives.
+manifest's policy, lease, window, experiments and directives.
 
 The same server is the **conformance target**: `node conformance/live.mjs
 --base-url … --root … --api-key …` exercises a running registry — `dev`,

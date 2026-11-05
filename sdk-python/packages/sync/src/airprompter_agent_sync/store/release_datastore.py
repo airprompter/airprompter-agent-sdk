@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Protocol
 
-from airprompter_agent_core.protocol.trust import experiments_of
+from airprompter_agent_core.protocol.assignment import servable_experiments
 
 from ..sync.pull_bundle import PullEdgeState
 from .datastore_records import datastore_keys, decode_datastore_record, encode_datastore_record, generation_of_release_key
@@ -106,11 +106,11 @@ def rollout_of(manifest: Mapping[str, Any]) -> dict[str, Any]:
     experiments = [
         {
             "experimentId": experiment["experimentId"],
-            "tag": experiment.get("tag"),
+            "tag": experiment["tag"],
             "arms": [{"arm": arm["arm"], "weightBps": arm["weightBps"]} for arm in experiment["arms"]],
             "ramp": [{"notBefore": step["notBefore"], "weightBps": list(step["weightBps"])} for step in experiment.get("ramp") or []],
         }
-        for experiment in experiments_of(payload)
+        for experiment in servable_experiments(payload)
     ]
     disabled: dict[str, Any] = {"agent": False, "slots": [], "arms": []}
     for directive in payload.get("directives") or []:

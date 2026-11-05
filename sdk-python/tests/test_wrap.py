@@ -412,7 +412,7 @@ def test_nothing_the_wrapper_does_fails_the_call():
     assert broken.chat.completions.create(model="gpt-5", messages=[]).choices[0].message.content == "answer 1 refund guaranteed"
     assert [e["event"] for e in log] == ["wrap_attribution_failed", "wrap_unattributed"]
 
-    target = ObserveTarget("t", "v", "none", "m")
+    target = ObserveTarget("t", "v", "none", "m", "art_1")
     hooks = WrapHooks(attribute=lambda _p: SimpleNamespace(tag="t", version_id="v", arm="none", model="m"), begin=lambda a, model: PendingObservation(target, recorded.append, model=model), log=log.append)
     odd = wrap_client(SimpleNamespace(messages=SimpleNamespace(create=lambda **_: FakeStream([None, 42, ns({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "x"}}), "str"]))), hooks)
     chunks = list(odd.messages.create(model="m2"))
@@ -461,7 +461,7 @@ def test_request_texts_and_registry():
 
 
 def test_inference_settings_ride_the_render_and_go_out_on_the_wrapped_call(state_dir):
-    """0.3.1: the release's values, whatever the call site wrote; integers on the wire, floats to the provider."""
+    """The release's values, whatever the call site wrote; integers on the wire, floats to the provider."""
     events: list = []
     plane = FakeControlPlane(SCOPE)
     full = {"temperatureMilli": 200, "topPBps": 9000, "maxOutputTokens": 800, "stopSequences": ["\n\nHuman:"], "reasoningEffort": "low"}

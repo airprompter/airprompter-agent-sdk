@@ -11,12 +11,13 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import pytest
 
-from airprompter_agent.agent import AirPrompterAgent
+from airprompter_agent.agent import AirPrompterAgent, RenderRefusedError
 from airprompter_agent_core.bundle.apbundle import DistributionKey
 from airprompter_agent_core.bundle.hpke import generate_x25519_key_pair
 from airprompter_agent_core.control.client import SyncClient
-from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key
+from airprompter_agent_core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key, release_digest
 from airprompter_agent_sync import MemoryReleaseDatastore, ReleaseKey, clear_datastore_rollback, pull_to_datastore, resolve_hydration, rollback_datastore
 
 from .control_plane import FakeControlPlane
@@ -69,7 +70,7 @@ def test_puller_writes_through_the_dao_and_a_runtime_hydrates_the_ramp_as_signed
     candidate = plane.slot(tag="support.reply", text="Reply warmly.", version_id="ver_2")
     now = datetime.now(timezone.utc)
     ramp = [{"notBefore": _iso(now - timedelta(hours=2)), "weightBps": [7500, 2500]}, {"notBefore": _iso(now - timedelta(hours=1)), "weightBps": [5000, 5000]}]
-    plane.promote([control], experiment={"experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 9000, "releaseDigest": "sha256:" + "0" * 64, "overrides": []}, {"arm": "candidate", "weightBps": 1000, "releaseDigest": "sha256:" + "1" * 64, "overrides": [candidate]}], "ramp": ramp})
+    plane.promote([control], experiments=[{"tag": control["tag"], "experimentId": "exp_1", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "request", "arms": [{"arm": "control", "weightBps": 9000, "releaseDigest": release_digest([control]), "overrides": []}, {"arm": "candidate", "weightBps": 1000, "releaseDigest": "sha256:" + "1" * 64, "overrides": [candidate]}], "ramp": ramp}])
     assert pull().status == "ok"
     row2 = datastore.latest(GLOBAL)
     assert row2.rollout["experiments"][0]["arms"] == [{"arm": "control", "weightBps": 9000}, {"arm": "candidate", "weightBps": 1000}]
@@ -87,6 +88,30 @@ def test_puller_writes_through_the_dao_and_a_runtime_hydrates_the_ramp_as_signed
         assert ap.hydrate() == {"outcome": "unchanged", "generation": 2}
         ap.stop()
     finally:
+        shutil.rmtree(state_dir, ignore_errors=True)
+
+
+def test_a_capability_refused_row_delivers_its_disables_and_a_later_refused_row_lifts_them():
+    plane, fleet, key, datastore = _setup()
+    slot = plane.slot(tag="support.reply", text="Reply politely.")
+    plane.promote([slot])
+    pull = puller(plane, datastore, fleet.public_raw)
+    pull()
+    state_dir = tempfile.mkdtemp(prefix="ap-datastore-")
+    ap = _boot(plane, key, datastore, state_dir)
+    try:
+        plane.promote([slot], required_capabilities=["future_slots"], directives=[{"kind": "disable", "scope": "slot", "tag": "support.reply", "issuedAt": "2026-09-12T11:00:00Z"}])
+        pull()
+        assert ap.hydrate()["outcome"] == "refused"
+        assert ap.generation == 1
+        with pytest.raises(RenderRefusedError):  # the disable reached a datastore host
+            ap.prompt("support.reply").render()
+        plane.promote([slot], required_capabilities=["future_slots"], directives=[])
+        pull()
+        ap.hydrate()
+        assert ap.prompt("support.reply").render().text == "Reply politely.", "and a lift lands"
+    finally:
+        ap.stop()
         shutil.rmtree(state_dir, ignore_errors=True)
 
 

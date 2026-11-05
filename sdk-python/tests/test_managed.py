@@ -33,7 +33,7 @@ CATALOGUE = {
         {"tag": "support.triage", "kind": "prompt", "model": "anthropic.claude-sonnet-5", "variables": [{"name": "team", "required": True, "trust": "operator"}, {"name": "ticket", "required": True, "trust": "end_user"}], "steps": None},
         {"tag": "onboarding.flow", "kind": "workflow", "model": "anthropic.claude-haiku-4-5", "variables": [{"name": "name", "required": True, "trust": "operator"}], "steps": [{"stepId": "welcome#1"}, {"stepId": "verify#2"}]},
     ],
-    "experiment": {"salt": SALT, "subjectKey": "request", "arms": ["control", "warmer"]},
+    "experiments": [{"experimentId": "exp_1", "tag": "support.triage", "salt": SALT, "subjectKey": "request", "arms": ["control", "warmer"]}, {"experimentId": "exp_2", "tag": "onboarding.flow", "salt": SALT, "subjectKey": "request", "arms": ["control", "warmer"]}],
 }
 DONE = {
     "runId": "run_0f3a",
@@ -107,8 +107,8 @@ def test_start_reads_catalogue_and_run_sends_salted_hash_never_subject():
 
 
 def test_managed_audience_selectors_match_arbitrary_tags_locally_and_send_only_opaque_ids():
-    device_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
-    region_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "conditions": [{"key": "region", "operator": "contains", "value": "west"}]}}
+    device_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "when", "when": {"key": "device_id", "is": "device-007"}}}
+    region_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "when", "when": {"key": "region", "contains": "west"}}}
     all_audience = {"audienceId": "aud_CCCCCCCCCCCCCCCCCCCCCC", "tag": "support.triage", "selector": {"mode": "all"}}
     catalogue = {**CATALOGUE, "observations": [device_audience, region_audience, all_audience]}
     transport, calls = scripted([
@@ -132,8 +132,8 @@ def test_managed_audience_selectors_match_arbitrary_tags_locally_and_send_only_o
 
 
 def test_managed_run_refreshes_and_rematches_once_when_catalogue_generation_changed():
-    old_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "tags", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
-    new_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "tags", "conditions": [{"key": "device_id", "operator": "is", "value": "device-007"}]}}
+    old_audience = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "tag": "support.triage", "selector": {"mode": "when", "when": {"key": "device_id", "is": "device-007"}}}
+    new_audience = {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "tag": "support.triage", "selector": {"mode": "when", "when": {"key": "device_id", "is": "device-007"}}}
     transport, calls = scripted([
         {"status": 200, "body": json.dumps({**CATALOGUE, "generation": 1, "observations": [old_audience]})},
         {"status": 409, "body": json.dumps({"error": "refresh", "code": "catalogue_stale", "detail": "2"})},
@@ -149,10 +149,10 @@ def test_managed_run_refreshes_and_rematches_once_when_catalogue_generation_chan
     agent.close()
 
 
-def test_older_catalogue_without_generation_capability_remains_compatible_with_strict_route():
-    legacy_catalogue = {key: value for key, value in CATALOGUE.items() if key != "capabilities"}
+def test_a_catalogue_with_no_capabilities_sends_no_catalogue_generation():
+    plain_catalogue = {key: value for key, value in CATALOGUE.items() if key != "capabilities"}
     transport, calls = scripted([
-        {"status": 200, "body": json.dumps(legacy_catalogue)},
+        {"status": 200, "body": json.dumps(plain_catalogue)},
         {"status": 200, "body": RUN_SSE, "stream": True},
     ])
     agent = ManagedAgent.start(agent_id="agent-1", target="prod", api_key="apr_run_key", base_url="https://run.example", transport=transport)
@@ -248,7 +248,7 @@ def test_feedback_posts_to_the_run_surface_and_returns_what_landed():
 
 def test_s17_per_prompt_experiments_hash_with_the_slots_own_salt():
     salt_b = "EBESExQVFhcYGRobHB0eHyAhIiMkJSYn"
-    per_prompt = {**CATALOGUE, "experiment": {"salt": SALT, "subjectKey": "request", "arms": ["control", "candidate"]}, "experiments": [{"experimentId": "exp_a", "tag": "support.triage", "salt": SALT, "subjectKey": "request", "arms": ["control", "candidate"]}, {"experimentId": "exp_b", "tag": "onboarding.flow", "salt": salt_b, "subjectKey": "request", "arms": ["control", "candidate"]}]}
+    per_prompt = {**CATALOGUE, "experiments": [{"experimentId": "exp_a", "tag": "support.triage", "salt": SALT, "subjectKey": "request", "arms": ["control", "candidate"]}, {"experimentId": "exp_b", "tag": "onboarding.flow", "salt": salt_b, "subjectKey": "request", "arms": ["control", "candidate"]}]}
     transport, calls = scripted([{"status": 200, "headers": {"x-agent-generation": "3"}, "body": json.dumps(per_prompt)}, {"status": 200, "body": RUN_SSE, "stream": True}, {"status": 200, "body": RUN_SSE, "stream": True}])
     agent = ManagedAgent.start(agent_id="agent-1", target="prod", api_key="apr_run_key", base_url="https://run.example/", transport=transport, sleep=lambda _s: None)
     agent.run("support.triage", {"team": "Billing", "ticket": "x"}, subject="user-42")
@@ -258,6 +258,16 @@ def test_s17_per_prompt_experiments_hash_with_the_slots_own_salt():
     assert agent.experiment_for("docs.missing") is None
     assert agent.subject_hash_for("user-42", "docs.missing") is None
     agent.close()
-    legacy, _ = start_with([])
-    assert legacy.subject_hash_for("user-42", "onboarding.flow") == subject_hash(SALT, "user-42")
-    legacy.close()
+    assert agent.experiment_for("support.triage")["experimentId"] == "exp_a", "by tag, never the first"
+    assert agent.subject_hash_for("user-42") == subject_hash(SALT, "user-42"), "no tag: the first experiment"
+
+
+def test_a_catalogue_slot_with_an_unmet_requires_is_absent_and_any_target_string_is_fine():
+    unmet = {"tag": "support.rubric", "kind": "rubric", "model": "m", "variables": [{"name": "needed", "required": True, "trust": "operator"}], "steps": [{"stepId": "x#1"}], "requires": ["rubric_slots"]}
+    transport, calls = scripted([{"status": 200, "headers": {"x-agent-generation": "3"}, "body": json.dumps({**CATALOGUE, "target": "qa", "slots": [*CATALOGUE["slots"], unmet]})}])
+    agent = ManagedAgent.start(agent_id="agent-1", target="qa", api_key="apr_run_key", base_url="https://run.example/", transport=transport, sleep=lambda _s: None)
+    assert "/targets/qa/slots" in str(calls[0].url)
+    with pytest.raises(KeyError, match="no slot support.rubric"):
+        agent.needs("support.rubric")
+    assert agent.workflow("support.rubric").steps == []
+    agent.close()

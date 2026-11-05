@@ -22,12 +22,12 @@ from airprompter_agent.integrations.anthropic import messages_create, messages_c
 from airprompter_agent.integrations.litellm import AirPrompterLiteLLMCallback, litellm_metadata
 from airprompter_agent.integrations.openai import chat_completion, chat_completion_async, responses_create
 from airprompter_agent_core.protocol.trust import public_jwk_of
-from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id
 from airprompter_agent_runtime.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
 
 from .control_plane import FakeControlPlane
 
-TARGET = ObserveTarget("support.triage", "ver_1", "none", "gpt-5")
+TARGET = ObserveTarget("support.triage", "ver_1", "none", "gpt-5", "art_1")
 
 
 def obj(**fields):
@@ -208,7 +208,7 @@ def test_openai_wrappers(agent):
     by_model = {w["model"]: w for w in windows}
     assert by_model["gpt-5"]["count"] == 2 and by_model["gpt-5"]["tokens"] == {"input": 60, "cachedInput": 40, "output": 10}
     assert by_model["gpt-5-mini"]["count"] == 1 and by_model["gpt-5-mini"]["tokens"]["input"] == 30
-    assert by_model["gpt-5-mini"]["outcomes"] == {"rating": {"n": 1, "sum": 5}}
+    assert by_model["gpt-5-mini"]["outcomes"] == {"rating": {"n": 1, "sum": 5, "sumSq": 25}}
     assert "Billing" not in str(windows) and "refund" not in str(windows)
 
 
@@ -246,11 +246,12 @@ def test_litellm_callback(agent):
     failed = next(w for w in windows if w["status"] == "error")
     assert ok["count"] == 2 and ok["tokens"] == {"input": 200, "output": 40} and ok["latencyMs"]["sum"] == 1624
     assert failed["errorClass"] == "provider_rate_limited" and failed["count"] == 1
-    assert all(w["v"] == 3 and w["artifactId"] == rendered.artifact_id for w in windows)
+    assert all(w["v"] == 4 and w["artifactId"] == rendered.artifact_id for w in windows)
 
 
 def test_litellm_callback_preserves_authenticated_audience_dimensions(agent):
-    run_ref = mint_run_ref(RunRefFacts("agt_1", "prod", "support.triage", "ver_targeted", "candidate", 7, 42, ("aud_AAAAAAAAAAAAAAAAAAAAAA",), "2026-09-12T14:03:00Z", "prm_targeted", "gpt-5"), agent._run_ref_key)
+    entry = {"tag": "support.triage", "artifactId": "prm_targeted", "versionId": "ver_targeted", "model": "gpt-5", "arm": "candidate", "bucket": 42, "runMinute": "2026-09-12T14:03:00Z", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"]}
+    run_ref = mint_run_ref(RunRefFacts("agt_1", "prod", new_run_id(), [entry]), agent._run_ref_key)
     metadata = {"airprompter": {"tag": "untrusted", "versionId": "untrusted", "runRef": run_ref}}
     start = dt.datetime(2026, 9, 12, 14, 3, 10)
     AirPrompterLiteLLMCallback(agent).log_success_event({"model": "gpt-5-mini", "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
@@ -261,7 +262,7 @@ def test_litellm_callback_preserves_authenticated_audience_dimensions(agent):
     measured = next(window for window in windows if window["count"] == 1)
     feedback = next(window for window in windows if window.get("outcomes"))
     assert measured["tokens"] == {"input": 3, "output": 2}
-    assert feedback["count"] == 0 and feedback["outcomes"] == {"rating": {"n": 1, "sum": 5}}
+    assert feedback["count"] == 0 and feedback["outcomes"] == {"rating": {"n": 1, "sum": 5, "sumSq": 25}}
 
 
 def test_litellm_callback_rejects_forged_cohort_attribution(agent):
@@ -272,9 +273,29 @@ def test_litellm_callback_rejects_forged_cohort_attribution(agent):
     callback.log_success_event({"model": "gpt-5", "litellm_params": {"metadata": forged}}, response, start, start + dt.timedelta(milliseconds=5))
     assert _windows(agent) == []
 
-    unsigned = {"airprompter": {"tag": "support.legacy", "versionId": "ver_legacy", "arm": "none", "model": "gpt-5", "artifactId": "prm_forged", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "runMinute": "2026-09-12T14:03:00Z"}}
+    unsigned = {"airprompter": {"tag": "support.unsigned", "versionId": "ver_unsigned", "arm": "none", "model": "gpt-5", "artifactId": "prm_forged", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "runMinute": "2026-09-12T14:03:00Z"}}
     callback.log_success_event({"model": "gpt-5-mini", "litellm_params": {"metadata": unsigned}}, response, start, start + dt.timedelta(milliseconds=5))
-    windows = _windows(agent)
-    assert len(windows) == 1
-    assert (windows[0]["tag"], windows[0]["versionId"], windows[0]["model"]) == ("support.legacy", "ver_legacy", "gpt-5-mini")
-    assert "artifactId" not in windows[0] and "audienceIds" not in windows[0] and "runMinute" not in windows[0]
+    assert _windows(agent) == [], "a row needs an artifact id, and unsigned metadata cannot name one"
+
+    no_entries = {"airprompter": {"tag": "x", "versionId": "x", "runRef": mint_run_ref(RunRefFacts("agt_1", "prod", new_run_id(), []), agent._run_ref_key)}}
+    callback.log_success_event({"model": "gpt-5", "litellm_params": {"metadata": no_entries}}, response, start, start + dt.timedelta(milliseconds=5))
+    assert _windows(agent) == []
+
+
+def test_litellm_callback_reports_a_workflow_step_under_the_slot_tag():
+    state_dir = tempfile.mkdtemp(prefix="ap-integrations-")
+    plane = FakeControlPlane({"organizationId": "org_1", "agentId": "agt_1", "target": "prod"})
+    plane.promote([plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Step one"}])])
+    ap = AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target="prod", api_key=plane.api_key, base_url="https://api.test", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, sync=SyncOptions(mode="on_invoke", root_url="https://edge.test/roots/prod/root.json"), transport=plane.transport(), telemetry={"sink": "memory"})
+    try:
+        step = ap.workflow("docs.flow").steps[0]
+        metadata = litellm_metadata(step)
+        start = dt.datetime(2026, 9, 12, 14, 3, 10)
+        AirPrompterLiteLLMCallback(ap).log_success_event({"model": "gpt-5", "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
+        ap.spool.close_windows(ap._now_ms())
+        rows = ap.drain_memory_sink()
+        assert [(row["tag"], row["count"]) for row in rows if row["type"] == "window"] == [("docs.flow", 1)]
+        assert [(row["tag"], row["step"]) for row in rows if row["type"] == "step"] == [("docs.flow", "docs.flow#1")]
+    finally:
+        ap.stop()
+        shutil.rmtree(state_dir, ignore_errors=True)

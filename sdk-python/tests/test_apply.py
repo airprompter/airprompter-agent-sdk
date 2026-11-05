@@ -4,7 +4,7 @@ window and waiting outside it; the local window winning over the
 manifest's; the hook that rejects keeping the release staged; a Freeze
 honoured from a manifest that is otherwise left staged; the heartbeat body
 (the protocol's shape, content-free, the cadence adopted from the answer,
-the open request reported as seen); halt without a way home degrading.
+the open request reported as seen); a lapsed lease with no way home still serving.
 """
 
 from __future__ import annotations
@@ -226,7 +226,7 @@ def test_heartbeat_body_cadence_refusal_and_offline(state_dir):
     try:
         plane2 = FakeControlPlane(SCOPE)
         t2, r2 = slots(plane2)
-        plane2.promote([t2, r2], lease_seconds=60, on_lease_expiry="halt")
+        plane2.promote([t2, r2], lease_seconds=60)
         clock = {"ms": now_ms()}
         online = start(plane2, dir2, now=lambda: clock["ms"])
         online.stop()
@@ -235,8 +235,7 @@ def test_heartbeat_body_cadence_refusal_and_offline(state_dir):
         offline = AirPrompterAgent.start(**KW, state_dir=dir2, root={"pinned": public_jwk_of(plane2.root_key)}, sync={"mode": "offline"}, now=lambda: clock["ms"], logger=lambda e: events.append(e["event"]))
         clock["ms"] += 120_000
         assert offline.status().lease_expired is True
-        assert offline.prompt("support.reply").render().text == "Reply to .", "halt without a way home degrades"
-        assert "halt_without_contact_degraded" in events
+        assert offline.prompt("support.reply").render().text == "Reply to .", "a lapsed lease with no way home keeps serving"
         assert offline.heartbeat_body()["syncMode"] == "offline"
         offline.stop()
         assert len(plane2.heartbeats) == heartbeats_before, "only the online start heart-beat"

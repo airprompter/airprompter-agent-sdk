@@ -36,7 +36,8 @@ from urllib.parse import quote
 
 import httpx
 
-from airprompter_agent_core.protocol.assignment import copy_audience_tags, matches_audience, subject_hash as salted_subject_hash
+from airprompter_agent_core.protocol.trust import AGENT_ID, TARGET_SLUG
+from airprompter_agent_core.protocol.assignment import copy_audience_tags, matches_audience, servable_slots, subject_hash as salted_subject_hash
 
 from .variables.fill import fill_sync, plan_fill, stricter_sources, supplied, unsourced
 from .variables.sources import VariableSourceContext, VariableSourceError, VariableSourceInput, VariableSourceRegistry, VariableSourceRequiredError
@@ -44,6 +45,7 @@ from .variables.sources import VariableSourceContext, VariableSourceError, Varia
 MANAGED_SDK_USER_AGENT = "airprompter-agent-sdk-python/managed"
 
 MANAGED_REFUSAL_CODES = (
+    "invalid_options",
     "unauthorized",
     "forbidden",
     "invalid_request",
@@ -226,7 +228,7 @@ class ManagedWorkflow:
         self._agent = agent
         self._tag = tag
         self._subject = subject
-        slot = next((s for s in agent.slots.get("slots", []) if s.get("tag") == tag), None)
+        slot = next((s for s in servable_slots(agent.slots) if s.get("tag") == tag), None)
         self.steps: list[Mapping[str, Any]] = list((slot or {}).get("steps") or [])
 
     def step(self, step_id: str, variables: Mapping[str, str], **options: Any) -> ManagedRunResult:
@@ -258,6 +260,10 @@ class ManagedAgent:
         ``api_key`` is a run key (``agent_run`` kind, ``agent.run`` scope); ``base_url`` the run route's origin (the AgentRunUrl output of the execution stack).
         ``variables`` registers how this process fills declared variables from its own system (a literal, or a source with its
         trust). This client is synchronous, so a source must be a plain callable: a coroutine function is refused at run time."""
+        if not isinstance(target, str) or not TARGET_SLUG.fullmatch(target):
+            raise ManagedRunError("invalid_options", 0, "target must be a lowercase slug: a letter, then up to 31 letters, digits or hyphens")
+        if not isinstance(agent_id, str) or not AGENT_ID.fullmatch(agent_id):
+            raise ManagedRunError("invalid_options", 0, "agent_id must be an agent id: a letter or digit, then up to 127 letters, digits, dots, underscores, colons or hyphens")
         agent = cls(agent_id=agent_id, target=target, api_key=api_key, base_url=base_url, catalogue={}, transport=transport, max_rate_limit_retries=max_rate_limit_retries, sleep=sleep or time.sleep, instance_id=instance_id, user_agent=user_agent, timeout=timeout, variables=variables, tags=tags)
         agent._catalogue = agent._read_catalogue()
         return agent
@@ -294,15 +300,12 @@ class ManagedAgent:
         return sorted(entry["audienceId"] for entry in observations if matches_audience(entry.get("selector"), local_tags))
 
     def experiment_for(self, tag: str) -> Optional[dict]:
-        """S17: the experiment that splits a slot — the per-prompt one by tag, else the legacy single one (it covers every slot), else None."""
-        entries = self._catalogue.get("experiments")
-        if entries:
-            return next((e for e in entries if e.get("tag") in (tag, None)), None)
-        return self._catalogue.get("experiment")
+        """S17: the experiment that splits a slot, else None."""
+        return next((e for e in self._catalogue.get("experiments") or [] if e.get("tag") == tag), None)
 
     def subject_hash_for(self, subject: Optional[str], tag: Optional[str] = None) -> Optional[str]:
         """The hash the route buckets on: the slot's experiment salt over the subject (or this instance when the experiment assigns by instance). Never the subject."""
-        experiment = self._catalogue.get("experiment") if tag is None else self.experiment_for(tag)
+        experiment = next(iter(self._catalogue.get("experiments") or []), None) if tag is None else self.experiment_for(tag)
         if not experiment:
             return None
         value = self._instance_id if experiment.get("subjectKey") == "instance" or subject is None else subject
@@ -332,7 +335,7 @@ class ManagedAgent:
 
     def needs(self, tag: str, values: Optional[Mapping[str, Any]] = None) -> list[str]:
         """The required declared variables a run of this slot would still lack after these values and the registered sources."""
-        slot = next((s for s in self._catalogue.get("slots", []) if s.get("tag") == tag), None)
+        slot = next((s for s in servable_slots(self._catalogue) if s.get("tag") == tag), None)
         if slot is None:
             raise KeyError(f"no slot {tag} in the catalogue")
         return unsourced(variables=slot.get("variables") or [], values=values or {}, registry=self.variables)
@@ -344,7 +347,7 @@ class ManagedAgent:
         never sent raw. Only what this run would actually fill can be unfenceable: an optional variable no run posts
         is not refused. The catalogue types trust as a string; anything but ``end_user`` counts as the looser
         declaration, which is the safe direction."""
-        slot = next((s for s in self._catalogue.get("slots", []) if s.get("tag") == tag), None)
+        slot = next((s for s in servable_slots(self._catalogue) if s.get("tag") == tag), None)
         if slot is None or not self.variables.names():
             return dict(values)
         declared = slot.get("variables") or []

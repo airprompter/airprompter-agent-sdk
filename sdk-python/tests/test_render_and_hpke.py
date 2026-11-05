@@ -12,7 +12,8 @@ import pytest
 
 from airprompter_agent_core.bundle.apbundle import BundleError, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle, DistributionKey
 from airprompter_agent_core.bundle.hpke import AEAD_AES_128_GCM, AEAD_AES_256_GCM, X25519KeyPair, decap, encap, generate_x25519_key_pair, key_schedule, open_, open_from, seal, seal_to, x25519_private_key_from_raw
-from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
+from airprompter_agent_core._util import b64url_decode, b64url_encode
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id, parse_run_ref
 from airprompter_agent_core.render.template import default_of, Delimiters, MissingVariableError, UnknownVariableError, render_template, xml_delimiters
 
 VARIABLES = [
@@ -66,18 +67,52 @@ def test_undeclared_placeholder_left_visible_and_custom_delimiters():
     assert xml_delimiters.open("x") == "<x>"
 
 
+ENTRY = {"tag": "support.triage", "artifactId": "prm_9", "versionId": "ver_9", "model": "gpt-5", "arm": "candidate", "bucket": 4321, "runMinute": "2026-09-12T14:03:00Z"}
+
+
 def test_run_ref_roundtrip_and_forgery():
     key = os.urandom(32)
-    facts = RunRefFacts("agt_1", "prod", "support.triage", "ver_9", "candidate", 12, 4321)
+    facts = RunRefFacts("agt_1", "prod", new_run_id(), [ENTRY])
     token = mint_run_ref(facts, key)
-    assert parse_run_ref(token, key) == facts
-    no_bucket = RunRefFacts("agt_1", "prod", "support.triage", "ver_9", "candidate", 12, None)
-    assert parse_run_ref(mint_run_ref(no_bucket, key), key) == no_bucket
+    assert parse_run_ref(token, key).to_wire() == facts.to_wire()
+    no_bucket = RunRefFacts("agt_1", "prod", facts.run_id, [{**ENTRY, "bucket": None}])
+    assert parse_run_ref(mint_run_ref(no_bucket, key), key).to_wire() == no_bucket.to_wire()
     assert parse_run_ref(token, os.urandom(32)) is None
     assert parse_run_ref(token[:-1] + ("B" if token.endswith("A") else "A"), key) is None
     assert parse_run_ref("not.a.token", key) is None
     assert parse_run_ref("", key) is None
     assert re.match(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$", token), "opaque, URL-safe"
+
+
+def test_run_ref_two_entries_round_trip_a_forged_entry_fails_the_mac_and_run_id_survives_a_re_mint():
+    key = os.urandom(32)
+    entry = {**ENTRY, "arm": "none", "bucket": None}
+    second = {**entry, "tag": "support.reply", "artifactId": "prm_2"}
+    run_id = new_run_id()
+    one = RunRefFacts("agt_1", "prod", run_id, [entry])
+    two = RunRefFacts("agt_1", "prod", run_id, [entry, second])
+    token = mint_run_ref(two, key)
+    assert parse_run_ref(token, key).to_wire() == two.to_wire()
+    reread = parse_run_ref(mint_run_ref(one, key), key)
+    grown = parse_run_ref(mint_run_ref(RunRefFacts(reread.agent_id, reread.target, reread.run_id, [*reread.entries, second]), key), key)
+    assert grown.run_id == run_id, "a token that grows keeps the run's identity"
+    body, mac = token.split(".")
+    forged = b64url_decode(body).replace(b'"arm":"none"', b'"arm":"gold"')
+    assert parse_run_ref(f"{b64url_encode(forged)}.{mac}", key) is None, "the body is what the MAC covers"
+    assert parse_run_ref(token, [os.urandom(32), key]).to_wire() == two.to_wire(), "each key is tried"
+    assert parse_run_ref(token, []) is None
+
+
+def test_run_ref_past_either_minting_bound_the_mint_raises():
+    key = os.urandom(32)
+    entries = [{**ENTRY, "tag": f"slot.{i}"} for i in range(9)]
+    facts = RunRefFacts("agt_1", "prod", new_run_id(), entries)
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(facts, key)
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", facts.run_id, [{**entry, "tag": "same"} for entry in entries[:2]]), key)
+    with pytest.raises(ValueError, match="run_ref_facts_invalid"):
+        mint_run_ref(RunRefFacts("agt_1", "prod", facts.run_id, entries[:1], ["x" * 12288]), key)
 
 
 # RFC 9180, Appendix A.1.1: DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-128-GCM, base mode.

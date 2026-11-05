@@ -6,7 +6,7 @@ delimiters declared for it — by default an XML-style element named after
 the variable — so the model sees where untrusted input starts and stops,
 and the assurance lens can find it. A missing required variable raises:
 that is the customer's bug and silence would ship a broken prompt. An
-optional variable nobody supplied renders its declared ``default`` (0.3.4)
+optional variable nobody supplied renders its declared ``default``
 when it has one, and nothing otherwise.
 Sync and telemetry failures degrade; render contract failures raise.
 
@@ -74,7 +74,7 @@ def _stringify(value: Any) -> str:
 
 
 def default_of(variable: Mapping[str, Any]) -> Optional[str]:
-    """0.3.4: a default counts only where the control plane allows one — an optional ``operator`` variable; elsewhere it is ignored."""
+    """A default counts only where the control plane allows one — an optional ``operator`` variable; elsewhere it is ignored."""
     default = variable.get("default")
     return default if not variable.get("required") and variable.get("trust") == "operator" and isinstance(default, str) else None
 

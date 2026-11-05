@@ -39,7 +39,7 @@ def handle(ticket: dict) -> dict:
     try:
         rendered = ap.prompt("support.triage", subject=ticket["customer_id"]).render(team=ticket["team"], ticket=ticket["text"])
     except RenderRefusedError as refused:
-        # A Freeze from the console, or a lapsed lease on a halt target: the worker parks the message and says why.
+        # A Freeze from the console: the worker parks the message and says why.
         return {"parked": refused.reason}
     message = messages_create(ap, rendered, client, messages=[{"role": "user", "content": ticket["text"]}], max_tokens=256)
     return {"classification": message.content[0].text, "run_ref": rendered.run_ref, "version": rendered.version_id, "arm": rendered.arm}

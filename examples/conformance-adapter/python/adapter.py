@@ -5,7 +5,7 @@ JSON lines on stdin / stdout: ``{"id", "fn", "args"}`` in, ``{"id", "result"}``
 or ``{"id", "error": {"reason", "message"}}`` out. Any language writes one of
 these; this one is the proof that the vectors the harness owns are runnable
 against an SDK the harness never imports. See ``conformance/ADAPTER.md`` for
-the twenty-three operations. Usage::
+the operations. Usage::
 
     node conformance/harness.mjs --adapter-command "python3 examples/conformance-adapter/python/adapter.py"
 
@@ -21,13 +21,24 @@ import sys
 from typing import Any, Callable
 
 from airprompter_agent_core.checks import checks_refusals, evaluate_checks, pattern_refusal, project_checks
-from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, matches_audience, ordered_steps, ramp_weights_at, valid_audience_instant, valid_audience_key, valid_audience_label, valid_audience_selector, validate_ramp
+from airprompter_agent_core.protocol.assignment import assign_arm, effective_arms, frozen_experiment, matches_audience, ordered_steps, ramp_weights_at, servable_experiments, servable_slots, valid_audience_instant, valid_audience_key, valid_audience_label, valid_audience_selector, validate_ramp
 from airprompter_agent_core.protocol.canonical_json import canonical_json, sha256_prefixed
-from airprompter_agent_core.protocol.trust import experiment_conflict, experiment_for_tag, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
+from airprompter_agent_core.protocol.trust import carried_payloads, experiment_conflict, optional_payloads, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref, run_ref_key_from
 from airprompter_agent_core.telemetry.feedback import normalize_feedback
-from airprompter_agent_core.telemetry.rows import epoch_minute, latency_bucket_index, minute_of
+from airprompter_agent_core.telemetry.rows import RunTotals, StepTotals, epoch_minute, latency_bucket_index, minute_of
+from airprompter_agent_runtime.release.resolver import disabled_from
 from airprompter_agent_telemetry.otel import spool_rows_to_otlp
 from airprompter_agent_telemetry.spool.writer import MemorySink, Observation, SegmentPlanner, SpoolWriter, WriterIdentity, segment_name
+from airprompter_agent_telemetry.uploader import inspect_segment
+
+
+class _Refused(Exception):
+    """A refusal the protocol names, as the harness reads it."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
 def _plain(value: Any) -> Any:
@@ -54,6 +65,8 @@ def _verdict(v: Any) -> dict[str, Any]:
         out["signingKeyId"] = v.signing_key_id
     if getattr(v, "generation", None) is not None:
         out["generation"] = v.generation
+    if getattr(v, "directives_stand", False):
+        out["directivesStand"] = True
     return out
 
 
@@ -84,8 +97,34 @@ def op_assign_arm(a: dict) -> dict:
     return {"subjectHash": r.subject_hash, "bucket": r.bucket, "arm": arm}
 
 
-def op_experiment_for_tag(a: dict) -> dict:
-    return {"experiment": experiment_for_tag(a["payload"], a["tag"])}
+def op_servable_slots(a: dict) -> dict:
+    overrides = {experiment["experimentId"]: {arm["arm"]: [override["tag"] for override in arm["overrides"]] for arm in experiment["arms"]} for experiment in servable_experiments(a["payload"])}
+    payload = a["payload"]
+    arms_off = disabled_from(payload.get("directives", [])).arms_for
+    frozen = sorted(experiment["tag"] for experiment in payload.get("experiments", []) if frozen_experiment(payload, arms_off, experiment["tag"], a.get("tags") or {}))
+    return {"frozen": frozen, "tags": [slot.get("tag") for slot in servable_slots(payload)], "overrides": overrides}
+
+
+def op_inspect_segment(a: dict) -> dict:
+    data = "".join(f"{line}\n" for line in a["lines"]).encode("utf-8")
+    inspection = inspect_segment(data, a["instanceId"], a["nowMs"])
+    return {"rows": inspection.rows, "invalid": inspection.invalid, "skipped": inspection.skipped, "stripped": inspection.stripped}
+
+
+def op_run_ref_key_from(a: dict) -> dict:
+    return {"keyHex": run_ref_key_from(a["secret"], a["agentId"], a["target"]).hex()}
+
+
+def op_mint_run_ref(a: dict) -> dict:
+    try:
+        return {"token": mint_run_ref(RunRefFacts.from_wire(a["facts"]), bytes.fromhex(a["keyHex"]))}
+    except ValueError as error:
+        raise _Refused(str(error)) from None
+
+
+def op_parse_run_ref(a: dict) -> dict:
+    facts = parse_run_ref(a["token"], [bytes.fromhex(key) for key in a["keysHex"]])
+    return {"facts": facts.to_wire() if facts else None}
 
 
 def op_experiment_conflict(a: dict) -> dict:
@@ -110,9 +149,13 @@ def op_verify_root_metadata(a: dict) -> dict:
     return _verdict(verify_root_metadata(candidate=a["candidate"], trusted=trusted, now=a["now"]))
 
 
+def op_carried_payloads(a: dict) -> dict:
+    return {"carried": sorted([content_hash, byte_length] for content_hash, byte_length in carried_payloads(a["payload"]).items()), "optional": sorted(optional_payloads(a["payload"]))}
+
+
 def op_verify_manifest(a: dict) -> dict:
     payloads = {p["contentHash"]: base64.urlsafe_b64decode(p["bytes"] + "=" * (-len(p["bytes"]) % 4)) for p in a["payloads"]} if a.get("payloads") is not None else None
-    return _verdict(verify_manifest(manifest=a["manifest"], root=a["root"], now=a["now"], scope=a["scope"], stored_generation=a["storedGeneration"], payloads=payloads, countersign_root=a.get("countersignRoot"), require_countersign=bool(a.get("requireCountersign"))))
+    return _verdict(verify_manifest(manifest=a["manifest"], root=a["root"], now=a["now"], scope=a["scope"], stored_generation=a["storedGeneration"], payloads=payloads, countersign_root=a.get("countersignRoot"), require_countersign=bool(a.get("requireCountersign")), carrying=a.get("carrying") is True, absent_requires=a.get("absentRequires") is True))
 
 
 def op_latency_bucket_index(a: dict) -> dict:
@@ -142,12 +185,17 @@ def op_aggregate_windows(a: dict) -> dict:
     for event in a["events"]:
         if event["kind"] == "observe":
             writer.observe(Observation.from_wire(event["observation"]), event["at"])
+        elif event["kind"] == "recordRun":
+            writer.record_run(RunTotals.from_wire(event["run"]), event["at"])
+        elif event["kind"] == "recordStep":
+            writer.record_step(StepTotals.from_wire(event["step"]), event["at"])
         elif event["kind"] == "feedback":
             fb = event["feedback"]
             writer.outcomes(tag=fb["tag"], artifact_id=fb.get("artifactId"), version_id=fb["versionId"], arm=fb["arm"], model=fb["model"], outcomes=fb["outcomes"], at_ms=event["at"], audience_ids=tuple(fb["audienceIds"]) if "audienceIds" in fb else None, outcome_run_minute=fb.get("outcomeRunMinute"))
         elif event["kind"] == "close":
             writer.close_windows(event["at"])
-    return {"windows": [row for row in sink.drain() if row["type"] == "window"]}
+    rows = sink.drain()
+    return {"windows": [row for row in rows if row["type"] == "window"], "steps": [row for row in rows if row["type"] == "step"]}
 
 
 def op_normalize_feedback(a: dict) -> dict:
@@ -180,7 +228,12 @@ OPS: dict[str, Callable[[dict], dict]] = {
     "canonicalJson": op_canonical_json,
     "orderedSteps": op_ordered_steps,
     "assignArm": op_assign_arm,
-    "experimentForTag": op_experiment_for_tag,
+    "servableSlots": op_servable_slots,
+    "inspectSegment": op_inspect_segment,
+    "carriedPayloads": op_carried_payloads,
+    "runRefKeyFrom": op_run_ref_key_from,
+    "mintRunRef": op_mint_run_ref,
+    "parseRunRef": op_parse_run_ref,
     "experimentConflict": op_experiment_conflict,
     "validateRamp": op_validate_ramp,
     "rampWeightsAt": op_ramp_weights_at,

@@ -73,7 +73,7 @@ from airprompter_agent_core.protocol import (
     verify_manifest,
     verify_root_metadata,
 )
-from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, parse_run_ref
+from airprompter_agent_core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id, parse_run_ref, run_ref_key_from
 from airprompter_agent_core.render.template import Delimiters, MissingVariableError, UnknownVariableError, default_of, placeholders_of, render_template, xml_delimiters
 from airprompter_agent_core.telemetry.feedback import NormalizedFeedback, normalize_feedback
 from airprompter_agent_telemetry.spool.writer import (
@@ -325,6 +325,7 @@ __all__ = [
     "latency_bucket_index",
     "managed",
     "mint_run_ref",
+    "new_run_id",
     "minute_of",
     "normalize_feedback",
     "normalize_usage",
@@ -337,6 +338,7 @@ __all__ = [
     "parse_golden_set",
     "parse_judge_reply",
     "parse_run_ref",
+    "run_ref_key_from",
     "parse_sse",
     "parse_window",
     "pass_bps_of",

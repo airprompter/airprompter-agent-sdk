@@ -33,9 +33,8 @@ spool.feedback({ tag, versionId, arm, model, outcomes: { accepted: true } });   
 process.on("beforeExit", () => spool.close());
 ```
 
-`tag`, `artifactId`, `versionId` and `arm` come from the release you rendered
-(or from the authenticated `runRef` a compatible endpoint returned). The
-immutable Team `artifactId` prevents equal per-prompt version identifiers
+`tag`, `artifactId`, `versionId` and `arm` come from the release you rendered.
+The immutable Team `artifactId` prevents equal per-prompt version identifiers
 from merging across prompts. Local tag values, device IDs and user IDs never
 enter the row. The `sdk` field names *your*
 writer: ingest keys on it, so a misreporting writer is isolated without

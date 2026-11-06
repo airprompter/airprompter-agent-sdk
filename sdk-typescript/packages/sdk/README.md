@@ -14,14 +14,14 @@ const reply = await ap.observe(r, () => openai.chat.completions.create({ model: 
 ap.feedback(r.runRef, { thumbs: "up" });
 ```
 
-The root is the agent, its option and result types, and the hosted client.
+The root is the agent and its option and result types.
 Everything else is a subpath, and a subpath you do not import is not loaded:
 
 | Subpath | What it holds |
 | --- | --- |
 | `/core` | The protocol with no I/O: trust chain, assignment, render, bundles, row schemas, the control-plane client |
 | `/sync` | Pull and verify, the encrypted slot store, the apply policy, the customer's datastore |
-| `/runtime` | Render and assign over a release you hold, the provider wrappers, the hosted client |
+| `/runtime` | Render and assign over a release you hold, the provider wrappers |
 | `/telemetry` | The spool and its uploader |
 | `/testing` | The CI kit: `FakeControlPlane`, `MemoryFs`, `FakeClock` |
 | `/frameworks/langchain` | LangChain middleware; `langchain`, `@langchain/core` and `zod` are optional peers |

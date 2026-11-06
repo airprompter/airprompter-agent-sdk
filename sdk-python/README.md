@@ -36,8 +36,12 @@ and `uv pip install` resolves the same pins with no flag.
 | `airprompter_agent` | `AirPrompterAgent`, its options and results, and the names the layers below export. `airprompter_agent.integrations.*` holds the openai, anthropic and LiteLLM clients. |
 | `airprompter_agent.core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane client, the port protocols. The CI kit is `airprompter_agent.core.testing`. |
 | `airprompter_agent.sync` | Your CI pulls and verifies releases (`sync_once`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). Key providers are extras: `[kms]`, `[vault]`, `[keyring]`. |
-| `airprompter_agent.runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `.core` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`); the hosted-execution client (`ManagedAgent`). |
+| `airprompter_agent.runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `.core` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`). |
 | `airprompter_agent.telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
+
+Everything runs on your systems: there is no hosted mode. `ManagedAgent` is
+retired. It stays in the source only until a later release removes it, so do not
+build on it.
 
 Beside it, separate distributions only where a dependency footprint earns one.
 Each pins `airprompter-agent` to the same version, so an environment holds one
@@ -272,6 +276,12 @@ unlocks it. ``ap.golden()`` runs the active release's sets on demand.
 ``JudgeRubric``) on your model and files only ``judgeScore`` / ``flagged``
 — ``protocol/golden-sets.md``.
 
+Judging comes from your side. Keep `run_ref` beside your own record and later
+call `ap.feedback(run_ref, thumbs="up")` or `rating=4` (1 to 5) from any process
+holding the same run reference secret or Agent key: the signals join the run's
+window. A middleware option that gives a client the thumbs or the 5-star rating
+to send is planned, and has no API yet.
+
 `models` is the catalogue the console shows under Settings › Models and the
 gate a release must pass at seal. A release may mark a slot's model
 **required**; a process whose `models` lacks it refuses that release
@@ -303,23 +313,6 @@ host as a finding instead of hiding it.
 
 `SlotStore.rotate_key(provider)` re-wraps the DEK under a new provider
 without re-encrypting a payload.
-
-## Managed mode
-
-Or no SDK of ours at all: the `openai` / `anthropic` clients pointed at
-`https://<run>/v1/agents/{agentId}/openai` (or `…/anthropic`) with a run key
-and `model="slot:support.triage"` — the mapping in
-[`protocol/compatible-endpoints.md`](../protocol/compatible-endpoints.md).
-
-Feedback works the same way hosted: keep `result.run_ref` beside your own
-record and later call `agent.feedback(run_ref, accepted=True, rating=4)` from
-any process holding the run key.
-
-No store, no models, no keys of your own: `ManagedAgent.start(agent_id=…, target=…, api_key=<run key>, base_url=<run route>, tags={"device_id": device_id})`,
-then `agent.run("support.triage", {"team": "Billing", "ticket": text}, subject="user-42")`
-or `for delta in agent.stream(...)`. The subject is hashed with the
-experiment's salt here and never sent. Audience tag values are also matched
-locally; only the signed opaque ids for matching audiences are posted.
 
 ## Provider wrappers
 
@@ -408,8 +401,7 @@ a `run_ref` minted there).
 | Telemetry daemon (`daemon.md`): `daemon.json` discovery, segment manifests, the hand-over both ways | ✓ | ✓ (same vectors) |
 | Apply control: update window (DST-safe), `on_staged` hook, Freeze precedence, heartbeat | ✓ | ✓ (`zoneinfo`) |
 | `observe()`: OpenAI / Anthropic / Bedrock usage, error classes | ✓ | ✓ + SDK objects, async variant |
-| Managed mode (catalogue, run, stream, typed refusals, 429 retry) | ✓ | ✓ |
-| Variable sources (`variables`, `needs()`, `status().variables`, fenced by the stricter trust, workflow steps, managed fill) | ✓ (`renderAsync`) | ✓ (`render()` runs plain callables on threads; `render_async()` awaits coroutine functions) |
+| Variable sources (`variables`, `needs()`, `status().variables`, fenced by the stricter trust, workflow steps) | ✓ (`renderAsync`) | ✓ (`render()` runs plain callables on threads; `render_async()` awaits coroutine functions) |
 | Provider wrappers | `ap.wrap()` for openai / Anthropic, AI SDK middleware | `ap.wrap()` for openai / anthropic (sync + async), explicit helpers, LiteLLM callback |
 | Spool upload on hosts | `airprompterd` uploads every writer's segments under that writer's own report (T26); with no live daemon the runtime uploads its own (S5) | ✓ (`SpoolUploader`, `upload_now()`, `TelemetryOptions(upload=False)`) |
 | Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓, awaited before `invoke()` returns (S5) | ✓ (`flush_telemetry()`, `request_upload_grant()`, `TelemetryOptions(flush="background")` opt-out) |

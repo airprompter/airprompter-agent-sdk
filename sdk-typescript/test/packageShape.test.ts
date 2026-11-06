@@ -210,8 +210,9 @@ test("the exports map, the type map and the root's names are exactly these; noth
 test("the tarball carries every declared subpath in both module systems, and speaks the protocol this repository is at", () => {
   ensureBuilt();
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const packed = JSON.parse(execFileSync(npm, ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: join(root, "packages", "sdk"), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], shell: process.platform === "win32" })) as Array<{ files: Array<{ path: string }> }>;
-  const files = new Set(packed[0]!.files.map((file) => file.path));
+  const packed = JSON.parse(execFileSync(npm, ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: join(root, "packages", "sdk"), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], shell: process.platform === "win32" })) as Record<string, { files: Array<{ path: string }> }>;
+  // npm 11 prints an array of one; npm 12 prints an object keyed by package name.
+  const files = new Set(Object.values(packed)[0]!.files.map((file) => file.path));
   for (const [subpath, entry] of Object.entries(manifestOf("sdk").exports)) for (const target of Object.values(entry)) assert.ok(files.has(target.slice(2)), `${subpath}: the tarball carries ${target}`);
   assert.ok(files.has("LICENSE") && files.has("README.md"), "the tarball carries its licence and README");
   const stray = [...files].filter((path) => !/^(dist\/|LICENSE$|README\.md$|package\.json$)/.test(path));

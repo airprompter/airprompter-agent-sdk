@@ -113,6 +113,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # The version release.yml publishes with, so a change in npm shows up here and not on a tag.
+      - run: npm install -g npm@11.21.2
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
       # Five packages in lockstep. Build the SDK, then the satellites — the

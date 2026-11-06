@@ -71,7 +71,8 @@ try {
   const tarballs = {};
   for (const name of PACKAGES) {
     const out = run(["pack", "--pack-destination", work, "--json"], join(root, "packages", name));
-    const packed = JSON.parse(out)[0];
+    // npm 11 prints an array of one; npm 12 prints an object keyed by package name.
+    const packed = Object.values(JSON.parse(out))[0];
     // What a customer downloads is the build and its licence: never a build cache, a source tree or a test.
     const stray = packed.files.map((file) => file.path).filter((path) => /(^|\/)\.tsbuildinfo$|^src\/|^test\/|\.test\.[cm]?js$/.test(path));
     if (stray.length > 0) throw new Error(`${name}: the tarball ships ${stray.join(", ")}`);

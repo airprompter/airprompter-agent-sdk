@@ -110,7 +110,8 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
       # Trusted publishing (OIDC) needs npm 11.5.1+; Node 22 ships npm 10, which publishes unauthenticated and gets a 404.
-      - run: npm install -g npm@latest
+      # A fixed version, the same one as ci.yml: npm@latest moved to 12 under a release and changed `npm pack --json`.
+      - run: npm install -g npm@11.21.2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -145,7 +146,8 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
       # Trusted publishing (OIDC) needs npm 11.5.1+; Node 22 ships npm 10, which publishes unauthenticated and gets a 404.
-      - run: npm install -g npm@latest
+      # A fixed version, the same one as ci.yml: npm@latest moved to 12 under a release and changed `npm pack --json`.
+      - run: npm install -g npm@11.21.2
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: sdk-typescript
       - run: npm run build

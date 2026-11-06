@@ -48,6 +48,14 @@ are `trust-chain.md`; `vectors/manifest-verify.json` has a case per refusal.
 (heartbeat), `agent.countersign.write` (countersign), `agent.run`
 (managed execution — a separate key kind, never co-granted by default).
 
+## Retired routes
+
+Agents run only on the customer's systems. `openapi.yaml` still lists the
+`managed` routes and the `agent.run` scope, `compatible-endpoints.md` still maps
+them, and `assignment-hash.md` still names `subjectHash`, because removing a route
+is a protocol change. They leave in a later protocol version. Do not implement
+them.
+
 ## Versioning
 
 This directory has its own semver, tagged `protocol/vX.Y.Z`; `VERSION`

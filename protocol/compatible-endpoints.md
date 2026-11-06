@@ -1,5 +1,9 @@
 # Provider-compatible endpoints — the mapping
 
+**Retired.** Agents run only on the customer's systems, so do not implement this.
+The mapping stays only because `openapi.yaml` still lists these routes, and
+removing them is a protocol change.
+
 A hosted (managed) environment can be called with the OpenAI or Anthropic
 SDK you already use: change the base URL and the key, and name the prompt
 as the model. Nothing else at the call site changes. This document is the

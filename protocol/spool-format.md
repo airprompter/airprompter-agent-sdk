@@ -325,8 +325,7 @@ reported with the platform's `retryAfterSeconds` and nothing is uploaded.
 2. Accumulate into the open minute's `window` row for
    `(tag, artifactId, versionId, arm, model, status, errorClass,
    audienceIds, outcomeRunMinute)` — the `tag`, `artifactId`, `versionId`
-   and `arm` come from the release you rendered (or from the authenticated
-   `runRef` the compatible endpoint returned).
+   and `arm` come from the release you rendered.
 3. At minute end write the row to the open segment, `fsync`, close per the
    rules above.
 
@@ -350,7 +349,6 @@ those.
 - **Bounds:** minting stops at 8 entries and 12,288 characters (eight worst-case entries are about 9,700). Reading accepts 32 entries and 40,960 characters, so a later minor can raise minting. A token above the minting bounds can be read but not re-minted.
 - **Readers are tolerant.** A body element past the fourth lands in `extra`, unknown keys on an entry stay on the entry, and both survive a re-mint, so a host can grow a ref a later SDK wrote.
 - A ref with no entries parses, and `feedback` on it returns `false`.
-- A hosted run's ref is a different token, for one hosted run of one slot, and is never parsed by the SDK.
 
 **Key.** `runRefKeyFrom(secret, agentId, target)` is HMAC-SHA256(`secret`, `"airprompter runRef v1\0" + agentId + "\0" + target`). The secret is `runRefSecret`, else the Agent key, so instances of one agent and target share it with no new setting, and a ref minted on one pod parses on another.
 

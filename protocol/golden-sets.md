@@ -93,10 +93,9 @@ override on its arm — the runtime:
 
 `ap.judge(runRef, output, rubric, invoke)` runs a rubric on the customer's
 own model and files only the score: `rubric` is a criteria list, one of the
-templates (`protection` — the five criteria the hosted judge applies to
-every sample; `helpfulness`), or `prompt` — the `## Success criteria`
-section of the prompt the run rendered, read the way the hosted judge reads
-it (list markers stripped, at most seven, each at most 300 characters). The
+templates (`protection` — five fixed criteria; `helpfulness`), or `prompt`
+— the `## Success criteria` section of the prompt the run rendered (list
+markers stripped, at most seven, each at most 300 characters). The
 judge prompt numbers the criteria, fences the output in `<answer>` (a
 closing fence inside the output is escaped) and asks for one verdict per
 criterion as one JSON line. The score is the share of resolved task

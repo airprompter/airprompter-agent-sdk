@@ -15,7 +15,7 @@ them. Both cite the design revision they follow.
 | [change-control.md](change-control.md) | How your change control, update windows, CI, golden sets, countersign, freeze and rollback plug into activation | §6.2–6.5, §8.2 (5-D) |
 | [telemetry.md](telemetry.md) | The spool contract in one table and the field → OpenTelemetry mapping | §9, §9.3 |
 | [ingest.md](ingest.md) | Your prompts (a git directory, a database table, an export) become reviewable versions: `airprompter login` + `airprompter import`, the derived id, what a re-run does | S11 |
-| [variables.md](variables.md) | Variables filled from your own system at render time: sources, precedence, trust (the stricter wins), `renderAsync` / `render_async`, `needs()`, workflows and managed mode | 0.2.10 (TS), 0.2.11 (Python), 0.2.12 (defaults, `source`) |
+| [variables.md](variables.md) | Variables filled from your own system at render time: sources, precedence, trust (the stricter wins), `renderAsync` / `render_async`, `needs()`, workflows | 0.2.10 (TS), 0.2.11 (Python), 0.2.12 (defaults, `source`) |
 | [change-notification.md](change-notification.md) | How a fleet learns a release moved: the pointer-first pull (a CDN 304 per idle interval, the API only on a promotion) and the proposed nudge on a channel the customer owns (SQS / SNS / EventBridge / webhook) — pull-and-verify stays the only source of truth | 0.2.8 |
 | [datastore.md](datastore.md) | Your own datastore carries the release: the `KvStore` port and the S3 / Postgres / Redis adapters, `checkKvStore` for your own, `pullToDatastore` / `pull_to_datastore`, hydration at start and on `hydrate()`, fleet rollback held in the datastore, regions, pruning | T40 |
 | [operator-tooling.md](operator-tooling.md) | `airprompter doctor` (every reason a host is not serving, with the remedy), the in-process `healthz`, `telemetry validate`, the verify GitHub Action, the published conformance harness and its adapter contract | S14 |
@@ -24,7 +24,6 @@ them. Both cite the design revision they follow.
 | [`../protocol/spool-format.md`](../protocol/spool-format.md) | The spool: files, rows, what may never be in it, upload, offline, third-party writers | §9.1, §9.3 |
 | [`../protocol/checks.md`](../protocol/checks.md) | Declared output checks: the kinds, the JSON Schema subset, the regex safety rule | §8.2 (5-E) |
 | [`../protocol/golden-sets.md`](../protocol/golden-sets.md) | Golden sets before activation; the customer-side judge | §8.2 (5-D), §9.2 |
-| [`../protocol/compatible-endpoints.md`](../protocol/compatible-endpoints.md) | Managed mode through OpenAI- and Anthropic-shaped endpoints | §11.2, §18 |
 | [`../protocol/daemon.md`](../protocol/daemon.md) | The telemetry daemon: the folder it publishes in `daemon.json`, the manifest an SDK writes beside each segment, what it uploads and what it leaves alone | §9.1 |
 | [`../protocol/store-format.md`](../protocol/store-format.md) | `store.json` as a cross-package contract: N/N-1, migrate on first write, `store_newer` naming the writer (S8) | D35 |
 | [`../protocol/assignment-hash.md`](../protocol/assignment-hash.md) | Sticky rollout assignment | §8 |

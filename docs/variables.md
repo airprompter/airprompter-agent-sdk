@@ -140,22 +140,12 @@ your call site — every required name no source fills — for the slot and
 for every experiment arm's override, since a subject may land on any arm.
 Declarations only, no payload read. Names only, never values.
 
-## Workflows, managed mode, golden sets
+## Workflows, golden sets
 
-- **Workflow steps** in client mode are handed back as raw text; `const flow = ap.workflow(tag)` now also has
+- **Workflow steps** are handed back as raw text; `const flow = ap.workflow(tag)` now also has
   `flow.renderStepAsync(stepId, values)` (Python: `flow.render_step(step_id, values)` and `render_step_async`), which
   fills a step with the same precedence — each step scanned on its own, so a source is called for the step that uses
   the variable and not for the one that does not. A source sees the step id (`docs.flow#2`) as its `tag`.
-- **Managed mode** (`ManagedAgent`, the hosted `/run` route) runs in your process, so `ManagedAgent.start({ variables })`
-  (Python: `ManagedAgent.start(variables=...)`; that client is synchronous throughout, so its sources must be plain
-  callables — a coroutine function is refused by name) fills required declared variables, and any marked
-  `source: runtime`, before the run is posted, and `agent.needs(tag, values)` answers the same question. The
-  catalogue names declarations, not text, so "used in the text" cannot be known there: required and `source: runtime`
-  ones are filled, other optional ones are not; the context a source sees carries `versionId: null` and `arm: null` (the run route
-  resolves them). A hosted run fences by the slot's declaration alone, so an `end_user` source for a variable the slot
-  declares `operator` is refused before any lookup (`VariableSourceError`, reason `unfenceable`) rather than sent raw —
-  declare the variable `end_user` in AirPrompter, or pass the value from the call site. The provider-compatible
-  endpoints have no process of yours in the path: call-site values only.
 - **Golden sets** run before activation, possibly in the CLI, and must be deterministic: they never consult sources.
   A golden case carries every value it needs.
 - **Fleet runtimes and vendored bundles**: sources are in-process registration and do not care where the release came
@@ -165,8 +155,7 @@ Declarations only, no payload read. Names only, never values.
 
 A slot's variable declarations are sealed into the release: `name`, `required`, `trust`,
 `default` (optional operator variables only; never empty) and `source: caller | runtime` — a statement of who is
-expected to fill the variable. In managed mode a `source: runtime` variable is filled from your registered source
-before the run is posted, required or not (the catalogue has no text to scan). Every runtime's heartbeat carries
+expected to fill the variable. Every runtime's heartbeat carries
 `catalog.variables` — the names `ap.variables.names()` answers, never a value, an empty list when there are none.
 A process whose telemetry the host's `airprompterd` ships is reported the same way: the daemon
 sends that process's own heartbeat report from its segment manifests, `catalog.variables` included
@@ -175,4 +164,4 @@ sends that process's own heartbeat report from its segment manifests, `catalog.v
 What the service does with them: the Slots › Variables editor for these fields; a seal
 that refuses a version whose text uses a placeholder the slot does not declare (`variable_undeclared`, so a runtime
 never renders a literal `{{name}}`); a warning when a `source: runtime` variable is filled by no live instance
-("uncovered on 0 of 4 instances", before the promotion, not after); and the hosted run route applying defaults.
+("uncovered on 0 of 4 instances", before the promotion, not after).

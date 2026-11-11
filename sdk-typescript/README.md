@@ -27,13 +27,17 @@ the old split packages in beside this one. npm's default range,
 
 | Import | Use it when |
 | --- | --- |
-| `@airprompter/agent-sdk` | `AirPrompterAgent`, its option and result types, and the hosted client (`ManagedAgent`). Everything else is reached through a subpath. |
+| `@airprompter/agent-sdk` | `AirPrompterAgent` and its option and result types. Everything else is reached through a subpath. |
 | `@airprompter/agent-sdk/core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane HTTP client, the port interfaces. Nothing here opens a file, a socket or a timer at import. |
 | `@airprompter/agent-sdk/sync` | Your CI pulls and verifies releases (`syncOnce`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). |
 | `@airprompter/agent-sdk/runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `/core` + `ReleaseResolver`); the provider wrappers (`wrapClient`, `aiSdkMiddleware`, `observeCall`). |
 | `@airprompter/agent-sdk/telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
 | `@airprompter/agent-sdk/testing` | The kit a customer's CI imports: `FakeControlPlane`, `MemoryFs`, `FakeClock`. Never loaded by the runtime. |
 | `@airprompter/agent-sdk/frameworks/langchain` | Middleware for LangChain's `createAgent`. `langchain`, `@langchain/core` and `zod` are optional peers: install them to use this subpath, and no other subpath loads them. |
+
+Everything runs on your systems: there is no hosted mode. `ManagedAgent` and
+its `runtime/managed/` module are retired. They stay in the source only until a
+later release removes them, so do not build on them.
 
 Beside it, separate packages only where a dependency footprint earns one. Each
 takes `@airprompter/agent-sdk` as a peer at the same version, so an application
@@ -291,6 +295,14 @@ runs the prompt's own `## Success criteria` (or `"protection"`,
 `"helpfulness"`, or your criteria) on your model and files only
 `judgeScore` / `flagged` — `protocol/golden-sets.md`.
 
+Judging comes from your side. Keep `runRef` beside your own record and later
+call `ap.feedback(runRef, { thumbs: "up" })` or `{ rating: 4 }` (1 to 5) from
+any process holding the same `runRefSecret` or Agent key: the signals join the
+run's window. The console's Settings › Prompt settings says which signal
+decides "quality" for a prompt and which ones are guardrails that may never
+rise. A middleware option that gives a client the thumbs or the 5-star rating to
+send is planned, and has no API yet.
+
 `models` is the catalogue the console shows under Settings › Models
 ("available on 3 of 5 instances") and the gate a release must pass: a
 version naming a model no instance declared is refused at seal. A release
@@ -314,17 +326,6 @@ Every `heartbeatSeconds` the runtime reports the protocol's heartbeat
 the requests it has surfaced) and adopts the cadence the server answers
 with; a key past its 500-live-instance cap is refused and reported in
 `status().heartbeat.lastRefusal`.
-
-## Hosted mode without this SDK (D64)
-
-A hosted environment answers the OpenAI and Anthropic SDKs directly: point
-`baseURL` at `https://<run>/v1/agents/{agentId}/openai` (or `…/anthropic`),
-use a run key, and name the prompt as the model — `model: "slot:support.triage"`.
-The release's template is the system prompt, the one user turn goes into
-the prompt's end-user variable, the other variables ride on an
-`airprompter` extension, and the answer is the provider's own shape with
-the `runRef` in `X-AirPrompter-RunRef`. The mapping and every refusal:
-[`protocol/compatible-endpoints.md`](../protocol/compatible-endpoints.md).
 
 ## Wrapped clients (`ap.wrap`, D65)
 
@@ -414,55 +415,6 @@ await agent.invoke({ messages }, { context: { airprompter: { subject: userId, ta
 
 Inside `ap.run(...)`, the middleware joins that run and `ap.run` ends it. Finish the work inside it, draining a stream there too: anything still going after `ap.run` returns is not part of that run. Waiting for 1.0: several slots in a run, tool counts in the console, output checks on this path, `modelFor`, and Python.
 
-## Hosted mode (`ManagedAgent`)
-
-Feedback works the same way hosted: keep `result.runRef` beside your own
-record and later call `agent.feedback(runRef, { accepted: true, rating: 4 })`
-from any process holding the run key — the signals join the run's window,
-and the answer names what landed and what was refused. The console's
-Settings › Prompt settings says which signal decides "quality" for a prompt
-and which ones are guardrails that may never rise.
-
-When an environment runs hosted, there is no store, no models and no keys of
-your own: AirPrompter runs the promoted version and meters it. The SDK's
-hosted client is deliberately thin.
-
-```ts
-import { ManagedAgent, ManagedRunError } from "@airprompter/agent-sdk";
-
-const ap = await ManagedAgent.start({
-  agentId: "agt_…",
-  target: "prod",
-  apiKey: process.env.AIRPROMPTER_RUN_KEY!, // a run key (Settings › Keys, "Run key")
-  baseUrl: "https://d123.cloudfront.net",  // the environment's hosted run URL
-  tags: { device_id: process.env.DEVICE_ID! }, // matched locally; values never leave this process
-});
-
-// The catalogue: tags, declared variables, workflow step ids, experiment arms.
-ap.slots.slots.map((s) => s.tag);
-
-// One run. The subject is hashed with the experiment's salt and never sent.
-const result = await ap.run("support.triage", { team: "Billing", ticket }, { subject: userId });
-result.output; result.arm; result.usage; result.priceMicros; result.runRef;
-
-// Streaming: deltas as they arrive, then the assembled result.
-const stream = await ap.stream("support.reply", { name }, { subject: userId });
-for await (const delta of stream) process.stdout.write(delta);
-const done = await stream.result;
-
-// Workflow slots: the customer executes tools between steps.
-const flow = ap.workflow("onboarding.flow", { subject: userId });
-for (const { stepId } of flow.steps) await flow.step(stepId, vars);
-
-try { await ap.run(…); } catch (e) { if (isManagedRunError(e)) e.code; /* typed refusal, e.status, e.retryAfterSeconds */ }
-```
-
-Every run streams under the hood (the edge closes a silent connection at
-60 s; a JSON run is silent until the model finishes) and `run()` assembles
-the final frame. The only retry is a `429`, honouring `Retry-After`. The
-CLI's `airprompter pull --tags-only --base-url <run url> --out slots.json`
-writes the same catalogue for build steps.
-
 ## Module map
 
 | Module | What it holds |
@@ -480,7 +432,7 @@ writes the same catalogue for build steps.
 | `packages/sdk/src/sync/store/` | `SlotStore`: two slots, stage → fsync → activate, AAD `agentId target generation contentHash` per payload, anti-rollback counter outside the slots, DEK wrapped by a `KeyProvider` (file key default; custom / KMS via `customKeyProvider`) |
 | `packages/sdk/src/sync/sync/`, `apply/` | `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `pullToDatastore`, the apply policy's update windows |
 | `packages/sdk/src/runtime/release/` | `ReleaseResolver`: which slot a subject gets under which arm (the plan walked on this host's clock, a retreat honoured), the rendered text with its run reference — over any `LoadedRelease` |
-| `packages/sdk/src/runtime/wrap/`, `observe.ts`, `managed/` | `ap.wrap()`: the client proxy and stream taps (`client.ts`), attribution by scope or rendered text (`attribution.ts`), the AI SDK middleware (`aiSdk.ts`); `observeCall` (usage off the provider's answer, the closed error set); `ManagedAgent` (hosted mode) |
+| `packages/sdk/src/runtime/wrap/`, `observe.ts` | `ap.wrap()`: the client proxy and stream taps (`client.ts`), attribution by scope or rendered text (`attribution.ts`), the AI SDK middleware (`aiSdk.ts`); `observeCall` (usage off the provider's answer, the closed error set) |
 | `packages/sdk/src/telemetry/spool/`, `uploader.ts` | Minute windows per dimension set, segment naming and rotation (`SegmentPlanner`), `DirectorySink` (0600, `.open` until fsync + rename, crash recovery, a manifest per closed segment) and `MemorySink`; `SpoolUploader` (grant, budget, quarantine, manifests, the marker); `spool/manifest.ts` (the daemon's `daemon.json` and the segment manifest) |
 
 Every file in `protocol/vectors/` runs through these modules in `test/`;
@@ -503,8 +455,7 @@ A lockfile can hold two copies of this package (a satellite resolved to a
 different patch; a bundler duplicating a chunk), and an error thrown by one
 copy is not `instanceof` the class from the other. Every SDK error therefore
 sets `name` and carries a `code`, and the guards read those: `isStoreError`,
-`isAgentStartError`, `isManagedRunError`,
-`isPayloadDecryptError`, and `errorNamed(error, name)` for your own checks.
+`isAgentStartError`, `isPayloadDecryptError`, and `errorNamed(error, name)` for your own checks.
 Sinks say what they are with `kind` (`"directory"` | `"memory"`) and what
 they can do with optional `drain()` / `depth()`; the runtime branches on
 those, never on `instanceof MemorySink`. `test/discriminants.test.ts` pins

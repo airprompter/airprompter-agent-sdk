@@ -92,12 +92,12 @@ test("the direction is core → sync, runtime, telemetry → agent, frameworks �
   const integration = join(root, "..", "integrations", "zapier", "src", "_lintProbe.ts");
   const platformLayer = planted(integration, 'import { MemoryKvStore } from "@airprompter/agent-sdk/sync";\nexport const probe = typeof MemoryKvStore;\n');
   assert.equal(platformLayer.status, 1, "an integration importing /sync fails the lint");
-  assert.match(platformLayer.stderr, /integrations\/zapier\/src\/_lintProbe\.ts:\d+: @airprompter\/agent-sdk\/sync: an integration imports the SDK only as @airprompter\/agent-sdk\/frameworks\/steps/);
+  assert.match(platformLayer.stderr, /integrations[\\/]zapier[\\/]src[\\/]_lintProbe\.ts:\d+: @airprompter\/agent-sdk\/sync: an integration imports the SDK only as @airprompter\/agent-sdk\/frameworks\/steps/);
   const platformRoot = planted(join(root, "..", "integrations", "n8n", "src", "_lintProbe.ts"), 'import { AirPrompterAgent } from "@airprompter/agent-sdk";\nexport const probe = typeof AirPrompterAgent;\n');
   assert.equal(platformRoot.status, 1, "an integration importing the root fails the lint");
   const platformPath = planted(integration, 'import { usageFrom } from "../../../sdk-typescript/packages/sdk/src/frameworks/steps/index.js";\nexport const probe = typeof usageFrom;\n');
   assert.equal(platformPath.status, 1, "an integration reaching the SDK's sources by path fails the lint");
-  assert.match(platformPath.stderr, /leaves integrations\/zapier/);
+  assert.match(platformPath.stderr, /leaves integrations[\\/]zapier/);
   const platformOk = planted(integration, 'import { usageFrom } from "@airprompter/agent-sdk/frameworks/steps";\nexport const probe = typeof usageFrom;\n');
   assert.equal(platformOk.status, 0, `the Steps subpath is allowed: ${platformOk.stderr}`);
 });

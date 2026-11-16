@@ -78,6 +78,42 @@ land in two rows. `toolsReported` is true when the slot's tool calls were
 seen (a tool record, a model call with `toolsObserved: true`, or an
 observation with `toolCalls`), so `tools.calls: 0` then means none ran.
 
+## A run reported by a later step (`reportRun`)
+
+Some hosts render the prompt in one invocation and run the model in
+another: a Zapier or n8n "Get prompt" step returns the text and its
+`runRef`, the platform's own AI step calls the model, and a "Report run"
+step, a separate invocation and maybe another process, gets back the
+`runRef` and what the model step returned. A `render()` outside a run
+writes no row, so that later step is where the run is counted:
+
+```ts
+// "Report run": a fresh on_invoke agent with the same Agent key (or runRefSecret) as "Get prompt".
+await ap.invoke(async () => ap.reportRun(runRef, { inputTokens: 812, outputTokens: 164, latencyMs: 2300 }));
+ap.feedback(runRef, { thumbs: "up" }); // a quality signal, when the step has one
+```
+
+It writes one ordinary one-call run row (`count` 1, `agentRun` 1,
+`modelCalls` 1) on the slot, version, arm and audience the reference
+carries, never on the release the reporting process holds by then, so
+the rollout gates read its tokens, latency and error on the arm that
+served it. Usage is `reported` when both `inputTokens` and
+`outputTokens` are given (`inputTokens` counts cached tokens too;
+`cachedInputTokens` says how many), else `unavailable`. `error` is an
+error class name, or anything a thrown error could be (an object with a
+`status` or `code`, a message); only the class is written. With no
+`latencyMs` the row takes the time since the minute the prompt rendered,
+an upper bound that includes the platform's queueing.
+
+It is the run's only count: call it once per reference, with or without
+usage. A run whose report never comes is not counted, which keeps a
+failed step from reading as a cheap, healthy run on the arm that failed
+it. A reference from `ap.run` or `openRun` is counted by its session and
+must not be reported here. `reportRun` returns false and writes nothing
+for a reference that does not verify under this agent's keys, a `slot` it
+does not name, a reference with several entries and no `slot`, or a
+count, latency or model out of range.
+
 ## Field → OpenTelemetry GenAI
 
 Window fields follow the OpenTelemetry GenAI semantic conventions where one

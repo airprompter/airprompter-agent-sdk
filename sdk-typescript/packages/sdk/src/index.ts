@@ -22,7 +22,7 @@
  */
 
 export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION, PROTOCOL_VERSION, VENDORED_BUNDLE_EXPIRY_WARNING_DAYS, healthzOf, healthzResponse } from "./agent.js";
-export type { AgentRampStatus, AgentStatus, Healthz, Rendered, StartOptions, SyncMode, ReleaseSource, ReleaseChange, SpoolReport, TelemetryPlacement, HeartbeatSdkName, BundleOutcome, HydrateOutcome, DatastoreStatus } from "./agent.js";
+export type { AgentRampStatus, AgentStatus, Healthz, Rendered, RunReport, StartOptions, SyncMode, ReleaseSource, ReleaseChange, SpoolReport, TelemetryPlacement, HeartbeatSdkName, BundleOutcome, HydrateOutcome, DatastoreStatus } from "./agent.js";
 
 // The run: what an adapter and `ap.run` see.
 export type { AgentRuntime, ModelCallRecord, ModelResolver, Placement, RunInput, RunSession, TokenUsage, ToolCallRecord, UnavailableReason } from "./runtime/index.js";

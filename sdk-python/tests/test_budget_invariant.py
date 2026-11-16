@@ -34,7 +34,7 @@ def iso_minute(ms: float) -> str:
 
 
 def window_row(instance_id: str, minute: str) -> dict:
-    return {"type": "window", "v": 4, "artifactId": "art_1", "minute": minute, "instanceId": instance_id, "instanceClass": "resident", "tag": "support.reply", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 40, "output": 9}, "sdk": "agent-sdk-py/0.1.0"}
+    return {"type": "window", "v": 5, "artifactId": "art_1", "minute": minute, "instanceId": instance_id, "instanceClass": "resident", "tag": "support.reply", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": None, "usageSource": "reported", "toolsReported": False, "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 40, "output": 9}, "sdk": "agent-sdk-py/0.1.0"}
 
 
 def segment(fs: MemoryFs, instance_id: str, minute_ms: float, n: int, rows: list[dict], open_: bool = False) -> str:

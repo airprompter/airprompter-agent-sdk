@@ -129,6 +129,34 @@ Async applications use `await ap.observe_async(r, lambda: client.messages.create
 is synchronous and thread-safe; resident mode runs its sync, heartbeat and
 update-window timers on daemon threads.
 
+### One request, one run
+
+An agent that calls several prompts, tools and steps for one request runs them
+inside one run, so the request counts once and each slot stays on one version:
+
+```python
+with ap.run(subject=user_id) as run:                # or `async with`; an exception ends the run with its class
+    placed = run.place("support.reply")             # `await run.place_async(...)` awaits coroutine sources too
+    if placed.kind == "passthrough":                # never raises: your own prompt and model run unchanged
+        reply = call_model(own_prompt, own_model)
+    else:
+        reply = call_model(placed.instructions, placed.model)
+        run.record_model_call("support.reply", step="agent", model=placed.model, latency_ms=812, usage=normalize_usage(reply))
+    run.record_tool_call("support.reply", step="tools", ok=True)   # safe from a worker thread
+    ref = run.run_ref                               # one reference, one entry per slot the run used
+ap.feedback(ref, thumbs="up")                       # files on every entry; `slot=` names one
+ap.explain(ref)                                     # the entries, or None for a reference that does not verify
+```
+
+At the end, each slot the run pinned writes one run row and a row per named
+step. `ap.prompt`, `ap.workflow` and `ap.observe` inside the block join the
+run. The current run lives in a context variable: a thread does not inherit it,
+so hand `run` to the worker or run it in `contextvars.copy_context()`.
+`run.end(interrupted=True)` parks a run until `ap.open_run(resume=ref)` picks it
+up. A run with no activity for `run_idle_timeout_ms` (default 15 minutes) ends
+on its own; a run resumed after that, or on another host, counts as a second
+run on the same arm.
+
 ## What happens at start
 
 1. The store is read before any network call. The active slot is
@@ -146,8 +174,11 @@ update-window timers on daemon threads.
    process that reads a bundle from a database column holds the
    distribution key, so keep that column as private as the key.
 3. With still nothing, one synchronous sync runs — the only time the SDK
-   waits on the network. If that fails too, `start()` raises
-   `AgentStartError("no_verified_release")` — or `"store_newer"` when
+   waits on the network. If that fails too, the agent starts at generation
+   0 and logs `started_without_release` with the control plane's answer:
+   every `run.place` passes through to your own prompt, and `prompt()`
+   raises `AgentStartError("no_verified_release")` at its first render.
+   `start()` raises `"store_newer"` when
    `store.json` was written by a newer package than this one (S8,
    `protocol/store-format.md`: N and N-1 are read, N is written, an older
    file migrates on first write, a newer one is refused naming its

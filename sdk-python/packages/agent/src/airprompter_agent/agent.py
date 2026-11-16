@@ -1,8 +1,9 @@
 """``AirPrompterAgent`` — the runtime a customer application holds.
 
 ``start()`` reads the store before any network and serves immediately from
-the last verified release (other slot → vendored bundle → refuse to start
-when nothing verifies); sync runs in the background per mode. ``prompt(tag)``
+the last verified release (other slot → vendored bundle → generation 0 when
+nothing verifies, logged as ``started_without_release``); sync runs in the
+background per mode. ``prompt(tag)``
 renders with trust-aware variables and hands back a content-free ``run_ref``;
 ``workflow(tag)`` yields steps in order; ``report()``, ``observe()`` and
 ``feedback()`` feed the spool. Zero network to AirPrompter on the render
@@ -18,6 +19,8 @@ Example::
                                 variables={"customer_tier": {"resolve": lambda ctx: crm.tier_of(ctx.subject), "trust": "operator"}})
     rendered = ap.prompt("support.triage", subject=customer_id).render(ticket=ticket_text)   # customer_tier looked up only if this version uses it
     ap.status().variables                                                                    # {"sources": ["customer_tier"], "unsourced": []}
+    with ap.run(subject=customer_id) as run:                                                 # or ``async with``: one request, one version per slot
+        placed = run.place("support.triage")                                                 # a passthrough means the framework's own prompt runs
 
 Threads: resident mode runs its sync, heartbeat and window timers on daemon
 threads; every public method is safe to call from any thread. ``stop()``
@@ -51,7 +54,7 @@ from airprompter_agent.core import AGENT_ID, TARGET_SLUG, key_thumbprint, truste
 from airprompter_agent.runtime import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
 from airprompter_agent.runtime import WrapHooks, wrap_client
 from airprompter_agent.core import copy_audience_tags, valid_audience_label
-from airprompter_agent.core import parse_run_ref, run_ref_key_from
+from airprompter_agent.core import RunRefFacts, mint_run_ref, parse_run_ref, run_ref_key_from
 from airprompter_agent.core import Delimiters
 from airprompter_agent.core import normalize_feedback
 from airprompter_agent.telemetry import read_daemon_discovery
@@ -69,6 +72,7 @@ from airprompter_agent.core import JUDGE_RUBRICS, JudgeResult, JudgeRubric, judg
 from airprompter_agent.runtime import PendingObservation, ObserveTarget, observe_call, observe_call_async
 from airprompter_agent.core import ReleaseSlot
 from airprompter_agent.runtime import ReleaseResolver, Rendered, Workflow, WorkflowStep, copy_inference, disabled_from
+from airprompter_agent.runtime import DEFAULT_RUN_IDLE_TIMEOUT_MS, Run, RunInput, RunRegistry, RunScope, RunSession, new_subject
 from airprompter_agent.runtime import FilledRender, FillPlan, VariableSourceContext, VariableSourceInput, VariableSourceRegistry, fill_async, fill_sync, is_variable_source_error, plan_fill, unsourced
 
 from airprompter_agent.core import SDK_VERSION  # one source: the distribution's metadata (tests/test_package_shape.py)
@@ -382,19 +386,22 @@ class PromptHandle:
     def __init__(self, agent: "AirPrompterAgent", tag: str, subject: Optional[str], tags: Optional[Mapping[str,str]] = None):
         self._agent = agent
         self._tag = tag
+        #: The caller's own subject, which a variable source sees.
         self._subject = subject
+        #: One id for the whole prompt() call, so needs(), variables() and render() read the same arm with no subject.
+        self._assign = subject if subject is not None else new_subject()
         self._tags = copy_audience_tags(tags) if tags is not None else None
 
     def render(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> Rendered:
         """Synchronous: the call site's values, literal sources and plain-callable sources (each on a worker thread
         under its timeout). A coroutine-function source in the way is ``VariableSourceRequiredError``."""
         merged = {**(values or {}), **kwargs}
-        return self._agent._render(self._tag, self._subject, merged, self._tags)
+        return self._agent._render(self._tag, self._subject, merged, self._tags, self._assign)
 
     async def render_async(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> Rendered:
         """The same render with every source awaited (each under its own timeout), values fenced by the stricter trust."""
         merged = {**(values or {}), **kwargs}
-        return await self._agent._render_async(self._tag, self._subject, merged, self._tags)
+        return await self._agent._render_async(self._tag, self._subject, merged, self._tags, self._assign)
 
     def needs(self, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> list[str]:
         """The required names a render would still lack after these values and the registered sources — check it at
@@ -403,7 +410,7 @@ class PromptHandle:
         return unsourced(variables=self.variables(), values=merged, registry=self._agent.variables)
 
     def variables(self) -> list[Mapping[str, Any]]:
-        return list(self._agent._resolve_slot(self._tag, self._subject, tags=copy_audience_tags({**self._agent._audience_tags, **(self._tags or {})}))[0].get("variables", []))
+        return self._agent._slot_variables(self._tag, self._assign, self._tags)
 
 
 @dataclass(frozen=True)
@@ -423,6 +430,72 @@ class WorkflowHandle(Workflow):
     async def render_step_async(self, step_id: str, values: Optional[Mapping[str, Any]] = None, /, **kwargs: Any) -> str:
         assert self._render_step_async is not None
         return await self._render_step_async(step_id, {**(values or {}), **kwargs})
+
+
+class _RunHost:
+    """What a run needs from the agent (``runtime.run.RunHost``). Takes no agent lock: a session calls it under its own."""
+
+    def __init__(self, agent: "AirPrompterAgent", idle_timeout_ms: float):
+        self._agent = agent
+        self.variables = agent.variables
+        self.idle_timeout_ms = idle_timeout_ms
+
+    def release(self) -> Union[ReleaseResolver, str]:
+        agent = self._agent
+        if agent._active is not None:
+            return agent._resolver()
+        return "awaiting_unlock" if agent._staged_manifest is not None else "no_verified_release"
+
+    def tags_for(self, overrides: Optional[Mapping[str, str]] = None) -> Mapping[str, str]:
+        agent = self._agent
+        tags = copy_audience_tags({**agent._audience_tags, **overrides}) if overrides is not None else agent._audience_tags
+        agent._remember_audience_tag_keys(tags.keys())
+        return tags
+
+    def register_label(self, tag: str) -> None:
+        self._agent._register_prompt_label(tag, self._agent._audience_prompt_labels.get(tag, tag))
+
+    def stamp_lease(self) -> None:
+        if self._agent._active is not None:
+            self._agent._guard_lease()
+
+    def stamp_disabled(self, generation: int, tag: Optional[str]) -> None:
+        self._agent._stamp_refusal("disabled", generation, tag)
+
+    def checks_for(self, tag: str, arm: str) -> list[Mapping[str, Any]]:
+        active = self._agent._active
+        if active is None:
+            return []
+        return list((self._agent._slot_on(active.manifest["payload"], tag, arm) or {}).get("outputChecks") or [])
+
+    def mint_run_ref(self, run_id: str, entries: Sequence[Mapping[str, Any]]) -> str:
+        return mint_run_ref(RunRefFacts(self._agent._o["agent_id"], self._agent._o["target"], run_id, tuple(entries)), self._agent._run_ref_key)
+
+    def parse_run_ref(self, run_ref: str) -> Optional[RunRefFacts]:
+        return parse_run_ref(run_ref, self._agent._run_ref_keys)
+
+    def log(self, event: Mapping[str, Any]) -> None:
+        self._agent._log(dict(event))
+
+    def now(self) -> float:
+        return self._agent._now_ms()
+
+
+class _RunRecorder:
+    """Where a run's rows go (``runtime.run.RunRecorder``). The spool validates every row: one it refuses is logged and
+    dropped by the session, never raised at the caller."""
+
+    def __init__(self, agent: "AirPrompterAgent"):
+        self._agent = agent
+
+    def record_run(self, totals: Any, now_ms: float) -> None:
+        self._agent.spool.record_run(totals, now_ms)
+
+    def record_step(self, totals: Any, now_ms: float) -> None:
+        self._agent.spool.record_step(totals, now_ms)
+
+    def count_passthrough(self, reason: str) -> None:
+        self._agent._count_passthrough(reason)
 
 
 class AirPrompterAgent:
@@ -510,6 +583,11 @@ class AirPrompterAgent:
         self.variables = VariableSourceRegistry(options.get("variables"))
         # A source stricter than the prompt's declaration is said once per slot and name for the life of the process.
         self._stricter_said: set[str] = set()
+        #: ``runCounters.passthrough``: cumulative since start and never reset on read, because a retried heartbeat must not double count.
+        self._passthrough_counts: dict[str, int] = {}
+        self._passthrough_lock = threading.Lock()
+        #: The open runs: one version per slot per request, one count per run.
+        self._runs = RunRegistry(_RunHost(self, float(options.get("run_idle_timeout_ms") or DEFAULT_RUN_IDLE_TIMEOUT_MS)), _RunRecorder(self))
         serverless = self._sync_options.mode == "on_invoke"
         sink_kind = self._telemetry.sink or ("memory" if serverless else "directory")
         # Every closed segment gets its manifest: the writer's scope and its heartbeat report, for the telemetry daemon.
@@ -555,6 +633,7 @@ class AirPrompterAgent:
         variables: Optional[Mapping[str, VariableSourceInput]] = None,
         tags: Optional[Mapping[str,str]] = None,
         prompt_labels: Optional[Mapping[str,str]] = None,
+        run_idle_timeout_ms: Optional[float] = None,
     ) -> "AirPrompterAgent":
         """``root`` is ``{"pinned": <P-256 public JWK>}`` for this environment, or a full root document (from the bundle or a previous accept).
         ``api_key`` absent means offline: serve the store or the vendored bundle, never call home.
@@ -565,7 +644,11 @@ class AirPrompterAgent:
         rotation: ``feedback`` still lands.
         ``variables`` is how this application fills prompt variables from its own system: a literal per name, or a
         source (``{"resolve": callable, "trust": "operator"|"end_user", ...}``) consulted for a declared variable the
-        version's text uses and the call site did not pass. ``ap.variables.provide()`` adds more after start."""
+        version's text uses and the call site did not pass. ``ap.variables.provide()`` adds more after start.
+        ``run_idle_timeout_ms`` (default 15 minutes) ends a run with no ``place`` or record for that long. A run resumed
+        after that, or on another host, counts as a second run on the same arm.
+        Nothing to serve is not a failure: the agent starts at generation 0, logs ``started_without_release``, and every
+        ``run.place`` answers ``passthrough no_verified_release`` until a release arrives."""
         # The slug feeds store paths and spool directories, so anything else never reaches the filesystem.
         if not isinstance(target, str) or not TARGET_SLUG.fullmatch(target):
             raise AgentStartError("invalid_options", "target must be a lowercase slug: a letter, then up to 31 letters, digits or hyphens")
@@ -601,6 +684,7 @@ class AirPrompterAgent:
             "random": random,
             "logger": logger,
             "variables": variables,
+            "run_idle_timeout_ms": run_idle_timeout_ms,
         }
         resolved_state_dir = state_dir or default_state_dir()
         # The root is scoped to the HOSTED environment (the public service is "prod"), never to this app's target.
@@ -809,9 +893,11 @@ class AirPrompterAgent:
             # a host with nothing to serve yet — not a host that cannot run. T9 makes the unlock the customer's to give, and
             # a process that refuses to start can never give it: so it starts, heartbeats as generation 0 with the staged
             # generation beside it, keeps syncing, and answers unlock(), the window, or the hook. prompt() refuses until then.
-            if self._staged_manifest is None:
-                raise AgentStartError("no_verified_release", "no verified release in the store, no usable vendored bundle, and nothing could be fetched")
-            self._log({"event": "awaiting_first_unlock", "generation": self._staged_manifest["payload"]["generation"]})
+            # With nothing staged either it starts the same way: generation 0, where run.place() answers passthrough.
+            if self._staged_manifest is not None:
+                self._log({"event": "awaiting_first_unlock", "generation": self._staged_manifest["payload"]["generation"]})
+            else:
+                self._log({"event": "started_without_release", "reason": f"no verified release in the store, no usable vendored bundle, and {self._describe_fetch_failure()}"})
         if self._client is not None and self._sync_options.mode == "resident":
             self._schedule()
             # The first heartbeat goes out right after boot so the fleet view sees the instance before its first interval.
@@ -822,6 +908,18 @@ class AirPrompterAgent:
         self._schedule_spool_close()
         self._schedule_window_unlock()
         self._schedule_datastore_poll()
+
+    def _describe_fetch_failure(self) -> str:
+        """Why the boot sync brought nothing, content-free."""
+        scope = f"{self._o['agent_id']} on {self._o['target']}"
+        if self._client is None:
+            return "no control plane is configured (no api_key), so nothing could be fetched"
+        outcome = self._last_sync_outcome
+        if outcome is None:
+            return "nothing could be fetched"
+        if outcome == "nothing_promoted":
+            return f"the control plane has no release promoted to {self._o['target']} for {scope} — promote one from the app's board, or check that this key is bound to this app and environment"
+        return f"the sync ended {outcome} for {scope} without a release"
 
     # ------------------------------------------------------------------ the customer's datastore (T40)
 
@@ -972,6 +1070,7 @@ class AirPrompterAgent:
 
         def tick() -> None:
             try:
+                self._runs.sweep()
                 self.spool.close_stale_windows(self._now_ms())
                 self.check_telemetry_daemon()
             finally:
@@ -1483,8 +1582,8 @@ class AirPrompterAgent:
             "protocol": PROTOCOL_VERSION,
             "capabilities": sorted(SUPPORTED_CAPABILITIES),
             "registration": {"tagKeys": sorted(self._audience_tag_keys), "prompts": [{"tag": tag, "displayName": label} for tag,label in sorted(self._audience_prompt_labels.items())]},
-            # Cumulative since this process started, so a retried heartbeat cannot double count. Ticket 11a fills the map.
-            "runCounters": {"passthrough": {}},
+            # Cumulative since this process started, so a retried heartbeat cannot double count.
+            "runCounters": {"passthrough": self._passthrough_snapshot()},
             "instanceId": self._own_instance_id,
             "instanceClass": self._telemetry.instance_class or ("ephemeral" if mode == "on_invoke" else "resident"),
             "sdk": {"name": SDK_NAME, "version": SDK_VERSION},
@@ -1677,12 +1776,15 @@ class AirPrompterAgent:
         S5: the invocation's rows are flushed before ``invoke()`` returns — a platform that freezes the process at the response
         (Lambda) would otherwise lose them with no ``dropped`` row possible. ``TelemetryOptions.flush="background"`` is the
         documented opt-out for hosts that keep running after the response."""
+        # A serverless host has no spool timer, so a run idle past its timeout ends at an invocation's edges.
+        self._runs.sweep()
         self.sync_now()
         if self._last_heartbeat_ms is None or self._now_ms() - self._last_heartbeat_ms >= self._heartbeat_interval_seconds * 1000:
             threading.Thread(target=self.heartbeat_now, name="airprompter-heartbeat", daemon=True).start()
         try:
             return handler()
         finally:
+            self._runs.sweep()
             self.spool.close_windows(self._now_ms())
             threading.Thread(target=self.sync_now, name="airprompter-sync", daemon=True).start()
             # D25 on serverless: the invocation's rows go out under the runtime's own grant; a failure keeps them for the next one.
@@ -1806,6 +1908,8 @@ class AirPrompterAgent:
         resolved: ReleaseSlot
         text: str
         plan: FillPlan
+        #: The run this render belongs to, when it happens inside one: its reference replaces the one-slot ref.
+        run: Optional[Any] = None
 
         @property
         def row(self) -> dict[str, Any]:
@@ -1816,29 +1920,39 @@ class AirPrompterAgent:
             resolver = self._resolver()
             local_tags = copy_audience_tags({**self._audience_tags, **tags}) if tags is not None else self._audience_tags
             self._remember_audience_tag_keys(local_tags.keys())
-            resolved = self._resolve_slot(tag, subject, True, local_tags)
+            # Inside a run the slot resolves through the run's pin (rule 2 applied), so one request stays on one version.
+            resolved, run = self._runs.resolve_through(tag, subject, tags, lambda run_subject, run_tags: self._resolve_slot(tag, run_subject, True, copy_audience_tags({**self._audience_tags, **run_tags}) if run_tags is not None else local_tags), entry=True)
             slot = resolved.slot
             text = resolver.text_of(slot)
             plan = plan_fill(tag=tag, variables=slot.get("variables", []), text=text, values=values, registry=self.variables)
-            return AirPrompterAgent._Prepared(resolver, resolved, text, plan)
+            return AirPrompterAgent._Prepared(resolver, resolved, text, plan, run)
 
     def _finish(self, prepared: "AirPrompterAgent._Prepared", filled: FilledRender) -> Rendered:
         rendered = self._render_observed(lambda: prepared.resolver.render(prepared.resolved, filled.values, fenced=filled.fenced, text=prepared.text), prepared.row)
         # The registry keeps its own copy of the block: the one handed out is the caller's to edit.
         self._renders.register(rendered.text, Attribution(rendered.tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference), rendered.audience_ids, rendered.run_minute, rendered.artifact_id))
         self._say_stricter(rendered.tag, prepared.resolved.slot, filled)
-        return rendered
+        # The run's reference, which names every slot the run used, replaces the one-slot ref.
+        run = prepared.run
+        return replace(rendered, run_ref=run.run_ref) if run is not None and not run.is_ended else rendered
 
     def _context(self, prepared: "AirPrompterAgent._Prepared", tag: str, subject: Optional[str]) -> VariableSourceContext:
         return VariableSourceContext(tag=tag, name="", subject=subject, version_id=prepared.resolved.slot["versionId"], arm=prepared.resolved.arm)
 
-    def _render(self, tag: str, subject: Optional[str], values: Mapping[str, Any], tags: Optional[Mapping[str,str]] = None) -> Rendered:
-        prepared = self._prepare(tag, subject, values, tags)
+    def _slot_variables(self, tag: str, subject: str, tags: Optional[Mapping[str,str]]) -> list[Mapping[str, Any]]:
+        """The variables of the version ``render`` would use: inside a run, through the run's pin."""
+        with self._lock:
+            local_tags = copy_audience_tags({**self._audience_tags, **(tags or {})})
+            resolved, _run = self._runs.resolve_through(tag, subject, tags, lambda run_subject, run_tags: self._resolve_slot(tag, run_subject, True, copy_audience_tags({**self._audience_tags, **run_tags}) if run_tags is not None else local_tags), entry=True)
+            return list(resolved.slot.get("variables", []))
+
+    def _render(self, tag: str, subject: Optional[str], values: Mapping[str, Any], tags: Optional[Mapping[str,str]] = None, assign: Optional[str] = None) -> Rendered:
+        prepared = self._prepare(tag, assign if assign is not None else subject, values, tags)
         # The lock is released here: a source is the customer's code and may take its time.
         return self._finish(prepared, self._fill_observed(lambda: fill_sync(prepared.plan, self._context(prepared, tag, subject), self.variables), tag, prepared.row))
 
-    async def _render_async(self, tag: str, subject: Optional[str], values: Mapping[str, Any], tags: Optional[Mapping[str,str]] = None) -> Rendered:
-        prepared = self._prepare(tag, subject, values, tags)
+    async def _render_async(self, tag: str, subject: Optional[str], values: Mapping[str, Any], tags: Optional[Mapping[str,str]] = None, assign: Optional[str] = None) -> Rendered:
+        prepared = self._prepare(tag, assign if assign is not None else subject, values, tags)
         filled = await self._fill_observed_async(lambda: fill_async(prepared.plan, self._context(prepared, tag, subject), self.variables), tag, prepared.row)
         return self._finish(prepared, filled)
 
@@ -1854,6 +1968,9 @@ class AirPrompterAgent:
             raise
 
     def _missing_row(self, row: Mapping[str, Any]) -> None:
+        # Inside a run that pinned this slot, its row becomes the error row instead of a one-call run.
+        if self._runs.render_failed(row["tag"]):
+            return
         self._observe_guarded(Observation(tag=row["tag"], artifact_id=row.get("artifact_id"), version_id=row["version_id"], arm=row["arm"], model=row["model"], status="error", error_class="render_missing_variable", latency_ms=0, usage_source="unavailable", audience_ids=row.get("audience_ids"), run_minute=row.get("run_minute")))
 
     def _source_failed(self, error: BaseException, tag: str, row: Mapping[str, Any]) -> None:
@@ -1898,7 +2015,8 @@ class AirPrompterAgent:
         there is one, names the workflow slot."""
         with self._lock:
             resolver = self._resolver()
-            resolved = self._resolve_slot(tag, subject, return_resolved=True)
+            # Inside a run the workflow slot pins through the run, so every step stays on one arm. Each step keeps its own ref.
+            resolved, _run = self._runs.resolve_through(tag, subject, None, lambda run_subject, run_tags: self._resolve_slot(tag, run_subject, True, copy_audience_tags({**self._audience_tags, **run_tags}) if run_tags is not None else None), entry=False)
             slot = resolved.slot
             workflow = resolver.workflow(resolved)
             for step in workflow.steps:
@@ -1976,8 +2094,15 @@ class AirPrompterAgent:
             self._log({"event": "observation_dropped", "reason": str(error)})
 
     def _record_observation(self, tool_calls: Optional[Mapping[str, int]]) -> Callable[[Observation], None]:
-        """What ``observe`` hands the writer: the observation, with the tool counts the caller gave."""
-        return lambda observation: self.spool.observe(replace(observation, tool_calls=tool_calls) if tool_calls else observation, self._now_ms())
+        """What ``observe`` hands the writer: the observation, with the tool counts the caller gave. Inside a run that
+        pinned this slot, the call folds into the run's counters instead: one request counts once."""
+
+        def record(observation: Observation) -> None:
+            built = replace(observation, tool_calls=tool_calls) if tool_calls else observation
+            if not self._runs.take(built):
+                self.spool.observe(built, self._now_ms())
+
+        return record
 
     def observe(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget], call: Callable[[], T], *, checks: Optional[Mapping[str, int]] = None, model: Optional[str] = None, tool_calls: Optional[Mapping[str, int]] = None) -> T:
         """Time a model call against a rendered prompt (or a workflow step) and report it: latency, ``usage`` read off the
@@ -2146,22 +2271,73 @@ class AirPrompterAgent:
         criteria = rubric_from_prompt(text.decode("utf-8")) if text else []
         return JudgeRubric(name="prompt", criteria=tuple(criteria), protection=JUDGE_RUBRICS["protection"].criteria)
 
-    def feedback(self, run_ref: str, signals: Optional[Mapping[str, Any]] = None, /, *, model: Optional[str] = None, **kwargs: Any) -> bool:
-        """File bounded quality signals; ``model=`` names the actual provider model when it overrode the slot."""
-        entry = self._first_entry(run_ref)
-        if entry is None:
+    def feedback(self, run_ref: str, signals: Optional[Mapping[str, Any]] = None, /, *, model: Optional[str] = None, slot: Optional[str] = None, **kwargs: Any) -> bool:
+        """File bounded quality signals against a run. With no ``slot``, they file once per entry of the reference, each
+        on that entry's own version, arm and minute; with ``slot``, on that entry only, and False when the run did not
+        use it. ``model=`` names the provider model that actually answered when it overrode the slot, so on a reference
+        with several entries it needs ``slot``."""
+        if not isinstance(run_ref, str):
+            return False
+        facts = parse_run_ref(run_ref, self._run_ref_keys)
+        if facts is None or not facts.entries:
+            return False
+        entries = list(facts.entries) if slot is None else [entry for entry in facts.entries if entry["tag"] == slot]
+        if not entries:
             return False
         if model is not None and (not isinstance(model, str) or not 1 <= len(model) <= 128 or re.search(r"[\x00-\x1f\x7f]", model)):
             self._log({"event": "feedback_rejected", "rejected": {"model": "invalid_model"}})
+            return False
+        if model is not None and len(entries) > 1:
+            self._log({"event": "feedback_rejected", "rejected": {"model": "slot_required"}})
             return False
         normalized = normalize_feedback({**(signals or {}), **kwargs})
         if normalized.rejected:
             self._log({"event": "feedback_rejected", "rejected": normalized.rejected})
         if not normalized.accepted:
             return False
-        # Feedback rides on the run's window: same dimension set, no extra count (the run was already counted).
-        self.spool.outcomes(tag=entry["tag"], artifact_id=entry["artifactId"], version_id=entry["versionId"], arm=entry["arm"], model=model or entry["model"], outcomes=normalized.outcomes, at_ms=self._now_ms(), audience_ids=entry.get("audienceIds"), outcome_run_minute=entry["runMinute"])
+        # Feedback rides on each run window: same dimension set, no extra count (the run was already counted).
+        for entry in entries:
+            self.spool.outcomes(tag=entry["tag"], artifact_id=entry["artifactId"], version_id=entry["versionId"], arm=entry["arm"], model=model or entry["model"], outcomes=normalized.outcomes, at_ms=self._now_ms(), audience_ids=entry.get("audienceIds"), outcome_run_minute=entry["runMinute"])
         return True
+
+    def explain(self, run_ref: str) -> Optional[list[Mapping[str, Any]]]:
+        """Why a run got the versions it did: the reference's entries, or None when it does not verify. Reads no release, writes nothing."""
+        if not isinstance(run_ref, str):
+            return None
+        facts = parse_run_ref(run_ref, self._run_ref_keys)
+        return [dict(entry) for entry in facts.entries] if facts is not None else None
+
+    # ------------------------------------------------------------------ runs
+
+    def open_run(self, input: Optional[RunInput] = None, /, **fields: Any) -> RunSession:
+        """Open a run, or get the live one named by ``resume``: its slots stay on one version, and it counts once.
+        ``fields`` are ``RunInput``'s: ``subject``, ``conversation_id``, ``tags``, ``variables``, ``resume``."""
+        return self._runs.open(input if input is not None else RunInput(**fields))
+
+    def current_run(self) -> Optional[RunSession]:
+        """The run this context is inside, if any, and only this agent's. A worker thread sees it when run in ``contextvars.copy_context()``."""
+        return self._runs.current()
+
+    def with_run(self, run: RunSession) -> RunScope:
+        """``with ap.with_run(run):`` (or ``async with``): the run is current inside the block, and a long tool there never looks idle to the sweep."""
+        return self._runs.with_run(run)  # type: ignore[arg-type]
+
+    def run(self, input: Optional[RunInput] = None, /, **fields: Any) -> Run:
+        """One request as one run: ``with ap.run(subject=user_id) as run:`` or ``async with``. It ends when the block
+        does, with the class of an exception that leaves it; the exception is not swallowed."""
+        return self._runs.run(input if input is not None else RunInput(**fields))
+
+    def log(self, event: Mapping[str, Any]) -> None:
+        """A line through this agent's logger, for an adapter. Never put a value, prompt or output in it."""
+        self._log(dict(event))
+
+    def _count_passthrough(self, reason: str) -> None:
+        with self._passthrough_lock:
+            self._passthrough_counts[reason] = self._passthrough_counts.get(reason, 0) + 1
+
+    def _passthrough_snapshot(self) -> dict[str, int]:
+        with self._passthrough_lock:
+            return dict(self._passthrough_counts)
 
     # ------------------------------------------------------------------ status
 
@@ -2280,6 +2456,8 @@ class AirPrompterAgent:
             pass
         with self._sync_lock:
             pass
+        # Open runs end by the idle rule before the windows close, so their rows are in them.
+        self._runs.end_all()
         self.spool.close_windows(self._now_ms())
         if self._client is not None:
             self._client.close()

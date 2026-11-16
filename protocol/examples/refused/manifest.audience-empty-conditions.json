@@ -3,7 +3,7 @@
   "reason": "an empty condition list cannot mean fleet-wide",
   "document": {
     "payload": {
-      "protocol": "3.0.0",
+      "protocol": "3.1.0",
       "organizationId": "org_7d3f9a2b",
       "agentId": "agt_4e8c1b6d",
       "target": "prod",

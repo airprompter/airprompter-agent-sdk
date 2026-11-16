@@ -10,6 +10,9 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### n8n nodes (new, `integrations/n8n`, not published)
+- **AirPrompter Agents for n8n** (`n8n-nodes-airprompter`): the AirPrompter node (Get Prompt, Report Run) and the AirPrompter Trigger (polling: new version, A/B start/end, dial-up step, rollback, disable) over `@airprompter/agent-sdk`, with an agent Update key. The signed release is kept on the n8n side — the n8n user folder when self-hosted, workflow static data without a disk — sealed to a key derived from the Update key, verified on every load, and served while AirPrompter is unreachable until the manifest's lease runs out. A vendored `.apbundle` seeds fully offline installs. Built on the same platform-agnostic core as the Zapier app (`src/core`, byte-identical). CI runs it against `airprompter dev`.
+
 ### Runs: several prompts in one request (AIR-2242)
 - **Python gets the run session** (`airprompter_agent.runtime.run`): `with ap.run(...) as run:` and `async with ap.run(...) as run:` from one object, `run.place` (sync sources only) and `run.place_async`, `run.run_ref`, `set_tags`, `slot_for`, `decline`, `record_model_call(..., tools_observed=)`, `record_tool_call`, `end(error_class=None, interrupted=False)`, `ap.open_run`, `ap.current_run`, `ap.with_run`, `ap.explain`, and `ap.feedback(..., slot=)`. The same rows, rules and review fixes as TypeScript.
 - **Python: a start with nothing promoted no longer raises.** It runs at generation 0 and `place` answers `passthrough no_verified_release`, as TypeScript has since S0. A missing subject is a fresh id per call, never the instance id, unless the experiment's `subjectKey` is `instance`.

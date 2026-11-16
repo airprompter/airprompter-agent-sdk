@@ -79,6 +79,24 @@ missing or stale).
 Vectors: `sdk-typescript/test/healthz.test.ts`,
 `sdk-python/tests/test_healthz.py`.
 
+## `ap.explain(runRef)` — why a run got the versions it did
+
+```ts
+ap.explain(runRef); // [{ tag, artifactId, versionId, model, arm, bucket, runMinute, audienceIds? }, …] or null
+```
+
+```python
+ap.explain(run_ref)
+```
+
+It verifies the reference under this agent's keys (the current one and any
+`runRefPreviousSecrets`) and returns one entry per slot the run used, in
+the order the run placed them: the version, the model, the arm and the
+bucket that chose it. It returns null for a reference that does not
+verify. It reads no release and writes nothing, so it answers for a run
+on a version that is no longer served. A reference carries ids only: no
+subject, no tag values, no prompt text.
+
 ## `airprompter telemetry validate <segment>…` — a third-party writer's segments
 
 ```sh

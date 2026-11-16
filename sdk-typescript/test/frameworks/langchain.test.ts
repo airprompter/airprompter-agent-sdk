@@ -26,7 +26,7 @@ const fixture = JSON.parse(readFileSync(new URL("../../../conformance/frameworks
 
 type Turn = { content?: string; toolCalls?: string[]; usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number } }; finish?: string; fail?: number };
 type Request = { url: string; model: string; system: string[]; temperature?: number; top_p?: number; max_tokens?: number; stop?: unknown; messages: Array<{ role: string; content: unknown }> };
-type WindowRow = { tag: string; arm: string; versionId: string; count: number; status: string; errorClass: string | null; usageSource: string; tokens: { input: number; output: number; cachedInput?: number } };
+type WindowRow = { tag: string; arm: string; versionId: string; count: number; agentRun: number; status: string; errorClass: string | null; usageSource: string; tokens: { input: number; output: number; cachedInput?: number } };
 
 const textOf = (content: unknown) => (Array.isArray(content) ? content.map((block: { text: string }) => block.text).join("") : String(content));
 
@@ -151,7 +151,8 @@ test("an id no provider claims runs on the caller's own model or gateway, and ot
   await createAgent({ model: chatModel(pub.fetch, "gpt-5"), tools: [], systemPrompt: "Own.", middleware: [airprompter(open.ap, { slots: TAG })] }).invoke(ask());
   assert.deepEqual([pub.requests[0]!.model, pub.requests[0]!.system], ["gpt-5", ["Own."]], "the public endpoint has no such model");
   assert.equal(open.events.filter((event) => event.reason === "model_unresolved").length, 1);
-  assert.deepEqual(await open.rows(), []);
+  // The run declines the slot: one error row against the version it could not serve, so the gates see it.
+  assert.deepEqual((await open.rows()).map((row) => [row.count, row.status, row.errorClass]), [[1, "error", "model_unresolved"]]);
 });
 
 test("an Azure caller never moves to the public endpoint, or runs another id on its deployment", async () => {
@@ -163,7 +164,7 @@ test("an Azure caller never moves to the public endpoint, or runs another id on 
     assert.deepEqual(requests[0]!.system, ["Own."], id);
     assert.match(requests[0]!.url, /acme\.openai\.azure\.com/);
     assert.equal(events.filter((event) => event.reason === "model_unresolved").length, 1);
-    assert.deepEqual(await rows(), []);
+    assert.deepEqual((await rows()).map((row) => [row.count, row.status, row.errorClass]), [[1, "error", "model_unresolved"]]);
   }
 });
 
@@ -435,15 +436,15 @@ test("a release on another provider leaves the caller's provider behind", async 
   assert.deepEqual((await rows()).map((row) => [row.count, row.tokens.input]), [[1, 4]]);
 });
 
-test("a model that cannot be built leaves the request untouched, writes nothing and says so once", async () => {
+test("a model that cannot be built leaves the request untouched, writes one error row per run and says so once", async () => {
   const { ap, events, rows } = await host({ model: "gemini-pro" });
   const { requests, fetch } = provider([{ content: "ok" }]);
   const agent = createAgent({ model: chatModel(fetch, "gpt-5"), tools: [], systemPrompt: "The caller's own prompt.", middleware: [airprompter(ap, { slots: TAG })] });
   await agent.invoke(ask());
   await agent.invoke(ask());
   assert.deepEqual(requests.map((request) => [request.model, request.system]), [["gpt-5", ["The caller's own prompt."]], ["gpt-5", ["The caller's own prompt."]]]);
-  assert.equal(events.filter((event) => event.reason === "model_unresolved").length, 1);
-  assert.deepEqual(await rows(), []);
+  assert.equal(events.filter((event) => event.event === "model_unresolved").length, 1, "the build failure is said once per model");
+  assert.deepEqual((await rows()).map((row) => [row.count, row.agentRun, row.status, row.errorClass]), [[2, 2, "error", "model_unresolved"]]);
 });
 
 test("nothing promoted: the framework's own prompt and model run, untouched, and nothing is written", async () => {

@@ -44,6 +44,38 @@ release: every process loads its own.
 | Offline | `airprompter export-telemetry` / `import-telemetry` carry the spool as one file, idempotent by key | [The spool over a file](../protocol/spool-format.md#the-spool-over-a-file-t16) |
 | Third-party writers | `examples/spool-writer/` (TypeScript and Python, dependency-free) pass the same vectors | [Writing to the spool without our SDK](../protocol/spool-format.md#writing-to-the-spool-without-our-sdk) |
 
+## Runs and steps from a run session
+
+A run session (`ap.run`, `ap.openRun`, and every framework adapter) adds
+to counters while the run is open and writes nothing until it ends. Then,
+for every slot the run pinned to a version, it writes:
+
+- **one run row** (a `window` row with `count` 1): `modelCalls` the calls
+  on that slot, `tools` its tool calls and failures, its summed tokens, and
+  `latencyMs` the run's wall clock from open to end. `agentRun` is 1 on the
+  first row the run writes and 0 on the rest, so a two-slot run adds 1 to
+  the agent's run total and 1 to each slot's `count`;
+- **one `step` row per named step** (a call or tool recorded with `step`),
+  per status and error class. A call with no step adds to the run row only.
+  Past `STEP_BOUNDS` (64 characters, 32 names a run) a name is `other`.
+
+Every row of one run lands in the minute it ended. `status` is
+`interrupted` when the idle sweep ends a run no record failed, `error`
+with the class `end` carries (or the last model call's), else `ok`. A
+model call that failed and was recovered stays in its step row. A slot
+pinned but never called still writes a run row with `modelCalls: 0`. A
+slot the adapter declined (`model_unresolved`) or whose variables could
+not be filled (`render_missing_variable`) writes one error row against the
+version it could not serve, however many calls tried it. `usageSource` is
+`reported` only when every model call reported its usage.
+
+`ap.report` and `ap.observe` outside a run stay one-call runs. Inside a
+run, `ap.observe` on a slot the run pinned folds into that run.
+
+Until the window key carries `usageSource` (tracked for the next row
+version), two runs of one minute and dimension set share a row whose
+`usageSource` is the first run's.
+
 ## Field → OpenTelemetry GenAI
 
 Window fields follow the OpenTelemetry GenAI semantic conventions where one

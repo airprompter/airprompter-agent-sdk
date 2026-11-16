@@ -105,6 +105,20 @@ The slot is resolved **before** a source is awaited: a release that
 activates while a lookup is in flight does not mix the new generation's
 text with the old run reference.
 
+## A run's `place`
+
+`run.place(slot)` renders with the run's `variables` (from `ap.run({ variables })`
+or an adapter's input), the registered sources, then the defaults, in the
+order above. It never throws: a required variable nobody fills is
+`passthrough` with reason `variables_unfilled`, the framework's own prompt
+runs, and the run writes one error row (`render_missing_variable`) against
+the version, so a candidate that cannot render shows on the console. Later
+`place` calls for that slot in the run answer the same passthrough.
+
+TypeScript's `place` is asynchronous and runs callable sources. Python has
+`place` and `place_async`: the synchronous one runs plain callables, as
+`render()` does, and a coroutine source there is `variables_unfilled`.
+
 ## Trust
 
 A callable source is text nobody in AirPrompter reviewed — a CRM notes

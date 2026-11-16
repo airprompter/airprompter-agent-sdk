@@ -1,9 +1,9 @@
 /**
  * The run: one user request to an agent, from its first model call to its
- * last, across tools, steps and sub-agents. One run holds one version per
- * slot and counts once, however many model calls it made. An adapter sees
- * only these types; it never renders, assigns, reads a manifest or writes a
- * row.
+ * last, across tools, steps, sub-agents and several prompts. One run holds one
+ * version per slot, chosen at that slot's first `place`, and one run
+ * reference that grows an entry per slot. An adapter sees only these types; it
+ * never renders, assigns, reads a manifest or writes a row.
  *
  * @example
  * ```ts
@@ -14,7 +14,7 @@
  *   const reply = await callModel(placed.instructions, placed.model);
  *   run.recordModelCall("support.reply", { model: placed.model, latencyMs: Date.now() - started, usage: normalizeUsage(reply) });
  *   return reply;
- * }); // writes one window row with count 1
+ * }); // one run row per slot the run pinned, `agentRun` 1 on the first only
  * ```
  */
 
@@ -26,38 +26,60 @@ export interface RunInput {
   conversationId?: string;
   tags?: Readonly<Record<string, string>>;
   variables?: Readonly<Record<string, string | number | boolean | null>>;
-  /** A run id. `openRun` is get-or-create on it: a live run comes back, and with none a new run opens with this id. */
+  /** A run reference. `openRun` is get-or-create on its `runId`: a live run comes back, and with none a new run opens with that id. */
   resume?: string;
 }
 
-export type UnavailableReason = "no_verified_release" | "awaiting_unlock" | "slot_disabled" | "no_slot" | "slot_kind_unsupported" | "variables_unfilled";
+export type UnavailableReason =
+  | "no_verified_release"
+  | "awaiting_unlock"
+  | "slot_disabled"
+  | "no_slot"
+  | "slot_kind_unsupported"
+  | "model_unresolved"
+  | "variables_unfilled";
 
 export type Placement =
   | { kind: "approved"; slot: string; instructions: string; model: string; settings: Readonly<SlotInference> }
   | { kind: "passthrough"; slot: string; reason: UnavailableReason };
 
+export type TokenUsage = UsageNormalized;
+
 export interface ModelCallRecord {
+  /** An opaque step name, such as a framework node. Past `STEP_BOUNDS` it is written as `other`. */
+  step?: string;
   model: string;
   latencyMs: number;
-  usage?: UsageNormalized;
+  usage?: TokenUsage;
   errorClass?: ErrorClass;
+  /** Read once for the slot's declared output checks, then dropped: never kept, never recorded. Absent when the call only asked for tools. */
+  outputText?: string;
 }
 
 export interface ToolCallRecord {
+  step?: string;
   ok: boolean;
 }
 
 export interface RunSession {
-  /** Fixed at open, and available before the first `place`. */
-  readonly id: string;
-  /** The first placed slot's run reference, undefined until a slot is placed. */
-  readonly runRef: string | undefined;
+  /** A getter, re-minted when a new slot pins: re-read it, never cache it. It carries the run id from the start. */
+  readonly runRef: string;
+  /** Merge tags for slots not yet placed. A pinned slot never changes, and the subject stays fixed. Values never leave the process. */
+  setTags(tags: Readonly<Record<string, string>>): void;
+  /** The slot a framework name maps to, `default` allowed, else undefined. A miss is logged once per name and counted. */
+  slotFor(slots: string | Readonly<Record<string, string>>, name?: string): string | undefined;
   /** Never throws for unavailability: it answers `passthrough`, and the framework's own prompt and model run. */
   place(slot: string): Promise<Placement>;
+  /** The adapter could not build the released model: the slot passes through for the rest of the run, with one error row. */
+  decline(slot: string, reason: "model_unresolved"): Placement;
   recordModelCall(slot: string, call: ModelCallRecord): void;
   recordToolCall(slot: string, call: ToolCallRecord): void;
-  /** Idempotent. With no class given, the last model call's error class decides, so a truncated reply counts. */
-  end(result?: { errorClass?: ErrorClass }): void;
+  /**
+   * Idempotent. With no class given, the last model call's error class decides, so a truncated reply counts.
+   * `interrupted: true` parks the run: it stays open and writes nothing until a resume picks it up and ends it, or the
+   * idle sweep does. A plain `end()` on a parked run does nothing.
+   */
+  end(result?: { errorClass?: ErrorClass; interrupted?: boolean }): void;
 }
 
 export interface AgentRuntime {
@@ -66,3 +88,6 @@ export interface AgentRuntime {
   withRun<T>(run: RunSession, fn: () => T): T;
   log(event: Record<string, unknown>): void;
 }
+
+/** Maps a release's model id onto the framework's model object, or returns the id for the adapter to build. */
+export type ModelResolver<TModel> = (releaseModelId: string, callerModel: TModel) => TModel | string;

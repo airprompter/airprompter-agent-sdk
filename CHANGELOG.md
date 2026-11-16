@@ -10,6 +10,17 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### Runs: several prompts in one request (AIR-2242)
+- **A run holds several slots.** Each slot pins one version at its first `place`, and the run writes one run row per slot when it ends: `count` 1, `modelCalls`, tool counts and summed tokens, with `agentRun` 1 on the first row only, plus a `step` row per named step. This closes the rc.0 gap where `RunSession` wrote `modelCalls: 1` and `agentRun: 1` on every slot.
+- **Breaking: `RunSession.id` is gone.** `run.runRef` is always a string, a getter that grows one entry per slot and keeps one run id. `RunInput.resume` takes a run reference. LangChain's graph state key is now `airprompter_run_ref` (was `airprompter_run_id`).
+- **New on `RunSession`:** `setTags` (late tags for later slots), `slotFor(slots, name)`, `decline(slot, "model_unresolved")`, `step` and `outputText` on `recordModelCall`, `step` on `recordToolCall`, and `end({ interrupted: true })`, which parks a run for a resume in the same process.
+- **`ap.feedback` files on every entry of a reference** unless `{ slot }` names one. `{ model }` on a reference with several entries needs `{ slot }`. **`ap.explain(runRef)`** decodes a reference.
+- **The direct path joins a run.** Inside `ap.run`, `ap.prompt` and `ap.workflow` resolve through the run's pin, `ap.prompt`'s rendered `runRef` is the run's, and `ap.observe` folds into the run, so one request counts once.
+- **The idle sweep** writes `interrupted` for a run no record failed (it wrote `ok`), runs at the edges of `invoke()` on serverless hosts, and holds at most 10,000 open runs.
+- **The heartbeat's `runCounters.passthrough`** counts each passthrough reason once per slot per run, plus `unmapped_step` and `slot_not_in_release`.
+- **LangChain:** a model the middleware cannot build writes one `model_unresolved` error row per run.
+- **Size budgets:** `./runtime` 215,000 → 260,000 bytes, `.` 265,000 → 275,000.
+
 ## 1.0.0-rc.0 — 2026-11-04 (protocol 3.0.0, Python 1.0.0rc0)
 
 The release candidate for 1.0.0, published beside `latest`: `npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.0`, `pip install "airprompter-agent==1.0.0rc0"`. Pin every package to the candidate, satellites included: an unpinned datastore installs the 0.x release, which brings the old split packages in beside the SDK. npm's default range, `^1.0.0-rc.0`, also matches later candidates, and a later candidate removes `ap.wrap`. pip's `--pre` opens prereleases on every dependency; `uv pip install` resolves the same pins with no flag. The CLI candidate is the GitHub pre-release `cli/v1.0.0-rc.0`; `@airprompter/cli` stays off npm. This is the version a dev environment on protocol 3.0.0 installs until 1.0.0.

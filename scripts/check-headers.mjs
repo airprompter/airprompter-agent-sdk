@@ -17,8 +17,8 @@ import { join, relative, basename, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(fileURLToPath(import.meta.url), "..", "..");
-const ROOTS = ["sdk-typescript/packages", "sdk-typescript/scripts", "sdk-python/packages", "sdk-python/tools", "cli/src", "cli/scripts", "conformance", "examples", "action", "protocol/tools", "deploy", "docs", "scripts"];
-const SKIP_DIRS = new Set(["node_modules", "dist", ".venv", "__pycache__", "cdk.out", ".airprompter-dev", "vendor"]);
+const ROOTS = ["sdk-typescript/packages", "sdk-typescript/scripts", "sdk-python/packages", "sdk-python/tools", "cli/src", "cli/scripts", "conformance", "examples", "action", "protocol/tools", "deploy", "docs", "scripts", "integrations"];
+const SKIP_DIRS = new Set(["node_modules", "dist", ".venv", "__pycache__", "cdk.out", ".airprompter-dev", "vendor", "build"]);
 const EXT = new Set([".ts", ".mjs", ".js", ".py"]);
 const list = process.argv.includes("--list");
 

@@ -1,0 +1,70 @@
+{
+  "name": "n8n-nodes-airprompter",
+  "version": "0.1.0",
+  "description": "n8n nodes for AirPrompter Agents: get the approved, signed prompt version for a slot (A/B and dial-up decided in AirPrompter), report how the run went, and trigger on rollout changes. Serves offline from a copy kept on the n8n side.",
+  "keywords": [
+    "n8n-community-node-package",
+    "airprompter",
+    "prompts",
+    "prompt-management",
+    "llm",
+    "ab-testing"
+  ],
+  "license": "BSD-3-Clause",
+  "homepage": "https://github.com/airprompter/airprompter-agent-sdk/tree/main/integrations/n8n#readme",
+  "bugs": {
+    "url": "https://github.com/airprompter/airprompter-agent-sdk/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/airprompter/airprompter-agent-sdk",
+    "directory": "integrations/n8n"
+  },
+  "author": {
+    "name": "AirPrompter",
+    "email": "support@airprompter.com"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/nodes",
+    "dist/credentials",
+    "dist/src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json && node scripts/copy-icons.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint nodes credentials src package.json",
+    "lint:cloud": "N8N_LINT_CLOUD=1 eslint nodes credentials src package.json",
+    "test": "TSX_DISABLE_CACHE=1 node --import tsx --test --test-timeout=90000 --test-force-exit \"test/**/*.test.ts\"",
+    "prepare:sdk": "npm --prefix ../../sdk-typescript ci --legacy-peer-deps && npm --prefix ../../sdk-typescript run build"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": false,
+    "credentials": [
+      "dist/credentials/AirPrompterAgentApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/AirPrompter/AirPrompter.node.js",
+      "dist/nodes/AirPrompterTrigger/AirPrompterTrigger.node.js"
+    ]
+  },
+  "dependencies": {
+    "@airprompter/agent-sdk": "file:../../sdk-typescript/packages/sdk"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "devDependencies": {
+    "@n8n/node-cli": "^0.56.4",
+    "@types/node": "^22.16.5",
+    "eslint": "^9.39.5",
+    "n8n-workflow": "^2.16.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.3"
+  }
+}

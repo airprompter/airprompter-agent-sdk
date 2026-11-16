@@ -33,6 +33,8 @@ const SDK_SUBPATHS = {
   "@airprompter/agent-sdk/runtime": ["ReleaseResolver", "wrapClient", "ManagedAgent"],
   "@airprompter/agent-sdk/telemetry": ["SpoolWriter", "DirectorySink", "SpoolUploader"],
   "@airprompter/agent-sdk/testing": ["FakeControlPlane", "MemoryFs"],
+  // No peers: the Steps core uses Node built-ins only, so it imports with the SDK alone.
+  "@airprompter/agent-sdk/frameworks/steps": ["createAutomationClient", "usageFrom"],
 };
 // Pinned to what the workspace tests against, so a framework's new release cannot fail this with no commit behind it.
 const WORKSPACE_DEV_DEPENDENCIES = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).devDependencies;

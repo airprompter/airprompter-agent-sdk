@@ -27,7 +27,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-const files = [...walk(join(root, "docs")), ...walk(join(root, "protocol")), ...walk(join(root, "examples")), join(root, "README.md"), join(root, "SECURITY.md"), join(root, "sdk-typescript", "README.md"), join(root, "sdk-python", "README.md"), join(root, "cli", "README.md")].filter((f) => existsSync(f));
+const files = [...walk(join(root, "docs")), ...walk(join(root, "protocol")), ...walk(join(root, "examples")), join(root, "README.md"), join(root, "SECURITY.md"), join(root, "sdk-typescript", "README.md"), join(root, "sdk-python", "README.md"), join(root, "cli", "README.md"), join(root, "integrations", "zapier", "README.md"), join(root, "integrations", "n8n", "README.md")].filter((f) => existsSync(f));
 
 /** GitHub's heading slug: lower-case, drop punctuation except hyphens and spaces, spaces to hyphens. */
 function slug(heading) {

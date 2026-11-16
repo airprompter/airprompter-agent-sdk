@@ -306,6 +306,62 @@ jobs:
           path: cli/dist/${{ matrix.artifact }}
           retention-days: 7
 
+  integration-zapier:
+    # The Zapier app is a thin client of the SDK in this repository (a file: dependency), so the SDK is built first.
+    # Its tests run against `airprompter dev`'s own code from cli/src; no Zapier account or login is involved.
+    name: Zapier integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: sdk-typescript
+      - run: npm run build
+        working-directory: sdk-typescript
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: integrations/zapier
+      - run: npm run typecheck
+        working-directory: integrations/zapier
+      - run: npm test
+        working-directory: integrations/zapier
+        env:
+          TSX_DISABLE_CACHE: "1"
+      - name: The app loads as zapier-platform build would load it
+        run: npm run build && node -e 'import("./index.js").then((m) => { if (!m.default.creates.get_prompt || !m.default.triggers.rollout_changed) process.exit(1); })'
+        working-directory: integrations/zapier
+
+  integration-n8n:
+    # The n8n nodes are a thin client of the SDK in this repository (a file: dependency), so the SDK is built first.
+    # The tests run against `airprompter dev`'s own code from cli/src and mocked n8n contexts; no n8n instance is needed.
+    name: n8n integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: sdk-typescript
+      - run: npm run build
+        working-directory: sdk-typescript
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: cli
+      - run: npm ci --ignore-scripts --no-audit --no-fund --legacy-peer-deps
+        working-directory: integrations/n8n
+      - run: npm run typecheck
+        working-directory: integrations/n8n
+      - run: npm run lint
+        working-directory: integrations/n8n
+      - run: npm test
+        working-directory: integrations/n8n
+      - name: The nodes load as n8n loads them
+        run: npm run build && node -e 'const p=require("./package.json"); for (const f of [...p.n8n.nodes, ...p.n8n.credentials]) { const m=require("./"+f); if (!Object.keys(m).length) process.exit(1); }'
+        working-directory: integrations/n8n
+
   deploy-manifests:
     name: Deploy manifests
     runs-on: ubuntu-latest

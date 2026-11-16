@@ -47,6 +47,8 @@ export { generateX25519KeyPair, x25519PrivateKeyFromRaw, x25519PublicKeyFromRaw 
 export { BundleRelease } from "./release/bundleRelease.js";
 export type { ReleaseReader, ReleaseSlot, LoadedRelease } from "./release/reader.js";
 export type { BundleReleaseInput, BundleReleaseRefusal } from "./release/bundleRelease.js";
+export { diffReleases } from "./release/diff.js";
+export type { ReleaseSlotDiff, ReleaseSnapshot, SlotReleaseChange, SlotReleaseState } from "./release/diff.js";
 
 export { SyncClient } from "./control/client.js";
 export type { ControlPlaneRefusal, FetchLike, ManifestFetch, SyncClientOptions } from "./control/client.js";

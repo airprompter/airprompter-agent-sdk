@@ -6,8 +6,8 @@
  * verified it still starts, at generation 0, and picks up the first release
  * by itself; sync runs in the background per mode. `prompt(tag)`
  * renders with trust-aware variables and hands back a content-free `runRef`;
- * `workflow(tag)` yields steps in order; `report()` and `feedback()` feed the
- * spool. The render path never reaches AirPrompter; the only network it can
+ * `workflow(tag)` yields steps in order; `report()`, `reportRun()` and `feedback()`
+ * feed the spool. The render path never reaches AirPrompter; the only network it can
  * touch is the application's own — a variable source it registered
  * (`renderAsync`, `docs/variables.md`), never on the synchronous `render()`.
  *
@@ -39,6 +39,7 @@ import type { ApplyPolicy, Bundle, Directive, HostedEnvironment, Manifest, Manif
 import { copyAudienceTags, validAudienceKey, validAudienceLabel, mintRunRef, parseRunRef, type RunRefEntry } from "./core/index.js";
 import type { Delimiters } from "./core/index.js";
 import { normalizeFeedback } from "./core/index.js";
+import { ERROR_CLASSES, type ErrorClass } from "./core/index.js";
 import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "./telemetry/index.js";
 import { readDaemonDiscovery, type DiscoveryResult } from "./telemetry/index.js";
 import { fileKey, type KeyProvider, type StorageProtection } from "./sync/index.js";
@@ -231,6 +232,29 @@ export interface SpoolReport {
 }
 
 export type { Rendered };
+
+/**
+ * What a separate step reports for a prompt rendered earlier, by its `runRef` (`ap.reportRun`). Counts and a class
+ * only: no prompt, output or error message is ever written.
+ */
+export interface RunReport {
+  /** Prompt tokens as the provider counts them, cached ones included. With `outputTokens`, the run's usage is `reported`. */
+  inputTokens?: number;
+  /** The part of `inputTokens` served from the provider's cache. */
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  /**
+   * The model step failed. An `ErrorClass` name is taken as is; anything else (an error object, a code, a message) is
+   * classified like a thrown error, and only the class is written. `undefined`, `null`, `false` and `""` mean it did not fail.
+   */
+  error?: unknown;
+  /** The model step's own duration. Absent: the time since the minute the prompt rendered, which is coarse. */
+  latencyMs?: number;
+  /** The provider model that answered, when the platform's model step used another than the release names. */
+  model?: string;
+  /** The slot to report on, when the reference names several. */
+  slot?: string;
+}
 
 /** S9/S16: a ramp plan as this host walks it — one per experiment. */
 export interface AgentRampStatus {
@@ -2119,6 +2143,65 @@ export class AirPrompterAgent implements AgentRuntime {
     if (!normalized.accepted) return false;
     // Feedback rides on each run window: same dimension set, no extra count (the run was already counted).
     for (const facts of entries) this.spool.outcomes({ tag: facts.tag, artifactId: facts.artifactId, versionId: facts.versionId, arm: facts.arm, model: options.model ?? facts.model, ...(facts.audienceIds ? {audienceIds: facts.audienceIds} : {}), outcomeRunMinute: facts.runMinute }, normalized.outcomes, this.nowMs());
+    return true;
+  }
+
+  /**
+   * Count a run whose prompt rendered in an earlier, separate invocation (`render()` outside a run, which writes no
+   * row), with what its model step returned: one run row, `count` 1, on the slot, version, arm and audience the
+   * reference carries, never on whatever release this process now holds. This call is the run's only count, so call
+   * it once per reference, with or without usage; a reference from `ap.run` / `openRun` is counted by its session and
+   * must not come here. False, with nothing written, for a reference that does not verify under this agent's keys, a
+   * `slot` it does not name, several entries and no `slot`, or a value out of range. Never throws.
+   */
+  reportRun(runRef: string, report: RunReport = {}): boolean {
+    const refuse = (reason: string): false => {
+      this.log({ event: "run_report_rejected", reason });
+      return false;
+    };
+    if (typeof runRef !== "string" || report === null || typeof report !== "object") return refuse("invalid_input");
+    const all = parseRunRef(runRef, this.runRefKeys)?.entries;
+    if (!all || all.length === 0) return refuse("run_ref_invalid");
+    const entries = report.slot === undefined ? all : all.filter((entry) => entry.tag === report.slot);
+    if (entries.length === 0) return refuse("slot_not_in_run");
+    // Usage belongs to one model step, and one step ran one slot: it is never split across a reference's entries.
+    if (entries.length > 1) return refuse("slot_required");
+    const entry = entries[0]!;
+    const model: unknown = report.model ?? entry.model;
+    if (typeof model !== "string" || model.length < 1 || model.length > 128 || /[\u0000-\u001f\u007f]/u.test(model)) return refuse("invalid_model");
+    const isCount = (value: unknown): boolean => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+    for (const name of ["inputTokens", "cachedInputTokens", "outputTokens"] as const) if (report[name] !== undefined && !isCount(report[name])) return refuse(`invalid_${name}`);
+    if (report.latencyMs !== undefined && !(typeof report.latencyMs === "number" && Number.isFinite(report.latencyMs) && report.latencyMs >= 0)) return refuse("invalid_latencyMs");
+    const cached = report.cachedInputTokens ?? 0;
+    if (report.inputTokens !== undefined && cached > report.inputTokens) return refuse("invalid_cachedInputTokens");
+    // `reported` needs both sides: half a usage would read as a cheap run on the gate's tokens per run.
+    const reported = report.inputTokens !== undefined && report.outputTokens !== undefined;
+    const failed = report.error !== undefined && report.error !== null && report.error !== false && report.error !== "";
+    const errorClass: ErrorClass | null = !failed ? null : typeof report.error === "string" && (ERROR_CLASSES as readonly string[]).includes(report.error) ? (report.error as ErrorClass) : classifyError(typeof report.error === "string" ? { message: report.error } : report.error);
+    const nowMs = this.nowMs();
+    try {
+      this.spool.observe(
+        {
+          tag: entry.tag,
+          artifactId: entry.artifactId,
+          versionId: entry.versionId,
+          arm: entry.arm,
+          model,
+          ...(entry.audienceIds ? { audienceIds: entry.audienceIds } : {}),
+          runMinute: entry.runMinute,
+          status: errorClass ? "error" : "ok",
+          errorClass,
+          // The reference keeps its render minute and no finer time, so with no measured duration this is an upper bound.
+          latencyMs: report.latencyMs ?? Math.max(0, nowMs - Date.parse(entry.runMinute)),
+          ...(reported ? { tokens: { input: report.inputTokens! - cached, cachedInput: cached, output: report.outputTokens! } } : {}),
+          usageSource: reported ? "reported" : "unavailable",
+        },
+        nowMs,
+      );
+    } catch (error) {
+      this.log({ event: "observation_dropped", reason: (error as Error).message });
+      return false;
+    }
     return true;
   }
 

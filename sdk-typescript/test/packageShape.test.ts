@@ -2,7 +2,7 @@
  * The one package and what sits beside it. The rules, each with its vector:
  *
  *   1. The direction inside the package is core → sync, runtime, telemetry →
- *      agent, frameworks, and a layer is reached only through its barrel:
+ *      agent, frameworks → steps, and a layer is reached only through its barrel:
  *      `scripts/lint-imports.mjs` pins the edge set, and a planted upward or
  *      deep import fails it.
  *   2. Two copies of the SDK in one process agree: an error, a release and a
@@ -37,7 +37,7 @@ const root = process.cwd();
 const scope = { organizationId: "org_1", agentId: "agt_split", target: "prod" as const };
 const SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"] as const;
 const PACKAGES = ["sdk", ...SATELLITES] as const;
-const SUBPATHS = [".", "./core", "./sync", "./runtime", "./telemetry", "./testing", "./frameworks/langchain"];
+const SUBPATHS = [".", "./core", "./sync", "./runtime", "./telemetry", "./testing", "./frameworks/langchain", "./frameworks/steps"];
 type Manifest = { name: string; version: string; private?: boolean; dependencies?: Record<string, string>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }>; devDependencies?: Record<string, string>; exports: Record<string, { types: string; import: string; require: string }>; typesVersions: Record<string, Record<string, string[]>>; airprompter: { sizeBudgetBytes: number | Record<string, number> } };
 const manifestOf = (name: string): Manifest => JSON.parse(readFileSync(join(root, "packages", name, "package.json"), "utf8")) as Manifest;
 
@@ -59,11 +59,11 @@ function planted(path: string, source: string): { status: number | null; stderr:
   }
 }
 
-test("the direction is core → sync, runtime, telemetry → agent, frameworks; the edge set is pinned; a planted upward or deep import fails the lint", () => {
+test("the direction is core → sync, runtime, telemetry → agent, frameworks → steps → integrations; the edge set is pinned; a planted upward or deep import fails the lint", () => {
   const clean = lint(["--json"]);
   assert.equal(clean.status, 0, clean.stderr);
   const { edges } = JSON.parse(clean.stdout.slice(0, clean.stdout.lastIndexOf("}") + 1)) as { edges: string[] };
-  assert.deepEqual(edges, ["agent-otel→core", "agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "cli→agent", "cli→agent-otel", "cli→core", "cli→runtime", "cli→sync", "cli→telemetry", "datastore-postgres→sync", "datastore-redis→sync", "datastore-s3→sync", "frameworks→core", "frameworks→runtime", "runtime→core", "sync→core", "telemetry→core"], "the middle layers never import each other; core imports nothing of ours; the exporter uses core alone and the datastores sync alone");
+  assert.deepEqual(edges, ["agent-otel→core", "agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "cli→agent", "cli→agent-otel", "cli→core", "cli→runtime", "cli→sync", "cli→telemetry", "datastore-postgres→sync", "datastore-redis→sync", "datastore-s3→sync", "frameworks→core", "frameworks→runtime", "n8n→steps", "runtime→core", "steps→agent", "steps→core", "steps→sync", "sync→core", "telemetry→core", "zapier→steps"], "the middle layers never import each other; core imports nothing of ours; the exporter uses core alone and the datastores sync alone; Steps drives the agent and the integrations reach the SDK only through Steps");
   const src = join(root, "packages", "sdk", "src");
   const upward = planted(join(src, "telemetry", "_lintProbe.ts"), 'import { SlotStore } from "../sync/index.js";\nexport const probe = typeof SlotStore;\n');
   assert.equal(upward.status, 1, "a sideways import is refused");
@@ -82,6 +82,24 @@ test("the direction is core → sync, runtime, telemetry → agent, frameworks; 
   assert.equal(coreUp.status, 1, "core imports nothing of ours");
   const satellite = planted(join(root, "packages", "agent-otel", "src", "_lintProbe.ts"), 'import { AirPrompterAgent } from "@airprompter/agent-sdk";\nexport const probe = typeof AirPrompterAgent;\n');
   assert.equal(satellite.status, 1, "a satellite imports a layer subpath, never the root");
+  const stepsDeep = planted(join(src, "frameworks", "steps", "_lintProbe.ts"), 'import { AirPrompterAgent } from "../../agent.js";\nexport const probe = typeof AirPrompterAgent;\n');
+  assert.equal(stepsDeep.status, 1, "Steps reaches the agent through the root barrel only");
+  assert.match(stepsDeep.stderr, /reaches into agent by path/);
+  const intoSteps = planted(join(src, "frameworks", "_lintProbe.ts"), 'import { createAutomationClient } from "./steps/index.js";\nexport const probe = typeof createAutomationClient;\n');
+  assert.equal(intoSteps.status, 1, "nothing below Steps imports it");
+  assert.match(intoSteps.stderr, /frameworks \(layer 2\) may not import steps \(layer 3\)/);
+  // Decision L (AIR-2231, AIR-2405): a platform package reaches the SDK only as the Steps subpath, never another layer.
+  const integration = join(root, "..", "integrations", "zapier", "src", "_lintProbe.ts");
+  const platformLayer = planted(integration, 'import { MemoryKvStore } from "@airprompter/agent-sdk/sync";\nexport const probe = typeof MemoryKvStore;\n');
+  assert.equal(platformLayer.status, 1, "an integration importing /sync fails the lint");
+  assert.match(platformLayer.stderr, /integrations\/zapier\/src\/_lintProbe\.ts:\d+: @airprompter\/agent-sdk\/sync: an integration imports the SDK only as @airprompter\/agent-sdk\/frameworks\/steps/);
+  const platformRoot = planted(join(root, "..", "integrations", "n8n", "src", "_lintProbe.ts"), 'import { AirPrompterAgent } from "@airprompter/agent-sdk";\nexport const probe = typeof AirPrompterAgent;\n');
+  assert.equal(platformRoot.status, 1, "an integration importing the root fails the lint");
+  const platformPath = planted(integration, 'import { usageFrom } from "../../../sdk-typescript/packages/sdk/src/frameworks/steps/index.js";\nexport const probe = typeof usageFrom;\n');
+  assert.equal(platformPath.status, 1, "an integration reaching the SDK's sources by path fails the lint");
+  assert.match(platformPath.stderr, /leaves integrations\/zapier/);
+  const platformOk = planted(integration, 'import { usageFrom } from "@airprompter/agent-sdk/frameworks/steps";\nexport const probe = typeof usageFrom;\n');
+  assert.equal(platformOk.status, 0, `the Steps subpath is allowed: ${platformOk.stderr}`);
 });
 
 test("two copies agree: an error, a release and a sink from one copy are recognised by the other (no instanceof coupling)", async () => {
@@ -248,7 +266,7 @@ test("every package carries one version and SDK_VERSION is it; satellites peer o
   }
   ensureBuilt();
   const sizes = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "size-budget.mjs"), "--json"], { encoding: "utf8" })) as Record<string, { bytes: number; budget: number }>;
-  assert.deepEqual(Object.keys(sizes).sort(), ["agent-otel", "datastore-postgres", "datastore-redis", "datastore-s3", "sdk", "sdk/core", "sdk/frameworks/langchain", "sdk/runtime", "sdk/sync", "sdk/telemetry", "sdk/testing"]);
+  assert.deepEqual(Object.keys(sizes).sort(), ["agent-otel", "datastore-postgres", "datastore-redis", "datastore-s3", "sdk", "sdk/core", "sdk/frameworks/langchain", "sdk/frameworks/steps", "sdk/runtime", "sdk/sync", "sdk/telemetry", "sdk/testing"]);
   for (const [name, { bytes, budget }] of Object.entries(sizes)) {
     assert.ok(bytes > 0, `${name} built`);
     assert.ok(bytes <= budget, `${name}: ${bytes} bytes over its ${budget}-byte budget`);

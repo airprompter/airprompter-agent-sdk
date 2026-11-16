@@ -21,8 +21,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { kvReleaseDatastore, type KvEntry, type KvPutCondition, type KvStore } from "@airprompter/agent-sdk/sync";
-import type { AutomationDatastore } from "../core/index.js";
+import { kvReleaseDatastore, type AutomationDatastore, type KvEntry, type KvPutCondition, type KvStore } from "@airprompter/agent-sdk/frameworks/steps";
 
 /** The slice of `z.cache` this needs (the real one, or the app tester's in-memory one). */
 export interface ZapierCache {

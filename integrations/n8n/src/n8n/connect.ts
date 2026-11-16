@@ -1,5 +1,5 @@
 /**
- * From an n8n credential to the shared core's `AutomationClient`: where the stored copy lives (the n8n user folder
+ * From an n8n credential to the Steps core's `AutomationClient` (`@airprompter/agent-sdk/frameworks/steps`): where the stored copy lives (the n8n user folder
  * on a self-hosted instance, or the workflow's static data where there is no disk), the credential's fields mapped
  * onto the core's options, and — n8n only — seeding the stored copy from a vendored bundle for installs that never
  * reach AirPrompter. No n8n runtime import here, so it is tested without n8n.
@@ -18,13 +18,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { openBundle } from "@airprompter/agent-sdk/core";
-import type { Bundle, HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/core";
-import { fsKvStore, kvReleaseDatastore, rolloutOf } from "@airprompter/agent-sdk/sync";
-import type { KvStore } from "@airprompter/agent-sdk/sync";
-
-import { AutomationError, createAutomationClient } from "../core";
-import type { AutomationClient, AutomationClientOptions, AutomationDatastore } from "../core";
+import { AutomationError, createAutomationClient, fsKvStore, kvAutomationDatastore, seedDatastoreFromBundle } from "@airprompter/agent-sdk/frameworks/steps";
+import type { AutomationClient, AutomationClientOptions, AutomationDatastore, Bundle, HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/frameworks/steps";
 import { staticDataKvStore } from "./staticDataKvStore";
 
 export type StorageMode = "userFolder" | "workflowStaticData";
@@ -49,7 +44,6 @@ export interface N8nStorageContext {
 }
 
 export const DEFAULT_API_BASE_URL = "https://api.airprompter.com";
-const NOTE_PREFIX = "automation/notes/";
 
 /** n8n's own rule: `N8N_USER_FOLDER` (else the home folder), then `.n8n`. */
 export function userFolder(env: NodeJS.ProcessEnv = process.env): string {
@@ -58,19 +52,6 @@ export function userFolder(env: NodeJS.ProcessEnv = process.env): string {
 
 function safeSegment(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 128) || "_";
-}
-
-/** The shared datastore format over any KvStore, plus the core's notes (the organization id) as keys beside it. */
-export function automationDatastore(kv: KvStore): AutomationDatastore {
-  const datastore = kvReleaseDatastore(kv) as AutomationDatastore;
-  datastore.readNote = async (name) => (await kv.get(`${NOTE_PREFIX}${name}`))?.value ?? null;
-  datastore.writeNote = async (name, value) => {
-    const key = `${NOTE_PREFIX}${name}`;
-    const held = await kv.get(key);
-    if (held?.value === value) return;
-    await kv.put(key, value, held ? { ifVersion: held.version } : { ifAbsent: true });
-  };
-  return datastore;
 }
 
 export function parseRootKey(text: string | undefined): P256PublicJwk | undefined {
@@ -91,10 +72,10 @@ export function parseRootKey(text: string | undefined): P256PublicJwk | undefine
 export function datastoreFor(credentials: AirPrompterCredentials, context: N8nStorageContext | null, env: NodeJS.ProcessEnv = process.env): AutomationDatastore {
   if ((credentials.storage ?? "userFolder") === "workflowStaticData") {
     if (!context) throw new AutomationError("invalid_input", "Workflow static data is only available inside a workflow.", false);
-    return automationDatastore(staticDataKvStore(context.getWorkflowStaticData("global")));
+    return kvAutomationDatastore(staticDataKvStore(context.getWorkflowStaticData("global")));
   }
   const environment = credentials.environment?.trim() || "prod";
-  return automationDatastore(fsKvStore(join(userFolder(env), "airprompter", safeSegment(credentials.agentId), safeSegment(environment), "releases")));
+  return kvAutomationDatastore(fsKvStore(join(userFolder(env), "airprompter", safeSegment(credentials.agentId), safeSegment(environment), "releases")));
 }
 
 export function clientOptions(credentials: AirPrompterCredentials, datastore: AutomationDatastore, extra: Partial<AutomationClientOptions> = {}): AutomationClientOptions {
@@ -124,13 +105,7 @@ export function clientOptions(credentials: AirPrompterCredentials, datastore: Au
  */
 export async function seedFromBundle(datastore: AutomationDatastore, input: { bundlePath: string; agentId: string; environment: string }): Promise<boolean> {
   const bundle = JSON.parse(readFileSync(input.bundlePath, "utf8")) as Bundle;
-  const contents = openBundle(bundle, { agentId: input.agentId, target: input.environment });
-  const payload = contents.manifest.payload;
-  const key = { organizationId: payload.organizationId, agentId: input.agentId, target: input.environment, region: null };
-  if (await datastore.latest(key)) return false;
-  await datastore.putRelease(key, { generation: payload.generation, releaseDigest: payload.releaseDigest, bundle: JSON.stringify(bundle), createdAt: contents.createdAt, notAfter: contents.notAfter, rollout: rolloutOf(contents.manifest) });
-  if (!(await datastore.readNote?.("organizationId"))) await datastore.writeNote?.("organizationId", payload.organizationId);
-  return true;
+  return seedDatastoreFromBundle(datastore, { bundle, agentId: input.agentId, environment: input.environment });
 }
 
 /** The client for one node run. Each call on it is self-contained (a fresh SDK agent, stopped at the end). */

@@ -12,7 +12,7 @@
  * ```
  */
 
-import type { RolloutCursor, RolloutEvent } from "../core";
+import type { RolloutCursor, RolloutEvent } from "@airprompter/agent-sdk/frameworks/steps";
 
 const SEEN_LIMIT = 500;
 

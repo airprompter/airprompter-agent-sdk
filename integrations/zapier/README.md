@@ -47,7 +47,7 @@ The connection test fetches the signed manifest, verifies it against the pinned 
 stores it.
 
 > **Owner action before production use:** `HOSTED_ROOTS` in
-> [`src/core/trust.ts`](src/core/trust.ts) is empty. Until AirPrompter's production root
+> the SDK's Steps core ([`sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`](../../sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts)) is empty. Until AirPrompter's production root
 > public key is pinned there, every connection to the hosted API reports
 > `root_not_pinned`. The only way around it is to paste the root into the advanced field.
 
@@ -112,11 +112,9 @@ What is stored, per connection (scope `auth`), in the SDK's shared datastore for
 
 ## Usage and the run count
 
-`Report Run` is the only place usage leaves (`attachUsage` in
-[`src/core/usage.ts`](src/core/usage.ts)). It calls the SDK's `ap.reportRun(runRef, …)`
-when the installed SDK has it (airprompter-agent-sdk#92). Until then it falls back to
-`ap.explain` + `ap.report`. Delete the fallback once #92 ships in the SDK version this
-package depends on.
+`Report Run` is the only place usage leaves: the Steps core calls the SDK's
+`ap.reportRun(runRef, …)` (see [`client.ts`](../../sdk-typescript/packages/sdk/src/frameworks/steps/client.ts) and [`usage.ts`](../../sdk-typescript/packages/sdk/src/frameworks/steps/usage.ts)
+in `@airprompter/agent-sdk/frameworks/steps`). That is the run's one count.
 
 Get Prompt renders outside any `ap.run`, so a render writes no run row. **A Get Prompt
 with no Report Run is not counted today.**
@@ -134,12 +132,15 @@ If AirPrompter cannot take a report (no upload grant, network down), the step fa
 
 ## Layout
 
-- `src/core/`: the platform-agnostic client (`createAutomationClient`). It imports nothing
-  from Zapier and is meant to move to a shared `integrations/core` with the n8n node.
+- The platform-agnostic client (`createAutomationClient`, the trigger's rollout diff, trust,
+  usage) is the SDK's Steps subpath, `@airprompter/agent-sdk/frameworks/steps`, shared with
+  the n8n nodes (AIR-2405). This package imports the SDK only through that subpath; the
+  SDK's `npm run lint:imports` enforces it. Its tests live in the SDK
+  (`sdk-typescript/test/frameworks/steps/`).
 - `src/zapier/`: connection, field schemas, the `z.cache` datastore, the trigger cursor,
   and error mapping.
-- `test/`: `core.test.ts` (no Zapier package loaded) and `zapier.test.ts` (the app tester).
-  Both run against `airprompter dev`'s own code ([`cli/src/commands/dev.ts`](../../cli/src/commands/dev.ts)).
+- `test/zapier.test.ts`: the app tester, against `airprompter dev`'s own code
+  ([`cli/src/commands/dev.ts`](../../cli/src/commands/dev.ts)) through the SDK's Steps test registry.
 
 ## Develop
 
@@ -154,7 +155,8 @@ npm run validate                                         # zapier-platform valid
 
 None of these steps have been run. They need the owner's Zapier account.
 
-1. Pin the production root in `src/core/trust.ts` (`HOSTED_ROOTS.prod`).
+1. Pin the production root in the SDK's Steps core (`HOSTED_ROOTS.prod` in
+   `sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`).
 2. `npx zapier-platform login`, then `npx zapier-platform register "AirPrompter Agents"`
    (once). This writes `.zapierapprc`, which is gitignored.
 3. `npm run build && npx zapier-platform push`. The SDK dependency is `file:`, installed

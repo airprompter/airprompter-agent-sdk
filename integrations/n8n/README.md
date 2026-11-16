@@ -39,7 +39,7 @@ Create an **AirPrompter Agent API** credential:
 | Agent ID | The agent in AirPrompter that holds the slots. |
 | Update Key | The agent's Update key (key kind "agent", bound to one agent and one environment). It reads approved releases and nothing more. |
 | Environment | The environment the key is bound to, such as `prod`. |
-| Root Public Key | AirPrompter's root public key (a JSON Web Key) for the deployment. Every release is verified against it before it is stored or used. This field goes away once the key is pinned in the shared core (`HOSTED_ROOTS` in `src/core/trust.ts`). |
+| Root Public Key | AirPrompter's root public key (a JSON Web Key) for the deployment. Every release is verified against it before it is stored or used. This field goes away once the key is pinned in the SDK's Steps core (`HOSTED_ROOTS` in `sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`). |
 | API Base URL | `https://api.airprompter.com` by default. For testing, use a dev URL or a local `airprompter dev` registry. |
 | AirPrompter Deployment | The deployment that signs the releases: `prod`, `staging` or `dev`. This is not the agent's environment. |
 | Root Document URL | Optional. Defaults to *API Base URL*`/roots/<deployment>/root.json`. |
@@ -156,18 +156,20 @@ and its linter (`npm run lint:cloud`) refuse four things this package needs or h
 
 ## How it is built
 
-- `src/core/`: the platform-agnostic client (`createAutomationClient`). It is **byte-identical** to the Zapier app's
-  `integrations/zapier/src/core/`, so the two can move to one shared package. It imports nothing from n8n.
+- The platform-agnostic client is the SDK's Steps subpath, `@airprompter/agent-sdk/frameworks/steps`, shared with
+  the Zapier app (AIR-2405): `createAutomationClient`, the rollout diff behind the trigger, trust, the KvStore
+  datastore with its notes, vendored-bundle seeding (`seedDatastoreFromBundle`) and usage detection (`usageFrom`).
+  This package imports the SDK only through that subpath; the SDK's `npm run lint:imports` enforces it. The core's
+  tests live in the SDK (`sdk-typescript/test/frameworks/steps/`).
 - `src/n8n/`: everything n8n-specific:
-  - storage (`fsKvStore` in the user folder, `staticDataKvStore`, the notes the core keeps)
-  - vendored-bundle seeding
-  - usage detection (`usageShapes.ts`, platform-agnostic and ready to move into the core)
+  - storage (`fsKvStore` in the user folder, `staticDataKvStore`)
+  - reading a vendored bundle from the credential's path
   - the poll state (baseline on the first poll, deduplication by event id)
   - error mapping to `NodeOperationError`
 - `nodes/`, `credentials/`: the node and credential descriptions.
 
-Usage is sent through one function, `attachUsage` in `src/core/usage.ts`. It calls the SDK's `ap.reportRun` when
-the installed SDK has it, and otherwise falls back to `ap.explain` plus `ap.report`.
+Report Run is the run's one count: the Steps core calls the SDK's `ap.reportRun`. Get Prompt renders outside any
+run and writes no run row.
 
 ## Develop
 
@@ -178,5 +180,5 @@ npm run typecheck && npm run lint && npm test
 ```
 
 The tests use mocked n8n contexts (execute, poll, load options, credential test) against the SDK's fake control plane
-over loopback HTTP. One test runs `airprompter dev <directory>` from `cli/` as its own process, edits a prompt file
-to promote a new version, then stops the registry and serves from the stored copy.
+over loopback HTTP, plus the fully offline install from a vendored bundle. The Steps core's own tests, including
+one that runs `airprompter dev <directory>` from `cli/` as its own process, are in the SDK.

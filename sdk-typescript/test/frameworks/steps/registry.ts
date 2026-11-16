@@ -1,17 +1,18 @@
 /**
  * The local registry the tests run against: `airprompter dev`'s own code (`cli/src/commands/dev.ts`) serving a
  * directory of prompt files over HTTP, signed under a dev root. `down()` / `up()` take it off and back on the same
- * port, which is what "AirPrompter unreachable" looks like to a Zapier step.
+ * port, which is what "AirPrompter unreachable" looks like to an automation step. The Steps tests and the Zapier
+ * app's tests share it.
  */
 
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { DEV_API_KEY, devPlane, loadOrCreateDevKeys, promoteRelease, readDevRelease } from "../../../cli/src/commands/dev.js";
-import { serveOverHttp } from "../../../sdk-typescript/packages/sdk/src/core/testing/controlPlane.js";
-import { releaseDigest } from "../../../sdk-typescript/packages/sdk/src/core/index.js";
-import type { ManifestSlot, P256PublicJwk } from "../../../sdk-typescript/packages/sdk/src/core/index.js";
+import { DEV_API_KEY, devPlane, loadOrCreateDevKeys, promoteRelease, readDevRelease } from "../../../../cli/src/commands/dev.js";
+import { serveOverHttp } from "../../../packages/sdk/src/core/testing/controlPlane.js";
+import { releaseDigest } from "../../../packages/sdk/src/core/index.js";
+import type { ManifestSlot, P256PublicJwk } from "../../../packages/sdk/src/core/index.js";
 
 export const SCOPE = { organizationId: "org_dev", agentId: "agt_dev", target: "dev" } as const;
 export { DEV_API_KEY };

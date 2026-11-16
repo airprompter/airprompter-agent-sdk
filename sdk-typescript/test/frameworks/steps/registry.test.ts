@@ -1,5 +1,5 @@
 /**
- * The platform-agnostic core against the local registry (`airprompter dev`'s code), with no Zapier package loaded:
+ * `@airprompter/agent-sdk/frameworks/steps` against the local registry (`airprompter dev`'s code), with no platform package loaded:
  * connection test, the approved version rendered, sticky and weighted A/B, serving from the stored copy while the
  * registry is down, refusing a tampered copy and a lapsed lease, rollout events and their dedupe, Report run.
  */
@@ -7,8 +7,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { MemoryReleaseDatastore } from "@airprompter/agent-sdk/sync";
-import { AutomationError, createAutomationClient, type AutomationDatastore, type AutomationClientOptions } from "../src/core/index.js";
+import { MemoryReleaseDatastore } from "../../../packages/sdk/src/sync/index.js";
+import { AutomationError, createAutomationClient, type AutomationDatastore, type AutomationClientOptions } from "../../../packages/sdk/src/frameworks/steps/index.js";
 import { DEV_API_KEY, SCOPE, abRelease, startRegistry, type Registry } from "./registry.js";
 
 const PROMPTS = {
@@ -258,12 +258,11 @@ test("a signed ramp step is a dial-up event when its time comes, with no new gen
   }
 });
 
-test("the core imports no platform package (it moves to a shared integrations/core as is)", async () => {
+test("Steps imports no platform package: Zapier and n8n build on it, never the other way round", async () => {
   const { readdirSync, readFileSync } = await import("node:fs");
-  const dir = new URL("../src/core/", import.meta.url);
+  const dir = new URL("../../../packages/sdk/src/frameworks/steps/", import.meta.url);
   for (const file of readdirSync(dir)) {
     const source = readFileSync(new URL(file, dir), "utf8");
-    assert.doesNotMatch(source, /from\s+["'](zapier-platform-core|n8n-[\w-]+)["']/, file);
-    assert.doesNotMatch(source, /from\s+["']\.\.\/zapier\//, file);
+    assert.doesNotMatch(source, /from\s+["'](zapier-platform-[\w-]+|n8n-[\w-]+|@n8n\/[\w-]+)["']/, file);
   }
 });

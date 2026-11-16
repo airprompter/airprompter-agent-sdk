@@ -18,8 +18,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { effectiveArms, servableExperiments, servableSlots } from "@airprompter/agent-sdk/core";
-import type { ManifestPayload, ManifestSlot, SlotVariable } from "@airprompter/agent-sdk/core";
+import { diffReleases, effectiveArms, servableExperiments, servableSlots } from "../../core/index.js";
+import type { ManifestPayload, ManifestSlot, SlotVariable } from "../../core/index.js";
 import type { RolloutCursor, RolloutEvent, RolloutState, SlotInfo, VariableInfo } from "./types.js";
 
 /** Only prompt slots: one slot per step, and a workflow slot is several steps. */
@@ -76,39 +76,32 @@ export function rolloutChanges(payload: ManifestPayload, previous: RolloutCursor
   const at = new Date(nowMs).toISOString();
   const ordinals = new Map(servablePrompts(payload).map((slot) => [slot.tag, slot.versionOrdinal]));
   const cursor: RolloutCursor = { generation: payload.generation, slots: {} };
-  const events: RolloutEvent[] = [];
+  const seen = new Map<string, { info: SlotInfo; content: { versionId: string; experiment: SlotInfo["experiment"]; disabled: boolean } }>();
   for (const info of slotsOf(payload, nowMs)) {
     const weights = info.experiment?.arms.map((arm) => arm.weightBps) ?? [];
     const content = { versionId: info.versionId, experiment: info.experiment, disabled: info.disabled };
-    const digest = sha(content);
-    const entry = { digest, versionId: info.versionId, ordinal: ordinals.get(info.slot) ?? null, experimentId: info.experiment?.experimentId ?? null, weights, disabled: info.disabled };
-    cursor.slots[info.slot] = entry;
-    const prev = previous?.slots[info.slot];
-    let state: RolloutState | null;
-    if (!previous) state = "current";
-    else if (!prev) state = "new_version";
-    else if (prev.digest === digest) state = null;
-    else if (prev.disabled !== info.disabled) state = info.disabled ? "disabled" : "enabled";
-    else if (prev.versionId !== info.versionId) state = prev.ordinal !== null && entry.ordinal !== null && entry.ordinal < prev.ordinal ? "rolled_back" : "new_version";
-    else if (prev.experimentId !== entry.experimentId) state = entry.experimentId ? "ab_started" : "ab_ended";
-    else state = `dial:${weights.map((w) => `${w / 100}`).join("-")}`;
-    if (state === null) continue;
-    events.push({
-      id: `${info.slot}:${sha({ content, generation: payload.generation })}:${state}`,
+    cursor.slots[info.slot] = { digest: sha(content), versionId: info.versionId, ordinal: ordinals.get(info.slot) ?? null, experimentId: info.experiment?.experimentId ?? null, weights, disabled: info.disabled };
+    seen.set(info.slot, { info, content });
+  }
+  // The comparison is the SDK's (`diffReleases`); what is platform-facing here is the event id, the sentence and the split.
+  const events = diffReleases(previous?.slots ?? null, cursor.slots).map((diff): RolloutEvent => {
+    const prev = diff.previous;
+    if (diff.change === "removed") {
+      return { id: `${diff.slot}:${sha({ removed: prev!.digest, generation: payload.generation })}:removed`, slot: diff.slot, state: "removed", summary: `${diff.slot} is no longer in the release`, generation: payload.generation, versionId: null, previousVersionId: prev?.versionId ?? null, experiment: null, at };
+    }
+    const { info, content } = seen.get(diff.slot)!;
+    return {
+      id: `${info.slot}:${sha({ content, generation: payload.generation })}:${diff.change}`,
       slot: info.slot,
-      state,
-      summary: summaryOf(info, state, prev?.versionId ?? null),
+      state: diff.change,
+      summary: summaryOf(info, diff.change, prev?.versionId ?? null),
       generation: payload.generation,
       versionId: info.versionId,
       previousVersionId: prev?.versionId ?? null,
       experiment: info.experiment,
       at,
-    });
-  }
-  for (const [tag, prev] of Object.entries(previous?.slots ?? {})) {
-    if (cursor.slots[tag]) continue;
-    events.push({ id: `${tag}:${sha({ removed: prev.digest, generation: payload.generation })}:removed`, slot: tag, state: "removed", summary: `${tag} is no longer in the release`, generation: payload.generation, versionId: null, previousVersionId: prev.versionId, experiment: null, at });
-  }
+    };
+  });
   return { events, cursor };
 }
 

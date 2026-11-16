@@ -1,7 +1,7 @@
 {
   "name": "@airprompter/agent-sdk",
   "version": "1.0.0-rc.0",
-  "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. One package: the agent at the root, its parts behind the subpaths /core, /sync, /runtime and /telemetry, the CI kit at /testing, framework adapters under /frameworks.",
+  "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. One package: the agent at the root, its parts behind the subpaths /core, /sync, /runtime and /telemetry, the CI kit at /testing, framework adapters under /frameworks (/frameworks/steps: no-code automation steps, the core of the Zapier and n8n integrations).",
   "keywords": [
     "airprompter",
     "prompts",
@@ -65,6 +65,11 @@
       "types": "./dist/esm/frameworks/langchain.d.ts",
       "import": "./dist/esm/frameworks/langchain.js",
       "require": "./dist/cjs/frameworks/langchain.js"
+    },
+    "./frameworks/steps": {
+      "types": "./dist/esm/frameworks/steps/index.d.ts",
+      "import": "./dist/esm/frameworks/steps/index.js",
+      "require": "./dist/cjs/frameworks/steps/index.js"
     }
   },
   "typesVersions": {
@@ -86,6 +91,9 @@
       ],
       "frameworks/langchain": [
         "dist/esm/frameworks/langchain.d.ts"
+      ],
+      "frameworks/steps": [
+        "dist/esm/frameworks/steps/index.d.ts"
       ]
     }
   },
@@ -106,7 +114,8 @@
       "./runtime": 260000,
       "./telemetry": 187000,
       "./testing": 85000,
-      "./frameworks/langchain": 30000
+      "./frameworks/langchain": 30000,
+      "./frameworks/steps": 100000
     }
   },
   "publishConfig": {

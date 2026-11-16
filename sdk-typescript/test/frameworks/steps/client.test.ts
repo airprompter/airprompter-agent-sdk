@@ -1,32 +1,31 @@
 /**
- * The shared platform-agnostic core (identical to the Zapier package's `src/core`) against the SDK's fake control
- * plane, as n8n drives it: no n8n package is loaded here.
+ * `@airprompter/agent-sdk/frameworks/steps` against the SDK's fake control plane, as a platform drives it (a fresh
+ * client per step, a KvStore that lasts): no platform package is loaded here.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { publicJwkOf } from "@airprompter/agent-sdk/core";
-import { MemoryKvStore } from "@airprompter/agent-sdk/sync";
-import { FakeControlPlane } from "@airprompter/agent-sdk/testing";
+import { publicJwkOf } from "../../../packages/sdk/src/core/index.js";
+import { FakeControlPlane } from "../../../packages/sdk/src/core/testing/index.js";
+import { MemoryKvStore } from "../../../packages/sdk/src/sync/index.js";
 
-import { isAutomationError } from "../../src/core";
-import type { RolloutCursor } from "../../src/core";
-import { automationDatastore } from "../../src/n8n/connect";
-import { abTest, harness } from "../helpers";
+import { isAutomationError, kvAutomationDatastore } from "../../../packages/sdk/src/frameworks/steps/index.js";
+import type { RolloutCursor } from "../../../packages/sdk/src/frameworks/steps/index.js";
+import { abTest, harness } from "./helpers.js";
 
 const code = (expected: string) => (error: unknown) => isAutomationError(error) && error.code === expected;
 
 test("credential test: fetches and verifies the manifest; a wrong key or a wrong root key fails with a reason", async () => {
   const h = harness();
   h.plane.promote([h.triage("Triage: {{ticket}}", "ver_1")]);
-  assert.deepEqual(await h.client().testConnection(), { ok: true, agentId: "agt_n8n", environment: "prod" });
+  assert.deepEqual(await h.client().testConnection(), { ok: true, agentId: "agt_steps", environment: "prod" });
 
-  const wrongKey = await h.client({ updateKey: "apa_live_wrong", datastore: automationDatastore(new MemoryKvStore()) }).testConnection();
+  const wrongKey = await h.client({ updateKey: "apa_live_wrong", datastore: kvAutomationDatastore(new MemoryKvStore()) }).testConnection();
   assert.equal(wrongKey.ok, false);
   assert.match((wrongKey as { reason: string }).reason, /refused the Update key/);
 
-  const stranger = new FakeControlPlane({ organizationId: "org_test", agentId: "agt_n8n", target: "prod" });
-  const wrongRoot = await h.client({ root: publicJwkOf(stranger.rootKey), datastore: automationDatastore(new MemoryKvStore()) }).testConnection();
+  const stranger = new FakeControlPlane({ organizationId: "org_test", agentId: "agt_steps", target: "prod" });
+  const wrongRoot = await h.client({ root: publicJwkOf(stranger.rootKey), datastore: kvAutomationDatastore(new MemoryKvStore()) }).testConnection();
   assert.equal(wrongRoot.ok, false);
 });
 
@@ -132,7 +131,7 @@ test("a tampered stored copy is refused, never served", async () => {
 
 test("a release signed by anyone but AirPrompter's root is refused at pull and never stored", async () => {
   const h = harness();
-  const stranger = new FakeControlPlane({ organizationId: "org_test", agentId: "agt_n8n", target: "prod" }, h.plane.apiKey);
+  const stranger = new FakeControlPlane({ organizationId: "org_test", agentId: "agt_steps", target: "prod" }, h.plane.apiKey);
   stranger.promote([stranger.slot({ tag: "support.triage", text: "Evil {{ticket}}", versionId: "evil", variables: [{ name: "ticket", required: true, trust: "end_user" }] })]);
   await assert.rejects(h.client({ fetch: stranger.fetch() }).getPrompt({ slot: "support.triage", variables: { ticket: "x" } }), (error: unknown) => isAutomationError(error));
   assert.deepEqual((await h.kv.list("")).filter((key) => key.includes("/releases/")), []);
@@ -192,7 +191,7 @@ test("Report run: tokens and the error class on the run's slot, version and arm;
   await assert.rejects(h.client().reportRun({ runRef: prompt.runRef, rating: 9 as 1 }), code("invalid_input"));
 });
 
-test("Report run with AirPrompter down fails retryably (n8n's Retry On Fail resends it), then lands", async () => {
+test("Report run with AirPrompter down fails retryably (the platform's retry resends it), then lands", async () => {
   const h = harness();
   h.plane.promote([h.triage("Triage {{ticket}}", "ver_1")]);
   const prompt = await h.client().getPrompt({ slot: "support.triage", variables: { ticket: "a" } });

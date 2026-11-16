@@ -21,7 +21,7 @@
  */
 
 import { createHash, createPrivateKey, createPublicKey, hkdfSync } from "node:crypto";
-import type { DistributionKey, FetchLike, HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/core";
+import type { DistributionKey, FetchLike, HostedEnvironment, P256PublicJwk } from "../../core/index.js";
 
 /**
  * AirPrompter's root public key per hosted environment. Empty until the owner pins the production key: until then a

@@ -1,5 +1,5 @@
 /**
- * The shared core's AutomationError → n8n's NodeOperationError, with a description that says what to do. Errors
+ * The Steps core's AutomationError (`@airprompter/agent-sdk/frameworks/steps`) → n8n's NodeOperationError, with a description that says what to do. Errors
  * that are not the core's pass through untouched (n8n reports them as they are).
  *
  * @example
@@ -11,7 +11,7 @@
 import { NodeOperationError } from "n8n-workflow";
 import type { INode } from "n8n-workflow";
 
-import { isAutomationError } from "../core";
+import { isAutomationError } from "@airprompter/agent-sdk/frameworks/steps";
 
 const DESCRIPTIONS: Record<string, string> = {
   unauthorized: "Open the AirPrompter Agent credential and check the Agent ID, the Environment and the Update Key.",

@@ -6,13 +6,19 @@
 //            telemetry
 //   layer 2  sdk/src/*.ts (the agent),     import the layers below, never each other
 //            sdk/src/frameworks
+//   layer 3  sdk/src/frameworks/steps      the no-code automation core: drives the
+//                                          agent (through the root barrel), core, sync
 //   beside   agent-otel, datastore-*       import `@airprompter/agent-sdk/<layer>`
+//   platform integrations/*                import the SDK only as
+//                                          `@airprompter/agent-sdk/frameworks/steps`
+//                                          (Decision L, AIR-2231/AIR-2405); tests exempt
 //   binary   cli/src                       imports any source, by path
 //
 // A file reaches another layer only through that layer's barrel
-// (`../core/index.js`), never a deeper path, so what a layer exports is what
-// another layer can depend on. The one other barrel is `core/testing/index.js`,
-// and only the `./testing` entry may use it. The binary and the tests import
+// (`../core/index.js`; the agent's is the root `index.js`, Steps' is
+// `frameworks/steps/index.js`), never a deeper path, so what a layer exports
+// is what another layer can depend on. The one other barrel is
+// `core/testing/index.js`, and only the `./testing` entry may use it. The binary and the tests import
 // sources by path on purpose (they bundle and they test internals); only the
 // binary's edges are recorded.
 //
@@ -27,7 +33,10 @@ import { fileURLToPath } from "node:url";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "..");
 const sdkSrc = join(root, "packages", "sdk", "src");
-const LAYER = { core: 0, sync: 1, runtime: 1, telemetry: 1, agent: 2, frameworks: 2 };
+const LAYER = { core: 0, sync: 1, runtime: 1, telemetry: 1, agent: 2, frameworks: 2, steps: 3 };
+/** A layer's one barrel, relative to packages/sdk/src without the extension. */
+const barrelOf = (layer) => (layer === "agent" ? "index" : layer === "steps" ? "frameworks/steps/index" : `${layer}/index`);
+const STEPS_SPEC = "@airprompter/agent-sdk/frameworks/steps";
 const SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"];
 const SUBPATH = /^@airprompter\/agent-sdk\/(core|sync|runtime|telemetry)$/;
 
@@ -58,6 +67,7 @@ const posix = (path) => path.split(sep).join("/");
 /** The layer a path under `packages/sdk/src` belongs to; a file directly under `src` is the agent. */
 function layerOf(path) {
   const rel = posix(relative(sdkSrc, path));
+  if (rel.startsWith("frameworks/steps/")) return "steps";
   const slash = rel.indexOf("/");
   return slash === -1 ? "agent" : rel.slice(0, slash);
 }
@@ -89,7 +99,7 @@ function lintSdkFile(file) {
     if (into === layer) continue;
     edges.push([layer, into]);
     const rel = posix(relative(sdkSrc, target)).replace(/\.(js|ts)$/, "");
-    const barrel = rel === `${into}/index` || (rel === "core/testing/index" && posix(relative(sdkSrc, file)) === "testing.ts");
+    const barrel = rel === barrelOf(into) || (rel === "core/testing/index" && posix(relative(sdkSrc, file)) === "testing.ts");
     if (!barrel) {
       offenders.push(`${shown}:${line}: reaches into ${into} by path (${spec}); import ${into}'s barrel`);
       continue;
@@ -99,7 +109,7 @@ function lintSdkFile(file) {
       continue;
     }
     if (LAYER[into] >= LAYER[layer]) {
-      offenders.push(`${shown}:${line}: ${layer} (layer ${LAYER[layer]}) may not import ${into} (layer ${LAYER[into]}); the direction is core → sync, runtime, telemetry → agent, frameworks`);
+      offenders.push(`${shown}:${line}: ${layer} (layer ${LAYER[layer]}) may not import ${into} (layer ${LAYER[into]}); the direction is core → sync, runtime, telemetry → agent, frameworks → steps`);
     }
   }
 }
@@ -126,6 +136,43 @@ function lintSatellite(name) {
 
 for (const file of walk(sdkSrc)) lintSdkFile(file);
 for (const name of SATELLITES) lintSatellite(name);
+
+// The platforms: every non-test source of integrations/<name> imports the SDK only through the Steps subpath, and
+// never reaches outside its own folder by path (the SDK's sources included). Their own platform packages are theirs.
+const integrations = resolve(root, "..", "integrations");
+const SKIP = new Set(["node_modules", "dist", "test"]);
+function walkIntegration(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    if (SKIP.has(entry)) continue;
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) walkIntegration(path, out);
+    else if (path.endsWith(".ts") && !path.endsWith(".d.ts")) out.push(path);
+  }
+  return out;
+}
+try {
+  for (const name of readdirSync(integrations).sort()) {
+    const home = join(integrations, name);
+    if (!statSync(home).isDirectory()) continue;
+    for (const file of walkIntegration(home)) {
+      const shown = relative(resolve(root, ".."), file);
+      for (const { spec, line } of specifiersOf(file)) {
+        if (spec.startsWith(".")) {
+          if (posix(relative(home, resolve(dirname(file), spec))).startsWith("..")) offenders.push(`${shown}:${line}: ${spec} leaves integrations/${name}; the SDK is reached as ${STEPS_SPEC}`);
+          continue;
+        }
+        if (!spec.startsWith("@airprompter/")) continue;
+        if (spec !== STEPS_SPEC) {
+          offenders.push(`${shown}:${line}: ${spec}: an integration imports the SDK only as ${STEPS_SPEC}`);
+          continue;
+        }
+        edges.push([name, "steps"]);
+      }
+    }
+  }
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
 
 // The binary: cli/src imports sources by path (it bundles them); every layer is below it.
 const cliSrc = resolve(root, "..", "cli", "src");
@@ -156,7 +203,7 @@ if (process.argv.includes("--json")) {
   console.log(JSON.stringify({ layers: LAYER, satellites: SATELLITES, edges: unique }, null, 2));
 }
 if (offenders.length) {
-  console.error("lint-imports: the direction is core → sync, runtime, telemetry → agent, frameworks → binary; these lines break it:");
+  console.error("lint-imports: the direction is core → sync, runtime, telemetry → agent, frameworks → steps → integrations, and the binary; these lines break it:");
   for (const line of offenders) console.error("  " + line);
   process.exit(1);
 }

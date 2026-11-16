@@ -24,6 +24,9 @@
       ],
       "@airprompter/agent-otel/exporter": [
         "packages/agent-otel/src/exporter/index.ts"
+      ],
+      "@airprompter/agent-sdk/frameworks/steps": [
+        "packages/sdk/src/frameworks/steps/index.ts"
       ]
     }
   },

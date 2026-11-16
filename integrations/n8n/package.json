@@ -40,7 +40,6 @@
     "lint": "eslint nodes credentials src package.json",
     "lint:cloud": "N8N_LINT_CLOUD=1 eslint nodes credentials src package.json",
     "test": "TSX_DISABLE_CACHE=1 node --import tsx --test --test-timeout=90000 --test-force-exit \"test/**/*.test.ts\"",
-    "test:core": "TSX_DISABLE_CACHE=1 node --import tsx --test --test-timeout=90000 --test-force-exit \"test/core/*.test.ts\"",
     "prepare:sdk": "npm --prefix ../../sdk-typescript ci --legacy-peer-deps && npm --prefix ../../sdk-typescript run build"
   },
   "n8n": {

@@ -17,7 +17,11 @@ const SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datasto
 /** Which subpath a built file belongs to: its top directory, the test kit apart from core, the rest of the root at `.`. */
 function subpathOf(rel) {
   if (rel === "testing.js" || rel.startsWith("core/testing/")) return "./testing";
-  if (rel.startsWith("frameworks/")) return `./${rel.replace(/\.js$/, "")}`;
+  // An adapter is one file (`frameworks/langchain.js`) or one folder (`frameworks/steps/…`): either way its own entry.
+  if (rel.startsWith("frameworks/")) {
+    const parts = rel.split("/");
+    return parts.length > 2 ? `./frameworks/${parts[1]}` : `./${rel.replace(/\.js$/, "")}`;
+  }
   const slash = rel.indexOf("/");
   return slash === -1 ? "." : `./${rel.slice(0, slash)}`;
 }

@@ -1,6 +1,6 @@
 /**
  * `createAutomationClient`: AirPrompter Agents for a no-code step, as a thin client of `@airprompter/agent-sdk`.
- * Platform-agnostic — no Zapier or n8n import — so it can move to a shared `integrations/core`.
+ * Platform-agnostic — no Zapier or n8n import: the Steps core both platforms build on (AIR-2405).
  *
  * Every call is one invocation and starts a FRESH agent (`on_invoke`), as a serverless step must: nothing is kept warm
  * between invocations, so two reports in one minute never share an ingest key. The order of a call:
@@ -31,15 +31,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AirPrompterAgent } from "@airprompter/agent-sdk";
-import { SyncClient, instant, trustedRootFromPinnedKey } from "@airprompter/agent-sdk/core";
-import type { ManifestPayload, RootMetadata } from "@airprompter/agent-sdk/core";
-import { pullToDatastore, type ReleaseKey } from "@airprompter/agent-sdk/sync";
+import { SyncClient, instant, trustedRootFromPinnedKey } from "../../core/index.js";
+import type { ManifestPayload, RootMetadata } from "../../core/index.js";
+import { AirPrompterAgent } from "../../index.js";
+import { pullToDatastore, type ReleaseKey } from "../../sync/index.js";
 
 import { rolloutChanges, slotsOf, variablesOf } from "./rollout.js";
 import { distributionKeyFor, pinnedRootFor, timedFetch } from "./trust.js";
 import { AutomationError, isAutomationError, type AutomationClient, type AutomationClientOptions, type GetPromptResult, type InferenceSettings, type ReportRunInput } from "./types.js";
-import { attachUsage } from "./usage.js";
+import { runReportOf } from "./usage.js";
 
 const ORGANIZATION_NOTE = "organizationId";
 const USER_AGENT = "airprompter-automation/1.0.0-rc.0";
@@ -311,7 +311,8 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
       try {
         const runRef = input.runRef.trim();
         const usage = { ...(input.inputTokens !== undefined ? { inputTokens: input.inputTokens } : {}), ...(input.outputTokens !== undefined ? { outputTokens: input.outputTokens } : {}), ...(input.error ? { error: input.error } : {}), ...(input.latencyMs !== undefined ? { latencyMs: input.latencyMs } : {}) };
-        if (attachUsage(session.ap, runRef, usage) === 0) throw new AutomationError("invalid_input", "The run reference does not verify for this connection (another agent, environment or Update key), or carries more than one slot.", false);
+        // `ap.reportRun` is the run's one count: Get prompt rendered outside any run and wrote no row.
+        if (!session.ap.reportRun(runRef, runReportOf(usage))) throw new AutomationError("invalid_input", "The run reference does not verify for this connection (another agent, environment or Update key), or carries more than one slot.", false);
         const signals = { ...(input.thumbs ? { thumbs: input.thumbs } : {}), ...(input.rating !== undefined ? { rating: input.rating } : {}) };
         if (Object.keys(signals).length > 0 && !session.ap.feedback(runRef, signals)) throw new AutomationError("invalid_input", "The quality signal was not accepted for this run reference.", false);
       } catch (error) {

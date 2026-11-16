@@ -2,11 +2,11 @@
  * The automation client's contract: what a no-code platform (Zapier, n8n) asks of AirPrompter Agents, in names that
  * carry no platform. One slot per step; the step picks the slot, fills its variables and may name a subject; every
  * rollout decision (versions, approvals, A/B arms, dial-up, rollback, the lease) was made in AirPrompter and arrives
- * signed. Nothing here imports a platform package, so the same file can move to a shared `integrations/core`.
+ * signed. Nothing here imports a platform package: Zapier and n8n both build on it.
  *
  * @example
  * ```ts
- * import type { AutomationClient } from "./types.js";
+ * import type { AutomationClient } from "@airprompter/agent-sdk/frameworks/steps";
  * async function step(client: AutomationClient) {
  *   const served = await client.getPrompt({ slot: "support.triage", variables: { ticket: "…" }, subject: "customer-42" });
  *   // hand served.prompt to the platform's own model step, then:
@@ -15,8 +15,9 @@
  * ```
  */
 
-import type { ReleaseDatastore } from "@airprompter/agent-sdk/sync";
-import type { FetchLike, HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/core";
+import { errorNamed } from "../../core/index.js";
+import type { FetchLike, HostedEnvironment, P256PublicJwk, SlotReleaseChange, SlotReleaseState } from "../../core/index.js";
+import type { ReleaseDatastore } from "../../sync/index.js";
 
 /**
  * A `ReleaseDatastore` that may also keep two small notes for the client: the organization id learned from the first
@@ -110,11 +111,12 @@ export interface ReportRunInput {
   error?: string;
   thumbs?: "up" | "down";
   rating?: 1 | 2 | 3 | 4 | 5;
-  /** The model step's duration when the platform shows it. Absent: recorded as 0 (the run still counts). */
+  /** The model step's duration when the platform shows it. Absent: `ap.reportRun` records the time since the render's minute, an upper bound. */
   latencyMs?: number;
 }
 
-export type RolloutState = "current" | "new_version" | "rolled_back" | "ab_started" | "ab_ended" | `dial:${string}` | "disabled" | "enabled" | "removed";
+/** The change a rollout event names: the SDK's `diffReleases` vocabulary. */
+export type RolloutState = SlotReleaseChange;
 
 export interface RolloutEvent {
   /** `slot:digest:state`: the same change is one id however many polls see it. */
@@ -133,7 +135,7 @@ export interface RolloutEvent {
 /** What the last poll saw, per slot; the platform keeps it between polls. Content-free. */
 export interface RolloutCursor {
   generation: number;
-  slots: Record<string, { digest: string; versionId: string; ordinal: number | null; experimentId: string | null; weights: number[]; disabled: boolean }>;
+  slots: Record<string, SlotReleaseState>;
 }
 
 export interface AutomationClient {
@@ -169,4 +171,5 @@ export class AutomationError extends Error {
   }
 }
 
-export const isAutomationError = (error: unknown): error is AutomationError => error instanceof AutomationError || (typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AutomationError");
+/** By name and code, never `instanceof`: an error from another copy of the SDK (a platform's own install) still counts. */
+export const isAutomationError = (error: unknown): error is AutomationError => errorNamed(error, "AutomationError");

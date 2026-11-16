@@ -12,7 +12,7 @@ import zapier from "zapier-platform-core";
 import App from "../src/zapier/app.js";
 import { VARIABLE_PREFIX } from "../src/zapier/steps.js";
 import { hostedEnvironmentOf, PRODUCTION_API } from "../src/zapier/connection.js";
-import { DEV_API_KEY, SCOPE, abRelease, startRegistry, type Registry } from "./registry.js";
+import { DEV_API_KEY, SCOPE, abRelease, startRegistry, type Registry } from "../../../sdk-typescript/test/frameworks/steps/registry.js";
 
 const PROMPTS = {
   "support/triage.md": "---\nvariables: team!, ticket?\nversion: triage_v1\n---\nRoute this ticket for {{team}}: {{ticket}}",

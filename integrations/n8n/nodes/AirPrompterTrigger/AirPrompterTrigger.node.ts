@@ -18,7 +18,7 @@
 import type { IDataObject, ILoadOptionsFunctions, INodeExecutionData, INodePropertyOptions, INodeType, INodeTypeDescription, IPollFunctions } from "n8n-workflow";
 import { NodeConnectionTypes } from "n8n-workflow";
 
-import type { RolloutCursor } from "../../src/core";
+import type { RolloutCursor } from "@airprompter/agent-sdk/frameworks/steps";
 import { clientFor } from "../../src/n8n/connect";
 import type { AirPrompterCredentials, N8nStorageContext } from "../../src/n8n/connect";
 import { toNodeError } from "../../src/n8n/errors";

@@ -25,6 +25,7 @@ Everything else is a subpath, and a subpath you do not import is not loaded:
 | `/telemetry` | The spool and its uploader |
 | `/testing` | The CI kit: `FakeControlPlane`, `MemoryFs`, `FakeClock` |
 | `/frameworks/langchain` | LangChain middleware; `langchain`, `@langchain/core` and `zod` are optional peers |
+| `/frameworks/steps` | No-code automation steps (the core of the Zapier and n8n integrations); outside the 1.0 promise for now |
 
 Separate packages exist only for dependency footprint and take this one as a
 peer at the same version: `@airprompter/agent-otel`, `@airprompter/datastore-s3`,

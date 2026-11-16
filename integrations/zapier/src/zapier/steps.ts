@@ -15,7 +15,7 @@
  */
 
 import type { Bundle, ZObject } from "zapier-platform-core";
-import type { GetPromptResult, RolloutCursor } from "../core/index.js";
+import type { GetPromptResult, RolloutCursor } from "@airprompter/agent-sdk/frameworks/steps";
 import { clientFor, withClient, zapierError } from "./connection.js";
 
 /** Variable fields are prefixed so a variable called `slot` or `subject` cannot shadow the step's own fields. */

@@ -1,7 +1,7 @@
 /**
  * Token usage from whatever a model step returned: automation platforms hand back the provider's own response shape
  * (or a framework's), so mapping usage by hand is where reports go wrong. This reads the common shapes and nothing
- * else — never text. Platform-agnostic (no n8n import): it can move into the shared core when Zapier wants it.
+ * else — never text. Platform-agnostic: any Steps platform reads a model step's output with it.
  *
  * Shapes read, at the top level or under `response`, `output`, `message`, `data`, `json`, `llmOutput`,
  * `response_metadata` or `generationInfo`:
@@ -13,6 +13,7 @@
  *
  * @example
  * ```ts
+ * import { usageFrom } from "@airprompter/agent-sdk/frameworks/steps";
  * usageFrom({ usage: { prompt_tokens: 812, completion_tokens: 96 } }); // → { inputTokens: 812, outputTokens: 96 }
  * usageFrom({ text: "hi" });                                            // → null
  * ```

@@ -18,7 +18,7 @@
 
 import { createHash } from "node:crypto";
 
-import type { KvEntry, KvPutCondition, KvStore } from "@airprompter/agent-sdk/sync";
+import type { KvEntry, KvPutCondition, KvStore } from "@airprompter/agent-sdk/frameworks/steps";
 
 /** The one key under the static data object that this integration owns. */
 export const STATIC_DATA_KEY = "airprompter";

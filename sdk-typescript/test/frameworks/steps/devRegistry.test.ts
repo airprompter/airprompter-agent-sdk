@@ -10,12 +10,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { MemoryKvStore } from "@airprompter/agent-sdk/sync";
+import { fileURLToPath } from "node:url";
 
-import { createAutomationClient } from "../../src/core";
-import { automationDatastore } from "../../src/n8n/connect";
+import { MemoryKvStore } from "../../../packages/sdk/src/sync/index.js";
+import { createAutomationClient, kvAutomationDatastore } from "../../../packages/sdk/src/frameworks/steps/index.js";
 
-const CLI = resolve(__dirname, "../../../../cli");
+const CLI = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../../cli");
 const runnable = existsSync(join(CLI, "node_modules", "tsx"));
 
 async function startRegistry(dir: string): Promise<{ baseUrl: string; child: ChildProcess }> {
@@ -49,7 +49,7 @@ test("against `airprompter dev`: credential test, Get prompt, a saved edit is a 
       environment: "prod",
       hostedEnvironment: "prod",
       root: JSON.parse(readFileSync(join(dir, ".airprompter-dev", "root.pub.json"), "utf8")),
-      datastore: automationDatastore(kv),
+      datastore: kvAutomationDatastore(kv),
       requestTimeoutMs: 3000,
     });
   try {

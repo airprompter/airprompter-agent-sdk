@@ -20,8 +20,7 @@
  */
 
 import type { Bundle, ZObject } from "zapier-platform-core";
-import type { HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/core";
-import { connectionLabel, createAutomationClient, isAutomationError, type AutomationClient } from "../core/index.js";
+import { connectionLabel, createAutomationClient, isAutomationError, type AutomationClient, type HostedEnvironment, type P256PublicJwk } from "@airprompter/agent-sdk/frameworks/steps";
 import { zapierDatastore, type ZapierCache } from "./storage.js";
 
 export const PRODUCTION_API = "https://api.airprompter.com";

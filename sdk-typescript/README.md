@@ -34,6 +34,7 @@ the old split packages in beside this one. npm's default range,
 | `@airprompter/agent-sdk/telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
 | `@airprompter/agent-sdk/testing` | The kit a customer's CI imports: `FakeControlPlane`, `MemoryFs`, `FakeClock`. Never loaded by the runtime. |
 | `@airprompter/agent-sdk/frameworks/langchain` | Middleware for LangChain's `createAgent`. `langchain`, `@langchain/core` and `zod` are optional peers: install them to use this subpath, and no other subpath loads them. |
+| `@airprompter/agent-sdk/frameworks/steps` | A no-code automation step (one invocation per step, nothing kept warm): `createAutomationClient` — Get prompt, Report run (through `ap.reportRun`, the run's one count), slots and variables for field schemas, rollout events for a polling trigger — over a signed copy kept in the platform's own storage. The core of the [Zapier app](../integrations/zapier/) and the [n8n nodes](../integrations/n8n/), which import the SDK only through it. Outside the 1.0 promise for now; TypeScript only. |
 
 Everything runs on your systems: there is no hosted mode. `ManagedAgent` and
 its `runtime/managed/` module are retired. They stay in the source only until a

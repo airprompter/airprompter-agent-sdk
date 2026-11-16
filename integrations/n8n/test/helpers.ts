@@ -3,13 +3,10 @@
  * so a test can take AirPrompter down, tamper with what is stored, and move the clock.
  */
 import { publicJwkOf, releaseDigest } from "@airprompter/agent-sdk/core";
-import type { FetchLike, ManifestSlot } from "@airprompter/agent-sdk/core";
-import { MemoryKvStore } from "@airprompter/agent-sdk/sync";
+import type { ManifestSlot } from "@airprompter/agent-sdk/core";
 import { FakeControlPlane } from "@airprompter/agent-sdk/testing";
-
-import { createAutomationClient } from "../src/core";
-import type { AutomationClient, AutomationClientOptions } from "../src/core";
-import { automationDatastore } from "../src/n8n/connect";
+import { MemoryKvStore, createAutomationClient, kvAutomationDatastore } from "@airprompter/agent-sdk/frameworks/steps";
+import type { AutomationClient, AutomationClientOptions, FetchLike } from "@airprompter/agent-sdk/frameworks/steps";
 
 export const SCOPE = { organizationId: "org_test", agentId: "agt_n8n", target: "prod" as const };
 export const BASE_URL = "https://api.test";
@@ -36,7 +33,7 @@ export function harness(): Harness {
     if (!online.value) throw new Error("getaddrinfo ENOTFOUND api.test");
     return inner(url, init);
   };
-  const datastore = automationDatastore(kv);
+  const datastore = kvAutomationDatastore(kv);
   return {
     plane,
     kv,

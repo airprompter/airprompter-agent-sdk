@@ -30,13 +30,12 @@ import type {
 } from "n8n-workflow";
 import { NodeConnectionTypes, NodeOperationError } from "n8n-workflow";
 
-import { MemoryKvStore } from "@airprompter/agent-sdk/sync";
+import { MemoryKvStore, kvAutomationDatastore, usageFrom } from "@airprompter/agent-sdk/frameworks/steps";
 
-import type { ReportRunInput } from "../../src/core";
-import { automationDatastore, clientFor } from "../../src/n8n/connect";
+import type { ReportRunInput } from "@airprompter/agent-sdk/frameworks/steps";
+import { clientFor } from "../../src/n8n/connect";
 import type { AirPrompterCredentials, N8nStorageContext } from "../../src/n8n/connect";
 import { toNodeError } from "../../src/n8n/errors";
-import { usageFrom } from "../../src/n8n/usageShapes";
 
 const CREDENTIAL = "airPrompterAgentApi";
 
@@ -240,7 +239,7 @@ export class AirPrompter implements INodeType {
         try {
           const data = credential.data as unknown as AirPrompterCredentials;
           // A throwaway store: testing a credential writes nothing the steps serve from.
-          const client = await clientFor({ ...data, bundlePath: "" }, null, { datastore: automationDatastore(new MemoryKvStore()) });
+          const client = await clientFor({ ...data, bundlePath: "" }, null, { datastore: kvAutomationDatastore(new MemoryKvStore()) });
           const result = await client.testConnection();
           return result.ok ? { status: "OK", message: `Verified the signed release for ${result.agentId} in ${result.environment}` } : { status: "Error", message: result.reason };
         } catch (error) {

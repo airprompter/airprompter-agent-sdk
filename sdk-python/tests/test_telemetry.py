@@ -246,7 +246,7 @@ def test_litellm_callback(agent):
     failed = next(w for w in windows if w["status"] == "error")
     assert ok["count"] == 2 and ok["tokens"] == {"input": 200, "output": 40} and ok["latencyMs"]["sum"] == 1624
     assert failed["errorClass"] == "provider_rate_limited" and failed["count"] == 1
-    assert all(w["v"] == 4 and w["artifactId"] == rendered.artifact_id for w in windows)
+    assert all(w["v"] == 5 and w["artifactId"] == rendered.artifact_id for w in windows)
 
 
 def test_litellm_callback_preserves_authenticated_audience_dimensions(agent):

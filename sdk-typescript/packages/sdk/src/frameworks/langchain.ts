@@ -40,7 +40,7 @@ export interface AirPrompterMiddlewareOptions {
 
 type Approved = Extract<Placement, { kind: "approved" }>;
 type RuntimeLike = { context?: unknown; configurable?: { thread_id?: unknown } };
-type StateLike = { airprompter_run_id?: string };
+type StateLike = { airprompter_run_ref?: string };
 type ModelLike = { model?: string; modelName?: string; lc_kwargs?: Record<string, unknown>; _defaultConfig?: Record<string, unknown>; _llmType?: () => string; constructor: new (fields: Record<string, unknown>) => unknown };
 
 /** The sealed settings a chat model reads only from its constructor. Passed as `modelSettings`, they never reach the wire. */
@@ -144,8 +144,8 @@ function softInput(value: unknown): RunInput {
   };
 }
 
+// Ids only: the run reference names versions and the run, never prompt text (rule 6).
 const stateSchema = z.object({
-  airprompter_run_id: z.string().optional(),
   airprompter_run_ref: z.string().optional(),
 });
 
@@ -164,11 +164,11 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
   const findRun = (state: StateLike, runtime: RuntimeLike | undefined): RunSession => {
     const current = ap.currentRun();
     if (current) return current;
-    const { airprompter_run_id: resume } = state;
+    const { airprompter_run_ref: resume } = state;
     return ap.openRun({ ...inputOf(runtime), ...(resume ? { resume } : {}) });
   };
 
-  const modelFor = async (model: ModelLike, placed: Approved): Promise<unknown> => {
+  const modelFor = async (model: ModelLike, placed: Approved, run: RunSession): Promise<unknown> => {
     let perPlacement = built.get(model);
     if (!perPlacement) built.set(model, (perPlacement = new Map()));
     const key = JSON.stringify([placed.model, placed.settings]);
@@ -180,8 +180,10 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
       perPlacement.delete(key);
       if (!unresolved.has(placed.model)) {
         unresolved.add(placed.model);
-        ap.log({ event: "run_passthrough", slot, reason: "model_unresolved", model: placed.model, error: (error as Error).name });
+        ap.log({ event: "model_unresolved", slot, model: placed.model, error: (error as Error).name });
       }
+      // The slot passes through for the rest of this run, with one error row against the version it could not serve.
+      run.decline(slot, "model_unresolved");
       return null;
     }
   };
@@ -192,14 +194,14 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
     stateSchema,
     beforeAgent: (_state: unknown, runtime: unknown) => {
       const run = ap.currentRun() ?? ap.openRun(inputOf(runtime as RuntimeLike));
-      return { airprompter_run_id: run.id };
+      return { airprompter_run_ref: run.runRef };
     },
     wrapModelCall: async (request: never, handler: (request: never) => Promise<never>) => {
       const { state, runtime, model, modelSettings } = request as unknown as { state: StateLike; runtime?: RuntimeLike; model: ModelLike; modelSettings?: Record<string, unknown> };
       const run = findRun(state, runtime);
       const placed = await run.place(slot);
       if (placed.kind === "passthrough") return ap.withRun(run, () => handler(request));
-      const approvedModel = await modelFor(model, placed);
+      const approvedModel = await modelFor(model, placed, run);
       if (!approvedModel) return ap.withRun(run, () => handler(request));
       const override = { ...(request as object), model: approvedModel, systemMessage: new SystemMessage(placed.instructions), modelSettings: { ...modelSettings, ...callSettings(placed.settings) } };
       const started = Date.now();
@@ -209,11 +211,11 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
         // With `responseFormat` the handler answers { structuredResponse, messages }.
         const message = ((result as { messages?: unknown[] }).messages?.[0] ?? result) as Parameters<typeof usageOf>[0] & Parameters<typeof finishErrorOf>[0];
         const errorClass = finishErrorOf(message);
-        run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), usage: usageOf(message), ...(errorClass ? { errorClass } : {}) });
+        run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), usage: usageOf(message), toolsObserved: true, ...(errorClass ? { errorClass } : {}) });
         return result;
       } catch (error) {
         // No `end` here: an outer retry middleware calls this hook again. A failed run reaches the console through the sweep.
-        if (!isBubbleUp(error)) run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), errorClass: classifyError(error) });
+        if (!isBubbleUp(error)) run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), errorClass: classifyError(error), toolsObserved: true });
         throw error;
       }
     },

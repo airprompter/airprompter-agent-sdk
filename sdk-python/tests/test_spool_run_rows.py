@@ -22,7 +22,7 @@ KEYS = {"tag": "support.reply", "artifact_id": "prm_1", "version_id": "ver_1", "
 
 
 def run(**patch) -> RunTotals:
-    fields = {"dimensions": DIMENSIONS, "status": "ok", "error_class": None, "usage_source": "reported", "agent_run": 1, "model_calls": 1, "latency_ms": 100, "tokens": {"input": 10, "cachedInput": 0, "output": 5}, "tools": {"calls": 0, "errors": 0}}
+    fields = {"dimensions": DIMENSIONS, "status": "ok", "error_class": None, "usage_source": "reported", "tools_reported": False, "agent_run": 1, "model_calls": 1, "latency_ms": 100, "tokens": {"input": 10, "cachedInput": 0, "output": 5}, "tools": {"calls": 0, "errors": 0}}
     return RunTotals(**{**fields, **patch})
 
 
@@ -34,7 +34,7 @@ def histogram(*latencies: float) -> dict:
 
 
 def step(name: str, **patch) -> StepTotals:
-    fields = {"dimensions": DIMENSIONS, "step": name, "status": "ok", "error_class": None, "usage_source": "reported", "model_calls": 2, "latency": histogram(100, 200), "tokens": {"input": 10, "cachedInput": 2, "output": 5}, "tools": {"calls": 1, "errors": 0}}
+    fields = {"dimensions": DIMENSIONS, "step": name, "status": "ok", "error_class": None, "usage_source": "reported", "tools_reported": True, "model_calls": 2, "latency": histogram(100, 200), "tokens": {"input": 10, "cachedInput": 2, "output": 5}, "tools": {"calls": 1, "errors": 0}}
     return StepTotals(**{**fields, **patch})
 
 
@@ -83,7 +83,7 @@ def test_record_step_writes_a_type_step_row_and_no_window():
     [row] = steps(written)
     assert row["tag"] == "support.reply", "the slot tag"
     assert row["step"] == "support.reply#1", "the step id"
-    assert row["v"] == 1
+    assert row["v"] == 2 and row["toolsReported"] is True
     assert sum(row["latencyMs"]["buckets"]) == row["modelCalls"], "bucket total equals modelCalls"
     assert validate_spool_row(row).ok
 
@@ -158,8 +158,8 @@ def test_the_validator_takes_each_form_and_refuses_a_crossed_one():
     assert validate_spool_row({"type": "refusal", "v": 1, "at": "2026-09-12T14:03:00Z", "instanceId": "i-testinstance", "reason": "a" * 32, "generation": 1, "tag": None}).ok
     refused({"type": "refusal", "v": 1, "at": "2026-09-12T14:03:00Z", "instanceId": "i-testinstance", "reason": "a" * 33, "generation": 1, "tag": None}, "reason")
     refused({**step_row, "step": ""}, "step")
-    assert validate_spool_row({**step_row, "v": 2}).later is True, "a later row version is skipped, not corrupt"
-    refused({**step_row, "v": 2}, "v")
+    assert validate_spool_row({**step_row, "v": 3}).later is True, "a later row version is skipped, not corrupt"
+    refused({**step_row, "v": 3}, "v")
     refused({**run_row, "agentRun": 2}, "agentRun")
     refused({key: value for key, value in run_row.items() if key != "tokensSq"}, "tokensSq")
     refused({**run_row, "tokensSq": {**run_row["tokensSq"], "inputOutput": -1}}, "tokensSq")
@@ -304,7 +304,7 @@ def test_a_skipped_line_is_a_line_the_dropped_row_says_so_and_names_no_segment()
     writer, rows = writing()
     writer.record_run(run(), T0)
     row = rows()[0]
-    inspection = inspect_segment(f"{json.dumps(row)}\n{json.dumps({**row, 'v': 5})}\n".encode("utf-8"), row["instanceId"], T0)
+    inspection = inspect_segment(f"{json.dumps(row)}\n{json.dumps({**row, 'v': 6})}\n".encode("utf-8"), row["instanceId"], T0)
     dropped = next(entry for entry in inspection.rows if entry["type"] == "dropped")
     assert (dropped["segments"], dropped["lines"]) == (0, 1)
     again = validate_spool_row(dropped)
@@ -339,3 +339,43 @@ def test_otel_a_segment_with_step_rows_gives_the_same_metrics_as_without_them():
     assert spool_rows_to_otlp([foreign, *without]) == spool_rows_to_otlp(without), "a step row first names no resource"
     alone = spool_rows_to_otlp(steps(written))["resourceMetrics"][0]
     assert (alone["scopeMetrics"][0]["metrics"], alone["resource"]["attributes"]) == ([], []), "step rows alone are no metrics and no resource"
+
+
+def test_a_reported_run_and_an_unavailable_run_in_one_minute_give_two_rows():
+    writer, rows = writing()
+    writer.record_run(run(), T0)
+    writer.record_run(run(usage_source="unavailable", model_calls=0, tokens={"input": 0, "cachedInput": 0, "output": 0}), T0)
+    written = sorted((row["usageSource"], row["count"]) for row in windows(rows()))
+    assert written == [("reported", 1), ("unavailable", 1)], "usageSource is in the window key"
+
+
+def test_tools_reported_is_in_both_keys_and_on_both_rows():
+    writer, rows = writing()
+    writer.record_run(run(), T0)
+    writer.record_run(run(tools_reported=True), T0)
+    writer.record_step(step("a"), T0)
+    writer.record_step(step("a", tools_reported=False, tools={"calls": 0, "errors": 0}), T0)
+    written = rows()
+    assert sorted((row["toolsReported"], row["v"]) for row in windows(written)) == [(False, 5), (True, 5)]
+    assert sorted((row["toolsReported"], row["v"]) for row in steps(written)) == [(False, 2), (True, 2)]
+    assert all(validate_spool_row(row).ok for row in written)
+
+
+def test_observe_reports_tools_only_when_the_caller_gave_tool_calls():
+    writer, rows = writing()
+    observation = Observation(tag="support.reply", artifact_id="prm_1", version_id="ver_1", arm="none", model="gpt-5", status="ok", latency_ms=5, step="s")
+    writer.observe(observation, T0)
+    writer.observe(Observation(**{**observation.__dict__, "tool_calls": {"calls": 0, "errors": 0}}), T0)
+    written = rows()
+    assert sorted((row["toolsReported"], row["tools"]["calls"]) for row in windows(written)) == [(False, 0), (True, 0)]
+    assert sorted(row["toolsReported"] for row in steps(written)) == [False, True]
+
+
+def test_the_validator_refuses_a_missing_tools_reported_and_a_feedback_row_that_claims_tools():
+    writer, rows = writing()
+    writer.record_run(run(), T0)
+    [row] = windows(rows())
+    refused({key: value for key, value in row.items() if key != "toolsReported"}, "toolsReported")
+    refused({**row, "toolsReported": 1}, "toolsReported")
+    feedback = {**{key: value for key, value in row.items() if key != "tokensSq"}, "count": 0, "modelCalls": 0, "agentRun": 0, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "outcomeRunMinute": row["minute"], "outcomes": {"thumbs": {"n": 1, "sum": 1, "sumSq": 1}}, "toolsReported": True}
+    refused(feedback, "feedback_measurements")

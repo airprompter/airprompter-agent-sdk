@@ -36,7 +36,7 @@ import { bundlePayloadBytes, openBundle, type DistributionKey } from "./core/ind
 import { rampWeightsAt } from "./core/index.js";
 import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./core/index.js";
 import type { ApplyPolicy, Bundle, Directive, HostedEnvironment, Manifest, ManifestPayload, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, SlotVariable, Target, UploadSink } from "./core/index.js";
-import { copyAudienceTags, validAudienceKey, validAudienceLabel, parseRunRef } from "./core/index.js";
+import { copyAudienceTags, validAudienceKey, validAudienceLabel, mintRunRef, parseRunRef, type RunRefEntry } from "./core/index.js";
 import type { Delimiters } from "./core/index.js";
 import { normalizeFeedback } from "./core/index.js";
 import { DirectorySink, HOST_SPOOL_BUDGET_BYTES, MemorySink, SpoolWriter, epochMinute, segmentName, type Observation, type RefusalRow, type SpoolRow, type SpoolSink } from "./telemetry/index.js";
@@ -527,6 +527,8 @@ export class AirPrompterAgent implements AgentRuntime {
   /** The application's variable sources (`start({ variables })`, `ap.variables.provide()`). */
   readonly variables: VariableSourceRegistry;
   private readonly runs: RunRegistry;
+  /** `runCounters.passthrough`: cumulative since start and never reset on read, because a retried heartbeat must not double count. */
+  private readonly passthroughCounts: Record<string, number> = {};
   /** Slot × variable pairs whose stricter-trust line was logged; bounded by declared names, never cleared. */
   private readonly stricterSaid = new Set<string>();
   readonly spool: SpoolWriter;
@@ -575,10 +577,17 @@ export class AirPrompterAgent implements AgentRuntime {
       variables: this.variables,
       stampLease: () => this.guardLease(),
       stampDisabled: (generation, tag) => this.stampRefusal("disabled", generation, tag),
-      recordRun: (observation, nowMs) => this.observeGuarded(observation, nowMs),
+      checksFor: (tag, arm) => this.declaredChecksFor(tag, arm),
+      mintRunRef: (runId, entries) => mintRunRef({ agentId: this.options.agentId, target: this.options.target, runId, entries }, this.runRefKey),
+      parseRunRef: (runRef) => parseRunRef(runRef, this.runRefKeys),
       log: (event) => this.log(event),
       now: () => this.nowMs(),
       idleTimeoutMs: options.runIdleTimeoutMs ?? DEFAULT_RUN_IDLE_TIMEOUT_MS,
+    }, {
+      // The spool validates every row: one it refuses is logged and dropped by the session, never thrown at the caller.
+      recordRun: (totals, nowMs) => this.spool.recordRun(totals, nowMs),
+      recordStep: (totals, nowMs) => this.spool.recordStep(totals, nowMs),
+      countPassthrough: (reason) => void (this.passthroughCounts[reason] = (this.passthroughCounts[reason] ?? 0) + 1),
     });
     this.client =
       options.apiKey && options.sync?.mode !== "offline"
@@ -1491,8 +1500,8 @@ export class AirPrompterAgent implements AgentRuntime {
       protocol: PROTOCOL_VERSION,
       capabilities: [...SUPPORTED_CAPABILITIES],
       registration: {tagKeys: [...this.audienceTagKeys].sort(), prompts: [...this.audiencePromptLabels].sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0).map(([tag,displayName])=>({tag,displayName}))},
-      // Cumulative since this process started, so a retried heartbeat cannot double count. Ticket 11a fills the map.
-      runCounters: { passthrough: {} },
+      // Cumulative since this process started, so a retried heartbeat cannot double count.
+      runCounters: { passthrough: { ...this.passthroughCounts } },
       instanceId: this.ownInstanceId,
       instanceClass: this.options.telemetry?.instanceClass ?? ((this.options.sync?.mode ?? "resident") === "on_invoke" ? "ephemeral" : "resident"),
       sdk: this.options.sdk ?? { name: "agent-sdk-typescript", version: SDK_VERSION },
@@ -1680,11 +1689,14 @@ export class AirPrompterAgent implements AgentRuntime {
    * documented opt-out for hosts that keep running after the response.
    */
   async invoke<T>(handler: () => Promise<T>): Promise<T> {
+    // A serverless host has no spool timer, so a run idle past its timeout ends at an invocation's edges.
+    this.runs.sweep();
     await this.syncNow();
     if (this.lastHeartbeatMs === null || this.nowMs() - this.lastHeartbeatMs >= this.heartbeatIntervalSeconds * 1000) void this.heartbeatNow();
     try {
       return await handler();
     } finally {
+      this.runs.sweep();
       this.spool.closeWindows(this.nowMs());
       void this.syncNow();
       // D25 on serverless: the invocation's rows go out under the runtime's own grant; a failure keeps them for the next one.
@@ -1801,16 +1813,18 @@ export class AirPrompterAgent implements AgentRuntime {
       const resolver = this.resolver();
       const localTags = tagOverride ? copyAudienceTags({...this.audienceTags,...tagOverride}) : this.audienceTags;
       this.rememberAudienceTagKeys(Object.keys(localTags));
-      const resolved = this.resolveSlot(tag, subject, localTags);
+      // Inside a run the slot resolves through the run's pin (rule 2 applied), so one request stays on one version.
+      const { resolved, run } = this.runs.resolveThrough(tag, subject, tagOverride, (runSubject, runTags) => this.resolveSlot(tag, runSubject, runTags ? copyAudienceTags({ ...this.audienceTags, ...runTags }) : localTags), { entry: true });
       const text = resolver.textOf(resolved.slot);
       const plan = planFill({ tag, variables: resolved.slot.variables, text, values, registry: this.variables });
-      return { resolver, resolved, text, plan };
+      return { resolver, resolved, text, plan, run };
     };
     const finish = (prepared: ReturnType<typeof prepare>, filled: FilledRender): Rendered => {
       const rendered = this.renderObserved(() => prepared.resolver.render(prepared.resolved, filled.values, { fenced: filled.fenced, text: prepared.text }), { tag, artifactId: prepared.resolved.slot.artifactId, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model, ...(prepared.resolved.audienceIds ? {audienceIds: prepared.resolved.audienceIds} : {}), ...(prepared.resolved.runMinute ? {runMinute: prepared.resolved.runMinute} : {}) });
       this.renders.register(rendered.text, { ...(rendered.audienceIds ? {audienceIds: rendered.audienceIds} : {}), runMinute: rendered.runMinute!, artifactId: rendered.artifactId, tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
       this.sayStricter(tag, prepared.resolved.slot, filled);
-      return rendered;
+      // The run's reference, which names every slot the run used, replaces the one-slot ref.
+      return prepared.run && !prepared.run.isEnded ? { ...rendered, runRef: prepared.run.runRef } : rendered;
     };
     /** Synchronous: the call site's values and literal sources. A callable source in the way is `VariableSourceRequiredError`. */
     const render = (values: RenderValues = {}): Rendered => {
@@ -1825,8 +1839,10 @@ export class AirPrompterAgent implements AgentRuntime {
     };
     /** The required names a render would still lack after these values and the registered sources — check it at start-up. */
     const localTags = () => tagOverride ? copyAudienceTags({...this.audienceTags,...tagOverride}) : this.audienceTags;
-    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: this.resolveSlot(tag, subject, localTags()).slot.variables, values, registry: this.variables });
-    return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, subject, localTags()).slot.variables };
+    // Inside a run, the version the run serves: the arm render() will use, not a fresh assignment.
+    const served = () => this.runs.resolveThrough(tag, subject, tagOverride, (runSubject, runTags) => this.resolveSlot(tag, runSubject, runTags ? copyAudienceTags({ ...this.audienceTags, ...runTags }) : localTags()), { entry: true }).resolved;
+    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: served().slot.variables, values, registry: this.variables });
+    return { render, renderAsync, needs, variables: () => served().slot.variables };
   }
 
   /** Count a render failure against its selected artifact and audience. */
@@ -1834,7 +1850,7 @@ export class AirPrompterAgent implements AgentRuntime {
     try {
       return render();
     } catch (error) {
-      if (errorNamed(error, "MissingVariableError")) this.observeGuarded({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
+      if (errorNamed(error, "MissingVariableError") && !this.runs.renderFailed(row.tag)) this.observeGuarded({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
       throw error;
     }
   }
@@ -1846,7 +1862,7 @@ export class AirPrompterAgent implements AgentRuntime {
     } catch (error) {
       if (isVariableSourceError(error)) {
         this.log({ event: "variable_source_failed", tag: context.tag, name: error.variable, reason: error.reason });
-        this.observeGuarded({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
+        if (!this.runs.renderFailed(row.tag)) this.observeGuarded({ ...row, status: "error", errorClass: "render_missing_variable", latencyMs: 0, usageSource: "unavailable" }, this.nowMs());
       }
       throw error;
     }
@@ -1868,7 +1884,8 @@ export class AirPrompterAgent implements AgentRuntime {
 
   /** A workflow slot's steps in ordinal order, each with its prompt text. */
   workflow(tag: string, options: { subject?: string } = {}) {
-    const resolved = this.resolveSlot(tag, options.subject);
+    // Inside a run the workflow slot pins through the run, so every step stays on one arm. Each step keeps its own ref.
+    const { resolved } = this.runs.resolveThrough(tag, options.subject ?? newSubject(), undefined, (subject, runTags) => this.resolveSlot(tag, subject, runTags ? copyAudienceTags({ ...this.audienceTags, ...runTags }) : undefined), { entry: false });
     const workflow = this.resolver().workflow(resolved);
     for (const step of workflow.steps) this.renders.register(step.text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag, step: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
     /** Render one workflow step with the workflow's variable rules. */
@@ -1942,7 +1959,8 @@ export class AirPrompterAgent implements AgentRuntime {
             return { passed: outcome.passed, failed: outcome.failed };
           }
         : undefined;
-    return observeCall(rendered, call, (observation) => this.spool.observe(observation, this.nowMs()), { ...options, ...(evaluate ? { evaluate } : {}), now: () => this.nowMs(), log: (event) => this.log(event) });
+    // Inside a run that pinned this slot, the call folds into the run's counters: one request counts once.
+    return observeCall(rendered, call, (observation) => void (this.runs.take(observation) || this.spool.observe(observation, this.nowMs())), { ...options, ...(evaluate ? { evaluate } : {}), now: () => this.nowMs(), log: (event) => this.log(event) });
   }
 
   /**
@@ -2076,21 +2094,38 @@ export class AirPrompterAgent implements AgentRuntime {
     return { name: "prompt", criteria, protection: [...JUDGE_RUBRICS.protection.criteria] };
   }
 
-  /** File bounded quality signals; `options.model` names the actual provider model when it overrode the slot. */
-  feedback(runRef: string, signals: Record<string, unknown>, options: { model?: string } = {}): boolean {
+  /**
+   * File bounded quality signals against a run. With no `slot`, they file once per entry of the reference, each on
+   * that entry's own version, arm and minute; with `slot`, on that entry only, and false when the run did not use it.
+   * `options.model` names the provider model that actually answered when it overrode the slot, so on a reference with
+   * several entries it needs `slot`.
+   */
+  feedback(runRef: string, signals: Record<string, unknown>, options: { model?: string; slot?: string } = {}): boolean {
     if (typeof runRef !== "string") return false;
-    const facts = parseRunRef(runRef, this.runRefKeys)?.entries[0];
-    if (!facts) return false;
+    const all = parseRunRef(runRef, this.runRefKeys)?.entries;
+    if (!all || all.length === 0) return false;
+    const entries = options.slot === undefined ? all : all.filter((entry) => entry.tag === options.slot);
+    if (entries.length === 0) return false;
     if (options.model !== undefined && (typeof options.model !== "string" || options.model.length < 1 || options.model.length > 128 || /[\u0000-\u001f\u007f]/u.test(options.model))) {
       this.log({ event: "feedback_rejected", rejected: { model: "invalid_model" } });
+      return false;
+    }
+    if (options.model !== undefined && entries.length > 1) {
+      this.log({ event: "feedback_rejected", rejected: { model: "slot_required" } });
       return false;
     }
     const normalized = normalizeFeedback(signals);
     if (Object.keys(normalized.rejected).length) this.log({ event: "feedback_rejected", rejected: normalized.rejected });
     if (!normalized.accepted) return false;
-    // Feedback rides on the run's window: same dimension set, no extra count (the run was already counted).
-    this.spool.outcomes({ tag: facts.tag, artifactId: facts.artifactId, versionId: facts.versionId, arm: facts.arm, model: options.model ?? facts.model, ...(facts.audienceIds ? {audienceIds: facts.audienceIds} : {}), outcomeRunMinute: facts.runMinute }, normalized.outcomes, this.nowMs());
+    // Feedback rides on each run window: same dimension set, no extra count (the run was already counted).
+    for (const facts of entries) this.spool.outcomes({ tag: facts.tag, artifactId: facts.artifactId, versionId: facts.versionId, arm: facts.arm, model: options.model ?? facts.model, ...(facts.audienceIds ? {audienceIds: facts.audienceIds} : {}), outcomeRunMinute: facts.runMinute }, normalized.outcomes, this.nowMs());
     return true;
+  }
+
+  /** Why a run got the versions it did: the reference's entries, or null when it does not verify. Reads no release, writes nothing. */
+  explain(runRef: string): readonly RunRefEntry[] | null {
+    if (typeof runRef !== "string") return null;
+    return parseRunRef(runRef, this.runRefKeys)?.entries ?? null;
   }
 
   /** S14: the in-process healthz — the rules on `Healthz`, over this process's own status. Never throws. */

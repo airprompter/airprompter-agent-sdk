@@ -18,6 +18,7 @@
     "model",
     "status",
     "usageSource",
+    "toolsReported",
     "count",
     "modelCalls",
     "agentRun",
@@ -31,7 +32,7 @@
     },
     "v": {
       "enum": [
-        4
+        5
       ]
     },
     "artifactId": {
@@ -113,6 +114,10 @@
         "estimated",
         "unavailable"
       ]
+    },
+    "toolsReported": {
+      "type": "boolean",
+      "description": "True when the writer saw this row's tool calls, so `tools.calls: 0` means none ran rather than not reported. A dimension of the window key. Always false on a feedback-only row."
     },
     "count": {
       "type": "integer",
@@ -380,6 +385,9 @@
               }
             },
             "type": "object"
+          },
+          "toolsReported": {
+            "const": false
           }
         },
         "type": "object"

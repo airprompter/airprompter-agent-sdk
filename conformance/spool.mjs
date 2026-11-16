@@ -86,7 +86,7 @@ export function mergeOutcomes(row, outcomes) {
 export const STEP_BOUNDS = { maxLength: 64, maxPerRun: 32 };
 const validStep = (value) => typeof value === "string" && [...value].length >= 1 && [...value].length <= STEP_BOUNDS.maxLength && !/[\u0000-\u001f\u007f]/u.test(value) && !/[\uD800-\uDFFF]/u.test(value);
 
-/** Minute windows per dimension set (tag, artifactId, versionId, arm, model, status, errorClass, audienceIds, outcomeRunMinute); step rows beside them, never in them. */
+/** Minute windows per dimension set (tag, artifactId, versionId, arm, model, status, errorClass, usageSource, toolsReported, audienceIds, outcomeRunMinute); step rows beside them, never in them. */
 export class WindowAggregator {
   constructor({ instanceId, instanceClass, sdk }) {
     this.identity = { instanceId, instanceClass, sdk };
@@ -113,12 +113,14 @@ export class WindowAggregator {
     const minute = this.turnMinute(at);
     const errorClass = dimensions.errorClass ?? null;
     const outcomeRunMinute = dimensions.outcomeRunMinute === minute ? null : dimensions.outcomeRunMinute ?? null;
-    const key = JSON.stringify([dimensions.tag, dimensions.artifactId, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass, dimensions.audienceIds ?? null, outcomeRunMinute]);
+    const usageSource = dimensions.usageSource ?? "reported";
+    const toolsReported = dimensions.toolsReported ?? false;
+    const key = JSON.stringify([dimensions.tag, dimensions.artifactId, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass, usageSource, toolsReported, dimensions.audienceIds ?? null, outcomeRunMinute]);
     let row = this.open.get(key);
     if (!row) {
       row = {
         type: "window",
-        v: 4,
+        v: 5,
         artifactId: dimensions.artifactId,
         minute,
         instanceId: this.identity.instanceId,
@@ -129,7 +131,8 @@ export class WindowAggregator {
         model: dimensions.model,
         status: dimensions.status,
         errorClass,
-        usageSource: dimensions.usageSource ?? "reported",
+        usageSource,
+        toolsReported,
         count: 0,
         modelCalls: 0,
         agentRun: 0,
@@ -146,7 +149,7 @@ export class WindowAggregator {
   }
   /** One run's totals: the only place `count` rises. Moments are over the run's totals, never per model call. */
   recordRun(at, totals) {
-    const dimensions = { ...totals.dimensions, status: totals.status, errorClass: totals.errorClass, usageSource: totals.usageSource };
+    const dimensions = { ...totals.dimensions, status: totals.status, errorClass: totals.errorClass, usageSource: totals.usageSource, toolsReported: totals.toolsReported };
     const row = this.window(at, dimensions);
     if (row.outcomeRunMinute === row.minute) delete row.outcomeRunMinute;
     row.count += 1;
@@ -184,10 +187,11 @@ export class WindowAggregator {
       else names.add(step);
     }
     const errorClass = totals.errorClass ?? null;
-    const key = JSON.stringify([dimensionKey, step, totals.status, errorClass]);
+    const usageSource = totals.usageSource ?? "reported";
+    const key = JSON.stringify([dimensionKey, step, totals.status, errorClass, usageSource, totals.toolsReported]);
     let row = this.openSteps.get(key);
     if (!row) {
-      row = { type: "step", v: 1, artifactId: d.artifactId, minute, instanceId: this.identity.instanceId, instanceClass: this.identity.instanceClass, tag: d.tag, versionId: d.versionId, arm: d.arm, model: d.model, step, status: totals.status, errorClass, usageSource: totals.usageSource, modelCalls: 0, latencyMs: { buckets: new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0), sum: 0 }, tokens: { input: 0, output: 0 }, tools: { calls: 0, errors: 0 }, sdk: this.identity.sdk };
+      row = { type: "step", v: 2, artifactId: d.artifactId, minute, instanceId: this.identity.instanceId, instanceClass: this.identity.instanceClass, tag: d.tag, versionId: d.versionId, arm: d.arm, model: d.model, step, status: totals.status, errorClass, usageSource, toolsReported: totals.toolsReported, modelCalls: 0, latencyMs: { buckets: new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0), sum: 0 }, tokens: { input: 0, output: 0 }, tools: { calls: 0, errors: 0 }, sdk: this.identity.sdk };
       if (d.audienceIds !== undefined) row.audienceIds = [...d.audienceIds];
       this.openSteps.set(key, row);
     }
@@ -210,27 +214,29 @@ export class WindowAggregator {
     const step = o.step;
     const dimensions = { tag, artifactId: o.artifactId, versionId: o.versionId, arm: o.arm, model: o.model, ...(o.audienceIds !== undefined ? { audienceIds: o.audienceIds } : {}) };
     const usageSource = o.usageSource ?? "reported";
+    const toolsReported = o.toolCalls !== undefined;
     const errorClass = o.errorClass ?? null;
-    const row = this.recordRun(at, { dimensions, status: o.status, errorClass, usageSource, agentRun: 1, modelCalls: 1, latencyMs: o.latencyMs, tokens, tools, ...(o.checks ? { checks: { passed: o.checks.passed ?? 0, failed: o.checks.failed ?? 0 } } : {}) });
+    const row = this.recordRun(at, { dimensions, status: o.status, errorClass, usageSource, toolsReported, agentRun: 1, modelCalls: 1, latencyMs: o.latencyMs, tokens, tools, ...(o.checks ? { checks: { passed: o.checks.passed ?? 0, failed: o.checks.failed ?? 0 } } : {}) });
     if (o.outcomes) mergeOutcomes(row, o.outcomes);
     if (step !== undefined) {
       const buckets = new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0);
       buckets[latencyBucketIndex(o.latencyMs)] = 1;
-      this.recordStep(at, { dimensions, step, status: o.status === "ok" ? "ok" : "error", errorClass, usageSource, modelCalls: 1, latency: { buckets, sum: roundedMs(o.latencyMs) }, tokens, tools });
+      this.recordStep(at, { dimensions, step, status: o.status === "ok" ? "ok" : "error", errorClass, usageSource, toolsReported, modelCalls: 1, latency: { buckets, sum: roundedMs(o.latencyMs) }, tokens, tools });
     }
   }
   outcomes(at, feedback) {
     if (!hasValidOutcome(feedback.outcomes) || feedback.artifactId === undefined) return;
     if (feedback.audienceIds !== undefined && !validAudienceIds(feedback.audienceIds)) return;
     if (feedback.outcomeRunMinute !== undefined && (!validOutcomeRunMinute(feedback.outcomeRunMinute) || feedback.outcomeRunMinute > minuteOf(at))) return;
-    if (feedback.outcomeRunMinute === undefined) {
-      const minute = minuteOf(at);
-      if (this.openMinute !== minute) return;
-      const key = JSON.stringify([feedback.tag, feedback.artifactId, feedback.versionId, feedback.arm, feedback.model, "ok", null, feedback.audienceIds ?? null, null]);
-      const existing = this.open.get(key);
-      if (!existing || existing.count === 0) return;
-      mergeOutcomes(existing, feedback.outcomes);
-      return;
+    if (feedback.outcomeRunMinute === undefined || feedback.outcomeRunMinute === minuteOf(at)) {
+      // Feedback knows neither usageSource nor toolsReported: the first measured ok row this minute with the other dimensions.
+      const audienceIds = JSON.stringify(feedback.audienceIds ?? null);
+      const existing = this.openMinute === minuteOf(at) ? [...this.open.values()].find((row) => row.count > 0 && row.status === "ok" && row.errorClass === null && row.outcomeRunMinute === undefined && ["tag", "artifactId", "versionId", "arm", "model"].every((name) => row[name] === feedback[name]) && JSON.stringify(row.audienceIds ?? null) === audienceIds) : undefined;
+      if (existing) {
+        mergeOutcomes(existing, feedback.outcomes);
+        return;
+      }
+      if (feedback.outcomeRunMinute === undefined) return;
     }
     mergeOutcomes(this.window(at, { ...feedback, tag: feedback.tag, status: "ok" }), feedback.outcomes);
   }
@@ -249,9 +255,9 @@ export class WindowAggregator {
 // ---------------------------------------------------------------------------
 
 const WINDOW_NESTED = { latencyMs: ["buckets", "sum"], tokens: ["input", "cachedInput", "output"], tools: ["calls", "errors"], tokensSq: ["input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput"], checks: ["passed", "failed"] };
-const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"];
-const STEP_FIELDS = ["type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "modelCalls", "latencyMs", "tokens", "tools", "sdk"];
-const ROW_FIELDS = { window: { v: 4, fields: WINDOW_FIELDS }, step: { v: 1, fields: STEP_FIELDS }, refusal: { v: 1, fields: ["type", "v", "at", "instanceId", "reason", "generation", "tag"] }, dropped: { v: 1, fields: ["type", "v", "at", "instanceId", "segments", "bytes"] } };
+const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "toolsReported", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"];
+const STEP_FIELDS = ["type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "toolsReported", "modelCalls", "latencyMs", "tokens", "tools", "sdk"];
+const ROW_FIELDS = { window: { v: 5, fields: WINDOW_FIELDS }, step: { v: 2, fields: STEP_FIELDS }, refusal: { v: 1, fields: ["type", "v", "at", "instanceId", "reason", "generation", "tag"] }, dropped: { v: 1, fields: ["type", "v", "at", "instanceId", "segments", "bytes"] } };
 
 /** Lines to rows: unknown fields stripped, later rows skipped and counted, only corruption refused. */
 const ROW_STATUSES = { window: ["ok", "error", "refused", "interrupted"], step: ["ok", "error"] };

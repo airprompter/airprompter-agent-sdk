@@ -1,14 +1,14 @@
 // A spool writer without the SDK (protocol/spool-format.md, D66): what a team
 // instrumenting a provider SDK themselves needs — minute windows per
-// (tag, artifactId, versionId, arm, model, status, errorClass, audienceIds,
-// outcomeRunMinute) where `count` means runs, step rows beside them, the fixed
+// (tag, artifactId, versionId, arm, model, status, errorClass, usageSource,
+// toolsReported, audienceIds, outcomeRunMinute) where `count` means runs, step rows beside them, the fixed
 // latency buckets, segment naming, `.open` → fsync → rename, and rotation on the
 // minute or at 1 MiB. `airprompterd` uploads what lands in `dir`. No
 // dependencies; `conformance/run.mjs` drives it through vectors/spool.json.
 //
 //   const spool = new SpoolWriter({ dir: `${stateDir}/airprompter/${agentId}/${target}/spool/telemetry`, instanceId, sdk: "acme-logger/1.0" });
 //   spool.observe({ tag, artifactId, versionId, arm, model, status: "ok", latencyMs: 812, tokens: { input: 400, output: 90 } }); // a one-call run
-//   spool.recordRun({ dimensions, status: "ok", errorClass: null, usageSource: "reported", agentRun: 1, modelCalls: 5, latencyMs: 4200, tokens, tools });
+//   spool.recordRun({ dimensions, status: "ok", errorClass: null, usageSource: "reported", toolsReported: true, agentRun: 1, modelCalls: 5, latencyMs: 4200, tokens, tools });
 //   spool.feedback({ tag, artifactId, versionId, arm, model, outcomes: { accepted: true } });
 //   process.on("beforeExit", () => spool.close());
 
@@ -53,8 +53,8 @@ export class SpoolWriter {
   }
 
   /** One run's totals: the only place `count` rises. Moments are over the run's totals, never per model call. */
-  recordRun({ dimensions, status, errorClass = null, usageSource = "reported", agentRun, modelCalls, latencyMs, tokens, tools, checks = null }, at = this.now()) {
-    const row = this.window(at, { ...dimensions, status, errorClass, usageSource });
+  recordRun({ dimensions, status, errorClass = null, usageSource = "reported", toolsReported = false, agentRun, modelCalls, latencyMs, tokens, tools, checks = null }, at = this.now()) {
+    const row = this.window(at, { ...dimensions, status, errorClass, usageSource, toolsReported });
     if (row.outcomeRunMinute === row.minute) delete row.outcomeRunMinute;
     row.count += 1;
     row.agentRun += agentRun;
@@ -79,7 +79,7 @@ export class SpoolWriter {
   }
 
   /** One step's totals: a row of its own, never a window. Past either cap in STEP_BOUNDS the name is written as `other`. */
-  recordStep({ dimensions, step, status, errorClass = null, usageSource = "reported", latency, tokens, tools }, at = this.now()) {
+  recordStep({ dimensions, step, status, errorClass = null, usageSource = "reported", toolsReported = false, latency, tokens, tools }, at = this.now()) {
     const d = dimensions;
     checkDimensions(d, at);
     const minute = this.turnMinute(at);
@@ -91,10 +91,10 @@ export class SpoolWriter {
       if (names.size >= STEP_BOUNDS.maxPerRun) name = "other";
       else names.add(name);
     }
-    const key = JSON.stringify([scope, name, status, errorClass]);
+    const key = JSON.stringify([scope, name, status, errorClass, usageSource, toolsReported]);
     let row = this.openSteps.get(key);
     if (!row) {
-      row = { type: "step", v: 1, artifactId: d.artifactId, minute, instanceId: this.instanceId, instanceClass: this.instanceClass, tag: d.tag, versionId: d.versionId, arm: d.arm, model: d.model, step: name, status, errorClass, usageSource, modelCalls: 0, latencyMs: { buckets: new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0), sum: 0 }, tokens: { input: 0, output: 0 }, tools: { calls: 0, errors: 0 }, sdk: this.sdk };
+      row = { type: "step", v: 2, artifactId: d.artifactId, minute, instanceId: this.instanceId, instanceClass: this.instanceClass, tag: d.tag, versionId: d.versionId, arm: d.arm, model: d.model, step: name, status, errorClass, usageSource, toolsReported, modelCalls: 0, latencyMs: { buckets: new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0), sum: 0 }, tokens: { input: 0, output: 0 }, tools: { calls: 0, errors: 0 }, sdk: this.sdk };
       if (d.audienceIds !== undefined) row.audienceIds = [...d.audienceIds];
       this.openSteps.set(key, row);
     }
@@ -111,18 +111,19 @@ export class SpoolWriter {
   }
 
   /** A one-call run: latency, tokens, status and error class, never text, ids or messages. A step row only when it names a step. */
-  observe({ tag: givenTag, artifactId, versionId, arm = "none", model, status = "ok", errorClass = null, usageSource = "reported", audienceIds, latencyMs, tokens = {}, toolCalls = {}, step: givenStep, checks = null, outcomes = null }, at = this.now()) {
+  observe({ tag: givenTag, artifactId, versionId, arm = "none", model, status = "ok", errorClass = null, usageSource = "reported", audienceIds, latencyMs, tokens = {}, toolCalls, step: givenStep, checks = null, outcomes = null }, at = this.now()) {
     const tag = givenTag;
     const step = givenStep;
     const dimensions = { tag, artifactId, versionId, arm, model, ...(audienceIds !== undefined ? { audienceIds } : {}) };
     const totals = { input: tokens.input ?? 0, cachedInput: tokens.cachedInput ?? 0, output: tokens.output ?? 0 };
-    const tools = { calls: toolCalls.calls ?? 0, errors: toolCalls.errors ?? 0 };
-    const row = this.recordRun({ dimensions, status, errorClass, usageSource, agentRun: 1, modelCalls: 1, latencyMs, tokens: totals, tools, ...(checks ? { checks: { passed: checks.passed ?? 0, failed: checks.failed ?? 0 } } : {}) }, at);
+    const tools = { calls: toolCalls?.calls ?? 0, errors: toolCalls?.errors ?? 0 };
+    const toolsReported = toolCalls !== undefined; // tool calls handed in were seen: zero means none ran
+    const row = this.recordRun({ dimensions, status, errorClass, usageSource, toolsReported, agentRun: 1, modelCalls: 1, latencyMs, tokens: totals, tools, ...(checks ? { checks: { passed: checks.passed ?? 0, failed: checks.failed ?? 0 } } : {}) }, at);
     if (outcomes) mergeOutcomes(row, outcomes);
     if (step !== undefined) {
       const buckets = new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0);
       buckets[latencyBucketIndex(latencyMs)] = 1;
-      this.recordStep({ dimensions, step, status: status === "ok" ? "ok" : "error", errorClass, usageSource, modelCalls: 1, latency: { buckets, sum: roundedMs(latencyMs) }, tokens: totals, tools }, at);
+      this.recordStep({ dimensions, step, status: status === "ok" ? "ok" : "error", errorClass, usageSource, toolsReported, modelCalls: 1, latency: { buckets, sum: roundedMs(latencyMs) }, tokens: totals, tools }, at);
     }
   }
 
@@ -131,16 +132,14 @@ export class SpoolWriter {
     if (!hasValidOutcome(outcomes) || artifactId === undefined) return;
     if (audienceIds !== undefined && !validAudienceIds(audienceIds)) return;
     if (outcomeRunMinute !== undefined && (!validOutcomeRunMinute(outcomeRunMinute) || outcomeRunMinute > minuteOf(at))) return;
-    if (outcomeRunMinute === undefined) {
-      const minute = minuteOf(at);
-      if (this.openMinute !== minute) return;
-      const key = JSON.stringify([tag, artifactId, versionId, arm, model, "ok", null, audienceIds ?? null, null]);
-      const existing = this.open.get(key);
-      if (!existing || existing.count === 0) return;
-      mergeOutcomes(existing, outcomes);
-      return;
+    if (outcomeRunMinute === undefined || outcomeRunMinute === minuteOf(at)) {
+      // Feedback knows neither usageSource nor toolsReported: the first measured ok row this minute with the other dimensions.
+      const audience = JSON.stringify(audienceIds ?? null);
+      const existing = this.openMinute === minuteOf(at) ? [...this.open.values()].find((row) => row.count > 0 && row.status === "ok" && row.errorClass === null && row.outcomeRunMinute === undefined && row.tag === tag && row.artifactId === artifactId && row.versionId === versionId && row.arm === arm && row.model === model && JSON.stringify(row.audienceIds ?? null) === audience) : undefined;
+      if (existing) return mergeOutcomes(existing, outcomes);
+      if (outcomeRunMinute === undefined) return;
     }
-    mergeOutcomes(this.window(at, { tag, artifactId, versionId, arm, model, status: "ok", errorClass: null, usageSource: "reported", audienceIds, outcomeRunMinute }), outcomes);
+    mergeOutcomes(this.window(at, { tag, artifactId, versionId, arm, model, status: "ok", errorClass: null, usageSource: "reported", toolsReported: false, audienceIds, outcomeRunMinute }), outcomes);
   }
 
   turnMinute(at) {
@@ -154,12 +153,14 @@ export class SpoolWriter {
     checkDimensions(d, at);
     const minute = this.turnMinute(at);
     const outcomeRunMinute = d.outcomeRunMinute === minute ? null : d.outcomeRunMinute ?? null;
-    const key = JSON.stringify([d.tag, d.artifactId, d.versionId, d.arm, d.model, d.status, d.errorClass ?? null, d.audienceIds ?? null, outcomeRunMinute]);
+    const usageSource = d.usageSource ?? "reported";
+    const toolsReported = d.toolsReported ?? false;
+    const key = JSON.stringify([d.tag, d.artifactId, d.versionId, d.arm, d.model, d.status, d.errorClass ?? null, usageSource, toolsReported, d.audienceIds ?? null, outcomeRunMinute]);
     let row = this.open.get(key);
     if (!row) {
       row = {
         type: "window",
-        v: 4,
+        v: 5,
         artifactId: d.artifactId,
         minute,
         instanceId: this.instanceId,
@@ -170,7 +171,8 @@ export class SpoolWriter {
         model: d.model,
         status: d.status,
         errorClass: d.errorClass ?? null,
-        usageSource: d.usageSource ?? "reported",
+        usageSource,
+        toolsReported,
         count: 0,
         modelCalls: 0,
         agentRun: 0,

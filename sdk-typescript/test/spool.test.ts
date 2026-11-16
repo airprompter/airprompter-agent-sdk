@@ -113,8 +113,8 @@ test("outcomes without a run minute require an open measured run", () => {
   const rows = sink.drain().filter((row): row is WindowRow => row.type === "window");
   assert.equal(rows.length, 2);
   assert.deepEqual(rows.map((row) => [row.v, row.count, row.outcomes?.thumbs]), [
-    [4, 1, { n: 1, sum: 1, sumSq: 1 }],
-    [4, 1, { n: 1, sum: 0, sumSq: 0 }],
+    [5, 1, { n: 1, sum: 1, sumSq: 1 }],
+    [5, 1, { n: 1, sum: 0, sumSq: 0 }],
   ]);
 });
 

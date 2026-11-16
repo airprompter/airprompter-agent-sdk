@@ -641,7 +641,8 @@ test("a telemetry failure never replaces what the caller is doing, on any path t
   plane.promote([plane.slot({ tag: "support.reply", text: "Reply to {{name}}", variables: [{ name: "name", required: true, trust: "operator" }] })]);
   const events: Record<string, unknown>[] = [];
   const ap = await start(plane, tempDir(), { logger: (event) => events.push(event) });
-  (ap as unknown as { spool: { observe: () => void } }).spool.observe = () => {
+  const spool = ap as unknown as { spool: { observe: () => void; recordRun: () => void; recordStep: () => void } };
+  spool.spool.observe = spool.spool.recordRun = spool.spool.recordStep = () => {
     throw new Error("disk full");
   };
   assert.throws(() => ap.prompt("support.reply").render({}), (error: unknown) => (error as Error).name === "MissingVariableError", "the caller's error stays the caller's");

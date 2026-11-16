@@ -128,6 +128,11 @@ export class ReleaseResolver {
     return effectiveArms({ arms: experiment.arms, ramp: experiment.ramp, disabledArms: disabledArmsFor(this.disabled(), experiment.experimentId), nowMs: this.input.nowMs() });
   }
 
+  /** Whether this release holds a servable slot with this tag. Reads no disable and assigns nothing. */
+  hasSlot(tag: string): boolean {
+    return servableSlots(this.payload).some((entry) => entry.tag === tag);
+  }
+
   /** The slot a subject gets for a tag, or why not. Refusals are data: the facade records them. */
   resolve(tag: string, subject?: string, tagsOverride?: Readonly<Record<string,string>>): ResolveOutcome {
     const payload = this.payload;

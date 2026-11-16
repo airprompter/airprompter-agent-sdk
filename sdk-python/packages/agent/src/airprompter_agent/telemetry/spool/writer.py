@@ -476,8 +476,8 @@ def _check_dimensions(*, artifact_id: Any, audience_ids: Optional[Sequence[str]]
         raise ValueError("telemetry_error_class_invalid")
 
 
-def _window_key(tag: str, artifact_id: Optional[str], version_id: str, arm: str, model: str, status: str, error_class: Optional[str], audience_ids: Optional[Sequence[str]], outcome_run_minute: Optional[str]) -> str:
-    return json.dumps([tag, artifact_id, version_id, arm, model, status, error_class, audience_ids, outcome_run_minute], separators=(",", ":"))
+def _window_key(tag: str, artifact_id: Optional[str], version_id: str, arm: str, model: str, status: str, error_class: Optional[str], audience_ids: Optional[Sequence[str]], outcome_run_minute: Optional[str], usage_source: str = "reported", tools_reported: bool = False) -> str:
+    return json.dumps([tag, artifact_id, version_id, arm, model, status, error_class, usage_source, tools_reported, audience_ids, outcome_run_minute], separators=(",", ":"))
 
 
 class SpoolWriter:
@@ -502,16 +502,17 @@ class SpoolWriter:
         self._open_minute = minute
         return minute
 
-    def _window(self, *, tag: str, version_id: str, artifact_id: Optional[str], arm: str, model: str, status: str, error_class: Optional[str], usage_source: Optional[str], at_ms: float, audience_ids: Optional[Sequence[str]] = None, outcome_run_minute: Optional[str] = None) -> SpoolRow:
+    def _window(self, *, tag: str, version_id: str, artifact_id: Optional[str], arm: str, model: str, status: str, error_class: Optional[str], usage_source: Optional[str], at_ms: float, audience_ids: Optional[Sequence[str]] = None, outcome_run_minute: Optional[str] = None, tools_reported: bool = False) -> SpoolRow:
         _check_dimensions(artifact_id=artifact_id, audience_ids=audience_ids, outcome_run_minute=outcome_run_minute, minute=minute_of(at_ms), tag=tag, version_id=version_id, arm=arm, model=model, status=status, usage_source=usage_source, error_class=error_class)
         minute = self._turn_minute(at_ms)
         outcome_key = None if outcome_run_minute == minute else outcome_run_minute
-        key = _window_key(tag, artifact_id, version_id, arm, model, status, error_class, audience_ids, outcome_key)
+        usage = usage_source or "reported"
+        key = _window_key(tag, artifact_id, version_id, arm, model, status, error_class, audience_ids, outcome_key, usage, tools_reported)
         row = self._open.get(key)
         if row is None:
             row = {
                 "type": "window",
-                "v": 4,
+                "v": 5,
                 "artifactId": artifact_id,
                 **({"audienceIds": list(audience_ids)} if audience_ids is not None else {}),
                 **({"outcomeRunMinute": outcome_run_minute} if outcome_run_minute else {}),
@@ -524,7 +525,8 @@ class SpoolWriter:
                 "model": model,
                 "status": status,
                 "errorClass": error_class,
-                "usageSource": usage_source or "reported",
+                "usageSource": usage,
+                "toolsReported": tools_reported,
                 "count": 0,
                 "modelCalls": 0,
                 "agentRun": 0,
@@ -548,7 +550,7 @@ class SpoolWriter:
         latency_sum = _rounded_ms(totals.latency_ms)
         tokens_in, cached, tokens_out = _token_counts(totals.tokens)
         tools = _tool_counts(totals.tools)
-        row = self._window(tag=dimensions.tag, version_id=dimensions.version_id, artifact_id=dimensions.artifact_id, arm=dimensions.arm, model=dimensions.model, status=totals.status, error_class=totals.error_class, usage_source=totals.usage_source, at_ms=at_ms, audience_ids=dimensions.audience_ids)
+        row = self._window(tag=dimensions.tag, version_id=dimensions.version_id, artifact_id=dimensions.artifact_id, arm=dimensions.arm, model=dimensions.model, status=totals.status, error_class=totals.error_class, usage_source=totals.usage_source, at_ms=at_ms, audience_ids=dimensions.audience_ids, tools_reported=totals.tools_reported)
         if row.get("outcomeRunMinute") == row["minute"]:
             row.pop("outcomeRunMinute")
         row["count"] += 1
@@ -581,12 +583,12 @@ class SpoolWriter:
             minute = self._turn_minute(at_ms)
             scope = _window_key(dimensions.tag, dimensions.artifact_id, dimensions.version_id, dimensions.arm, dimensions.model, "", None, dimensions.audience_ids, None)
             step = step_name(totals.step, self._step_names.setdefault(scope, set()))
-            key = json.dumps([scope, step, totals.status, totals.error_class], separators=(",", ":"))
+            key = json.dumps([scope, step, totals.status, totals.error_class, totals.usage_source, totals.tools_reported], separators=(",", ":"))
             row = self._open_steps.get(key)
             if row is None:
                 row = {
                     "type": "step",
-                    "v": 1,
+                    "v": 2,
                     "artifactId": dimensions.artifact_id,
                     **({"audienceIds": list(dimensions.audience_ids)} if dimensions.audience_ids is not None else {}),
                     "minute": minute,
@@ -600,6 +602,7 @@ class SpoolWriter:
                     "status": totals.status,
                     "errorClass": totals.error_class,
                     "usageSource": totals.usage_source,
+                    "toolsReported": totals.tools_reported,
                     "modelCalls": 0,
                     "latencyMs": _empty_histogram(),
                     "tokens": {"input": 0, "output": 0},
@@ -622,8 +625,10 @@ class SpoolWriter:
         tokens = {name: _member(observation.tokens, name) or 0 for name in ("input", "cachedInput", "output")}
         tools = {name: _member(observation.tool_calls, name) or 0 for name in ("calls", "errors")}
         usage_source = "reported" if observation.usage_source is None else observation.usage_source
+        # A caller that hands in ``tool_calls`` saw them, so zero calls means none ran.
+        tools_reported = observation.tool_calls is not None
         with self._lock:
-            row = self._add_run(RunTotals(dimensions=dimensions, status=observation.status, error_class=observation.error_class, usage_source=usage_source, agent_run=1, model_calls=1, latency_ms=observation.latency_ms, tokens=tokens, tools=tools, checks=observation.checks), at_ms)
+            row = self._add_run(RunTotals(dimensions=dimensions, status=observation.status, error_class=observation.error_class, usage_source=usage_source, tools_reported=tools_reported, agent_run=1, model_calls=1, latency_ms=observation.latency_ms, tokens=tokens, tools=tools, checks=observation.checks), at_ms)
             if observation.outcomes:
                 _merge_outcomes(row, observation.outcomes)
             if step is None:
@@ -631,14 +636,19 @@ class SpoolWriter:
             latency = _empty_histogram()
             latency["buckets"][latency_bucket_index(observation.latency_ms)] = 1
             latency["sum"] = _rounded_ms(observation.latency_ms)
-            self.record_step(StepTotals(dimensions=dimensions, step=step, status="ok" if observation.status == "ok" else "error", error_class=observation.error_class, usage_source=usage_source, model_calls=1, latency=latency, tokens=tokens, tools=tools), at_ms)
+            self.record_step(StepTotals(dimensions=dimensions, step=step, status="ok" if observation.status == "ok" else "error", error_class=observation.error_class, usage_source=usage_source, tools_reported=tools_reported, model_calls=1, latency=latency, tokens=tokens, tools=tools), at_ms)
 
     def _measured_row(self, *, tag: str, artifact_id: Optional[str], version_id: str, arm: str, model: str, audience_ids: Optional[Sequence[str]], at_ms: float) -> Optional[SpoolRow]:
-        """The open measured row these dimensions name, if a run has landed on it this minute."""
+        """The first open measured row these dimensions name, if a run has landed on one this minute: status ok, no error
+        class, no other run minute, whatever its ``usageSource`` or ``toolsReported``. Neither is known to feedback, so it
+        searches the open windows rather than building one key."""
         if self._open_minute != minute_of(at_ms):
             return None
-        row = self._open.get(_window_key(tag, artifact_id, version_id, arm, model, "ok", None, audience_ids, None))
-        return row if row is not None and row["count"] > 0 else None
+        audience = list(audience_ids) if audience_ids is not None else None
+        for row in self._open.values():
+            if row["count"] > 0 and row["status"] == "ok" and row["errorClass"] is None and "outcomeRunMinute" not in row and row["tag"] == tag and row["artifactId"] == artifact_id and row["versionId"] == version_id and row["arm"] == arm and row["model"] == model and row.get("audienceIds") == audience:
+                return row
+        return None
 
     def checks(self, *, tag: str, version_id: str, artifact_id: Optional[str] = None, arm: str, model: str, passed: int, failed: int, at_ms: float, audience_ids: Optional[Sequence[str]] = None, run_minute: Optional[str] = None) -> None:
         """T29: output-check counts against a run already counted (an app that evaluated after the fact): the run's window, no extra count. A window holding no run takes none."""
@@ -654,14 +664,16 @@ class SpoolWriter:
                 return
             if audience_ids is not None and not valid_audience_ids(audience_ids):
                 return
-            if outcome_run_minute is None:
+            if outcome_run_minute is not None and not _valid_outcome_run_minute(outcome_run_minute, minute_of(at_ms)):
+                return
+            if outcome_run_minute is None or outcome_run_minute == minute_of(at_ms):
                 row = self._measured_row(tag=tag, artifact_id=artifact_id, version_id=version_id, arm=arm, model=model, audience_ids=audience_ids, at_ms=at_ms)
                 if row is not None:
                     _merge_outcomes(row, outcomes)
-                return
-            if not _valid_outcome_run_minute(outcome_run_minute, minute_of(at_ms)):
-                return
-            _merge_outcomes(self._window(tag=tag, version_id=version_id, artifact_id=artifact_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms, audience_ids=audience_ids, outcome_run_minute=outcome_run_minute), outcomes)
+                    return
+                if outcome_run_minute is None:
+                    return
+            _merge_outcomes(self._window(tag=tag, version_id=version_id, artifact_id=artifact_id, arm=arm, model=model, status="ok", error_class=None, usage_source=None, at_ms=at_ms, audience_ids=audience_ids, outcome_run_minute=outcome_run_minute, tools_reported=False), outcomes)
 
     def refusal(self, *, at: str, reason: str, generation: int, tag: Optional[str], at_ms: float) -> None:
         self._sink.append({"type": "refusal", "v": 1, "instanceId": self._identity.instance_id, "at": at, "reason": reason, "generation": generation, "tag": tag}, at_ms)

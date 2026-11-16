@@ -28,6 +28,7 @@ from airprompter_agent.core.render.run_ref import RunRefFacts, mint_run_ref, new
 from airprompter_agent.core.render.template import MissingVariableError, UnknownVariableError
 from airprompter_agent.sync.sync.loop import required_models_missing
 from airprompter_agent.core._util import b64url_encode
+from airprompter_agent.runtime.run import Passthrough
 
 from .control_plane import FakeControlPlane, new_key
 
@@ -226,7 +227,7 @@ def test_workflows_telemetry_feedback_spool(state_dir):
         assert forbidden not in text, f"{forbidden} must never reach the spool"
 
 
-def test_offline_store_then_vendored_bundle_then_refuse(state_dir):
+def test_offline_store_then_vendored_bundle_then_generation_0(state_dir):
     plane = FakeControlPlane(SCOPE)
     plane.promote(triage_slots(plane))
     start(plane, state_dir).stop()
@@ -256,12 +257,19 @@ def test_offline_store_then_vendored_bundle_then_refuse(state_dir):
         assert [(e["event"], e["daysLeft"]) for e in expiry] == [("vendored_bundle_expiring_soon", 10)]
         expiring.stop()
         other = create_plaintext_bundle({**contents, "payloads": []})
-        with pytest.raises(AgentStartError) as wrong_target:
-            AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target="staging", state_dir=tempfile.mkdtemp(), root={"pinned": public_jwk_of(plane.root_key)}, vendored_bundle={"bundle": other})
-        assert wrong_target.value.code == "no_verified_release"
-        with pytest.raises(AgentStartError) as nothing:
-            AirPrompterAgent.start(**KW, state_dir=tempfile.mkdtemp(), root={"pinned": public_jwk_of(plane.root_key)})
-        assert nothing.value.code == "no_verified_release"
+        # Nothing to serve is not a failure to start: generation 0, where a run passes through to the agent's own prompt.
+        for unusable in (
+            dict(organization_id="org_1", agent_id="agt_1", target="staging", vendored_bundle={"bundle": other}),
+            dict(**KW),
+        ):
+            events: list[dict] = []
+            nothing = AirPrompterAgent.start(**unusable, state_dir=tempfile.mkdtemp(), root={"pinned": public_jwk_of(plane.root_key)}, logger=events.append)
+            assert nothing.generation == 0 and any(e.get("event") == "started_without_release" for e in events)
+            assert nothing.open_run().place("support.reply") == Passthrough("support.reply", "no_verified_release")
+            with pytest.raises(AgentStartError) as refused:
+                nothing.prompt("support.reply").render(name="Bo")
+            assert refused.value.code == "no_verified_release", "the direct path still refuses, at the first render"
+            nothing.stop()
     finally:
         shutil.rmtree(fresh, ignore_errors=True)
 
@@ -522,9 +530,13 @@ def test_s18_pinned_root_is_scoped_to_the_hosted_environment_not_the_target(stat
         agent.stop()
     import tempfile
 
-    with pytest.raises(AgentStartError) as wrong:
-        AirPrompterAgent.start(**kw, state_dir=tempfile.mkdtemp(prefix="ap-s18-"), root={"pinned": public_jwk_of(plane.root_key), "hosted_environment": "staging"}, sync=sync)
-    assert wrong.value.code == "no_verified_release"
+    # A root for another hosted environment verifies nothing: the agent starts at generation 0 and passes through.
+    wrong = AirPrompterAgent.start(**kw, state_dir=tempfile.mkdtemp(prefix="ap-s18-"), root={"pinned": public_jwk_of(plane.root_key), "hosted_environment": "staging"}, sync=sync)
+    try:
+        assert wrong.generation == 0
+        assert wrong.open_run().place("support.reply") == Passthrough("support.reply", "no_verified_release")
+    finally:
+        wrong.stop()
 
 
 def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
@@ -574,10 +586,10 @@ def test_targeted_broadcast_names_only_and_late_feedback(state_dir):
         if name.endswith(".ndjson"):
             with open(os.path.join(path,name)) as f: rows.extend(json.loads(line) for line in f if line.strip())
     feedback = next(r for r in rows if r.get("outcomes",{}).get("thumbs"))
-    assert feedback["v"] == 4 and feedback["artifactId"] == candidate["artifactId"] and feedback["count"] == 0 and feedback["versionId"] == "ver_candidate"
+    assert feedback["v"] == 5 and feedback["artifactId"] == candidate["artifactId"] and feedback["count"] == 0 and feedback["versionId"] == "ver_candidate"
     assert feedback["outcomeRunMinute"] == "2026-09-12T14:03:00Z" and feedback["audienceIds"] == [audience["audienceId"]]
     measured = next(r for r in rows if r.get("checks"))
-    assert measured["v"] == 4 and measured["artifactId"] == candidate["artifactId"] and measured["count"] == 1 and measured["audienceIds"] == [audience["audienceId"]]
+    assert measured["v"] == 5 and measured["artifactId"] == candidate["artifactId"] and measured["count"] == 1 and measured["audienceIds"] == [audience["audienceId"]]
     assert measured["checks"] == {"passed":2,"failed":0}
 
 

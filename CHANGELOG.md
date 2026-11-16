@@ -10,6 +10,20 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### Runs: several prompts in one request (AIR-2242)
+- **Python gets the run session** (`airprompter_agent.runtime.run`): `with ap.run(...) as run:` and `async with ap.run(...) as run:` from one object, `run.place` (sync sources only) and `run.place_async`, `run.run_ref`, `set_tags`, `slot_for`, `decline`, `record_model_call(..., tools_observed=)`, `record_tool_call`, `end(error_class=None, interrupted=False)`, `ap.open_run`, `ap.current_run`, `ap.with_run`, `ap.explain`, and `ap.feedback(..., slot=)`. The same rows, rules and review fixes as TypeScript.
+- **Python: a start with nothing promoted no longer raises.** It runs at generation 0 and `place` answers `passthrough no_verified_release`, as TypeScript has since S0. A missing subject is a fresh id per call, never the instance id, unless the experiment's `subjectKey` is `instance`.
+- **A run holds several slots.** Each slot pins one version at its first `place`, and the run writes one run row per slot when it ends: `count` 1, `modelCalls`, tool counts and summed tokens, with `agentRun` 1 on the first row only, plus a `step` row per named step. This closes the rc.0 gap where `RunSession` wrote `modelCalls: 1` and `agentRun: 1` on every slot.
+- **Breaking: `RunSession.id` is gone.** `run.runRef` is always a string, a getter that grows one entry per slot and keeps one run id. `RunInput.resume` takes a run reference. LangChain's graph state key is now `airprompter_run_ref` (was `airprompter_run_id`).
+- **New on `RunSession`:** `setTags` (late tags for later slots), `slotFor(slots, name)`, `decline(slot, "model_unresolved")`, `step` and `outputText` on `recordModelCall`, `step` on `recordToolCall`, and `end({ interrupted: true })`, which parks a run for a resume in the same process.
+- **`ap.feedback` files on every entry of a reference** unless `{ slot }` names one. `{ model }` on a reference with several entries needs `{ slot }`. **`ap.explain(runRef)`** decodes a reference.
+- **The direct path joins a run.** Inside `ap.run`, `ap.prompt` and `ap.workflow` resolve through the run's pin, `ap.prompt`'s rendered `runRef` is the run's, and `ap.observe` folds into the run, so one request counts once.
+- **The idle sweep** writes `interrupted` for a run no record failed (it wrote `ok`), runs at the edges of `invoke()` on serverless hosts, and holds at most 10,000 open runs.
+- **The heartbeat's `runCounters.passthrough`** counts each passthrough reason once per slot per run, plus `unmapped_step` and `slot_not_in_release`.
+- **LangChain:** a model the middleware cannot build writes one `model_unresolved` error row per run.
+- **Size budgets:** `./runtime` 215,000 → 260,000 bytes, `.` 265,000 → 275,000.
+- **Protocol 3.1.0: window rows v5, step rows v2.** Both gain a required `toolsReported`, true when the writer saw the row's tool calls, so `tools.calls: 0` means none ran. `usageSource` and `toolsReported` join the window key and the step key, so a `reported` run and an `unavailable` run in one minute land in two rows. `recordModelCall` takes `toolsObserved`, which LangChain sets on every call. A cut-over: old row versions are neither written nor read. See the [protocol changelog](protocol/CHANGELOG.md).
+
 ## 1.0.0-rc.0 — 2026-11-04 (protocol 3.0.0, Python 1.0.0rc0)
 
 The release candidate for 1.0.0, published beside `latest`: `npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.0`, `pip install "airprompter-agent==1.0.0rc0"`. Pin every package to the candidate, satellites included: an unpinned datastore installs the 0.x release, which brings the old split packages in beside the SDK. npm's default range, `^1.0.0-rc.0`, also matches later candidates, and a later candidate removes `ap.wrap`. pip's `--pre` opens prereleases on every dependency; `uv pip install` resolves the same pins with no flag. The CLI candidate is the GitHub pre-release `cli/v1.0.0-rc.0`; `@airprompter/cli` stays off npm. This is the version a dev environment on protocol 3.0.0 installs until 1.0.0.

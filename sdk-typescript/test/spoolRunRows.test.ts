@@ -17,13 +17,13 @@ import { inspectSegment, validateSpoolRow } from "../packages/sdk/src/telemetry/
 const T0 = Date.parse("2026-09-12T14:03:10Z");
 const identity = { instanceId: "i-testinstance", instanceClass: "resident" as const, sdk: "t/0" };
 const dimensions = { tag: "support.reply", artifactId: "prm_1", versionId: "ver_1", arm: "none", model: "gpt-5" };
-const run = (patch: Partial<RunTotals> = {}): RunTotals => ({ dimensions, status: "ok", errorClass: null, usageSource: "reported", agentRun: 1, modelCalls: 1, latencyMs: 100, tokens: { input: 10, cachedInput: 0, output: 5 }, tools: { calls: 0, errors: 0 }, ...patch });
+const run = (patch: Partial<RunTotals> = {}): RunTotals => ({ dimensions, status: "ok", errorClass: null, usageSource: "reported", toolsReported: false, agentRun: 1, modelCalls: 1, latencyMs: 100, tokens: { input: 10, cachedInput: 0, output: 5 }, tools: { calls: 0, errors: 0 }, ...patch });
 const histogram = (...latencies: number[]) => {
   const buckets = new Array<number>(LATENCY_BUCKET_EDGES_MS.length).fill(0);
   for (const ms of latencies) buckets[latencyBucketIndex(ms)]! += 1;
   return { buckets, sum: latencies.reduce((sum, ms) => sum + ms, 0) };
 };
-const step = (name: string, patch: Partial<StepTotals> = {}): StepTotals => ({ dimensions, step: name, status: "ok", errorClass: null, usageSource: "reported", modelCalls: 2, latency: histogram(100, 200), tokens: { input: 10, cachedInput: 2, output: 5 }, tools: { calls: 1, errors: 0 }, ...patch });
+const step = (name: string, patch: Partial<StepTotals> = {}): StepTotals => ({ dimensions, step: name, status: "ok", errorClass: null, usageSource: "reported", toolsReported: true, modelCalls: 2, latency: histogram(100, 200), tokens: { input: 10, cachedInput: 2, output: 5 }, tools: { calls: 1, errors: 0 }, ...patch });
 function writing() {
   const sink = new MemorySink();
   const writer = new SpoolWriter(sink, identity);
@@ -57,7 +57,7 @@ test("recordStep writes a type step row and no window", () => {
   const [row] = steps(written);
   assert.equal(row!.tag, "support.reply", "the slot tag");
   assert.equal(row!.step, "support.reply#1", "the step id");
-  assert.equal(row!.v, 1);
+  assert.equal(row!.v, 2);
   assert.equal(row!.latencyMs.buckets.reduce((sum, n) => sum + n, 0), row!.modelCalls, "bucket total equals modelCalls");
   assert.equal(validateSpoolRow(row).ok, true);
 });
@@ -120,6 +120,11 @@ test("the validator takes each form and refuses a crossed one", () => {
   assert.equal(validateSpoolRow({ ...runRow, usageSource: "a".repeat(32) }).ok, true);
   assert.deepEqual(validateSpoolRow({ ...runRow, usageSource: "a".repeat(33) }), { ok: false, reason: "usageSource" });
   assert.deepEqual(validateSpoolRow({ ...stepRow, step: "" }), { ok: false, reason: "step" });
+  for (const row of [runRow, stepRow]) {
+    const { toolsReported: _toolsReported, ...withoutTools } = row;
+    assert.deepEqual(validateSpoolRow(withoutTools), { ok: false, reason: "toolsReported" }, `${row.type}: toolsReported is required`);
+    assert.deepEqual(validateSpoolRow({ ...row, toolsReported: "yes" }), { ok: false, reason: "toolsReported" }, `${row.type}: toolsReported is a boolean`);
+  }
   assert.deepEqual(validateSpoolRow({ ...runRow, agentRun: 2 }), { ok: false, reason: "agentRun" });
   const { tokensSq: _tokensSq, ...withoutMoments } = runRow;
   assert.deepEqual(validateSpoolRow(withoutMoments), { ok: false, reason: "tokensSq" });
@@ -187,7 +192,7 @@ test("a skipped line is a line: the dropped row says so and OTel counts no segme
   const { writer, rows } = writing();
   writer.recordRun(run(), T0);
   const row = rows()[0] as WindowRow;
-  const inspection = inspectSegment(Buffer.from(`${JSON.stringify(row)}\n${JSON.stringify({ ...row, v: 5 })}\n`), row.instanceId, T0);
+  const inspection = inspectSegment(Buffer.from(`${JSON.stringify(row)}\n${JSON.stringify({ ...row, v: 6 })}\n`), row.instanceId, T0);
   const dropped = inspection.rows.find((entry) => entry.type === "dropped") as { segments: number; lines?: number };
   assert.deepEqual([dropped.segments, dropped.lines], [0, 1]);
   assert.deepEqual(validateSpoolRow(dropped), { ok: true, row: dropped, stripped: [] }, "the row this reader wrote passes this reader");

@@ -18,6 +18,7 @@ Example::
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
@@ -28,6 +29,11 @@ from airprompter_agent.core import minute_of
 from airprompter_agent.core import LoadedRelease, ReleaseSlot
 from airprompter_agent.core import RunRefFacts, mint_run_ref, new_run_id
 from airprompter_agent.core import render_template
+
+
+def new_subject() -> str:
+    """An absent subject is a fresh id per call: hashing the instance would split instances, not users."""
+    return secrets.token_hex(16)
 
 
 def copy_inference(inference: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
@@ -201,6 +207,10 @@ class ReleaseResolver:
         disabled = self.disabled().arms_for(experiment.get("experimentId"))
         return effective_arms(arms=experiment["arms"], ramp=experiment.get("ramp"), disabled_arms=disabled, now_ms=self._now_ms())
 
+    def has_slot(self, tag: str) -> bool:
+        """Whether this release holds a servable slot with this tag. Reads no disable and assigns nothing."""
+        return any(entry.get("tag") == tag for entry in servable_slots(self._payload))
+
     def resolve(self, tag: str, subject: Optional[str] = None, tags: Optional[Mapping[str,str]] = None) -> ResolveOutcome:
         """The slot a subject gets for a tag, or why not. Refusals are data: the facade records them."""
         payload = self._payload
@@ -232,7 +242,8 @@ class ReleaseResolver:
             return ResolveOutcome(True, AudienceReleaseSlot(slot, "none", None, **cohort))
         if not experiment or (experiment.get("audience") and not matches_audience(experiment["audience"]["selector"],local_tags)):
             return ResolveOutcome(True, AudienceReleaseSlot(slot, "none", None, **cohort))
-        subject_value = self._instance_id if experiment.get("subjectKey") == "instance" or subject is None else subject
+        # The instance id only when the experiment asks for it: hashing the instance for an absent subject would split instances, not users.
+        subject_value = self._instance_id if experiment.get("subjectKey") == "instance" else (subject if subject is not None else new_subject())
         arms = self.arms(experiment)
         if arms is None:
             return ResolveOutcome(False, reason="disabled", tag=tag)

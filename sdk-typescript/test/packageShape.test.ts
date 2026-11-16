@@ -198,7 +198,8 @@ test("the exports map, the type map and the root's names are exactly these; noth
   assert.doesNotMatch(index, /^export \*/m, "no star export: a layer's new name is not public by accident");
   assert.doesNotMatch(index, /^export \{[^}]*\btype\s/m, "no inline `export { type X }`: the type pin below reads `export type { … }` only");
   const typeNames = [...index.matchAll(/^export type \{([^}]*)\}/gm)].flatMap((match) => match[1]!.split(",").map((name) => name.trim())).filter(Boolean).sort();
-  assert.deepEqual(typeNames, ["AgentRampStatus", "AgentStatus", "BundleOutcome", "DatastoreStatus", "Healthz", "HeartbeatSdkName", "HydrateOutcome", "ManagedRunOptions", "ManagedRunResult", "ManagedRunStream", "ManagedStartOptions", "ReleaseChange", "ReleaseSource", "Rendered", "SpoolReport", "StartOptions", "SyncMode", "TelemetryPlacement"], "the root's type names are a promise too");
+  // The run types are on the root too (AIR-2242): an adapter and `ap.run` need them beside the agent.
+  assert.deepEqual(typeNames, ["AgentRampStatus", "AgentRuntime", "AgentStatus", "BundleOutcome", "DatastoreStatus", "Healthz", "HeartbeatSdkName", "HydrateOutcome", "ManagedRunOptions", "ManagedRunResult", "ManagedRunStream", "ManagedStartOptions", "ModelCallRecord", "ModelResolver", "Placement", "ReleaseChange", "ReleaseSource", "Rendered", "RunInput", "RunRefEntry", "RunSession", "SpoolReport", "StartOptions", "SyncMode", "TelemetryPlacement", "TokenUsage", "ToolCallRecord", "UnavailableReason"], "the root's type names are a promise too");
   ensureBuilt();
   const resolve = (spec: string) => spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(spec)});`], { cwd: root, encoding: "utf8" });
   assert.equal(resolve("@airprompter/agent-sdk/core").status, 0, "a declared subpath resolves");

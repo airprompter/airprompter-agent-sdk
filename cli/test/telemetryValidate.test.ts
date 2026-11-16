@@ -14,7 +14,7 @@ import test from "node:test";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";
 
-const WINDOW = { type: "window", v: 4, artifactId: "art_1", minute: "2026-09-12T14:03:00Z", instanceId: "i-writer-a", instanceClass: "resident", tag: "support.triage", versionId: "rev-4", arm: "candidate", model: "claude-sonnet-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 12 }, tokens: { input: 3, output: 4 }, sdk: "my-writer/1.0" };
+const WINDOW = { type: "window", v: 5, artifactId: "art_1", minute: "2026-09-12T14:03:00Z", instanceId: "i-writer-a", instanceClass: "resident", tag: "support.triage", versionId: "rev-4", arm: "candidate", model: "claude-sonnet-5", status: "ok", errorClass: null, usageSource: "reported", toolsReported: false, count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 12 }, tokens: { input: 3, output: 4 }, sdk: "my-writer/1.0" };
 
 function ctx(work: string): { ctx: Context; stdout: string[]; stderr: string[] } {
   const stdout: string[] = [];

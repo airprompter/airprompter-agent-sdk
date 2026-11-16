@@ -407,13 +407,39 @@ await agent.invoke({ messages }, { context: { airprompter: { subject: userId, ta
 - **What it does.** The system text and model on every provider request are the release's, and the sealed temperature, top-p, output cap and stop sequences go with them. One request is one run, one version, one `count`, with its tokens summed, however many model calls and tools it used.
 - **Keep it last in `middleware`.** The list runs outermost first. Listed before `modelFallbackMiddleware`, the fallback model would receive the approved text. Middleware cannot see its neighbours, so nothing enforces this for you.
 - **Pass a subject.** `context.airprompter.subject` decides the arm. Without one it uses the `thread_id`, then the run's own id, so each request lands on its own. To build the input from your own context, use `input: (context) => ({ subject: context.userId })` and list those keys in `contextSchema: z.object({ userId: z.string() })`, because LangChain hands a middleware only the keys it declares. A `subject` that is not a string is dropped, not refused.
-- **When nothing can be served,** your own prompt and model run, untouched, and nothing is written: nothing promoted, a staged release waiting for an unlock, a disable, or a slot that is not in the release. A release on a model LangChain cannot load does the same and logs `run_passthrough` with `model_unresolved` once.
+- **When nothing can be served,** your own prompt and model run, untouched, and nothing is written: nothing promoted, a staged release waiting for an unlock, a disable, or a slot that is not in the release. A release on a model LangChain cannot load also runs your own prompt and model, logs `model_unresolved` once, and writes one error row per run against that version, so the console shows a release it cannot serve.
 - **The release's model wins.** On your provider your key and base URL stay, so a gateway keeps working. An id no provider claims runs only where you set your own base URL, and otherwise gives `model_unresolved`. On another provider, the model is built with `initChatModel` and nothing of yours: it uses that provider's environment key and default endpoint. With no key there, OpenAI fails as a model error at the call, and a provider that checks its key at build gives `model_unresolved`. An Azure deployment never moves to another model id: that is `model_unresolved`, because it would run on the wrong deployment or send your messages to the public endpoint.
 - **A thrown model error** reaches the console after the idle sweep (`runIdleTimeoutMs`, default 15 minutes), because LangChain has no hook after one. A recovered failure, such as one a retry middleware retried, counts as `ok`.
 - **Interrupts.** A resume in the same process is the same run. After a sweep or on another host it is a new run, and it counts again. It keeps its arm only if you pass the same `context` on the resume.
-- **Checkpoints.** AirPrompter writes only a run id and run reference into graph state. What LangChain itself stores in your own checkpoint stays yours. Nothing crosses to AirPrompter.
+- **Checkpoints.** AirPrompter writes only the run reference (`airprompter_run_ref`, ids only) into graph state. What LangChain itself stores in your own checkpoint stays yours. Nothing crosses to AirPrompter.
 
-Inside `ap.run(...)`, the middleware joins that run and `ap.run` ends it. Finish the work inside it, draining a stream there too: anything still going after `ap.run` returns is not part of that run. Waiting for 1.0: several slots in a run, tool counts in the console, output checks on this path, `modelFor`, and Python.
+Inside `ap.run(...)`, the middleware joins that run and `ap.run` ends it. Two agents called inside one `ap.run`, each with its own slot, are one run under one reference. Finish the work inside it, draining a stream there too: anything still going after `ap.run` returns is not part of that run. Waiting for 1.0: several slots in one middleware, output checks on this path, `modelFor`, and Python LangChain.
+
+## Runs
+
+A run is one user request, across every model call, tool, step and prompt it uses. Each slot it uses stays on one approved version for the whole run, chosen at that slot's first `place`. The run counts once per slot, and once for the agent.
+
+```ts
+const answer = await ap.run({ subject: userId, tags: { plan } }, async (run) => {
+  const intent = await run.place("support.classify");
+  // … call your model with intent.instructions, then:
+  run.setTags({ intent: "billing" }); // a later slot's audience rule can read it; a pinned slot never moves
+  const reply = await run.place("support.reply");
+  run.recordModelCall("support.reply", { step: "draft", model: reply.kind === "approved" ? reply.model : "own", latencyMs, usage, outputText });
+  run.recordToolCall("support.reply", { step: "lookup", ok: true });
+  return { text, runRef: run.runRef }; // one reference for the whole run
+});
+ap.feedback(answer.runRef, { thumbs: "up" });               // files on every slot the run used
+ap.feedback(answer.runRef, { rating: 2 }, { slot: "support.reply" }); // or on one
+ap.explain(answer.runRef);                                   // which version, arm and bucket each slot got
+```
+
+- **`place` never throws.** When nothing can be served it answers `passthrough` with a reason (`no_verified_release`, `awaiting_unlock`, `slot_disabled`, `no_slot`, `slot_kind_unsupported`, `model_unresolved`, `variables_unfilled`) and your own prompt runs. A disable reaches a pinned slot at its next `place`; a ramp step or a new release reaches the next run.
+- **`runRef` is a getter.** It grows an entry per slot (up to eight) and keeps one run id. Re-read it after each `place`. `ap.prompt` inside a run renders with the run's reference, and `ap.observe` folds into the run.
+- **Rows.** Nothing is written until the run ends: then one run row per slot, `agentRun` 1 on the first, and a `step` row per named step. See [telemetry](../docs/telemetry.md#runs-and-steps-from-a-run-session).
+- **Resume.** `ap.openRun({ resume: runRef })` returns the live run with that reference's id, or opens one with the same id. `run.end({ interrupted: true })` parks a run waiting for a person; a resume in the same process carries on as the same run and writes one row. A run resumed after the idle sweep (`runIdleTimeoutMs`, default 15 minutes) or on another host counts as a second run. With no `subject`, it keeps its arm, because the run id hashes the same.
+- **The sweep** ends a run nothing has touched for `runIdleTimeoutMs`, with the last model call's error class, else `interrupted`. Work inside `ap.withRun(run, fn)` (and `ap.run`) holds the run open, so a long tool does not end it. `stop()` ends open runs before the windows close.
+- **Nothing leaves.** Tag values, subjects, prompt text and output text never reach a row, a log line or the reference. `outputText` is read once for the slot's declared output checks and dropped.
 
 ## Module map
 

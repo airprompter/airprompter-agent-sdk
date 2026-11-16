@@ -32,7 +32,7 @@ const WRITER_B = "i-writerBBBBBBBB";
 const DIR = "/spool";
 
 function windowRow(instanceId: string, minute: string): SpoolRow {
-  return { type: "window", v: 4, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
+  return { type: "window", v: 5, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", toolsReported: false, count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
 }
 
 function segment(fs: MemoryFs, instanceId: string, minuteMs: number, n: number, rows: SpoolRow[], open = false): string {

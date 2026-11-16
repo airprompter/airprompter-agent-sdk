@@ -1,7 +1,7 @@
 {
   "format": "apbundle",
   "version": 1,
-  "protocol": "3.0.0",
+  "protocol": "3.1.0",
   "encryption": {
     "scheme": "none",
     "contents": {
@@ -9,7 +9,7 @@
       "notAfter": "2026-10-12T10:05:00Z",
       "manifest": {
         "payload": {
-          "protocol": "3.0.0",
+          "protocol": "3.1.0",
           "organizationId": "org_7d3f9a2b",
           "agentId": "agt_4e8c1b6d",
           "target": "prod",
@@ -326,7 +326,7 @@
       "keySet": {
         "signed": {
           "type": "root",
-          "protocol": "3.0.0",
+          "protocol": "3.1.0",
           "purpose": "platform",
           "environment": "prod",
           "version": 3,

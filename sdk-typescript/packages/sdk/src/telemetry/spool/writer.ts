@@ -2,11 +2,12 @@
  * The spool writer (`protocol/spool-format.md`, D52/D66).
  *
  * Minute windows accumulate in memory per dimension set
- * `(tag, artifactId, versionId, arm, model, status, errorClass, audienceIds,
- * outcomeRunMinute)` and are written as `window` rows when the minute closes.
- * `count` means runs, and `recordRun` is the only thing that raises it. Step
- * rows are their own rows, kept per run dimensions, step, status and
- * errorClass, so no window can count one. Segments are append-only NDJSON
+ * `(tag, artifactId, versionId, arm, model, status, errorClass, usageSource,
+ * toolsReported, audienceIds, outcomeRunMinute)` and are written as `window`
+ * rows when the minute closes. `count` means runs, and `recordRun` is the only
+ * thing that raises it. Step rows are their own rows, kept per run dimensions,
+ * step, status, errorClass, usageSource and toolsReported, so no window can
+ * count one. Segments are append-only NDJSON
  * under `<store>/spool/telemetry/`, open as `seg-<inst>-<epochMinute>-<n>.ndjson.open`,
  * closed by fsync + rename; rotated at the minute boundary or 1 MiB. Nothing
  * here can carry prompt text, output, or an end-user identifier — the row
@@ -390,7 +391,7 @@ function isoSeconds(ms: number): string {
 }
 
 type WindowKey = string;
-type WindowDimensions = Pick<RunDimensions, "tag" | "artifactId" | "versionId" | "arm" | "model" | "audienceIds"> & { status: WindowRow["status"]; errorClass?: WindowRow["errorClass"]; usageSource?: WindowRow["usageSource"]; outcomeRunMinute?: string };
+type WindowDimensions = Pick<RunDimensions, "tag" | "artifactId" | "versionId" | "arm" | "model" | "audienceIds"> & { status: WindowRow["status"]; errorClass?: WindowRow["errorClass"]; usageSource?: WindowRow["usageSource"]; toolsReported?: boolean; outcomeRunMinute?: string };
 type OutcomeDimensions = Pick<Observation, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute"> & { artifactId?: string };
 
 const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -447,12 +448,14 @@ export class SpoolWriter {
     const minute = this.turnMinute(nowMs);
     const errorClass = dimensions.errorClass ?? null;
     const outcomeRunMinute = dimensions.outcomeRunMinute === minute ? "" : dimensions.outcomeRunMinute ?? "";
-    const key = [dimensions.tag, dimensions.artifactId, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass ?? "", JSON.stringify(dimensions.audienceIds ?? null), outcomeRunMinute].join("\u0000");
+    const usageSource = dimensions.usageSource ?? "reported";
+    const toolsReported = dimensions.toolsReported ?? false;
+    const key = [dimensions.tag, dimensions.artifactId, dimensions.versionId, dimensions.arm, dimensions.model, dimensions.status, errorClass ?? "", usageSource, String(toolsReported), JSON.stringify(dimensions.audienceIds ?? null), outcomeRunMinute].join("\u0000");
     let row = this.open.get(key);
     if (!row) {
       row = {
         type: "window",
-        v: 4,
+        v: 5,
         artifactId: dimensions.artifactId,
         ...(dimensions.audienceIds !== undefined ? {audienceIds: [...dimensions.audienceIds]} : {}),
         ...(dimensions.outcomeRunMinute ? {outcomeRunMinute: dimensions.outcomeRunMinute} : {}),
@@ -465,7 +468,8 @@ export class SpoolWriter {
         model: dimensions.model,
         status: dimensions.status,
         errorClass,
-        usageSource: dimensions.usageSource ?? "reported",
+        usageSource,
+        toolsReported,
         count: 0,
         modelCalls: 0,
         agentRun: 0,
@@ -486,7 +490,7 @@ export class SpoolWriter {
 
   /** `observe` reports status `refused` too, which a run session never does. */
   private addRun(totals: Omit<RunTotals, "status"> & { status: WindowRow["status"] }, nowMs: number): WindowRow {
-    const row = this.window({ ...totals.dimensions, status: totals.status, errorClass: totals.errorClass, usageSource: totals.usageSource }, nowMs);
+    const row = this.window({ ...totals.dimensions, status: totals.status, errorClass: totals.errorClass, usageSource: totals.usageSource, toolsReported: totals.toolsReported }, nowMs);
     if (row.outcomeRunMinute === row.minute) delete row.outcomeRunMinute;
     row.count += 1;
     row.agentRun += totals.agentRun;
@@ -517,12 +521,12 @@ export class SpoolWriter {
     let seen = this.stepNames.get(scope);
     if (!seen) this.stepNames.set(scope, (seen = new Set()));
     const step = stepName(totals.step, seen);
-    const key = [scope, step, totals.status, totals.errorClass ?? ""].join("\u0000");
+    const key = [scope, step, totals.status, totals.errorClass ?? "", totals.usageSource, String(totals.toolsReported)].join("\u0000");
     let row = this.openSteps.get(key);
     if (!row) {
       row = {
         type: "step",
-        v: 1,
+        v: 2,
         artifactId: dimensions.artifactId,
         ...(dimensions.audienceIds !== undefined ? { audienceIds: [...dimensions.audienceIds] } : {}),
         minute,
@@ -536,6 +540,7 @@ export class SpoolWriter {
         status: totals.status,
         errorClass: totals.errorClass,
         usageSource: totals.usageSource,
+        toolsReported: totals.toolsReported,
         modelCalls: 0,
         latencyMs: { buckets: emptyHistogram(), sum: 0 },
         tokens: { input: 0, output: 0 },
@@ -561,22 +566,30 @@ export class SpoolWriter {
     const tokens = { input: observation.tokens?.input ?? 0, cachedInput: observation.tokens?.cachedInput ?? 0, output: observation.tokens?.output ?? 0 };
     const tools = { calls: observation.toolCalls?.calls ?? 0, errors: observation.toolCalls?.errors ?? 0 };
     const usageSource = observation.usageSource ?? "reported";
+    // A caller that hands in `toolCalls` saw them, so zero calls means none ran.
+    const toolsReported = observation.toolCalls !== undefined;
     const errorClass = observation.errorClass ?? null;
     const checks = observation.checks ? { passed: observation.checks.passed ?? 0, failed: observation.checks.failed ?? 0 } : undefined;
-    const row = this.addRun({ dimensions, status: observation.status, errorClass, usageSource, agentRun: 1, modelCalls: 1, latencyMs: observation.latencyMs, tokens, tools, ...(checks ? { checks } : {}) }, nowMs);
+    const row = this.addRun({ dimensions, status: observation.status, errorClass, usageSource, toolsReported, agentRun: 1, modelCalls: 1, latencyMs: observation.latencyMs, tokens, tools, ...(checks ? { checks } : {}) }, nowMs);
     if (observation.outcomes) mergeOutcomes(row, observation.outcomes);
     if (step === undefined) return;
     const buckets = emptyHistogram();
     buckets[latencyBucketIndex(observation.latencyMs)] = 1;
-    this.recordStep({ dimensions, step, status: observation.status === "ok" ? "ok" : "error", errorClass, usageSource, modelCalls: 1, latency: { buckets, sum: roundedMs(observation.latencyMs) }, tokens, tools }, nowMs);
+    this.recordStep({ dimensions, step, status: observation.status === "ok" ? "ok" : "error", errorClass, usageSource, toolsReported, modelCalls: 1, latency: { buckets, sum: roundedMs(observation.latencyMs) }, tokens, tools }, nowMs);
   }
 
-  /** The open measured row these dimensions name, if a run has landed on it this minute. */
+  /**
+   * The first open measured row these dimensions name, if a run has landed on one this minute: status `ok`, no error
+   * class, no other run minute, whatever its `usageSource` or `toolsReported`. Neither is known to feedback, so it
+   * searches the open windows rather than building one key.
+   */
   private measuredRow(dimensions: { tag: string; artifactId?: string | undefined; versionId: string; arm: string; model: string; audienceIds?: readonly string[] | undefined }, nowMs: number): WindowRow | null {
     if (this.openMinute !== minuteOf(nowMs)) return null;
-    const key = [dimensions.tag, dimensions.artifactId, dimensions.versionId, dimensions.arm, dimensions.model, "ok", "", JSON.stringify(dimensions.audienceIds ?? null), ""].join("\u0000");
-    const existing = this.open.get(key);
-    return existing && existing.count > 0 ? existing : null;
+    const audienceIds = JSON.stringify(dimensions.audienceIds ?? null);
+    for (const row of this.open.values()) {
+      if (row.count > 0 && row.status === "ok" && row.errorClass === null && row.outcomeRunMinute === undefined && row.tag === dimensions.tag && row.artifactId === dimensions.artifactId && row.versionId === dimensions.versionId && row.arm === dimensions.arm && row.model === dimensions.model && JSON.stringify(row.audienceIds ?? null) === audienceIds) return row;
+    }
+    return null;
   }
 
   /** T29: output-check counts against a run already counted (an app that evaluated after the fact): the run's window, no extra count. A window holding no run takes none. */
@@ -591,10 +604,13 @@ export class SpoolWriter {
     if (!hasValidOutcome(outcomes) || dimensions.artifactId === undefined) return;
     if (dimensions.audienceIds !== undefined && !validAudienceIds(dimensions.audienceIds)) return;
     if (dimensions.outcomeRunMinute !== undefined && (!validAudienceMinute(dimensions.outcomeRunMinute) || Date.parse(dimensions.outcomeRunMinute) > Date.parse(minuteOf(nowMs)))) return;
-    if (dimensions.outcomeRunMinute === undefined) {
+    if (dimensions.outcomeRunMinute === undefined || dimensions.outcomeRunMinute === minuteOf(nowMs)) {
       const existing = this.measuredRow(dimensions, nowMs);
-      if (existing) mergeOutcomes(existing, outcomes);
-      return;
+      if (existing) {
+        mergeOutcomes(existing, outcomes);
+        return;
+      }
+      if (dimensions.outcomeRunMinute === undefined) return;
     }
     mergeOutcomes(this.window({ tag: dimensions.tag, artifactId: dimensions.artifactId, versionId: dimensions.versionId, arm: dimensions.arm, model: dimensions.model, status: "ok", outcomeRunMinute: dimensions.outcomeRunMinute, ...(dimensions.audienceIds !== undefined ? { audienceIds: dimensions.audienceIds } : {}) }, nowMs), outcomes);
   }

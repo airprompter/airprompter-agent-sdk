@@ -124,18 +124,20 @@ class Aggregator:
         if outcome_run_minute is not None and (not valid_outcome_run_minute(outcome_run_minute) or outcome_run_minute > minute_of(at)):
             raise ValueError("telemetry_outcome_run_minute_invalid")
 
-    def _window(self, at: int, tag, version_id, arm, model, status, error_class, usage_source, *, artifact_id=None, audience_ids=None, outcome_run_minute=None):
+    def _window(self, at: int, tag, version_id, arm, model, status, error_class, usage_source, tools_reported=False, *, artifact_id=None, audience_ids=None, outcome_run_minute=None):
         self._check(at, artifact_id, audience_ids, outcome_run_minute)
         minute = self._turn_minute(at)
         outcome_key = None if outcome_run_minute == minute else outcome_run_minute
-        key = (tag, artifact_id, version_id, arm, model, status, error_class, tuple(audience_ids) if audience_ids is not None else None, outcome_key)
+        usage_source = usage_source or "reported"
+        # The window key (spool-format.md): usageSource and toolsReported are dimensions, never first-wins.
+        key = (tag, artifact_id, version_id, arm, model, status, error_class, usage_source, tools_reported, tuple(audience_ids) if audience_ids is not None else None, outcome_key)
         row = self.open.get(key)
         if row is None:
             row = {
-                "type": "window", "v": 4, "artifactId": artifact_id, "minute": minute,
+                "type": "window", "v": 5, "artifactId": artifact_id, "minute": minute,
                 "instanceId": self.identity[0], "instanceClass": self.identity[1],
                 "tag": tag, "versionId": version_id, "arm": arm, "model": model, "status": status,
-                "errorClass": error_class, "usageSource": usage_source or "reported", "count": 0,
+                "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "count": 0,
                 "modelCalls": 0, "agentRun": 0, "tools": {"calls": 0, "errors": 0},
                 "latencyMs": {"buckets": [0] * len(EDGES), "sum": 0}, "tokens": {"input": 0, "output": 0},
                 "sdk": self.identity[2],
@@ -148,7 +150,7 @@ class Aggregator:
     def record_run(self, at: int, r: dict):
         """One run's totals: the only place `count` rises. Moments are over the run's totals, never per model call."""
         d = r["dimensions"]
-        row = self._window(at, d["tag"], d["versionId"], d["arm"], d["model"], r["status"], r.get("errorClass"), r.get("usageSource"), artifact_id=d.get("artifactId"), audience_ids=d.get("audienceIds"))
+        row = self._window(at, d["tag"], d["versionId"], d["arm"], d["model"], r["status"], r.get("errorClass"), r.get("usageSource"), r["toolsReported"], artifact_id=d.get("artifactId"), audience_ids=d.get("audienceIds"))
         if row.get("outcomeRunMinute") == row["minute"]:
             row.pop("outcomeRunMinute")
         row["count"] += 1
@@ -189,14 +191,15 @@ class Aggregator:
                 step = "other"
             else:
                 names.add(step)
-        key = (dimension_key, step, r["status"], r.get("errorClass"))
+        usage_source = r.get("usageSource") or "reported"
+        key = (dimension_key, step, r["status"], r.get("errorClass"), usage_source, r["toolsReported"])
         row = self.open_steps.get(key)
         if row is None:
             row = {
-                "type": "step", "v": 1, "artifactId": d["artifactId"], "minute": minute,
+                "type": "step", "v": 2, "artifactId": d["artifactId"], "minute": minute,
                 "instanceId": self.identity[0], "instanceClass": self.identity[1],
                 "tag": d["tag"], "versionId": d["versionId"], "arm": d["arm"], "model": d["model"], "step": step, "status": r["status"],
-                "errorClass": r.get("errorClass"), "usageSource": r.get("usageSource") or "reported", "modelCalls": 0,
+                "errorClass": r.get("errorClass"), "usageSource": usage_source, "toolsReported": r["toolsReported"], "modelCalls": 0,
                 "latencyMs": {"buckets": [0] * len(EDGES), "sum": 0}, "tokens": {"input": 0, "output": 0}, "tools": {"calls": 0, "errors": 0},
                 "sdk": self.identity[2],
             }
@@ -218,10 +221,11 @@ class Aggregator:
         """A one-call run: one run row, and a step row only when the observation names a step."""
         tokens = {"input": (o.get("tokens") or {}).get("input", 0), "cachedInput": (o.get("tokens") or {}).get("cachedInput", 0), "output": (o.get("tokens") or {}).get("output", 0)}
         tools = {"calls": (o.get("toolCalls") or {}).get("calls", 0), "errors": (o.get("toolCalls") or {}).get("errors", 0)}
+        tools_reported = "toolCalls" in o  # a caller that hands in tool calls saw them: zero means none ran
         slot_tag = o["tag"]
         step = o.get("step")
         dimensions = {**{k: o[k] for k in ("artifactId", "versionId", "arm", "model", "audienceIds") if k in o}, "tag": slot_tag}
-        run = {"dimensions": dimensions, "status": o["status"], "errorClass": o.get("errorClass"), "usageSource": o.get("usageSource"), "agentRun": 1, "modelCalls": 1, "latencyMs": o["latencyMs"], "tokens": tokens, "tools": tools}
+        run = {"dimensions": dimensions, "status": o["status"], "errorClass": o.get("errorClass"), "usageSource": o.get("usageSource"), "toolsReported": tools_reported, "agentRun": 1, "modelCalls": 1, "latencyMs": o["latencyMs"], "tokens": tokens, "tools": tools}
         if "checks" in o:
             run["checks"] = {"passed": o["checks"].get("passed", 0), "failed": o["checks"].get("failed", 0)}
         row = self.record_run(at, run)
@@ -230,7 +234,7 @@ class Aggregator:
         if step is not None:
             buckets = [0] * len(EDGES)
             buckets[bucket_index(o["latencyMs"])] = 1
-            self.record_step(at, {"dimensions": dimensions, "step": step, "status": "ok" if o["status"] == "ok" else "error", "errorClass": o.get("errorClass"), "usageSource": o.get("usageSource"), "modelCalls": 1, "latency": {"buckets": buckets, "sum": rounded_ms(o["latencyMs"])}, "tokens": tokens, "tools": tools})
+            self.record_step(at, {"dimensions": dimensions, "step": step, "status": "ok" if o["status"] == "ok" else "error", "errorClass": o.get("errorClass"), "usageSource": o.get("usageSource"), "toolsReported": tools_reported, "modelCalls": 1, "latency": {"buckets": buckets, "sum": rounded_ms(o["latencyMs"])}, "tokens": tokens, "tools": tools})
 
     def outcomes(self, at: int, f: dict):
         if not has_valid_outcome(f["outcomes"]) or "artifactId" not in f:
@@ -239,17 +243,24 @@ class Aggregator:
             return
         if "outcomeRunMinute" in f and (not valid_outcome_run_minute(f["outcomeRunMinute"]) or f["outcomeRunMinute"] > minute_of(at)):
             return
-        if "outcomeRunMinute" not in f:
-            minute = minute_of(at)
-            if self.open_minute != minute:
+        if "outcomeRunMinute" not in f or f["outcomeRunMinute"] == minute_of(at):
+            row = self._measured(at, f)
+            if row is not None:
+                merge_outcomes(row, f["outcomes"])
                 return
-            key = (f["tag"], f.get("artifactId"), f["versionId"], f["arm"], f["model"], "ok", None, tuple(f["audienceIds"]) if "audienceIds" in f else None, None)
-            row = self.open.get(key)
-            if row is None or row["count"] == 0:
+            if "outcomeRunMinute" not in f:
                 return
-            merge_outcomes(row, f["outcomes"])
-            return
         merge_outcomes(self._window(at, f["tag"], f["versionId"], f["arm"], f["model"], "ok", None, None, artifact_id=f.get("artifactId"), audience_ids=f.get("audienceIds"), outcome_run_minute=f.get("outcomeRunMinute")), f["outcomes"])
+
+    def _measured(self, at: int, f: dict):
+        """Feedback knows neither usageSource nor toolsReported: the first measured ok row opened this minute with the other dimensions."""
+        if self.open_minute != minute_of(at):
+            return None
+        audience = f.get("audienceIds")
+        for row in self.open.values():
+            if row["count"] > 0 and row["status"] == "ok" and row["errorClass"] is None and "outcomeRunMinute" not in row and all(row[k] == f.get(k) for k in ("tag", "artifactId", "versionId", "arm", "model")) and row.get("audienceIds") == (list(audience) if audience is not None else None):
+                return row
+        return None
 
     def close(self, at: int):
         self.emitted.extend(self.open.values())
@@ -403,13 +414,13 @@ def spool_vectors():
     # What a run session hands the writer at `end`: one run's totals, however many calls it made.
     dims = {k: triage[k] for k in ("tag", "artifactId", "versionId", "arm", "model")}
     reply = {"tag": "support.reply", "artifactId": "prm_support_reply", "versionId": "ver_reply_3", "arm": "candidate", "model": "gpt-5"}
-    def run(dimensions=dims, *, status="ok", error_class=None, usage="reported", agent_run=1, model_calls=1, latency=1000, tokens=(0, 0, 0), tools=(0, 0)):
-        return {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage, "agentRun": agent_run, "modelCalls": model_calls, "latencyMs": latency, "tokens": {"input": tokens[0], "cachedInput": tokens[1], "output": tokens[2]}, "tools": {"calls": tools[0], "errors": tools[1]}}
-    def step(name, dimensions=dims, *, status="ok", error_class=None, usage="reported", latencies=(100,), tokens=(0, 0, 0), tools=(0, 0)):
+    def run(dimensions=dims, *, status="ok", error_class=None, usage="reported", tools_reported=False, agent_run=1, model_calls=1, latency=1000, tokens=(0, 0, 0), tools=(0, 0)):
+        return {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage, "toolsReported": tools_reported or tools != (0, 0), "agentRun": agent_run, "modelCalls": model_calls, "latencyMs": latency, "tokens": {"input": tokens[0], "cachedInput": tokens[1], "output": tokens[2]}, "tools": {"calls": tools[0], "errors": tools[1]}}
+    def step(name, dimensions=dims, *, status="ok", error_class=None, usage="reported", tools_reported=False, latencies=(100,), tokens=(0, 0, 0), tools=(0, 0)):
         histogram = [0] * len(EDGES)
         for ms in latencies:
             histogram[bucket_index(ms)] += 1
-        return {"dimensions": dimensions, "step": name, "status": status, "errorClass": error_class, "usageSource": usage, "modelCalls": len(latencies), "latency": {"buckets": histogram, "sum": sum(latencies)}, "tokens": {"input": tokens[0], "cachedInput": tokens[1], "output": tokens[2]}, "tools": {"calls": tools[0], "errors": tools[1]}}
+        return {"dimensions": dimensions, "step": name, "status": status, "errorClass": error_class, "usageSource": usage, "toolsReported": tools_reported or tools != (0, 0), "modelCalls": len(latencies), "latency": {"buckets": histogram, "sum": sum(latencies)}, "tokens": {"input": tokens[0], "cachedInput": tokens[1], "output": tokens[2]}, "tools": {"calls": tools[0], "errors": tools[1]}}
     window_cases = [
         windows("two runs and feedback on one window", "feedback merges outcomes into the runs' window (status ok) and never adds to count or latency", [
             {"kind": "observe", "at": T0, "observation": ok(latencyMs=812, tokens={"input": 400, "output": 90, "cachedInput": 100}, checks={"passed": 1})},
@@ -577,6 +588,30 @@ def spool_vectors():
             {"kind": "feedback", "at": T0 + 60000, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"score": 1e200}}},
             {"kind": "close", "at": T0 + 60001},
         ]),
+        windows("a reported run and an unavailable run in one minute", "usageSource is a dimension of the window key: two runs on one slot in one minute land in two rows, never first-wins", [
+            {"kind": "recordRun", "at": T0, "run": run(model_calls=2, latency=800, tokens=(120, 0, 40))},
+            {"kind": "recordRun", "at": T0 + 1, "run": run(usage="unavailable", model_calls=0, latency=50)},
+            {"kind": "close", "at": T0 + 2},
+        ]),
+        windows("tools reported and not reported split rows", "toolsReported is a dimension: a run whose tool calls were seen (zero of them) and one whose were not land in two window rows, and likewise two step rows", [
+            {"kind": "observe", "at": T0, "observation": ok(latencyMs=10, toolCalls={"calls": 0, "errors": 0})},
+            {"kind": "observe", "at": T0 + 1, "observation": ok(latencyMs=20)},
+            {"kind": "recordStep", "at": T0 + 2, "step": step("docs.flow#1", dims, tools_reported=True)},
+            {"kind": "recordStep", "at": T0 + 3, "step": step("docs.flow#1", dims)},
+            {"kind": "close", "at": T0 + 4},
+        ]),
+        windows("a feedback-only row carries toolsReported false", "delayed feedback opens its own count-0 row with toolsReported false, apart from a measured row in the filing minute whose tool calls were seen", [
+            {"kind": "observe", "at": T0 + 60000, "observation": ok(latencyMs=10, toolCalls={"calls": 1, "errors": 0})},
+            {"kind": "feedback", "at": T0 + 60001, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
+            {"kind": "close", "at": T0 + 60002},
+        ]),
+        windows("same-minute feedback ignores usageSource and toolsReported", "feedback in its run minute merges into the first measured ok row with the same dimensions, whatever its usageSource or toolsReported", [
+            {"kind": "observe", "at": T0, "observation": ok(latencyMs=10, usageSource="unavailable", toolCalls={"calls": 2, "errors": 0})},
+            {"kind": "observe", "at": T0 + 1, "observation": ok(latencyMs=20)},
+            {"kind": "feedback", "at": T0 + 2, "feedback": {**triage, "outcomes": {"thumbs": True}}},
+            {"kind": "feedback", "at": T0 + 3, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"rating": 4}}},
+            {"kind": "close", "at": T0 + 4},
+        ]),
         windows("a long run stays below the last bucket", "a 200-second run lands in the 262,144 ms bucket, so p95 does not saturate", [
             {"kind": "recordRun", "at": T0, "run": run(latency=200000)},
             {"kind": "close", "at": T0 + 1},
@@ -610,7 +645,7 @@ def tolerance_cases():
     run = aggregator.emitted[0]
     text = lambda row: json.dumps(row, separators=(",", ":"), ensure_ascii=False)
     later_type = {"type": "trace", "v": 1, "instanceId": INSTANCE, "body": "from a later minor"}
-    later_v = {**run, "v": 5, "somethingNew": 1}
+    later_v = {**run, "v": 6, "somethingNew": 1}
     with_fields = {**run, "laterField": "gone", "tokens": {**run["tokens"], "laterToken": 3}, "tools": {**run["tools"], "names": ["never"]}}
     at = "2026-09-12T14:03:10Z"
     dropped = lambda *lines: {"type": "dropped", "v": 1, "at": at, "instanceId": INSTANCE, "segments": 0, "lines": len(lines), "bytes": sum(len(line.encode("utf-8")) + 1 for line in lines)}

@@ -1,7 +1,7 @@
 """A spool writer without the SDK (protocol/spool-format.md, D66): what a team
 instrumenting a provider SDK themselves needs — minute windows per
-(tag, artifactId, versionId, arm, model, status, errorClass, audienceIds,
-outcomeRunMinute) where ``count`` means runs, step rows beside them, the fixed
+(tag, artifactId, versionId, arm, model, status, errorClass, usageSource,
+toolsReported, audienceIds, outcomeRunMinute) where ``count`` means runs, step rows beside them, the fixed
 latency buckets, segment naming, ``.open`` → fsync → rename, and rotation on the minute or at
 1 MiB. ``airprompterd`` uploads what lands in ``dir``. Standard library only;
 ``check_vectors.py`` drives it through protocol/vectors/spool.json.
@@ -10,7 +10,7 @@ latency buckets, segment naming, ``.open`` → fsync → rename, and rotation on
 
     spool = SpoolWriter(dir=f"{state_dir}/airprompter/{agent_id}/{target}/spool/telemetry", instance_id=instance_id, sdk="acme-logger/1.0")
     spool.observe(tag=tag, artifact_id=artifact_id, version_id=version_id, arm=arm, model=model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90})
-    spool.record_run({"dimensions": dimensions, "status": "ok", "errorClass": None, "usageSource": "reported", "agentRun": 1, "modelCalls": 5, "latencyMs": 4200, "tokens": tokens, "tools": tools})
+    spool.record_run({"dimensions": dimensions, "status": "ok", "errorClass": None, "usageSource": "reported", "toolsReported": True, "agentRun": 1, "modelCalls": 5, "latencyMs": 4200, "tokens": tokens, "tools": tools})
     spool.feedback(tag=tag, artifact_id=artifact_id, version_id=version_id, arm=arm, model=model, outcomes={"accepted": True})
     atexit.register(spool.close)
 """
@@ -86,7 +86,7 @@ class SpoolWriter:
         at = self.now() if at is None else at
         d = run["dimensions"]
         audience_ids = tuple(d["audienceIds"]) if "audienceIds" in d else None
-        row = self._window(at, d["tag"], d["versionId"], d["arm"], d["model"], run["status"], run.get("errorClass"), run.get("usageSource") or "reported", artifact_id=d.get("artifactId"), audience_ids=audience_ids)
+        row = self._window(at, d["tag"], d["versionId"], d["arm"], d["model"], run["status"], run.get("errorClass"), run.get("usageSource") or "reported", bool(run.get("toolsReported", False)), artifact_id=d.get("artifactId"), audience_ids=audience_ids)
         if row.get("outcomeRunMinute") == row["minute"]:
             del row["outcomeRunMinute"]
         row["count"] += 1
@@ -128,10 +128,12 @@ class SpoolWriter:
                 name = "other"
             else:
                 names.add(name)
-        key = json.dumps([scope, name, step["status"], step.get("errorClass")])
+        usage_source = step.get("usageSource") or "reported"
+        tools_reported = bool(step.get("toolsReported", False))
+        key = json.dumps([scope, name, step["status"], step.get("errorClass"), usage_source, tools_reported])
         row = self.open_steps.get(key)
         if row is None:
-            row = {"type": "step", "v": 1, "artifactId": d["artifactId"], "minute": minute, "instanceId": self.instance_id, "instanceClass": self.instance_class, "tag": d["tag"], "versionId": d["versionId"], "arm": d["arm"], "model": d["model"], "step": name, "status": step["status"], "errorClass": step.get("errorClass"), "usageSource": step.get("usageSource") or "reported", "modelCalls": 0, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "tools": {"calls": 0, "errors": 0}, "sdk": self.sdk}
+            row = {"type": "step", "v": 2, "artifactId": d["artifactId"], "minute": minute, "instanceId": self.instance_id, "instanceClass": self.instance_class, "tag": d["tag"], "versionId": d["versionId"], "arm": d["arm"], "model": d["model"], "step": name, "status": step["status"], "errorClass": step.get("errorClass"), "usageSource": usage_source, "toolsReported": tools_reported, "modelCalls": 0, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "tools": {"calls": 0, "errors": 0}, "sdk": self.sdk}
             if "audienceIds" in d:
                 row["audienceIds"] = list(d["audienceIds"])
             self.open_steps[key] = row
@@ -156,7 +158,8 @@ class SpoolWriter:
         given = tokens or {}
         totals = {"input": given.get("input", 0), "cachedInput": given.get("cachedInput", 0), "output": given.get("output", 0)}
         tools = {"calls": (tool_calls or {}).get("calls", 0), "errors": (tool_calls or {}).get("errors", 0)}
-        run: dict[str, Any] = {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage_source, "agentRun": 1, "modelCalls": 1, "latencyMs": latency_ms, "tokens": totals, "tools": tools}
+        tools_reported = tool_calls is not None  # tool calls handed in were seen: zero means none ran
+        run: dict[str, Any] = {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "agentRun": 1, "modelCalls": 1, "latencyMs": latency_ms, "tokens": totals, "tools": tools}
         if checks:
             run["checks"] = {"passed": checks.get("passed", 0), "failed": checks.get("failed", 0)}
         row = self.record_run(run, at)
@@ -165,7 +168,7 @@ class SpoolWriter:
         if step is not None:
             buckets = [0] * len(LATENCY_BUCKET_EDGES_MS)
             buckets[latency_bucket_index(latency_ms)] = 1
-            self.record_step({"dimensions": dimensions, "step": step, "status": "ok" if status == "ok" else "error", "errorClass": error_class, "usageSource": usage_source, "modelCalls": 1, "latency": {"buckets": buckets, "sum": _rounded_ms(latency_ms)}, "tokens": totals, "tools": tools}, at)
+            self.record_step({"dimensions": dimensions, "step": step, "status": "ok" if status == "ok" else "error", "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "modelCalls": 1, "latency": {"buckets": buckets, "sum": _rounded_ms(latency_ms)}, "tokens": totals, "tools": tools}, at)
 
     def feedback(self, *, tag: str, version_id: str, model: str, outcomes: Mapping[str, Any], artifact_id: Optional[str] = None, arm: str = "none", audience_ids: Optional[tuple[str, ...]] = None, outcome_run_minute: Optional[str] = None, at: Optional[float] = None) -> None:
         """Feedback filed against a run: rides on the run's ``ok`` window for this minute, never adds to count or latency."""
@@ -176,17 +179,17 @@ class SpoolWriter:
             return
         if outcome_run_minute is not None and (not _valid_outcome_run_minute(outcome_run_minute) or outcome_run_minute > minute_of(at)):
             return
-        if outcome_run_minute is None:
-            minute = minute_of(at)
-            if self.open_minute != minute:
+        if outcome_run_minute is None or outcome_run_minute == minute_of(at):
+            # Feedback knows neither usageSource nor toolsReported: the first measured ok row this minute with the other dimensions.
+            audience = list(audience_ids) if audience_ids is not None else None
+            measured = (row for row in self.open.values() if row["count"] > 0 and row["status"] == "ok" and row["errorClass"] is None and "outcomeRunMinute" not in row and (row["tag"], row["artifactId"], row["versionId"], row["arm"], row["model"]) == (tag, artifact_id, version_id, arm, model) and row.get("audienceIds") == audience)
+            row = next(measured, None) if self.open_minute == minute_of(at) else None
+            if row is not None:
+                _merge_outcomes(row, outcomes)
                 return
-            key = json.dumps([tag, artifact_id, version_id, arm, model, "ok", None, audience_ids, None])
-            row = self.open.get(key)
-            if row is None or row["count"] == 0:
+            if outcome_run_minute is None:
                 return
-            _merge_outcomes(row, outcomes)
-            return
-        _merge_outcomes(self._window(at, tag, version_id, arm, model, "ok", None, "reported", artifact_id=artifact_id, audience_ids=audience_ids, outcome_run_minute=outcome_run_minute), outcomes)
+        _merge_outcomes(self._window(at, tag, version_id, arm, model, "ok", None, "reported", False, artifact_id=artifact_id, audience_ids=audience_ids, outcome_run_minute=outcome_run_minute), outcomes)
 
     def _turn_minute(self, at: float) -> str:
         minute = minute_of(at)
@@ -195,14 +198,14 @@ class SpoolWriter:
         self.open_minute = minute
         return minute
 
-    def _window(self, at: float, tag: str, version_id: str, arm: str, model: str, status: str, error_class: Optional[str], usage_source: str, *, artifact_id: Optional[str] = None, audience_ids: Optional[tuple[str, ...]] = None, outcome_run_minute: Optional[str] = None) -> dict[str, Any]:
+    def _window(self, at: float, tag: str, version_id: str, arm: str, model: str, status: str, error_class: Optional[str], usage_source: str, tools_reported: bool, *, artifact_id: Optional[str] = None, audience_ids: Optional[tuple[str, ...]] = None, outcome_run_minute: Optional[str] = None) -> dict[str, Any]:
         _check_dimensions(at, artifact_id, audience_ids, outcome_run_minute)
         minute = self._turn_minute(at)
         outcome_key = None if outcome_run_minute == minute else outcome_run_minute
-        key = json.dumps([tag, artifact_id, version_id, arm, model, status, error_class, audience_ids, outcome_key])
+        key = json.dumps([tag, artifact_id, version_id, arm, model, status, error_class, usage_source, tools_reported, audience_ids, outcome_key])
         row = self.open.get(key)
         if row is None:
-            row = {"type": "window", "v": 4, "artifactId": artifact_id, "minute": minute, "instanceId": self.instance_id, "instanceClass": self.instance_class, "tag": tag, "versionId": version_id, "arm": arm, "model": model, "status": status, "errorClass": error_class, "usageSource": usage_source, "count": 0, "modelCalls": 0, "agentRun": 0, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "sdk": self.sdk}
+            row = {"type": "window", "v": 5, "artifactId": artifact_id, "minute": minute, "instanceId": self.instance_id, "instanceClass": self.instance_class, "tag": tag, "versionId": version_id, "arm": arm, "model": model, "status": status, "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "count": 0, "modelCalls": 0, "agentRun": 0, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "sdk": self.sdk}
             if audience_ids is not None:
                 row["audienceIds"] = list(audience_ids)
             if outcome_run_minute is not None:

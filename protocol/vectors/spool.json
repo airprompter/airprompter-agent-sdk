@@ -1,5 +1,5 @@
 {
-  "protocol": "3.0.0",
+  "protocol": "3.1.0",
   "description": "Spool writer conformance (spool-format.md): latency bucket index, minute formatting, segment naming, rotation, and minute-window aggregation. `count` means runs. Rows compare as sets (order of emission is not significant).",
   "segmentMaxBytes": 1048576,
   "stepBounds": {
@@ -642,7 +642,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -654,6 +654,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 2,
           "modelCalls": 2,
           "agentRun": 2,
@@ -837,7 +838,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -849,9 +850,10 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
-          "count": 2,
-          "modelCalls": 2,
-          "agentRun": 2,
+          "toolsReported": false,
+          "count": 1,
+          "modelCalls": 1,
+          "agentRun": 1,
           "tools": {
             "calls": 0,
             "errors": 0
@@ -862,7 +864,7 @@
               0,
               0,
               1,
-              1,
+              0,
               0,
               0,
               0,
@@ -882,7 +884,7 @@
               0,
               0
             ],
-            "sum": 14
+            "sum": 5
           },
           "tokens": {
             "input": 0,
@@ -900,7 +902,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -912,6 +914,7 @@
           "status": "error",
           "errorClass": "provider_timeout",
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -963,7 +966,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -975,6 +978,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -1026,7 +1030,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1038,6 +1042,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -1089,7 +1094,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1101,6 +1106,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -1152,7 +1158,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1164,6 +1170,7 @@
           "status": "refused",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -1198,6 +1205,70 @@
               0
             ],
             "sum": 0
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "tokensSq": {
+            "input": 0,
+            "cachedInput": 0,
+            "output": 0,
+            "inputOutput": 0,
+            "inputCached": 0,
+            "cachedOutput": 0
+          }
+        },
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "estimated",
+          "toolsReported": false,
+          "count": 1,
+          "modelCalls": 1,
+          "agentRun": 1,
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 9
           },
           "tokens": {
             "input": 0,
@@ -1258,7 +1329,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_alpha",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1270,6 +1341,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -1321,7 +1393,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_beta",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1333,6 +1405,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -1416,7 +1489,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_alpha",
           "minute": "2026-09-12T14:04:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1428,6 +1501,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 0,
           "modelCalls": 0,
           "agentRun": 0,
@@ -1524,7 +1598,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_alpha",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1536,6 +1610,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -1826,7 +1901,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_alpha",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1838,6 +1913,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -1896,7 +1972,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -1908,6 +1984,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -2018,7 +2095,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_alpha",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2030,6 +2107,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -2081,7 +2159,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_alpha",
           "minute": "2026-09-12T14:04:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2093,6 +2171,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -2200,7 +2279,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2212,6 +2291,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 2,
           "modelCalls": 2,
           "agentRun": 2,
@@ -2263,7 +2343,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:04:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2275,6 +2355,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -2396,7 +2477,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2408,6 +2489,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 2,
           "modelCalls": 2,
           "agentRun": 2,
@@ -2514,7 +2596,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:04:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2526,6 +2608,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 0,
           "modelCalls": 0,
           "agentRun": 0,
@@ -2677,7 +2760,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2689,6 +2772,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 6,
           "modelCalls": 6,
           "agentRun": 6,
@@ -2844,7 +2928,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2856,6 +2940,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -2907,7 +2992,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -2919,6 +3004,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -2993,6 +3079,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": true,
             "agentRun": 1,
             "modelCalls": 5,
             "latencyMs": 4200,
@@ -3015,7 +3102,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -3027,6 +3114,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": true,
           "count": 1,
           "modelCalls": 5,
           "agentRun": 1,
@@ -3102,6 +3190,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "agentRun": 1,
             "modelCalls": 1,
             "latencyMs": 100,
@@ -3130,6 +3219,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "agentRun": 1,
             "modelCalls": 1,
             "latencyMs": 200,
@@ -3158,6 +3248,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "agentRun": 1,
             "modelCalls": 1,
             "latencyMs": 300,
@@ -3209,7 +3300,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -3221,6 +3312,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 3,
           "modelCalls": 3,
           "agentRun": 3,
@@ -3308,6 +3400,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "agentRun": 1,
             "modelCalls": 2,
             "latencyMs": 900,
@@ -3336,6 +3429,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": true,
             "agentRun": 0,
             "modelCalls": 1,
             "latencyMs": 900,
@@ -3358,7 +3452,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -3370,6 +3464,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 2,
           "agentRun": 1,
@@ -3421,7 +3516,7 @@
         },
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_reply",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -3433,6 +3528,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": true,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 0,
@@ -3507,6 +3603,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "agentRun": 1,
             "modelCalls": 1,
             "latencyMs": 10,
@@ -3535,6 +3632,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "agentRun": 0,
             "modelCalls": 1,
             "latencyMs": 10,
@@ -3557,7 +3655,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -3569,6 +3667,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 2,
           "modelCalls": 2,
           "agentRun": 1,
@@ -3644,6 +3743,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": true,
             "modelCalls": 2,
             "latency": {
               "buckets": [
@@ -3699,6 +3799,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": true,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -3754,6 +3855,7 @@
             "status": "error",
             "errorClass": "provider_timeout",
             "usageSource": "unavailable",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -3808,6 +3910,7 @@
             "status": "error",
             "errorClass": "provider_timeout",
             "usageSource": "reported",
+            "toolsReported": true,
             "agentRun": 1,
             "modelCalls": 4,
             "latencyMs": 31000,
@@ -3830,7 +3933,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -3842,6 +3945,7 @@
           "status": "error",
           "errorClass": "provider_timeout",
           "usageSource": "reported",
+          "toolsReported": true,
           "count": 1,
           "modelCalls": 4,
           "agentRun": 1,
@@ -3896,7 +4000,7 @@
       "expectedSteps": [
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -3909,6 +4013,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": true,
           "modelCalls": 2,
           "latencyMs": {
             "buckets": [
@@ -3950,7 +4055,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -3963,6 +4068,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": true,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -4005,7 +4111,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -4018,6 +4124,7 @@
           "status": "error",
           "errorClass": "provider_timeout",
           "usageSource": "unavailable",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -4096,7 +4203,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -4108,6 +4215,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": true,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -4199,7 +4307,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -4211,6 +4319,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": true,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -4265,7 +4374,7 @@
       "expectedSteps": [
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -4278,6 +4387,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": true,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -4343,6 +4453,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4398,6 +4509,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4453,6 +4565,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4508,6 +4621,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4563,6 +4677,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4618,6 +4733,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4673,6 +4789,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4728,6 +4845,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4783,6 +4901,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4838,6 +4957,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4893,6 +5013,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -4948,6 +5069,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5003,6 +5125,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5058,6 +5181,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5113,6 +5237,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5168,6 +5293,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5223,6 +5349,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5278,6 +5405,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5333,6 +5461,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5388,6 +5517,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5443,6 +5573,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5498,6 +5629,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5553,6 +5685,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5608,6 +5741,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5663,6 +5797,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5718,6 +5853,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5773,6 +5909,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5828,6 +5965,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5883,6 +6021,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5938,6 +6077,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -5993,6 +6133,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -6048,6 +6189,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -6103,6 +6245,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -6158,6 +6301,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -6213,6 +6357,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -6262,7 +6407,7 @@
       "expectedSteps": [
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6275,6 +6420,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 2,
           "latencyMs": {
             "buckets": [
@@ -6316,7 +6462,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6329,6 +6475,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6370,7 +6517,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6383,6 +6530,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6424,7 +6572,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6437,6 +6585,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6478,7 +6627,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6491,6 +6640,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6532,7 +6682,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6545,6 +6695,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6586,7 +6737,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6599,6 +6750,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6640,7 +6792,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6653,6 +6805,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6694,7 +6847,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6707,6 +6860,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6748,7 +6902,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6761,6 +6915,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6802,7 +6957,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6815,6 +6970,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6856,7 +7012,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6869,6 +7025,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6910,7 +7067,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6923,6 +7080,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -6964,7 +7122,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -6977,6 +7135,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7018,7 +7177,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7031,6 +7190,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7072,7 +7232,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7085,6 +7245,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7126,7 +7287,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7139,6 +7300,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7180,7 +7342,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7193,6 +7355,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7234,7 +7397,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7247,6 +7410,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7288,7 +7452,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7301,6 +7465,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7342,7 +7507,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7355,6 +7520,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7396,7 +7562,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7409,6 +7575,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7450,7 +7617,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7463,6 +7630,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7504,7 +7672,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7517,6 +7685,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7558,7 +7727,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7571,6 +7740,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7612,7 +7782,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7625,6 +7795,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7666,7 +7837,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7679,6 +7850,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7720,7 +7892,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7733,6 +7905,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7774,7 +7947,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7787,6 +7960,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7828,7 +8002,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7841,6 +8015,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7882,7 +8057,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7895,6 +8070,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7936,7 +8112,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -7949,6 +8125,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -7990,7 +8167,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8003,6 +8180,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 2,
           "latencyMs": {
             "buckets": [
@@ -8067,6 +8245,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -8122,6 +8301,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -8177,6 +8357,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -8232,6 +8413,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 1,
             "latency": {
               "buckets": [
@@ -8281,7 +8463,7 @@
       "expectedSteps": [
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8294,6 +8476,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -8335,7 +8518,7 @@
         },
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8348,6 +8531,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 3,
           "latencyMs": {
             "buckets": [
@@ -8411,6 +8595,7 @@
             "status": "interrupted",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "agentRun": 1,
             "modelCalls": 1,
             "latencyMs": 900000,
@@ -8433,7 +8618,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8445,6 +8630,7 @@
           "status": "interrupted",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -8519,6 +8705,7 @@
             "status": "error",
             "errorClass": "model_unresolved",
             "usageSource": "unavailable",
+            "toolsReported": false,
             "agentRun": 1,
             "modelCalls": 0,
             "latencyMs": 0,
@@ -8541,7 +8728,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8553,6 +8740,7 @@
           "status": "error",
           "errorClass": "model_unresolved",
           "usageSource": "unavailable",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 0,
           "agentRun": 1,
@@ -8643,7 +8831,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8655,6 +8843,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": true,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -8730,6 +8919,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "modelCalls": 7,
             "latency": {
               "buckets": [
@@ -8779,7 +8969,7 @@
       "expectedSteps": [
         {
           "type": "step",
-          "v": 1,
+          "v": 2,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8792,6 +8982,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "modelCalls": 1,
           "latencyMs": {
             "buckets": [
@@ -8866,7 +9057,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8878,6 +9069,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -8970,6 +9162,1001 @@
       "expectedRefusals": []
     },
     {
+      "name": "a reported run and an unavailable run in one minute",
+      "note": "usageSource is a dimension of the window key: two runs on one slot in one minute land in two rows, never first-wins",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "recordRun",
+          "at": 1789221790000,
+          "run": {
+            "dimensions": {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "arm": "none",
+              "model": "claude-haiku-4-5"
+            },
+            "status": "ok",
+            "errorClass": null,
+            "usageSource": "reported",
+            "toolsReported": false,
+            "agentRun": 1,
+            "modelCalls": 2,
+            "latencyMs": 800,
+            "tokens": {
+              "input": 120,
+              "cachedInput": 0,
+              "output": 40
+            },
+            "tools": {
+              "calls": 0,
+              "errors": 0
+            }
+          }
+        },
+        {
+          "kind": "recordRun",
+          "at": 1789221790001,
+          "run": {
+            "dimensions": {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "arm": "none",
+              "model": "claude-haiku-4-5"
+            },
+            "status": "ok",
+            "errorClass": null,
+            "usageSource": "unavailable",
+            "toolsReported": false,
+            "agentRun": 1,
+            "modelCalls": 0,
+            "latencyMs": 50,
+            "tokens": {
+              "input": 0,
+              "cachedInput": 0,
+              "output": 0
+            },
+            "tools": {
+              "calls": 0,
+              "errors": 0
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790002
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "toolsReported": false,
+          "count": 1,
+          "modelCalls": 2,
+          "agentRun": 1,
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 800
+          },
+          "tokens": {
+            "input": 120,
+            "output": 40
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "tokensSq": {
+            "input": 14400,
+            "cachedInput": 0,
+            "output": 1600,
+            "inputOutput": 4800,
+            "inputCached": 0,
+            "cachedOutput": 0
+          }
+        },
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "unavailable",
+          "toolsReported": false,
+          "count": 1,
+          "modelCalls": 0,
+          "agentRun": 1,
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 50
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "tokensSq": {
+            "input": 0,
+            "cachedInput": 0,
+            "output": 0,
+            "inputOutput": 0,
+            "inputCached": 0,
+            "cachedOutput": 0
+          }
+        }
+      ],
+      "expectedSteps": [],
+      "expectedRefusals": []
+    },
+    {
+      "name": "tools reported and not reported split rows",
+      "note": "toolsReported is a dimension: a run whose tool calls were seen (zero of them) and one whose were not land in two window rows, and likewise two step rows",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 10,
+            "toolCalls": {
+              "calls": 0,
+              "errors": 0
+            }
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790001,
+          "observation": {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 20
+          }
+        },
+        {
+          "kind": "recordStep",
+          "at": 1789221790002,
+          "step": {
+            "dimensions": {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "arm": "none",
+              "model": "claude-haiku-4-5"
+            },
+            "step": "docs.flow#1",
+            "status": "ok",
+            "errorClass": null,
+            "usageSource": "reported",
+            "toolsReported": true,
+            "modelCalls": 1,
+            "latency": {
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sum": 100
+            },
+            "tokens": {
+              "input": 0,
+              "cachedInput": 0,
+              "output": 0
+            },
+            "tools": {
+              "calls": 0,
+              "errors": 0
+            }
+          }
+        },
+        {
+          "kind": "recordStep",
+          "at": 1789221790003,
+          "step": {
+            "dimensions": {
+              "tag": "support.triage",
+              "artifactId": "prm_support_triage",
+              "versionId": "ver_triage_7",
+              "arm": "none",
+              "model": "claude-haiku-4-5"
+            },
+            "step": "docs.flow#1",
+            "status": "ok",
+            "errorClass": null,
+            "usageSource": "reported",
+            "toolsReported": false,
+            "modelCalls": 1,
+            "latency": {
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sum": 100
+            },
+            "tokens": {
+              "input": 0,
+              "cachedInput": 0,
+              "output": 0
+            },
+            "tools": {
+              "calls": 0,
+              "errors": 0
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790004
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "toolsReported": true,
+          "count": 1,
+          "modelCalls": 1,
+          "agentRun": 1,
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 10
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "tokensSq": {
+            "input": 0,
+            "cachedInput": 0,
+            "output": 0,
+            "inputOutput": 0,
+            "inputCached": 0,
+            "cachedOutput": 0
+          }
+        },
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "toolsReported": false,
+          "count": 1,
+          "modelCalls": 1,
+          "agentRun": 1,
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 20
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "tokensSq": {
+            "input": 0,
+            "cachedInput": 0,
+            "output": 0,
+            "inputOutput": 0,
+            "inputCached": 0,
+            "cachedOutput": 0
+          }
+        }
+      ],
+      "expectedSteps": [
+        {
+          "type": "step",
+          "v": 2,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "step": "docs.flow#1",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "toolsReported": true,
+          "modelCalls": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 100
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        },
+        {
+          "type": "step",
+          "v": 2,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "step": "docs.flow#1",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "toolsReported": false,
+          "modelCalls": 1,
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 100
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0"
+        }
+      ],
+      "expectedRefusals": []
+    },
+    {
+      "name": "a feedback-only row carries toolsReported false",
+      "note": "delayed feedback opens its own count-0 row with toolsReported false, apart from a measured row in the filing minute whose tool calls were seen",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221850000,
+          "observation": {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 10,
+            "toolCalls": {
+              "calls": 1,
+              "errors": 0
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221850001,
+          "feedback": {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "outcomeRunMinute": "2026-09-12T14:03:00Z",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221850002
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:04:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "toolsReported": true,
+          "count": 1,
+          "modelCalls": 1,
+          "agentRun": 1,
+          "tools": {
+            "calls": 1,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 10
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "tokensSq": {
+            "input": 0,
+            "cachedInput": 0,
+            "output": 0,
+            "inputOutput": 0,
+            "inputCached": 0,
+            "cachedOutput": 0
+          }
+        },
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:04:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "toolsReported": false,
+          "count": 0,
+          "modelCalls": 0,
+          "agentRun": 0,
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 0
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "outcomeRunMinute": "2026-09-12T14:03:00Z",
+          "outcomes": {
+            "thumbs": {
+              "n": 1,
+              "sum": 1,
+              "sumSq": 1
+            }
+          }
+        }
+      ],
+      "expectedSteps": [],
+      "expectedRefusals": []
+    },
+    {
+      "name": "same-minute feedback ignores usageSource and toolsReported",
+      "note": "feedback in its run minute merges into the first measured ok row with the same dimensions, whatever its usageSource or toolsReported",
+      "instanceId": "i-7f3aQx9kLmN2pQ",
+      "instanceClass": "resident",
+      "sdk": "agent-sdk-ts/0.1.0",
+      "events": [
+        {
+          "kind": "observe",
+          "at": 1789221790000,
+          "observation": {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 10,
+            "usageSource": "unavailable",
+            "toolCalls": {
+              "calls": 2,
+              "errors": 0
+            }
+          }
+        },
+        {
+          "kind": "observe",
+          "at": 1789221790001,
+          "observation": {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "status": "ok",
+            "latencyMs": 20
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790002,
+          "feedback": {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "outcomes": {
+              "thumbs": true
+            }
+          }
+        },
+        {
+          "kind": "feedback",
+          "at": 1789221790003,
+          "feedback": {
+            "tag": "support.triage",
+            "artifactId": "prm_support_triage",
+            "versionId": "ver_triage_7",
+            "arm": "none",
+            "model": "claude-haiku-4-5",
+            "outcomeRunMinute": "2026-09-12T14:03:00Z",
+            "outcomes": {
+              "rating": 4
+            }
+          }
+        },
+        {
+          "kind": "close",
+          "at": 1789221790004
+        }
+      ],
+      "expectedWindows": [
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "unavailable",
+          "toolsReported": true,
+          "count": 1,
+          "modelCalls": 1,
+          "agentRun": 1,
+          "tools": {
+            "calls": 2,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 10
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "tokensSq": {
+            "input": 0,
+            "cachedInput": 0,
+            "output": 0,
+            "inputOutput": 0,
+            "inputCached": 0,
+            "cachedOutput": 0
+          },
+          "outcomes": {
+            "thumbs": {
+              "n": 1,
+              "sum": 1,
+              "sumSq": 1
+            },
+            "rating": {
+              "n": 1,
+              "sum": 4,
+              "sumSq": 16
+            }
+          }
+        },
+        {
+          "type": "window",
+          "v": 5,
+          "artifactId": "prm_support_triage",
+          "minute": "2026-09-12T14:03:00Z",
+          "instanceId": "i-7f3aQx9kLmN2pQ",
+          "instanceClass": "resident",
+          "tag": "support.triage",
+          "versionId": "ver_triage_7",
+          "arm": "none",
+          "model": "claude-haiku-4-5",
+          "status": "ok",
+          "errorClass": null,
+          "usageSource": "reported",
+          "toolsReported": false,
+          "count": 1,
+          "modelCalls": 1,
+          "agentRun": 1,
+          "tools": {
+            "calls": 0,
+            "errors": 0
+          },
+          "latencyMs": {
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "sum": 20
+          },
+          "tokens": {
+            "input": 0,
+            "output": 0
+          },
+          "sdk": "agent-sdk-ts/0.1.0",
+          "tokensSq": {
+            "input": 0,
+            "cachedInput": 0,
+            "output": 0,
+            "inputOutput": 0,
+            "inputCached": 0,
+            "cachedOutput": 0
+          }
+        }
+      ],
+      "expectedSteps": [],
+      "expectedRefusals": []
+    },
+    {
       "name": "a long run stays below the last bucket",
       "note": "a 200-second run lands in the 262,144 ms bucket, so p95 does not saturate",
       "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -8990,6 +10177,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "agentRun": 1,
             "modelCalls": 1,
             "latencyMs": 200000,
@@ -9012,7 +10200,7 @@
       "expectedWindows": [
         {
           "type": "window",
-          "v": 4,
+          "v": 5,
           "artifactId": "prm_support_triage",
           "minute": "2026-09-12T14:03:00Z",
           "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -9024,6 +10212,7 @@
           "status": "ok",
           "errorClass": null,
           "usageSource": "reported",
+          "toolsReported": false,
           "count": 1,
           "modelCalls": 1,
           "agentRun": 1,
@@ -9084,13 +10273,13 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
       ],
       "expected": {
         "rows": [
           {
             "type": "window",
-            "v": 4,
+            "v": 5,
             "artifactId": "prm_support_triage",
             "minute": "2026-09-12T14:03:00Z",
             "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -9102,6 +10291,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "count": 1,
             "modelCalls": 1,
             "agentRun": 1,
@@ -9162,13 +10352,13 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0,\"names\":[\"never\"]},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0,\"laterToken\":3},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0},\"laterField\":\"gone\"}"
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0,\"names\":[\"never\"]},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0,\"laterToken\":3},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0},\"laterField\":\"gone\"}"
       ],
       "expected": {
         "rows": [
           {
             "type": "window",
-            "v": 4,
+            "v": 5,
             "artifactId": "prm_support_triage",
             "minute": "2026-09-12T14:03:00Z",
             "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -9180,6 +10370,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "count": 1,
             "modelCalls": 1,
             "agentRun": 1,
@@ -9253,14 +10444,14 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}",
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}",
         "{\"type\":\"trace\",\"v\":1,\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"body\":\"from a later minor\"}"
       ],
       "expected": {
         "rows": [
           {
             "type": "window",
-            "v": 4,
+            "v": 5,
             "artifactId": "prm_support_triage",
             "minute": "2026-09-12T14:03:00Z",
             "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -9272,6 +10463,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "count": 1,
             "modelCalls": 1,
             "agentRun": 1,
@@ -9346,14 +10538,14 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0},\"somethingNew\":1}",
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
+        "{\"type\":\"window\",\"v\":6,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0},\"somethingNew\":1}",
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
       ],
       "expected": {
         "rows": [
           {
             "type": "window",
-            "v": 4,
+            "v": 5,
             "artifactId": "prm_support_triage",
             "minute": "2026-09-12T14:03:00Z",
             "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -9365,6 +10557,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "count": 1,
             "modelCalls": 1,
             "agentRun": 1,
@@ -9421,7 +10614,7 @@
             "instanceId": "i-7f3aQx9kLmN2pQ",
             "segments": 0,
             "lines": 1,
-            "bytes": 603
+            "bytes": 625
           }
         ],
         "invalid": [],
@@ -9439,13 +10632,13 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"error\",\"errorClass\":\"guardrail_tripped\",\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"error\",\"errorClass\":\"guardrail_tripped\",\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
       ],
       "expected": {
         "rows": [
           {
             "type": "window",
-            "v": 4,
+            "v": 5,
             "artifactId": "prm_support_triage",
             "minute": "2026-09-12T14:03:00Z",
             "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -9457,6 +10650,7 @@
             "status": "error",
             "errorClass": "guardrail_tripped",
             "usageSource": "reported",
+            "toolsReported": false,
             "count": 1,
             "modelCalls": 1,
             "agentRun": 1,
@@ -9517,14 +10711,14 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"paused\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}",
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"paused\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}",
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
       ],
       "expected": {
         "rows": [
           {
             "type": "window",
-            "v": 4,
+            "v": 5,
             "artifactId": "prm_support_triage",
             "minute": "2026-09-12T14:03:00Z",
             "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -9536,6 +10730,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "count": 1,
             "modelCalls": 1,
             "agentRun": 1,
@@ -9592,7 +10787,7 @@
             "instanceId": "i-7f3aQx9kLmN2pQ",
             "segments": 0,
             "lines": 1,
-            "bytes": 590
+            "bytes": 612
           }
         ],
         "invalid": [],
@@ -9610,7 +10805,7 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0},\"step\":\"a\"}"
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0},\"step\":\"a\"}"
       ],
       "expected": {
         "rows": [],
@@ -9629,14 +10824,14 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}",
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-7f3aQx9kLmN2pQ\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}",
         "{not json"
       ],
       "expected": {
         "rows": [
           {
             "type": "window",
-            "v": 4,
+            "v": 5,
             "artifactId": "prm_support_triage",
             "minute": "2026-09-12T14:03:00Z",
             "instanceId": "i-7f3aQx9kLmN2pQ",
@@ -9648,6 +10843,7 @@
             "status": "ok",
             "errorClass": null,
             "usageSource": "reported",
+            "toolsReported": false,
             "count": 1,
             "modelCalls": 1,
             "agentRun": 1,
@@ -9713,7 +10909,7 @@
       "instanceId": "i-7f3aQx9kLmN2pQ",
       "nowMs": 1789221790000,
       "lines": [
-        "{\"type\":\"window\",\"v\":4,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-someone-else\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
+        "{\"type\":\"window\",\"v\":5,\"artifactId\":\"prm_support_triage\",\"minute\":\"2026-09-12T14:03:00Z\",\"instanceId\":\"i-someone-else\",\"instanceClass\":\"resident\",\"tag\":\"support.triage\",\"versionId\":\"ver_1\",\"arm\":\"none\",\"model\":\"gpt-5\",\"status\":\"ok\",\"errorClass\":null,\"usageSource\":\"reported\",\"toolsReported\":false,\"count\":1,\"modelCalls\":1,\"agentRun\":1,\"tools\":{\"calls\":0,\"errors\":0},\"latencyMs\":{\"buckets\":[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],\"sum\":10},\"tokens\":{\"input\":0,\"output\":0},\"sdk\":\"agent-sdk-ts/0.1.0\",\"tokensSq\":{\"input\":0,\"cachedInput\":0,\"output\":0,\"inputOutput\":0,\"inputCached\":0,\"cachedOutput\":0}}"
       ],
       "expected": {
         "rows": [],

@@ -139,9 +139,15 @@ export class RunRegistry {
     return this.live.size;
   }
 
+  /** By the idle rule: the run idle longest that no `withRun` scope holds, and only when every run is held, the oldest. */
   private endOldest(): void {
     let oldest: Session | undefined;
-    for (const session of this.live.values()) if (!oldest || session.lastActive < oldest.lastActive) oldest = session;
-    oldest?.endIdle();
+    let oldestHeld: Session | undefined;
+    for (const session of this.live.values()) {
+      if (session.busy) {
+        if (!oldestHeld || session.lastActive < oldestHeld.lastActive) oldestHeld = session;
+      } else if (!oldest || session.lastActive < oldest.lastActive) oldest = session;
+    }
+    (oldest ?? oldestHeld)?.endIdle();
   }
 }

@@ -20,7 +20,7 @@ const scope = { organizationId: "org_1", agentId: "agt_run", target: "prod" as c
 const TAG = "support.reply";
 const T0 = 1_789_300_800_000;
 
-type WindowRow = { type: string; tag: string; arm: string; versionId: string; count: number; modelCalls: number; agentRun: number; tools: { calls: number; errors: number }; checks?: { passed: number; failed: number }; step?: string; status: string; errorClass: string | null; usageSource: string; tokens: { input: number; output: number; cachedInput?: number }; latencyMs: { sum: number } };
+type WindowRow = { type: string; tag: string; arm: string; versionId: string; count: number; modelCalls: number; agentRun: number; tools: { calls: number; errors: number }; checks?: { passed: number; failed: number }; step?: string; status: string; errorClass: string | null; usageSource: string; toolsReported: boolean; minute: string; tokens: { input: number; output: number; cachedInput?: number }; latencyMs: { sum: number } };
 
 function fixture() {
   const plane = new FakeControlPlane(scope);
@@ -266,8 +266,50 @@ test("end twice writes once; a pinned slot with no model call still writes a run
   run.end();
   run.recordModelCall(TAG, { model: "gpt", latencyMs: 1, usage: usage(9, 9) });
   run.end({ errorClass: "provider_error" });
-  // Both runs land in one window: `usageSource` is not in the window key on v4 (AIR-2268 tracks the key change).
-  assert.deepEqual(rows(ap).filter((row) => row.count > 0).map((row) => [row.count, row.modelCalls, row.tokens.input, row.status]), [[2, 1, 1, "ok"]]);
+  // The silent run has no usage, so it is `unavailable` and lands on a row of its own beside the `reported` run.
+  assert.deepEqual(rows(ap).filter((row) => row.count > 0).map((row) => [row.count, row.modelCalls, row.tokens.input, row.status, row.usageSource]).sort(), [[1, 0, 0, "ok", "unavailable"], [1, 1, 1, "ok", "reported"]]);
+  await ap.stop();
+});
+
+test("two runs in one minute, one reported and one unavailable, land in two rows", async () => {
+  const { plane, start, slotOf, rows } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  const reported = ap.openRun();
+  await reported.place(TAG);
+  reported.recordModelCall(TAG, { model: "gpt", latencyMs: 1, usage: usage(4, 2) });
+  reported.end();
+  const unavailable = ap.openRun();
+  await unavailable.place(TAG);
+  unavailable.recordModelCall(TAG, { model: "gpt", latencyMs: 1 });
+  unavailable.end();
+  const written = rows(ap).filter((row) => row.count > 0);
+  assert.equal(new Set(written.map((row) => row.minute)).size, 1, "one minute");
+  assert.deepEqual(written.map((row) => [row.usageSource, row.count, row.modelCalls, row.tokens.input]).sort(), [["reported", 1, 1, 4], ["unavailable", 1, 1, 0]]);
+  await ap.stop();
+});
+
+test("toolsReported: a tool record makes it true, a slot with no tool hook is false, and toolsObserved with no tools is true with calls 0", async () => {
+  const CLASSIFY = "support.classify";
+  const { plane, start, slotOf, allRows } = fixture();
+  plane.promote([slotOf("Version A", "ver_a"), plane.slot({ tag: CLASSIFY, text: "Classify", versionId: "ver_c", variables: [] })]);
+  const ap = await start();
+  await ap.run({ subject: "ann" }, async (run) => {
+    await run.place(TAG);
+    await run.place(CLASSIFY);
+    run.recordModelCall(TAG, { step: "plan", model: "gpt", latencyMs: 10, usage: usage(1, 1) });
+    run.recordToolCall(TAG, { ok: true });
+    run.recordModelCall(CLASSIFY, { step: "classify", model: "gpt", latencyMs: 10, usage: usage(1, 1) });
+  });
+  await ap.run({ subject: "bob" }, async (run) => {
+    await run.place(CLASSIFY);
+    run.recordModelCall(CLASSIFY, { model: "gpt", latencyMs: 10, usage: usage(1, 1), toolsObserved: true });
+  });
+  const written = allRows(ap);
+  const windows = written.filter((row) => row.type === "window" && row.count > 0).map((row) => [row.tag, row.toolsReported, row.tools.calls, row.count]).sort();
+  assert.deepEqual(windows, [[CLASSIFY, false, 0, 1], [CLASSIFY, true, 0, 1], [TAG, true, 1, 1]]);
+  const steps = written.filter((row) => row.type === "step").map((row) => [row.tag, row.step, row.toolsReported]).sort();
+  assert.deepEqual(steps, [[CLASSIFY, "classify", false], [TAG, "plan", true]], "a step row takes its slot's value");
   await ap.stop();
 });
 
@@ -956,4 +998,108 @@ test("two agents in one process: b.currentRun() is undefined inside a.run", asyn
   });
   await a.stop();
   await b.stop();
+});
+
+// ------------------------------------------------------------------------------- AIR-2242 review regressions
+
+test("review: two concurrent place calls after the pinned arm is disabled both settle", async () => {
+  const { plane, start, slotOf, experiment } = fixture();
+  const a = slotOf("Version A", "ver_a");
+  const b = slotOf("Version B", "ver_b");
+  const t = experiment(a, b, 10_000);
+  plane.promote([a], { experiments: [t] });
+  const ap = await start();
+  const run = ap.openRun({ subject: "ann" });
+  assert.equal((await run.place(TAG)).kind, "approved");
+  plane.promote([a], { experiments: [t], directives: [disable({ scope: "arm", arm: "candidate", experimentId: "exp_1" })] });
+  await ap.syncNow();
+  const results = await Promise.allSettled([run.place(TAG), run.place(TAG)]);
+  assert.ok(results.every((r) => r.status === "fulfilled"), "place must never throw");
+  await ap.stop();
+});
+
+test("review: after a re-placed arm, ap.observe on the new arm still folds into the run", async () => {
+  const { plane, start, slotOf, experiment, rows } = fixture();
+  const a = slotOf("Version A", "ver_a");
+  const b = slotOf("Version B", "ver_b");
+  const t = experiment(a, b, 10_000);
+  plane.promote([a], { experiments: [t] });
+  const ap = await start();
+  await ap.run({ subject: "ann" }, async () => {
+    const r1 = ap.prompt(TAG).render();
+    await ap.observe(r1, async () => ({ usage: { input_tokens: 4, output_tokens: 2 } }));
+    plane.promote([a], { experiments: [t], directives: [disable({ scope: "arm", arm: "candidate", experimentId: "exp_1" })] });
+    await ap.syncNow();
+    const r2 = ap.prompt(TAG).render();
+    assert.equal(r2.text, "Version A");
+    await ap.observe(r2, async () => ({ usage: { input_tokens: 4, output_tokens: 2 } }));
+  });
+  const written = rows(ap).filter((row) => row.count > 0);
+  assert.equal(written.reduce((n, r) => n + r.count, 0), 1, "one request counts once");
+  await ap.stop();
+});
+test("review: inside a run, needs() reads the arm render() uses", async () => {
+  const { plane, start, slotOf, experiment } = fixture();
+  const a = plane.slot({ tag: TAG, text: "A {{x}}", versionId: "ver_a", variables: [{ name: "x", required: true, trust: "operator" }] });
+  const b = slotOf("Version B", "ver_b");
+  plane.promote([a], { experiments: [experiment(a, b)] });
+  const ap = await start();
+  let mismatches = 0;
+  for (let i = 0; i < 40; i += 1) {
+    await ap.run({ subject: `u${i}` }, async () => {
+      const prompt = ap.prompt(TAG);
+      const needs = prompt.needs();
+      try { const t = prompt.render(needs.length === 1 ? { x: "1" } : {}).text; if (t !== (needs.length === 1 ? "A 1" : "Version B")) mismatches++; } catch { mismatches++; }
+    });
+  }
+  assert.equal(mismatches, 0);
+  await ap.stop();
+});
+
+test("review: a direct-path slot gets its one run_placed log", async () => {
+  const { plane, start, slotOf, events } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  await ap.run({}, async () => { ap.prompt(TAG).render(); });
+  const placed = events.filter((e) => e.event === "run_placed");
+  assert.equal(placed.length, 1);
+  await ap.stop();
+});
+
+test("review: the 10,000-run cap never ends a run held open by withRun", async () => {
+  const { plane, start, slotOf, rows } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  const live = ap.openRun({ subject: "first" });
+  await live.place(TAG);
+  const p = ap.withRun(live, () => held);
+  for (let i = 0; i < 10_000; i += 1) ap.openRun();
+  const stillCurrent = ap.withRun(live, () => ap.currentRun() === live);
+  release(); await p;
+  assert.equal(stillCurrent, true, "a run inside withRun is not idle");
+  await ap.stop();
+});
+test("review: a slot disable keeps the direct-path pin, so the run keeps its version after the disable lifts", async () => {
+  const { plane, start, slotOf, experiment, rows } = fixture();
+  const a = slotOf("Version A", "ver_a");
+  const b = slotOf("Version B", "ver_b");
+  plane.promote([a], { experiments: [experiment(a, b, 10_000)] });
+  const ap = await start();
+  const texts: string[] = [];
+  await ap.run({ subject: "ann" }, async () => {
+    const r1 = ap.prompt(TAG).render(); texts.push(r1.text);
+    await ap.observe(r1, async () => ({ usage: { input_tokens: 1, output_tokens: 1 } }));
+    plane.promote([a], { experiments: [experiment(a, b, 10_000)], directives: [disable({ scope: "slot", tag: TAG })] });
+    await ap.syncNow();
+    try { ap.prompt(TAG).render(); } catch { texts.push("threw"); }
+    plane.promote([a], { experiments: [experiment(a, b, 0)] });
+    await ap.syncNow();
+    const r3 = ap.prompt(TAG).render(); texts.push(r3.text);
+    await ap.observe(r3, async () => ({ usage: { input_tokens: 1, output_tokens: 1 } }));
+  });
+  const written = rows(ap).filter((row) => row.count > 0);
+  assert.equal(texts[2], "Version B", "the pin stays across a disable");
+  await ap.stop();
 });

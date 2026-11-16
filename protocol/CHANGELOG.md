@@ -1,5 +1,15 @@
 # Protocol changelog
 
+## 3.1.0 · Tool counts say whether they were seen
+
+A cut-over: 3.1.0 writers write only the new row versions, and nothing reads the old ones.
+
+- Window rows v5. Rows gain a required boolean `toolsReported`: `true` when the writer saw the row's tool calls, so `tools: {calls: 0}` means none ran rather than not reported. A feedback-only row carries `false`.
+- The window key, at the writer and at ingest, is `(instanceId, minute, tag, artifactId, versionId, arm, model, status, errorClass, usageSource, toolsReported, audienceIds, outcomeRunMinute)`. `usageSource` is no longer the first run's: a `reported` run and an `unavailable` run in one minute are two rows.
+- Step rows v2. They gain the same required `toolsReported`, and their open key adds `usageSource` and `toolsReported` to the run dimensions, `step`, `status` and `errorClass`.
+- Feedback filed in its run's minute lands on the first matching measured row, whatever its `usageSource` or `toolsReported`.
+- Refusal and dropped rows stay v1.
+
 ## 3.0.0 · One wire
 
 Breaking. 3.0.0 is the only wire: older manifests, heartbeats, rows and run references are refused, and no compatibility path remains. Any `3.x.y` is read; a feature a reader must understand is gated by a capability, never by the minor number.

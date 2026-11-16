@@ -30,7 +30,7 @@ const WRITER_A = "i-writerAAAAAAAA";
 const WRITER_B = "i-writerBBBBBBBB";
 
 function windowRow(instanceId: string, minute: string, tag = "support.triage"): SpoolRow {
-  return { type: "window", v: 4, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag, versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
+  return { type: "window", v: 5, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag, versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", toolsReported: false, count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 40, output: 9 }, sdk: "agent-sdk-ts/0.1.0" };
 }
 
 function writeSegment(dir: string, instanceId: string, minuteMs: number, n: number, lines: string[]): string {
@@ -78,7 +78,7 @@ test("the validator accepts every row the vectors expect and refuses the shapes 
   assert.equal(validateSpoolRow({ ...base, status: "error", errorClass: "exploded" }).ok, true, "a later error class is any slug");
   assert.deepEqual(validateSpoolRow({ ...base, status: "error", errorClass: "Not A Slug" }), { ok: false, reason: "errorClass" });
   assert.deepEqual(validateSpoolRow({ ...base, outcomes: { thumbs: { n: 1, sum: 1, sumSq: 1 }, "Free Text": { n: 1, sum: 0, sumSq: 0 } } }), { ok: false, reason: "outcomes:Free Text" });
-  for (const v of [1, 2, 3, 5]) assert.deepEqual(validateSpoolRow({ ...base, v }), { ok: false, reason: "v", later: true }, `v${v} is not read`);
+  for (const v of [1, 2, 3, 4, 6]) assert.deepEqual(validateSpoolRow({ ...base, v }), { ok: false, reason: "v", later: true }, `v${v} is not read`);
   assert.deepEqual(validateSpoolRow({ ...base, tag: "onboarding.flow#1" }), { ok: false, reason: "tag" }, "a step never rides in tag");
   assert.deepEqual(validateSpoolRow({ type: "refusal", v: 1, at: "2026-09-12T14:03:00Z", instanceId: WRITER_A, reason: "Not A Slug", generation: 1, tag: null }), { ok: false, reason: "reason" });
   assert.deepEqual(validateSpoolRow("a line"), { ok: false, reason: "not_an_object" });

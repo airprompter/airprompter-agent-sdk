@@ -546,7 +546,8 @@ test("broadcast targeting: one device, mutable local tags, names-only heartbeat 
   const spoolDir=join(stateDir,"airprompter","agt_1","prod","spool","telemetry");
   const rows=readdirSync(spoolDir).filter(n=>n.endsWith(".ndjson")).flatMap(n=>readFileSync(join(spoolDir,n),"utf8").trim().split("\n").map(line=>JSON.parse(line)));
   const feedback=rows.find(r=>r.type==="window" && r.outcomes?.thumbs);
-  assert.equal(feedback.v,4);
+  assert.equal(feedback.v,5);
+  assert.equal(feedback.toolsReported,false);
   assert.equal(feedback.artifactId,candidate.artifactId);
   assert.deepEqual(feedback.outcomes.thumbs,{n:1,sum:1,sumSq:1});
   assert.equal(feedback.count,0);
@@ -813,7 +814,7 @@ test("manual output checks retain audience attribution only on an open measured 
     await ap.stop();
     const rows=ap.drainMemorySink().filter((r:any)=>r.type==="window") as any[];
     assert.equal(rows.length,1);
-    assert.equal(rows[0].v,4);
+    assert.equal(rows[0].v,5);
     assert.equal(rows[0].artifactId,checked.artifactId);
     assert.equal(rows[0].count,1);
     assert.deepEqual(rows[0].audienceIds,[audience.audienceId]);

@@ -40,6 +40,7 @@
         "step",
         "status",
         "usageSource",
+        "toolsReported",
         "modelCalls",
         "latencyMs",
         "tokens",
@@ -50,7 +51,7 @@
           "const": "step"
         },
         "v": {
-          "const": 1
+          "const": 2
         },
         "artifactId": {
           "$ref": "https://airprompter.com/protocol/telemetry-window/1#/properties/artifactId"
@@ -78,6 +79,9 @@
         },
         "usageSource": {
           "$ref": "https://airprompter.com/protocol/telemetry-window/1#/properties/usageSource"
+        },
+        "toolsReported": {
+          "$ref": "https://airprompter.com/protocol/telemetry-window/1#/properties/toolsReported"
         },
         "modelCalls": {
           "$ref": "https://airprompter.com/protocol/telemetry-window/1#/properties/modelCalls"

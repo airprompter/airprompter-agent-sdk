@@ -72,7 +72,7 @@ function capture(work: string, env: Record<string, string> = {}): { ctx: Context
 
 function windowLine(instanceId: string, minuteMs: number): string {
   const minute = new Date(Math.floor(minuteMs / 60_000) * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
-  return `${JSON.stringify({ type: "window", v: 4, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 4, output: 2 }, sdk: "agent-sdk-ts/0.3.0" })}\n`;
+  return `${JSON.stringify({ type: "window", v: 5, artifactId: "art_1", minute, instanceId, instanceClass: "resident", tag: "support.reply", versionId: "ver_1", arm: "none", model: "gpt-5", status: "ok", errorClass: null, usageSource: "reported", toolsReported: false, count: 1, modelCalls: 1, agentRun: 1, tools: { calls: 0, errors: 0 }, tokensSq: { input: 0, cachedInput: 0, output: 0, inputOutput: 0, inputCached: 0, cachedOutput: 0 }, latencyMs: { buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sum: 812 }, tokens: { input: 4, output: 2 }, sdk: "agent-sdk-ts/0.3.0" })}\n`;
 }
 
 test("the telemetry daemon: publishes daemon.json and no store; ships two writers' segments under their own grants and reports; quarantines a mismatch; a clean stop hands the upload back", { skip }, async () => {

@@ -37,7 +37,7 @@ release: every process loads its own.
 | Segments | `seg-<instanceId>-<epochMinute>-<n>.ndjson`, `.open` until fsync + rename; rotate at the minute, at 1 MiB, or on an oversize line | [Segment files](../protocol/spool-format.md#segment-files); `vectors/spool.json` rotation cases |
 | Rows | `window` (one minute of one dimension set; `count` means runs), `step` (one step of a run, a row of its own), `refusal` (a control-plane refusal), `dropped` (segments evicted by the disk budget) — each validated against `spool-rows.schema.json` | [Row types](../protocol/spool-format.md#row-types) |
 | Latency | 23 fixed bucket edges every writer uses, up to one hour | `schemas/latency-buckets.json`; `vectors/spool.json` |
-| Runs | v4 window rows: `count` is runs, `modelCalls` the calls across them, `agentRun` the runs this slot opened, `tools` the tool counts with no names, `tokensSq` the second moments of each run's token totals | [Row types](../protocol/spool-format.md#row-types); `vectors/spool.json` |
+| Runs | v5 window rows: `count` is runs, `modelCalls` the calls across them, `agentRun` the runs this slot opened, `tools` the tool counts with no names and `toolsReported` whether they were seen, `tokensSq` the second moments of each run's token totals | [Row types](../protocol/spool-format.md#row-types); `vectors/spool.json` |
 | Feedback | `outcomes[signal] = {n, sum, sumSq}` from the declared catalogue only; `goldenPass` is the runtime's own | `schemas/feedback-signals.schema.json`; `vectors/feedback.json` |
 | Never in the spool | prompt text, model output, end-user identifiers, stack traces, application error messages — no field exists for them; unknown fields are stripped, unknown rows are skipped and counted, and only corruption quarantines a segment at ingest | [What must never be in the spool](../protocol/spool-format.md#what-must-never-be-in-the-spool) |
 | Upload | heartbeat → presigned S3 POST grant (≤ 15 min, ≤ 1 MiB, the instance's own prefix); backoff with full jitter; acknowledged segments deleted (S6); a refused grant is the throttle | [Upload](../protocol/spool-format.md#upload-for-reference-implemented-by-the-telemetry-daemon); `sdk-typescript/test/uploader.test.ts` |
@@ -72,9 +72,11 @@ version it could not serve, however many calls tried it. `usageSource` is
 `ap.report` and `ap.observe` outside a run stay one-call runs. Inside a
 run, `ap.observe` on a slot the run pinned folds into that run.
 
-Until the window key carries `usageSource` (tracked for the next row
-version), two runs of one minute and dimension set share a row whose
-`usageSource` is the first run's.
+From protocol 3.1.0 the window key carries `usageSource` and
+`toolsReported`, so a `reported` run and an `unavailable` run in one minute
+land in two rows. `toolsReported` is true when the slot's tool calls were
+seen (a tool record, a model call with `toolsObserved: true`, or an
+observation with `toolCalls`), so `tools.calls: 0` then means none ran.
 
 ## Field → OpenTelemetry GenAI
 

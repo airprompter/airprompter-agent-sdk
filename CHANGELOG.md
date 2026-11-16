@@ -20,6 +20,7 @@ may change a public shape and says so here.
 - **The heartbeat's `runCounters.passthrough`** counts each passthrough reason once per slot per run, plus `unmapped_step` and `slot_not_in_release`.
 - **LangChain:** a model the middleware cannot build writes one `model_unresolved` error row per run.
 - **Size budgets:** `./runtime` 215,000 → 260,000 bytes, `.` 265,000 → 275,000.
+- **Protocol 3.1.0: window rows v5, step rows v2.** Both gain a required `toolsReported`, true when the writer saw the row's tool calls, so `tools.calls: 0` means none ran. `usageSource` and `toolsReported` join the window key and the step key, so a `reported` run and an `unavailable` run in one minute land in two rows. `recordModelCall` takes `toolsObserved`, which LangChain sets on every call. A cut-over: old row versions are neither written nor read. See the [protocol changelog](protocol/CHANGELOG.md).
 
 ## 1.0.0-rc.0 — 2026-11-04 (protocol 3.0.0, Python 1.0.0rc0)
 

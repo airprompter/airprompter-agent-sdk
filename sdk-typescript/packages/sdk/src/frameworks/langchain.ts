@@ -211,11 +211,11 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
         // With `responseFormat` the handler answers { structuredResponse, messages }.
         const message = ((result as { messages?: unknown[] }).messages?.[0] ?? result) as Parameters<typeof usageOf>[0] & Parameters<typeof finishErrorOf>[0];
         const errorClass = finishErrorOf(message);
-        run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), usage: usageOf(message), ...(errorClass ? { errorClass } : {}) });
+        run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), usage: usageOf(message), toolsObserved: true, ...(errorClass ? { errorClass } : {}) });
         return result;
       } catch (error) {
         // No `end` here: an outer retry middleware calls this hook again. A failed run reaches the console through the sweep.
-        if (!isBubbleUp(error)) run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), errorClass: classifyError(error) });
+        if (!isBubbleUp(error)) run.recordModelCall(slot, { model: placed.model, latencyMs: latency(), errorClass: classifyError(error), toolsObserved: true });
         throw error;
       }
     },

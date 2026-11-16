@@ -1839,8 +1839,10 @@ export class AirPrompterAgent implements AgentRuntime {
     };
     /** The required names a render would still lack after these values and the registered sources — check it at start-up. */
     const localTags = () => tagOverride ? copyAudienceTags({...this.audienceTags,...tagOverride}) : this.audienceTags;
-    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: this.resolveSlot(tag, subject, localTags()).slot.variables, values, registry: this.variables });
-    return { render, renderAsync, needs, variables: () => this.resolveSlot(tag, subject, localTags()).slot.variables };
+    // Inside a run, the version the run serves: the arm render() will use, not a fresh assignment.
+    const served = () => this.runs.resolveThrough(tag, subject, tagOverride, (runSubject, runTags) => this.resolveSlot(tag, runSubject, runTags ? copyAudienceTags({ ...this.audienceTags, ...runTags }) : localTags()), { entry: true }).resolved;
+    const needs = (values: RenderValues = {}): string[] => unsourced({ variables: served().slot.variables, values, registry: this.variables });
+    return { render, renderAsync, needs, variables: () => served().slot.variables };
   }
 
   /** Count a render failure against its selected artifact and audience. */

@@ -87,6 +87,8 @@ export interface RunTotals {
   status: "ok" | "error" | "interrupted";
   errorClass: ErrorClass | null;
   usageSource: UsageSource;
+  /** True when the writer saw this run's tool calls, so `tools.calls: 0` means none ran rather than not reported. */
+  toolsReported: boolean;
   /** 1 when this is the first slot of its run, so an agent-wide total counts a two-slot run once. */
   agentRun: 0 | 1;
   modelCalls: number;
@@ -104,6 +106,8 @@ export interface StepTotals {
   status: "ok" | "error";
   errorClass: ErrorClass | null;
   usageSource: UsageSource;
+  /** True when the writer saw this step's tool calls; `tools.calls: 0` then means none ran. */
+  toolsReported: boolean;
   modelCalls: number;
   latency: { buckets: number[]; sum: number };
   tokens: TokenTotals;
@@ -126,7 +130,7 @@ export interface TokenMoments {
  */
 export interface WindowRow {
   type: "window";
-  v: 4;
+  v: 5;
   artifactId: string;
   audienceIds?: readonly string[];
   outcomeRunMinute?: string;
@@ -141,6 +145,8 @@ export interface WindowRow {
   status: "ok" | "error" | "refused" | "interrupted";
   errorClass: ErrorClass | null;
   usageSource: UsageSource;
+  /** True when the writer saw this row's tool calls, so `tools: {calls: 0}` means none ran rather than not reported. */
+  toolsReported: boolean;
   count: number;
   modelCalls: number;
   agentRun: number;
@@ -156,7 +162,7 @@ export interface WindowRow {
 /** A step is its own row type, so no fold over windows can count one. No `count`, moments, outcomes or checks. */
 export interface StepRow {
   type: "step";
-  v: 1;
+  v: 2;
   artifactId: string;
   audienceIds?: readonly string[];
   minute: string;
@@ -170,6 +176,7 @@ export interface StepRow {
   status: "ok" | "error";
   errorClass: ErrorClass | null;
   usageSource: UsageSource;
+  toolsReported: boolean;
   modelCalls: number;
   latencyMs: { buckets: number[]; sum: number };
   tokens: { input: number; cachedInput?: number; output: number };

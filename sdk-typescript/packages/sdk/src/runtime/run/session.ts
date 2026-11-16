@@ -51,6 +51,8 @@ interface SlotState extends Counts {
   dims: RunDimensions;
   checks?: { passed: number; failed: number };
   steps: Map<string, StepCounts>;
+  /** True once this slot's tool calls are known to be seen: a tool record, a model call with `toolsObserved`, or a folded observation with `toolCalls`. Its step rows take the same value. */
+  toolsReported: boolean;
 }
 
 /** What the session needs from its registry. */
@@ -107,8 +109,16 @@ export class Session implements RunSession {
       try {
         this.minted = this.host.mintRunRef(this.runId, entries.slice(0, RUN_REF_MAX_ENTRIES));
       } catch {
-        // An entry that cannot be minted is left out rather than losing the reference.
-        this.minted = this.host.mintRunRef(this.runId, []);
+        // Only an entry that cannot be minted is left out; the others and the run id stay.
+        const mintable = entries.filter((entry) => {
+          try {
+            this.host.mintRunRef(this.runId, [entry]);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        this.minted = this.host.mintRunRef(this.runId, mintable.slice(0, RUN_REF_MAX_ENTRIES));
       }
     }
     return this.minted;
@@ -152,7 +162,8 @@ export class Session implements RunSession {
     const pin = await pending;
     this.touch();
     this.settle(slot, pin);
-    const remembered = this.answers.get(slot)!;
+    // A concurrent re-place may have cleared the answer: the pin this caller awaited still names what it served.
+    const remembered = this.answers.get(slot) ?? pin.placement;
     if (remembered.kind === "passthrough" && remembered.reason !== "slot_disabled") return remembered;
     const verdict = this.verdict(slot, pin.resolved?.arm);
     if (verdict === "replace") {
@@ -164,7 +175,7 @@ export class Session implements RunSession {
       }
       const next = await this.pins.get(slot)!;
       this.settle(slot, next);
-      return this.answers.get(slot)!;
+      return this.answers.get(slot) ?? next.placement;
     }
     if (verdict === "disabled") return { kind: "passthrough", slot, reason: "slot_disabled" };
     return pin.placement;
@@ -191,6 +202,7 @@ export class Session implements RunSession {
     const state = this.recordable(slot);
     if (!state) return;
     this.lastErrorClass = call.errorClass ?? null;
+    if (call.toolsObserved === true) state.toolsReported = true;
     const reported = call.usage?.source === "reported";
     const tokens = { input: call.usage?.input ?? 0, cachedInput: call.usage?.cachedInput ?? 0, output: call.usage?.output ?? 0 };
     addCall(state, tokens, reported);
@@ -212,6 +224,7 @@ export class Session implements RunSession {
   recordToolCall(slot: string, call: ToolCallRecord): void {
     const state = this.recordable(slot);
     if (!state) return;
+    state.toolsReported = true;
     addTool(state, call.ok);
     if (call.step !== undefined) addTool(this.step(state, call.step, "ok", null), call.ok);
   }
@@ -256,6 +269,11 @@ export class Session implements RunSession {
     return this.openScopes === 0 && nowMs - this.lastActiveAt >= this.host.idleTimeoutMs;
   }
 
+  /** Inside an open `withRun` scope: never idle, so never evicted. */
+  get busy(): boolean {
+    return this.openScopes > 0;
+  }
+
   get lastActive(): number {
     return this.lastActiveAt;
   }
@@ -272,12 +290,13 @@ export class Session implements RunSession {
     if (pinned) {
       const verdict = this.verdict(slot, pinned.arm);
       if (verdict === "stands") return pinned;
+      // A disable keeps the pin: `resolve` is the throwing path and refuses, and the run keeps its version if the
+      // disable lifts. Only a disabled arm moves the run.
+      if (verdict === "disabled") return resolve(this.subject, this.tags());
+      this.host.log({ event: "run_replaced", runId: this.runId, slot });
       this.resolved.delete(slot);
-      if (verdict === "replace") {
-        this.host.log({ event: "run_replaced", runId: this.runId, slot });
-        this.answers.delete(slot);
-        this.pins.delete(slot);
-      }
+      this.answers.delete(slot);
+      this.pins.delete(slot);
     }
     const resolved = resolve(this.subject, this.tags());
     this.resolved.set(slot, resolved);
@@ -285,6 +304,7 @@ export class Session implements RunSession {
       const dims = dimensionsOf(slot, resolved);
       const pin: SlotPin = { placement: { kind: "passthrough", slot, reason: "no_slot" }, direct: true, dims, resolved, ...(options.entry ? { entry: entryOf(slot, resolved, dims.runMinute ?? "") } : {}) };
       this.adopt(slot, pin);
+      this.once(`placed\u0000${slot}`, () => this.host.log({ event: "run_placed", runId: this.runId, slot, versionId: dims.versionId, artifactId: dims.artifactId, arm: dims.arm }));
     }
     return resolved;
   }
@@ -293,13 +313,15 @@ export class Session implements RunSession {
   take(observation: { tag: string; arm: string; step?: string; status: string; errorClass?: ErrorClass | null; latencyMs: number; tokens?: { input?: number; cachedInput?: number; output?: number }; usageSource?: UsageSource; toolCalls?: { calls: number; errors: number }; checks?: { passed?: number; failed?: number } }): boolean {
     if (this.ended) return false;
     const state = this.states.get(observation.tag);
-    if (!state || state.dims.arm !== observation.arm) return false;
+    // The slot's row takes a call on the arm it pinned, or on the arm a re-place now serves: one request, one row.
+    if (!state || (state.dims.arm !== observation.arm && this.resolved.get(observation.tag)?.arm !== observation.arm)) return false;
     this.touch();
     const errorClass = observation.status === "ok" ? null : (observation.errorClass ?? null);
     this.lastErrorClass = errorClass;
     const tokens = { input: observation.tokens?.input ?? 0, cachedInput: observation.tokens?.cachedInput ?? 0, output: observation.tokens?.output ?? 0 };
     const reported = (observation.usageSource ?? "reported") === "reported";
     addCall(state, tokens, reported);
+    if (observation.toolCalls !== undefined) state.toolsReported = true;
     state.tools.calls += observation.toolCalls?.calls ?? 0;
     state.tools.errors += observation.toolCalls?.errors ?? 0;
     if (observation.checks) state.checks = { passed: (state.checks?.passed ?? 0) + (observation.checks.passed ?? 0), failed: (state.checks?.failed ?? 0) + (observation.checks.failed ?? 0) };
@@ -342,6 +364,7 @@ export class Session implements RunSession {
           status,
           errorClass,
           usageSource: usageOf(state),
+          toolsReported: state.toolsReported,
           agentRun,
           modelCalls: state.modelCalls,
           latencyMs,
@@ -362,6 +385,7 @@ export class Session implements RunSession {
             status: step.status,
             errorClass: step.errorClass,
             usageSource: usageOf(step),
+            toolsReported: state.toolsReported,
             modelCalls: step.modelCalls,
             latency: { buckets: step.buckets, sum: step.latencySum },
             tokens: { input: step.input, cachedInput: step.cachedInput, output: step.output },
@@ -444,7 +468,7 @@ export class Session implements RunSession {
       const rowError = existing.pin.rowError ?? pin.rowError;
       existing.pin = { ...rest, ...(existing.pin.entry ? { entry: existing.pin.entry } : {}), ...(rowError ? { rowError } : {}) };
     } else {
-      this.states.set(slot, { ...emptyCounts(), pin, dims: pin.dims!, steps: new Map() });
+      this.states.set(slot, { ...emptyCounts(), pin, dims: pin.dims!, steps: new Map(), toolsReported: false });
     }
     this.minted = undefined;
   }

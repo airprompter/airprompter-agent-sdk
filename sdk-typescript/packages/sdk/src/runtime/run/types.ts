@@ -54,6 +54,11 @@ export interface ModelCallRecord {
   errorClass?: ErrorClass;
   /** Read once for the slot's declared output checks, then dropped: never kept, never recorded. Absent when the call only asked for tools. */
   outputText?: string;
+  /**
+   * The caller sees every tool call this slot's requests make, so a run with none recorded reports zero tools, not
+   * unknown. Once true on a slot in a run, its run row and step rows carry `toolsReported: true`.
+   */
+  toolsObserved?: boolean;
 }
 
 export interface ToolCallRecord {

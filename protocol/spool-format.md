@@ -121,15 +121,15 @@ field or a row it does not know is under Readers.
 | Form | Told apart by | `count` | `latencyMs` | Carries |
 | -- | -- | -- | -- | -- |
 | Run row | `count` above 0 | runs | run wall-clock; bucket total equals `count` | tokens totals for the run, `modelCalls`, `agentRun`, `tools`, `tokensSq`, `outcomes[*].sumSq`, `checks` |
-| Feedback-only row | `count: 0` with `outcomeRunMinute` | 0 | all zero | outcomes only; every measure zero; no `tokensSq` |
+| Feedback-only row | `count: 0` with `outcomeRunMinute` | 0 | all zero | outcomes only; every measure zero; no `tokensSq`; `toolsReported: false` |
 
 ```json
-{"type":"window","v":4,"artifactId":"prm_8b2f…",
+{"type":"window","v":5,"artifactId":"prm_8b2f…",
  "minute":"2026-09-11T14:03:00Z",
  "instanceId":"i-7f3a…","instanceClass":"resident",
  "tag":"support.triage","versionId":"pv_…","arm":"candidate",
  "model":"claude-haiku-4-5","status":"ok","errorClass":null,
- "usageSource":"reported",
+ "usageSource":"reported","toolsReported":true,
  "count":412,"modelCalls":1236,"agentRun":412,
  "tools":{"calls":188,"errors":3},
  "latencyMs":{"buckets":[0,0,3,41,188,150,27,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"sum":617384},
@@ -153,6 +153,12 @@ field or a row it does not know is under Readers.
   two-slot run writes two run rows, each `count: 1`, and `agentRun: 1` on the
   first only, so an agent-wide total counts it once. A one-call run has 1.
 - `tools` holds tool calls and how many failed. No tool name ever travels.
+- `toolsReported` is `true` when the writer saw this row's tool calls, so
+  `tools: {calls: 0}` means none ran; `false` means the tool count was not
+  reported and `0` says nothing. A one-call observation reports them when it
+  carries `toolCalls`; a run session reports them for a slot once a tool call
+  is recorded, a model call says its tools are observed, or a folded
+  observation carries `toolCalls`. A feedback-only row carries `false`.
 - `tokensSq` holds the second moments of each run's token totals, summed over
   runs: `input`, `cachedInput` and `output` squared, and the products
   `inputOutput`, `inputCached` and `cachedOutput`, where `inputOutput` is
@@ -166,7 +172,10 @@ field or a row it does not know is under Readers.
   and checks filed against a run ride on that run's `status: ok` window when
   filed in the run minute and **never** add to `count` or `latencyMs`. The
   writer omits `outcomeRunMinute` when it equals the row's `minute`, so
-  feedback filed before the run still merges with it. Delayed feedback keeps
+  feedback filed before the run still merges with it. Feedback filed in its
+  run's minute lands on the first measured row opened that minute (status
+  `ok`, no error class) whose other dimensions match, whatever its
+  `usageSource` or `toolsReported`, since feedback knows neither. Delayed feedback keeps
   the original `outcomeRunMinute` and can therefore produce a `count: 0` row
   in its later filing minute. Writers must not create a feedback-only row
   without that authenticated run minute; without it, feedback may attach only
@@ -190,21 +199,23 @@ field or a row it does not know is under Readers.
 - `outcomes` carries only declared signal names from the feedback catalogue
   (`schemas/feedback-signals.schema.json`), each as `{n, sum, sumSq}`.
 - Rows for the same key `(instanceId, minute, tag, artifactId, versionId,
-  arm, model, status, errorClass, audienceIds, outcomeRunMinute)`
-  **replace** each other at ingest (SET semantics), so
-  a replayed segment is a no-op.
+  arm, model, status, errorClass, usageSource, toolsReported, audienceIds,
+  outcomeRunMinute)` **replace** each other at ingest (SET semantics), so
+  a replayed segment is a no-op. The writer's open window has the same key,
+  so a `reported` run and an `unavailable` run in one minute are two rows,
+  and neither field is first-wins inside a window.
 
 ### `step` — one step of a run in one minute
 
 A step is its own row type, never a window row with `count: 0`, so no fold over windows can count one.
 
 ```json
-{"type":"step","v":1,"artifactId":"prm_8b2f…",
+{"type":"step","v":2,"artifactId":"prm_8b2f…",
  "minute":"2026-09-11T14:03:00Z",
  "instanceId":"i-7f3a…","instanceClass":"resident",
  "tag":"docs.flow","versionId":"pv_…","arm":"none","model":"gpt-5",
  "step":"docs.flow#2","status":"ok","errorClass":null,
- "usageSource":"reported","modelCalls":2,
+ "usageSource":"reported","toolsReported":true,"modelCalls":2,
  "latencyMs":{"buckets":[0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0],"sum":812},
  "tokens":{"input":300,"output":70},
  "tools":{"calls":1,"errors":0},
@@ -221,7 +232,10 @@ A step is its own row type, never a window row with `count: 0`, so no fold over 
   `modelCalls`. `status` is `ok` or `error`.
 - There is no `count`, no moments, no outcomes and no checks. OpenTelemetry
   exports skip step rows.
-- The open key is the run dimensions plus `step`, `status` and `errorClass`.
+- `toolsReported` means what it does on a window row. A run session gives a
+  step row its slot's value for the run.
+- The open key is the run dimensions plus `step`, `status`, `errorClass`,
+  `usageSource` and `toolsReported`.
 
 ### `refusal` — a control-plane refusal (rare, content-free)
 
@@ -324,8 +338,9 @@ reported with the platform's `retryAfterSeconds` and nothing is uploaded.
    response.
 2. Accumulate into the open minute's `window` row for
    `(tag, artifactId, versionId, arm, model, status, errorClass,
-   audienceIds, outcomeRunMinute)` — the `tag`, `artifactId`, `versionId`
-   and `arm` come from the release you rendered.
+   usageSource, toolsReported, audienceIds, outcomeRunMinute)` — the `tag`,
+   `artifactId`, `versionId` and `arm` come from the release you rendered;
+   `toolsReported` is `true` only when you counted the run's tool calls.
 3. At minute end write the row to the open segment, `fsync`, close per the
    rules above.
 

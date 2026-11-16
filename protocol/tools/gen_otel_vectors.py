@@ -139,24 +139,24 @@ def main(out_path: str) -> None:
     buckets[5] = 2
     buckets[7] = 1
     window = {
-        "type": "window", "v": 4, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
+        "type": "window", "v": 5, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
         "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "status": "ok", "errorClass": None,
-        "usageSource": "reported", "count": 3, "modelCalls": 7, "agentRun": 3, "tools": {"calls": 2, "errors": 0}, "latencyMs": {"buckets": buckets, "sum": 250}, "tokens": {"input": 900, "cachedInput": 300, "output": 210},
+        "usageSource": "reported", "toolsReported": True, "count": 3, "modelCalls": 7, "agentRun": 3, "tools": {"calls": 2, "errors": 0}, "latencyMs": {"buckets": buckets, "sum": 250}, "tokens": {"input": 900, "cachedInput": 300, "output": 210},
         "tokensSq": {"input": 270000, "cachedInput": 30000, "output": 14700, "inputOutput": 63000, "inputCached": 90000, "cachedOutput": 21000},
         "checks": {"passed": 5, "failed": 1}, "outcomes": {"accepted": {"n": 2, "sum": 2, "sumSq": 2}, "rating": {"n": 1, "sum": 4, "sumSq": 16}}, "sdk": "agent-sdk-ts/0.1.0",
     }
     error_window = {
-        "type": "window", "v": 4, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
+        "type": "window", "v": 5, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
         "tag": "support.triage", "versionId": "rev-4", "arm": "control", "model": "claude-sonnet-5", "status": "error", "errorClass": "provider_timeout",
-        "usageSource": "unavailable", "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"buckets": [0] * (len(EDGES) - 1) + [1], "sum": 30000}, "tokens": {"input": 0, "output": 0},
+        "usageSource": "unavailable", "toolsReported": False, "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"buckets": [0] * (len(EDGES) - 1) + [1], "sum": 30000}, "tokens": {"input": 0, "output": 0},
         "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "sdk": "agent-sdk-ts/0.1.0",
     }
     step_buckets = [0] * len(EDGES)
     step_buckets[8] = 2
     step = {
-        "type": "step", "v": 1, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
+        "type": "step", "v": 2, "artifactId": "prm_triage", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident",
         "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "step": "support.triage#2", "status": "ok", "errorClass": None,
-        "usageSource": "reported", "modelCalls": 2, "latencyMs": {"buckets": step_buckets, "sum": 400}, "tokens": {"input": 300, "output": 70}, "tools": {"calls": 1, "errors": 0}, "sdk": "agent-sdk-ts/0.1.0",
+        "usageSource": "reported", "toolsReported": True, "modelCalls": 2, "latencyMs": {"buckets": step_buckets, "sum": 400}, "tokens": {"input": 300, "output": 70}, "tools": {"calls": 1, "errors": 0}, "sdk": "agent-sdk-ts/0.1.0",
     }
     refusal = {"type": "refusal", "v": 1, "at": "2026-09-12T14:03:07Z", "instanceId": "i-writer-a", "reason": "lease_expired", "generation": 41, "tag": None}
     dropped = {"type": "dropped", "v": 1, "at": "2026-09-12T14:04:00Z", "instanceId": "i-writer-a", "segments": 2, "bytes": 1048576}

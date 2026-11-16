@@ -95,10 +95,10 @@ const isNonNegativeInt = (value: unknown, min = 0): value is number => typeof va
 const isString = (value: unknown, max: number): value is string => typeof value === "string" && value.length <= max;
 const onlyKeys = (object: Record<string, unknown>, allowed: readonly string[]): string | null => Object.keys(object).find((key) => !allowed.includes(key)) ?? null;
 
-const ROW_VERSIONS: Readonly<Record<string, number>> = { window: 4, step: 1, refusal: 1, dropped: 1 };
+const ROW_VERSIONS: Readonly<Record<string, number>> = { window: 5, step: 2, refusal: 1, dropped: 1 };
 const TOKEN_MOMENTS = ["input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput"] as const;
-const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"] as const;
-const STEP_FIELDS = ["type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "modelCalls", "latencyMs", "tokens", "tools", "sdk"] as const;
+const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "toolsReported", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"] as const;
+const STEP_FIELDS = ["type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "toolsReported", "modelCalls", "latencyMs", "tokens", "tools", "sdk"] as const;
 const WINDOW_ONLY_FIELDS = ["tokensSq", "count", "outcomes", "checks"] as const;
 const REFUSAL_FIELDS = ["type", "v", "at", "instanceId", "reason", "generation", "tag"] as const;
 const DROPPED_FIELDS = ["type", "v", "at", "instanceId", "segments", "lines", "bytes"] as const;
@@ -154,6 +154,7 @@ function dimensionReason(value: Record<string, unknown>): string | null {
   if (!isString(value.model, 128)) return "model";
   if (value.errorClass !== undefined && value.errorClass !== null && !(typeof value.errorClass === "string" && SLUG.test(value.errorClass))) return "errorClass";
   if (typeof value.usageSource !== "string" || !SLUG.test(value.usageSource)) return "usageSource";
+  if (typeof value.toolsReported !== "boolean") return "toolsReported";
   if (!isNonNegativeInt(value.modelCalls)) return "modelCalls";
   if (!toolsFit(value.tools)) return "tools";
   if (!histogramFits(value.latencyMs)) return "latencyMs";
@@ -184,7 +185,7 @@ export function validateSpoolRow(value: unknown): RowVerdict {
       const latency = value.latencyMs as { buckets: number[]; sum: number };
       const tokens = value.tokens as { input: number; cachedInput?: number; output: number };
       const tools = value.tools as { calls: number; errors: number };
-      if (value.count === 0 && (value.modelCalls !== 0 || tools.calls !== 0 || tools.errors !== 0 || latency.sum !== 0 || tokens.input !== 0 || tokens.output !== 0 || (tokens.cachedInput ?? 0) !== 0 || value.tokensSq !== undefined || (isObject(value.checks) && ((value.checks.passed ?? 0) !== 0 || (value.checks.failed ?? 0) !== 0)))) return { ok: false, reason: "feedback_measurements" };
+      if (value.count === 0 && (value.toolsReported !== false || value.modelCalls !== 0 || tools.calls !== 0 || tools.errors !== 0 || latency.sum !== 0 || tokens.input !== 0 || tokens.output !== 0 || (tokens.cachedInput ?? 0) !== 0 || value.tokensSq !== undefined || (isObject(value.checks) && ((value.checks.passed ?? 0) !== 0 || (value.checks.failed ?? 0) !== 0)))) return { ok: false, reason: "feedback_measurements" };
       if (value.count > 0) {
         const moments = value.tokensSq;
         if (!isObject(moments) || !TOKEN_MOMENTS.every((name) => isMoment(moments[name]))) return { ok: false, reason: "tokensSq" };

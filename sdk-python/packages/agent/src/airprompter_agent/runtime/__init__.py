@@ -17,7 +17,7 @@ from .attribution import Attribution, RenderRegistry, attribution_scope, current
 from .inference import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
 from .managed import MANAGED_REFUSAL_CODES, MANAGED_SDK_USER_AGENT, ManagedAgent, ManagedRunError, ManagedRunResult, ManagedRunStream, ManagedWorkflow, parse_sse
 from .observe import ObserveTarget, PendingObservation, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
-from .release.resolver import Disabled, ReleaseResolver, Rendered, ResolveOutcome, Workflow, WorkflowStep, copy_inference, disabled_from
+from .release.resolver import Disabled, ReleaseResolver, Rendered, ResolveOutcome, Workflow, WorkflowStep, copy_inference, disabled_from, new_subject
 from .variables import (
     DEFAULT_SOURCE_MAX_BYTES,
     DEFAULT_SOURCE_TIMEOUT_SECONDS,
@@ -41,6 +41,7 @@ from .variables import (
     supplied,
     unsourced,
 )
+from .run import DEFAULT_RUN_IDLE_TIMEOUT_MS, MAX_OPEN_RUNS, AgentRuntime, Approved, ModelResolver, Passthrough, Placement, Run, RunHost, RunInput, RunRecorder, RunRegistry, RunScope, RunSession
 from .wrap import WRAPPED_METHODS, WrapHooks, wrap_client
 
 __all__ = [
@@ -96,6 +97,21 @@ __all__ = [
     "copy_inference",
     "current_attribution",
     "disabled_from",
+    "new_subject",
+    "DEFAULT_RUN_IDLE_TIMEOUT_MS",
+    "MAX_OPEN_RUNS",
+    "AgentRuntime",
+    "Approved",
+    "ModelResolver",
+    "Passthrough",
+    "Placement",
+    "Run",
+    "RunHost",
+    "RunInput",
+    "RunRecorder",
+    "RunRegistry",
+    "RunScope",
+    "RunSession",
     "normalize_usage",
     "observe_call",
     "observe_call_async",

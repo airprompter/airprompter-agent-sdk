@@ -274,7 +274,7 @@ def test_a_process_hydrated_from_the_datastore_sends_its_telemetry_to_the_daemon
 
 def _window_row(instance_id: str, minute_ms: float) -> dict:
     minute = datetime.fromtimestamp(int(minute_ms // 60_000) * 60, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return {"type": "window", "v": 4, "artifactId": "art_1", "minute": minute, "instanceId": instance_id, "instanceClass": "resident", "tag": "support.reply", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 4, "output": 2}, "sdk": "agent-sdk-py/0.3.0"}
+    return {"type": "window", "v": 5, "artifactId": "art_1", "minute": minute, "instanceId": instance_id, "instanceClass": "resident", "tag": "support.reply", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": None, "usageSource": "reported", "toolsReported": False, "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 4, "output": 2}, "sdk": "agent-sdk-py/0.3.0"}
 
 
 def test_the_uploader_honours_manifests(dirs):

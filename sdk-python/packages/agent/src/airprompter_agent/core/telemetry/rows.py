@@ -118,6 +118,8 @@ class RunTotals:
     status: str  # "ok" | "error" | "interrupted"
     error_class: Optional[str]
     usage_source: str
+    #: True when the writer saw this run's tool calls, so ``tools.calls == 0`` means none ran rather than not reported.
+    tools_reported: bool
     #: 1 when this is the first slot of its run, so an agent-wide total counts a two-slot run once.
     agent_run: int
     model_calls: int
@@ -129,7 +131,7 @@ class RunTotals:
 
     @classmethod
     def from_wire(cls, row: Mapping[str, Any]) -> "RunTotals":
-        return cls(dimensions=RunDimensions.from_wire(row["dimensions"]), status=row["status"], error_class=row.get("errorClass"), usage_source=row["usageSource"], agent_run=row["agentRun"], model_calls=row["modelCalls"], latency_ms=row["latencyMs"], tokens=row["tokens"], tools=row["tools"], checks=row.get("checks"))
+        return cls(dimensions=RunDimensions.from_wire(row["dimensions"]), status=row["status"], error_class=row.get("errorClass"), usage_source=row["usageSource"], tools_reported=row["toolsReported"], agent_run=row["agentRun"], model_calls=row["modelCalls"], latency_ms=row["latencyMs"], tokens=row["tokens"], tools=row["tools"], checks=row.get("checks"))
 
 
 @dataclass
@@ -141,6 +143,8 @@ class StepTotals:
     status: str  # "ok" | "error"
     error_class: Optional[str]
     usage_source: str
+    #: True when the writer saw this step's tool calls; ``tools.calls == 0`` then means none ran.
+    tools_reported: bool
     model_calls: int
     latency: Mapping[str, Any]  # buckets / sum
     tokens: Mapping[str, int]  # input / cachedInput / output
@@ -148,7 +152,7 @@ class StepTotals:
 
     @classmethod
     def from_wire(cls, row: Mapping[str, Any]) -> "StepTotals":
-        return cls(dimensions=RunDimensions.from_wire(row["dimensions"]), step=row["step"], status=row["status"], error_class=row.get("errorClass"), usage_source=row["usageSource"], model_calls=row["modelCalls"], latency=row["latency"], tokens=row["tokens"], tools=row["tools"])
+        return cls(dimensions=RunDimensions.from_wire(row["dimensions"]), step=row["step"], status=row["status"], error_class=row.get("errorClass"), usage_source=row["usageSource"], tools_reported=row["toolsReported"], model_calls=row["modelCalls"], latency=row["latency"], tokens=row["tokens"], tools=row["tools"])
 
 
 def latency_bucket_index(latency_ms: float) -> int:

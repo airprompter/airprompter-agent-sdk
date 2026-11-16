@@ -117,7 +117,7 @@ def test_audience_manual_checks_only_attach_to_a_measured_open_run():
     writer.checks(**dimensions,passed=1,failed=0,at_ms=T0)
     writer.close_windows(T0)
     rows=[r for r in sink.drain() if r.get("type")=="window"]
-    assert len(rows)==1 and rows[0]["v"]==4 and rows[0]["count"]==1
+    assert len(rows)==1 and rows[0]["v"]==5 and rows[0]["toolsReported"] is False and rows[0]["count"]==1
     assert rows[0]["audienceIds"]==list(audience_ids) and rows[0]["checks"]=={"passed":1,"failed":0}
 
 
@@ -148,8 +148,8 @@ def test_artifact_aware_windows_reject_noncanonical_artifact_identities_from_sha
 
 
 BASE_ROW = {
-    "type": "window", "v": 4, "artifactId": "art_1", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-testinstance", "instanceClass": "resident",
-    "tag": "a.b", "versionId": "v1", "arm": "none", "model": "m", "status": "ok", "errorClass": None, "usageSource": "reported",
+    "type": "window", "v": 5, "artifactId": "art_1", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-testinstance", "instanceClass": "resident",
+    "tag": "a.b", "versionId": "v1", "arm": "none", "model": "m", "status": "ok", "errorClass": None, "usageSource": "reported", "toolsReported": False,
     "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"buckets": [1] + [0] * 22, "sum": 1}, "tokens": {"input": 0, "output": 0},
     "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "sdk": "t/0",
 }
@@ -164,7 +164,7 @@ def test_uploader_rejects_noncanonical_artifact_identities_from_shared_vectors()
 
 
 def test_uploader_refuses_every_older_window_row_and_a_step_in_tag():
-    for version in (1, 2, 3, True):
+    for version in (1, 2, 3, 4, True):
         verdict = validate_spool_row({**BASE_ROW, "v": version})
         assert not verdict.ok and verdict.reason == "v", version
     refused = validate_spool_row({**BASE_ROW, "tag": "onboarding.flow#1"})
@@ -204,7 +204,7 @@ def test_a_reader_takes_the_shape_of_a_later_value_and_strips_what_it_cannot_vou
     later = validate_spool_row({**BASE_ROW, "status": "Not A Slug"})
     assert (later.ok, later.reason, later.later) == (False, "status", True), "a status off the closed list is a later writer's"
     assert validate_spool_row({"type": "refusal", "v": 1, "at": "2026-09-12T14:03:00Z", "instanceId": "i-testinstance", "reason": "bored", "generation": 1, "tag": None}).ok
-    for row in ({**BASE_ROW, "type": "trace"}, {**BASE_ROW, "v": 5}, {"type": 7}):
+    for row in ({**BASE_ROW, "type": "trace"}, {**BASE_ROW, "v": 6}, {"type": 7}):
         assert validate_spool_row(row).later is True, row
 
 
@@ -254,8 +254,8 @@ def test_outcomes_without_a_run_minute_require_an_open_measured_run_and_an_artif
     writer.close_windows(T0)
     rows = [row for row in sink.drain() if row["type"] == "window"]
     assert [(row["v"], row["count"], row["outcomes"]["thumbs"]) for row in rows] == [
-        (4, 1, {"n": 1, "sum": 1, "sumSq": 1}),
-        (4, 1, {"n": 1, "sum": 0, "sumSq": 0}),
+        (5, 1, {"n": 1, "sum": 1, "sumSq": 1}),
+        (5, 1, {"n": 1, "sum": 0, "sumSq": 0}),
     ]
 
 

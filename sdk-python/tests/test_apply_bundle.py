@@ -12,9 +12,8 @@ import tempfile
 
 import httpx
 from datetime import datetime, timezone
-import pytest
 
-from airprompter_agent.agent import AgentStartError, AirPrompterAgent
+from airprompter_agent.agent import AirPrompterAgent
 from airprompter_agent.core.bundle.apbundle import create_encrypted_bundle
 from airprompter_agent.core._util import b64url_encode
 from airprompter_agent.core.bundle.apbundle import DistributionKey
@@ -161,8 +160,9 @@ def test_compromised_store_cannot_poison_a_runtime():
     d = tempfile.mkdtemp(prefix="ap-poison-")
     try:
         events: list[dict] = []
-        with pytest.raises(AgentStartError):
-            AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(_forged(plane, fleet.public_raw, 999))}, logger=events.append)
+        poisoned = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(_forged(plane, fleet.public_raw, 999))}, logger=events.append)
+        assert poisoned.generation == 0, "nothing verified: it serves nothing rather than the forgery"
+        poisoned.stop()
         assert any(e.get("event") == "vendored_bundle_refused" for e in events), events
         real = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])})
         assert real.generation == 1, "the forgery left no generation behind"

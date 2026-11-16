@@ -43,6 +43,8 @@ from airprompter_agent.core import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, Golden
 from airprompter_agent.core import JUDGE_RUBRICS, PROTECTION_CRITERIA, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
 from airprompter_agent.core import APBUNDLE_INFO, BundleError, DistributionKey, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle
 from airprompter_agent.core import X25519KeyPair, generate_x25519_key_pair, x25519_private_key_from_raw, x25519_public_key_from_raw
+# The run: what an adapter and ``ap.run`` see.
+from airprompter_agent.runtime import AgentRuntime, Approved, ModelResolver, Passthrough, Placement, RunInput, RunSession
 from airprompter_agent.runtime import MANAGED_REFUSAL_CODES, MANAGED_SDK_USER_AGENT, ManagedAgent, ManagedRunError, ManagedRunResult, ManagedRunStream, ManagedWorkflow, parse_sse
 from airprompter_agent.core import (
     ASSIGNMENT_MODULUS,
@@ -209,6 +211,13 @@ __all__ = [
     "MANAGED_REFUSAL_CODES",
     "MANAGED_SDK_USER_AGENT",
     "ManagedAgent",
+    "AgentRuntime",
+    "Approved",
+    "ModelResolver",
+    "Passthrough",
+    "Placement",
+    "RunInput",
+    "RunSession",
     "ManagedRunError",
     "ManagedRunResult",
     "ManagedRunStream",

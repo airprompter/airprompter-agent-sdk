@@ -76,7 +76,7 @@ class Collector:
         return httpx.MockTransport(handle)
 
 
-WINDOW = {"type": "window", "v": 4, "artifactId": "art_1", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident", "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "status": "ok", "errorClass": None, "usageSource": "reported", "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 3, "output": 4}, "sdk": "agent-sdk-py/0.1.0"}
+WINDOW = {"type": "window", "v": 5, "artifactId": "art_1", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident", "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "status": "ok", "errorClass": None, "usageSource": "reported", "toolsReported": False, "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 3, "output": 4}, "sdk": "agent-sdk-py/0.1.0"}
 
 
 def segment(name: str = "seg-i-writer-a-1-1.ndjson") -> UploadSegment:

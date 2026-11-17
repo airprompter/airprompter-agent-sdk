@@ -52,7 +52,7 @@ export interface AutomationClientOptions {
   organizationId?: string;
   /** Default: the platform's `fetch` with a timeout per request (`requestTimeoutMs`). */
   fetch?: FetchLike;
-  /** Per request; an unreachable AirPrompter must leave time to serve the stored copy inside a platform's step limit. Default 8000. */
+  /** Per request; an unreachable AirPrompter must leave time to serve the stored copy inside a platform's step limit. Default 8000. Also how long a step's closing pass may take to deliver a report (the agent's `stopUploadTimeoutMs`). */
   requestTimeoutMs?: number;
   logger?: (event: Record<string, unknown>) => void;
 }

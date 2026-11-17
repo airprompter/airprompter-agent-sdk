@@ -10,6 +10,9 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### Steps: a new connection's first Report run no longer fails (AIR-2392)
+- **Report run waits out a slow first heartbeat.** A Steps session closes with `stop()`, which since rc.2 (AIR-2261) bounds its last pass at `telemetry.stopUploadTimeoutMs`, 2000 ms by default, and aborts whatever is still in flight. A new agent's first heartbeat, which issues the upload grant, takes longer than that on a cold service. It was aborted, so every new Zapier or n8n connection's first report came back as a retryable `unreachable … heartbeat_failed` with nothing recorded (2 of 2 live on dev). The Steps client now gives that pass its own per-request limit (`requestTimeoutMs`, default 8000 ms). It was verified live: a fresh dev agent's first report was accepted after about 3 s. The core agent's default is unchanged.
+
 ### Steps: the hosted dev root is pinned (AIR-2392)
 - **`HOSTED_ROOTS.dev` is AirPrompter's dev root** (key id `86267aa3…df91`), exactly as the offline ceremony of 2026-09-14 wrote it (AIR-1935). A Steps client pointed at the hosted dev service needs no `root` any more. `HOSTED_ROOTS.prod` stays empty, so the production service still reports `root_not_pinned`, because its root ceremony has not run yet. A test checks the real dev root document against the pinned key and refuses a document signed by any other root.
 

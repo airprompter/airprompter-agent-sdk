@@ -71,7 +71,8 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
   const rootUrl = options.rootUrl ?? `${baseUrl}/roots/${hosted}/root.json`;
   const nowMs = () => options.now?.() ?? Date.now();
   const nowIso = () => new Date(nowMs()).toISOString();
-  const fetch = options.fetch ?? timedFetch(globalThis.fetch, options.requestTimeoutMs ?? 8000);
+  const requestTimeoutMs = options.requestTimeoutMs ?? 8000;
+  const fetch = options.fetch ?? timedFetch(globalThis.fetch, requestTimeoutMs);
   const log = options.logger ?? (() => undefined);
   const distributionKey = distributionKeyFor({ updateKey: options.updateKey, agentId: options.agentId, environment });
   const { datastore } = options;
@@ -201,7 +202,12 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
         sync: { mode: "on_invoke", rootUrl },
         datastore: { store: datastore },
         distributionKey,
-        telemetry: { sink: "memory", flush: "await" },
+        // stop() bounds its last pass (AIR-2261, 2 s by default) and aborts whatever is in flight at the bound, the
+        // heartbeat that issues the upload grant included; after that abort the flush that delivers a report cannot
+        // run. A new agent's first heartbeat on a cold service takes longer than 2 s, so every new connection's first
+        // report failed (live on dev, 2026-11-17). The bound is this client's own per-request limit: a step never
+        // gives up on a request sooner than `timedFetch` would.
+        telemetry: { sink: "memory", flush: "await", stopUploadTimeoutMs: requestTimeoutMs },
         fetch,
         now: nowMs,
         logger: log,

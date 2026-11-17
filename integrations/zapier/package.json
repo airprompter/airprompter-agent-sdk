@@ -21,7 +21,7 @@
     "validate": "npm run build && npx --yes --package zapier-platform-cli@19.3.0 zapier-platform validate"
   },
   "dependencies": {
-    "@airprompter/agent-sdk": "1.0.0-rc.2",
+    "@airprompter/agent-sdk": "1.0.0-rc.3",
     "zapier-platform-core": "19.3.0"
   },
   "devDependencies": {

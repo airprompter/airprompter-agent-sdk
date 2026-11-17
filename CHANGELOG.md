@@ -8,6 +8,11 @@ entry names the protocol it speaks. Format: [Keep a Changelog](https://keepachan
 versions follow [SemVer](https://semver.org/) — before 1.0, a minor bump
 may change a public shape and says so here.
 
+## Unreleased
+
+### Zapier and n8n on 1.0.0-rc.3
+- **`integrations/zapier` and `integrations/n8n` depend on `@airprompter/agent-sdk` `1.0.0-rc.3`** (exact pin, registry lockfiles). They get the pinned hosted dev root, and a new connection's first Report run no longer fails.
+
 ## 1.0.0-rc.3 — 2026-11-17
 
 The third release candidate, for the Steps core under Zapier and n8n: the hosted dev root is pinned, and a new connection's first Report run no longer fails. Protocol unchanged. Python has no changes and moves with the version only (lockstep). The CLI moves with it (`cli/v1.0.0-rc.3`). `1.0.0-rc.1` stays reserved for AIR-2231.

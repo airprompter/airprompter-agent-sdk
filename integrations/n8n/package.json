@@ -53,7 +53,7 @@
     ]
   },
   "dependencies": {
-    "@airprompter/agent-sdk": "1.0.0-rc.2"
+    "@airprompter/agent-sdk": "1.0.0-rc.3"
   },
   "peerDependencies": {
     "n8n-workflow": "*"

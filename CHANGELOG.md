@@ -8,7 +8,9 @@ entry names the protocol it speaks. Format: [Keep a Changelog](https://keepachan
 versions follow [SemVer](https://semver.org/) — before 1.0, a minor bump
 may change a public shape and says so here.
 
-## Unreleased
+## 1.0.0-rc.2 — 2026-11-16
+
+The second release candidate. `1.0.0-rc.1` is kept for AIR-2231 (the adapter contract), which publishes the candidate after this one; npm and PyPI list rc.2 first until then. Protocol unchanged. The CLI moves with it (`cli/v1.0.0-rc.2`).
 
 ### `stop()` sends the last runs (AIR-2261, TypeScript and Python)
 - **`stop()` uploads what it ends.** After ending open runs and closing the windows it makes one upload pass (a resident host's own uploader, `flushTelemetry()` on the memory sink), bounded by the new `telemetry.stopUploadTimeoutMs` / `TelemetryOptions.stop_upload_timeout_ms` (default 2000 ms from the call, `0` skips). It waits for an uploader pass already in flight first, so that pass cannot hide the last segment. At the bound TypeScript aborts every request the runtime has in flight, heartbeat and grant included (`FetchLike` and `UploadSegment` take an optional `signal`, `SpoolUploader.runOnce({ signal })`, `postSegment({ signal })`); Python leaves the pass on a daemon thread. Neither holds the process's exit; what did not go stays for the next start, and a pass that sends nothing logs `stop_upload_held`. No pass with `upload: false` or a directory spool this process does not upload. Before this, a short-lived process's last runs waited in the spool until the next start.

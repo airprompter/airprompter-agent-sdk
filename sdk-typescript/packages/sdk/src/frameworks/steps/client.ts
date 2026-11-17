@@ -42,7 +42,7 @@ import { AutomationError, isAutomationError, type AutomationClient, type Automat
 import { runReportOf } from "./usage.js";
 
 const ORGANIZATION_NOTE = "organizationId";
-const USER_AGENT = "airprompter-automation/1.0.0-rc.0";
+const USER_AGENT = "airprompter-automation/1.0.0-rc.2";
 /** Rows kept per connection: the one serving and the one before it. A rollback is a new generation, so older rows serve nothing. */
 const KEEP_ROWS = 2;
 

@@ -39,8 +39,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint nodes credentials src package.json",
     "lint:cloud": "N8N_LINT_CLOUD=1 eslint nodes credentials src package.json",
-    "test": "TSX_DISABLE_CACHE=1 node --import tsx --test --test-timeout=90000 --test-force-exit \"test/**/*.test.ts\"",
-    "prepare:sdk": "npm --prefix ../../sdk-typescript ci --legacy-peer-deps && npm --prefix ../../sdk-typescript run build"
+    "test": "TSX_DISABLE_CACHE=1 node --import tsx --test --test-timeout=90000 --test-force-exit \"test/**/*.test.ts\""
   },
   "n8n": {
     "n8nNodesApiVersion": 1,
@@ -54,7 +53,7 @@
     ]
   },
   "dependencies": {
-    "@airprompter/agent-sdk": "file:../../sdk-typescript/packages/sdk"
+    "@airprompter/agent-sdk": "1.0.0-rc.2"
   },
   "peerDependencies": {
     "n8n-workflow": "*"

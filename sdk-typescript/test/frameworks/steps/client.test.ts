@@ -247,3 +247,29 @@ test("AIR-2403: what a trigger poll costs — idle polls read only the CDN point
   assert.deepEqual(hourly.calls.filter((c) => c.startsWith("/targets/") || c.startsWith("/payloads/")), ["/targets/prod/manifest 304 (conditional)"], "past the pointer's trust window: the origin, conditionally, and nothing changed");
   assert.equal(h.plane.heartbeats.length, 0, "a trigger poll never heartbeats, so it never shows in Fleet as an instance");
 });
+
+test("Report run waits out a slow first heartbeat (a new agent on a cold service) instead of aborting it at stop()'s 2 s default", async () => {
+  const h = harness();
+  h.plane.promote([h.triage("Triage {{ticket}}", "ver_1")]);
+  const prompt = await h.client().getPrompt({ slot: "support.triage", variables: { ticket: "a" } });
+  // The first heartbeat (which issues the upload grant) takes 3 s, as it did live on dev for a brand-new agent and key.
+  let slowed = 0;
+  const slowFirstHeartbeat: typeof h.fetch = async (url, init) => {
+    // As the platform's fetch does: a request on a signal that is already aborted never leaves.
+    if (init?.signal?.aborted) throw Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+    if (String(url).endsWith("/heartbeat") && slowed++ === 0) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 3000);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
+        });
+      });
+    }
+    return h.fetch(url, init);
+  };
+  await h.client({ fetch: slowFirstHeartbeat }).reportRun({ runRef: prompt.runRef, inputTokens: 4243, outputTokens: 7 });
+  assert.equal(slowed >= 1, true, "the heartbeat went through the slow path");
+  const uploaded = [...h.plane.objects.values()].map((bytes) => bytes.toString("utf8")).join("\n");
+  assert.match(uploaded, /4243/, "the report landed on the first try");
+});

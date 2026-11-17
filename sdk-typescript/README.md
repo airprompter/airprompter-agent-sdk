@@ -222,6 +222,26 @@ who uploads, `ap.status().upload` what this process's uploader is doing,
 `ap.uploadNow()` runs one pass, `telemetry.upload: false` leaves the spool
 for the daemon or an operator's export. See `docs/telemetry.md`.
 
+**Call `await ap.stop()` before a short-lived process exits** (a script, a
+job, a Zapier or n8n step). It ends open runs, closes the windows, and
+sends them in one pass bounded by `telemetry.stopUploadTimeoutMs` (default
+2000 ms, counted from the call): a resident host's own uploader, or
+`flushTelemetry()` on the memory sink. At the bound every request the
+runtime has in flight is aborted so none holds the exit (a `fetch` you pass
+must honour `init.signal`), and whatever did not go stays for the next
+start. `0` skips the pass; so do `upload: false` and a directory spool this
+process does not upload (a daemon's folder, or an `on_invoke` host that
+writes one: use the memory sink there, the `on_invoke` default). A pass that
+sends nothing (a backoff, a hold) logs `stop_upload_held`. `uploadNow()`
+before `stop()` sends nothing new: the windows are still open. Python's
+`ap.stop()` (and `with AirPrompterAgent.start(...) as ap:`) does the same,
+on a daemon thread joined for `TelemetryOptions.stop_upload_timeout_ms`.
+
+A start whose root does not name the manifest's signing key refuses with
+`unknown_signing_key`, keeps serving what it holds, and logs a `hint`: the
+usual cause is a root for another environment (a dev service needs the dev
+root and `hostedEnvironment: "dev"`).
+
 ## Apply policy
 
 The manifest carries `applyPolicy`. Under `unlock_required` a new

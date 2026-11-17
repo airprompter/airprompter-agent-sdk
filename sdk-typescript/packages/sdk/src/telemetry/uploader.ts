@@ -303,7 +303,8 @@ export function multipartBody(boundary: string, fields: Array<[string, string]>,
 export type PostOutcome = { status: "ok"; key: string } | { status: "refused"; httpStatus: number; expired: boolean } | { status: "too_large"; bytes: number } | { status: "network"; reason: string };
 
 /** One segment under one grant. S3 PUT is idempotent by key, so a replay after a lost response overwrites identically. */
-export async function postSegment(input: { grant: UploadGrant; segment: string; bytes: Uint8Array; fetch: FetchLike; now?: () => number; boundary?: string }): Promise<PostOutcome> {
+/** `signal` aborts the request (the bounded last pass at `stop()`): an abort is a `network` outcome and the segment stays. */
+export async function postSegment(input: { grant: UploadGrant; segment: string; bytes: Uint8Array; fetch: FetchLike; now?: () => number; boundary?: string; signal?: AbortSignal }): Promise<PostOutcome> {
   const { grant } = input;
   if (input.bytes.length > grant.maxObjectBytes) return { status: "too_large", bytes: input.bytes.length };
   const now = input.now?.() ?? Date.now();
@@ -315,7 +316,8 @@ export async function postSegment(input: { grant: UploadGrant; segment: string; 
   const boundary = input.boundary ?? `----airprompter${Math.random().toString(36).slice(2)}${now.toString(36)}`;
   const body = multipartBody(boundary, fields, { name: input.segment, contentType, bytes: input.bytes });
   try {
-    const response = await input.fetch(grant.url, { method: "POST", headers: { "content-type": `multipart/form-data; boundary=${boundary}`, "content-length": String(body.length) }, body });
+    if (input.signal?.aborted) return { status: "network", reason: "aborted" };
+    const response = await input.fetch(grant.url, { method: "POST", headers: { "content-type": `multipart/form-data; boundary=${boundary}`, "content-length": String(body.length) }, body, ...(input.signal ? { signal: input.signal } : {}) });
     if (response.status >= 200 && response.status < 300) return { status: "ok", key };
     const text = await response.text().catch(() => "");
     return { status: "refused", httpStatus: response.status, expired: response.status === 403 && /expired|Policy expired|signature/i.test(text) };
@@ -436,12 +438,12 @@ export function airprompterUploadSink(input: { grantFor: (instanceId: string, re
       const decision = await grantFor(segment.instanceId, segment.report);
       if (decision.kind === "hold") return { status: "hold", retryAfterMs: decision.retryAfterSeconds * 1000, ...(decision.reason !== undefined ? { reason: decision.reason } : {}) };
       if (decision.kind === "unavailable") return { status: "failed", reason: `grant:${decision.reason}` };
-      let outcome = await postSegment({ grant: decision.grant, segment: segment.segment, bytes: segment.bytes, fetch: input.fetch, now });
+      let outcome = await postSegment({ grant: decision.grant, segment: segment.segment, bytes: segment.bytes, fetch: input.fetch, now, ...(segment.signal ? { signal: segment.signal } : {}) });
       if (outcome.status === "refused" && outcome.expired) {
         // The grant lapsed between the check and the bucket's clock: one fresh grant, one more try.
         grants.delete(segment.instanceId);
         const fresh = await grantFor(segment.instanceId, segment.report);
-        if (fresh.kind === "grant") outcome = await postSegment({ grant: fresh.grant, segment: segment.segment, bytes: segment.bytes, fetch: input.fetch, now });
+        if (fresh.kind === "grant" && !segment.signal?.aborted) outcome = await postSegment({ grant: fresh.grant, segment: segment.segment, bytes: segment.bytes, fetch: input.fetch, now, ...(segment.signal ? { signal: segment.signal } : {}) });
       }
       if (outcome.status === "ok") return { status: "ok" };
       if (outcome.status === "too_large") return { status: "too_large", bytes: outcome.bytes };
@@ -702,10 +704,14 @@ export class SpoolUploader {
     this.log({ event: "segment_quarantined", segment: name, reason, ...(detail !== undefined ? { detail } : {}) });
   }
 
-  /** One pass: sweep, budget, then each closed segment oldest first — validate, grant, POST, move — until the spool is empty, a hold, or a failure. Never throws. */
-  runOnce(): Promise<PassResult> {
+  /**
+   * One pass: sweep, budget, then each closed segment oldest first — validate, grant, POST, move — until the spool is
+   * empty, a hold, or a failure. Never throws. `signal` (a new pass only; one in flight is returned as it is) ends the
+   * pass at the next segment and aborts the POST in flight: what was not sent stays in the spool.
+   */
+  runOnce(options: { signal?: AbortSignal } = {}): Promise<PassResult> {
     if (this.inFlight) return this.inFlight;
-    this.inFlight = this.pass().finally(() => {
+    this.inFlight = this.pass(options.signal).finally(() => {
       this.inFlight = null;
     });
     void this.inFlight.then((result) => {
@@ -718,7 +724,7 @@ export class SpoolUploader {
     return this.inFlight;
   }
 
-  private async pass(): Promise<PassResult> {
+  private async pass(signal?: AbortSignal): Promise<PassResult> {
     const result: PassResult = { uploaded: [], quarantined: [], dropped: 0, held: false };
     try {
       this.sweep();
@@ -728,6 +734,10 @@ export class SpoolUploader {
         return result;
       }
       for (const name of this.closedSegments()) {
+        if (signal?.aborted) {
+          result.held = true;
+          return result;
+        }
         const path = join(this.options.dir, name);
         const instanceId = SEGMENT_NAME.exec(name)![1]!;
         const read = this.readSegment(path);
@@ -778,7 +788,7 @@ export class SpoolUploader {
           continue;
         }
         // The partial tail (a crashed writer's last line) is not sent: the bytes shipped are exactly the whole lines, cleaned.
-        const outcome = await this.sink.ship({ instanceId, segment: name, rows: inspection.rows, bytes: inspection.payload, ...(report ? { report } : {}) });
+        const outcome = await this.sink.ship({ instanceId, segment: name, rows: inspection.rows, bytes: inspection.payload, ...(report ? { report } : {}), ...(signal ? { signal } : {}) });
         if (outcome.status === "hold") {
           this.backoffUntilMs = this.now() + outcome.retryAfterMs;
           this.lastError = `hold:${outcome.reason ?? "retry_after"}`;

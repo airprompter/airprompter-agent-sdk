@@ -108,7 +108,7 @@
   },
   "airprompter": {
     "sizeBudgetBytes": {
-      ".": 275000,
+      ".": 285000,
       "./core": 315000,
       "./sync": 220000,
       "./runtime": 260000,

@@ -161,6 +161,12 @@ class TelemetryOptions:
     #: S5: serverless — ``invoke()`` flushes the invocation's rows before it returns (``"await"``, the default). ``"background"``
     #: hands the flush to a thread; a platform that freezes the process at the response loses rows in flight, silently.
     flush: str = "await"
+    #: AIR-2261: how long ``stop()`` may spend sending the runs it just ended (default 2000 ms). After the runs end and the
+    #: windows close, ``stop()`` makes one upload pass — the uploader's, or ``flush_telemetry()`` on the memory sink — on a
+    #: daemon thread and waits at most this long: a pass still running then never holds the interpreter's exit, and what
+    #: did not go stays in the spool (or the memory buffer) for the next start. ``0`` makes no pass. No pass either when
+    #: a telemetry daemon ships this folder or ``upload`` is ``False``.
+    stop_upload_timeout_ms: Optional[float] = None
 
 
 @dataclass
@@ -663,6 +669,7 @@ class AirPrompterAgent:
             "target": target,
             "api_key": api_key,
             "base_url": base_url,
+            "root": root,
             "run_ref_secret": run_ref_secret,
             "run_ref_previous_secrets": run_ref_previous_secrets,
             "countersign_root": countersign_root,
@@ -1204,7 +1211,24 @@ class AirPrompterAgent:
     def _log(self, event: dict[str, Any]) -> None:
         logger = self._o.get("logger")
         if logger:
-            logger({"sdk": SDK_NAME, "agentId": self._o["agent_id"], "target": self._o["target"], **event})
+            # AIR-2261: the one refusal a developer cannot read on its own says what to check, wherever it is logged.
+            hint = {"hint": self._signing_key_hint()} if event.get("reason") == "unknown_signing_key" and "hint" not in event else {}
+            logger({"sdk": SDK_NAME, "agentId": self._o["agent_id"], "target": self._o["target"], **event, **hint})
+
+    def _signing_key_hint(self) -> str:
+        """What to check when a manifest is signed by a key the trusted root does not name: almost always a root for another environment."""
+        root = self._o.get("root") or {}
+        pinned = isinstance(root, Mapping) and "pinned" in root
+        service = self._o.get("base_url") or "https://api.airprompter.com"
+        keys = ", ".join(sorted((self._trusted_root.get("signed") or {}).get("keys") or {})) or "none"
+        root_url = self._sync_options.root_url
+        return " ".join([
+            f"The manifest is signed by a key the trusted root does not name (root keys: {keys}).",
+            (f"Check that root[\"pinned\"] is AirPrompter's root for the service at {service}, and that root[\"hosted_environment\"] (\"{root.get('hosted_environment', 'prod')}\") is that service's environment: a dev service needs the dev root and hosted_environment \"dev\"."
+             if pinned else f"Check that the root document passed as root belongs to the service at {service}."),
+            (f"sync.root_url ({root_url}) must serve that same environment's root.json." if root_url else "Pass sync.root_url (the edge's roots/{environment}/root.json) so a signing-key rotation under the pinned root is picked up."),
+            "Then check that the agent key belongs to that environment.",
+        ])
 
     def _now_ms(self) -> float:
         now = self._o.get("now")
@@ -2448,9 +2472,12 @@ class AirPrompterAgent:
         self._spool_timer.cancel()
         self._heartbeat_timer.cancel()
         self._datastore_timer.cancel()
+        # AIR-2261: the uploader first. A pass in flight finishes here (it cannot see a segment closed after it listed the
+        # folder), so the last pass below sees every segment.
         with self._placing:
-            if self._uploader is not None:
-                self._uploader.stop()
+            uploader = self._uploader
+            if uploader is not None:
+                uploader.stop()
         # A pass or a heartbeat in flight finishes first.
         with self._heartbeat_lock:
             pass
@@ -2459,8 +2486,42 @@ class AirPrompterAgent:
         # Open runs end by the idle rule before the windows close, so their rows are in them.
         self._runs.end_all()
         self.spool.close_windows(self._now_ms())
+        self._last_upload(uploader)
         if self._client is not None:
             self._client.close()
+
+    def _last_upload(self, uploader: Optional[SpoolUploader]) -> None:
+        """AIR-2261: a short-lived process's last runs go out before ``stop()`` returns, not at the next start. One pass on a
+        daemon thread, joined for at most ``telemetry.stop_upload_timeout_ms`` (default 2000, ``0`` skips): a pass still
+        running then cannot hold the interpreter's exit, and what it did not send stays. Never raises."""
+        if not self._telemetry.upload:
+            return
+        bound_ms = 2000.0 if self._telemetry.stop_upload_timeout_ms is None else float(self._telemetry.stop_upload_timeout_ms)
+        if not bound_ms > 0:
+            return
+        work: Optional[Callable[[], bool]] = None
+        # A directory sink with no uploader of its own (a daemon's folder, or an on_invoke host's) is not this process's to ship.
+        if uploader is not None:
+            work = lambda: uploader.run_once().held  # noqa: E731
+        elif self._directory_sink is None and self._client is not None and callable(getattr(self._sink, "drain", None)):
+            work = lambda: self.flush_telemetry().get("status") == "held"  # noqa: E731
+        if work is None:
+            return
+        held: list[bool] = []
+
+        def run() -> None:
+            try:
+                held.append(work())
+            except Exception:  # noqa: BLE001 — both passes never raise; this is belt and braces on a thread nobody joins past the bound
+                held.append(True)
+
+        thread = threading.Thread(target=run, name="airprompter-stop-upload", daemon=True)
+        thread.start()
+        thread.join(bound_ms / 1000)
+        if thread.is_alive():
+            self._log({"event": "stop_upload_bounded", "boundMs": bound_ms})
+        elif held and held[0]:
+            self._log({"event": "stop_upload_held"})
 
     def __enter__(self) -> "AirPrompterAgent":
         return self

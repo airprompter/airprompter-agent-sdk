@@ -1,0 +1,53 @@
+{
+  "signed": {
+    "type": "root",
+    "protocol": "0.2.5",
+    "purpose": "platform",
+    "environment": "dev",
+    "version": 1,
+    "expires": "2026-12-13T22:03:52.792Z",
+    "keys": {
+      "86267aa3dc49005a0c1474d5c9c06bd7e1d0e835da715a864c1eca706545df91": {
+        "keyType": "ecdsa-p256",
+        "scheme": "ES256",
+        "publicKey": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "gAQGIbpqvkYwfGnz2yJjAFcMLZm43fsQ6zXF4CjImss",
+          "y": "ImPVZkVwb3KC73p9T3EBtGzhm-s-vI6VVu0ovgka6ek"
+        }
+      },
+      "c6756cde7f3c0422d67c4984b4e8cb4fc8650156ae0e54c2bf50f09222f9063c": {
+        "keyType": "ecdsa-p256",
+        "scheme": "ES256",
+        "publicKey": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "FDG984iXtFnzWUv9fYWI5OQq6b70XnJJSjz8lhSIuB4",
+          "y": "3W1goKhMwexu6wkfFlZhh-uRcuwbZHzEPuEdNVuY2f8"
+        }
+      }
+    },
+    "roles": {
+      "root": {
+        "keyIds": [
+          "86267aa3dc49005a0c1474d5c9c06bd7e1d0e835da715a864c1eca706545df91"
+        ],
+        "threshold": 1
+      },
+      "targets": {
+        "keyIds": [
+          "c6756cde7f3c0422d67c4984b4e8cb4fc8650156ae0e54c2bf50f09222f9063c"
+        ],
+        "threshold": 1
+      }
+    }
+  },
+  "signatures": [
+    {
+      "keyId": "86267aa3dc49005a0c1474d5c9c06bd7e1d0e835da715a864c1eca706545df91",
+      "alg": "ES256",
+      "sig": "-nL3pn5011HYXNstCYMpefh8JQj9Nf6fqfJKJ4QqLQK9T94HR2-uv8IhKqPN1qWgOJUFdHMgmQ8r72tkMQi4Ag"
+    }
+  ]
+}

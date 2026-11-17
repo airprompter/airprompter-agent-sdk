@@ -10,6 +10,9 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### Steps: the hosted dev root is pinned (AIR-2392)
+- **`HOSTED_ROOTS.dev` is AirPrompter's dev root** (key id `86267aa3…df91`), exactly as the offline ceremony of 2026-09-14 wrote it (AIR-1935). A Steps client pointed at the hosted dev service needs no `root` any more. `HOSTED_ROOTS.prod` stays empty, so the production service still reports `root_not_pinned`, because its root ceremony has not run yet. A test checks the real dev root document against the pinned key and refuses a document signed by any other root.
+
 ### Zapier and n8n depend on the published SDK
 - **`integrations/zapier` and `integrations/n8n` now depend on `@airprompter/agent-sdk` `1.0.0-rc.2` from npm** (pinned exactly; it ships `/frameworks/steps` and `ap.reportRun`), instead of `file:../../sdk-typescript/packages/sdk`. Their `.npmrc` (`install-links`) and n8n's `prepare:sdk` are gone, and building either one no longer needs the SDK built first.
 

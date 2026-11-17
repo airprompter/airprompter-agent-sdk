@@ -38,7 +38,7 @@ test("connection test: fetch and verify the manifest; a wrong key or an unpinned
     const wrongKey = await clientOf(registry, memoryDatastore(), { updateKey: "apa_wrong" }).testConnection();
     assert.equal(wrongKey.ok, false);
     assert.match((wrongKey as { reason: string }).reason, /refused the Update key/);
-    const noRoot = createAutomationClient({ agentId: SCOPE.agentId, updateKey: DEV_API_KEY, baseUrl: registry.baseUrl, environment: SCOPE.target, hostedEnvironment: "dev", datastore: memoryDatastore() });
+    const noRoot = createAutomationClient({ agentId: SCOPE.agentId, updateKey: DEV_API_KEY, baseUrl: registry.baseUrl, environment: SCOPE.target, hostedEnvironment: "staging", datastore: memoryDatastore() });
     assert.match(((await noRoot.testConnection()) as { reason: string }).reason, /No AirPrompter root key is pinned/);
     // A root that did not sign this registry: the manifest does not verify, so the connection is not OK.
     const otherRoot = { ...registry.root, x: (await startRegistry(PROMPTS).then(async (r) => { await r.close(); return r.root; })).x };

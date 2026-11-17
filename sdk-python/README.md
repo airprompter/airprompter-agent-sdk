@@ -12,7 +12,7 @@ conformance vectors and the same on-disk store as the TypeScript SDK — a
 store one SDK wrote is a store the other (and the `airprompter` CLI) opens.
 
 ```bash
-pip install "airprompter-agent==1.0.0rc2"   # the 1.0 release candidate; extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
+pip install "airprompter-agent==1.0.0rc3"   # the 1.0 release candidate; extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
 ```
 
 ## Packages
@@ -22,7 +22,7 @@ you use. The tree mirrors the TypeScript SDK's subpaths.
 
 ```bash
 # With a satellite, pin each one to the same candidate:
-pip install "airprompter-agent==1.0.0rc2" "airprompter-datastore-s3==1.0.0rc2" "airprompter-agent-otel==1.0.0rc2"
+pip install "airprompter-agent==1.0.0rc3" "airprompter-datastore-s3==1.0.0rc3" "airprompter-agent-otel==1.0.0rc3"
 ```
 
 Pin every distribution exactly. Unpinned, `airprompter-agent` installs 0.5.0,
@@ -337,7 +337,7 @@ host as a finding instead of hiding it.
 | Provider | `storageProtection` | Extra |
 |---|---|---|
 | `file_key(path)` (default: `store.key` beside the store, 0600) | `file_key` | — |
-| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install "airprompter-agent[kms]==1.0.0rc2"` |
+| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install "airprompter-agent[kms]==1.0.0rc3"` |
 | `vault(transit_key)` — HashiCorp Vault transit | `vault` | `[vault]` |
 | `os_keystore()` — Keychain / Credential Locker / Secret Service | `os_keystore` | `[keyring]` |
 | `custom_key_provider(wrap=…, unwrap=…)` | `custom` | — |

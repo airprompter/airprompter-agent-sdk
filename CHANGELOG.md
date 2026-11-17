@@ -8,7 +8,9 @@ entry names the protocol it speaks. Format: [Keep a Changelog](https://keepachan
 versions follow [SemVer](https://semver.org/) — before 1.0, a minor bump
 may change a public shape and says so here.
 
-## Unreleased
+## 1.0.0-rc.3 — 2026-11-17
+
+The third release candidate, for the Steps core under Zapier and n8n: the hosted dev root is pinned, and a new connection's first Report run no longer fails. Protocol unchanged. Python has no changes and moves with the version only (lockstep). The CLI moves with it (`cli/v1.0.0-rc.3`). `1.0.0-rc.1` stays reserved for AIR-2231.
 
 ### Steps: a new connection's first Report run no longer fails (AIR-2392)
 - **Report run waits out a slow first heartbeat.** A Steps session closes with `stop()`, which since rc.2 (AIR-2261) bounds its last pass at `telemetry.stopUploadTimeoutMs`, 2000 ms by default, and aborts whatever is still in flight. A new agent's first heartbeat, which issues the upload grant, takes longer than that on a cold service. It was aborted, so every new Zapier or n8n connection's first report came back as a retryable `unreachable … heartbeat_failed` with nothing recorded (2 of 2 live on dev). The Steps client now gives that pass its own per-request limit (`requestTimeoutMs`, default 8000 ms). It was verified live: a fresh dev agent's first report was accepted after about 3 s. The core agent's default is unchanged.

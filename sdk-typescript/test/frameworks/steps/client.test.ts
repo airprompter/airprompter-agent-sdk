@@ -209,3 +209,41 @@ test("the stored copy is ciphertext under a key derived from the Update key", as
   const stored = await Promise.all((await h.kv.list("")).map(async (key) => (await h.kv.get(key))!.value));
   assert.doesNotMatch(stored.join("\n"), /Very recognisable/);
 });
+
+test("AIR-2403: what a trigger poll costs — idle polls read only the CDN pointer, a promotion one manifest and its payload, the hourly check a conditional 304; no poll ever heartbeats", async () => {
+  const h = harness();
+  const seen: Array<{ path: string; status: number; conditional: boolean }> = [];
+  const fetch: typeof h.fetch = async (url, init) => {
+    const response = await h.fetch(url, init);
+    seen.push({ path: new URL(url).pathname, status: response.status, conditional: Boolean(init?.headers?.["if-none-match"]) });
+    return response;
+  };
+  const poll = async (cursor: RolloutCursor | null) => {
+    seen.length = 0;
+    const result = await h.client({ fetch }).rolloutEvents(cursor);
+    return { ...result, calls: seen.map((s) => `${s.path.replace(/^\/v1\/agents\/agt_steps/, "").replace(/sha256:[0-9a-f]+$/, "<hash>")} ${s.status}${s.conditional ? " (conditional)" : ""}`) };
+  };
+  h.plane.promote([h.triage("v1 {{ticket}}", "ver_1", 1)]);
+  let { cursor } = await poll(null);
+
+  for (let minute = 1; minute <= 10; minute += 1) {
+    h.clock.now += 60_000;
+    const idle = await poll(cursor);
+    cursor = idle.cursor;
+    assert.deepEqual(idle.events, []);
+    // The baseline came from the origin, so the first idle poll reads the pointer once for its ETag; then conditional 304s.
+    assert.deepEqual(idle.calls, [minute === 1 ? "/g/target-token/generation.json 200" : "/g/target-token/generation.json 304 (conditional)"], `minute ${minute}: one CDN request, no origin call`);
+  }
+
+  h.plane.promote([h.triage("v2 {{ticket}}", "ver_2", 2)]);
+  const promoted = await poll(cursor);
+  cursor = promoted.cursor;
+  assert.deepEqual(promoted.events.map((e) => e.state), ["new_version"]);
+  assert.deepEqual(promoted.calls.filter((c) => c.startsWith("/targets/") || c.startsWith("/payloads/")), ["/targets/prod/manifest 200 (conditional)", "/payloads/<hash> 200"], "the pointer moved: one manifest and the one new payload");
+
+  h.clock.now += 61 * 60_000;
+  const hourly = await poll(cursor);
+  assert.deepEqual(hourly.events, []);
+  assert.deepEqual(hourly.calls.filter((c) => c.startsWith("/targets/") || c.startsWith("/payloads/")), ["/targets/prod/manifest 304 (conditional)"], "past the pointer's trust window: the origin, conditionally, and nothing changed");
+  assert.equal(h.plane.heartbeats.length, 0, "a trigger poll never heartbeats, so it never shows in Fleet as an instance");
+});

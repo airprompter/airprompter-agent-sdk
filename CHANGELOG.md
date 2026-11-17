@@ -8,6 +8,11 @@ entry names the protocol it speaks. Format: [Keep a Changelog](https://keepachan
 versions follow [SemVer](https://semver.org/) — before 1.0, a minor bump
 may change a public shape and says so here.
 
+## Unreleased
+
+### Zapier and n8n depend on the published SDK
+- **`integrations/zapier` and `integrations/n8n` now depend on `@airprompter/agent-sdk` `1.0.0-rc.2` from npm** (pinned exactly; it ships `/frameworks/steps` and `ap.reportRun`), instead of `file:../../sdk-typescript/packages/sdk`. Their `.npmrc` (`install-links`) and n8n's `prepare:sdk` are gone, and building either one no longer needs the SDK built first.
+
 ## 1.0.0-rc.2 — 2026-11-16
 
 The second release candidate. `1.0.0-rc.1` is kept for AIR-2231 (the adapter contract), which publishes the candidate after this one; npm and PyPI list rc.2 first until then. Protocol unchanged. The CLI moves with it (`cli/v1.0.0-rc.2`).

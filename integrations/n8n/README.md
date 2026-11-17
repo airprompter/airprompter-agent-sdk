@@ -20,10 +20,9 @@ can name a **Subject**.
 
 ## Install (self-hosted)
 
-Until the package is on npm, build it from this repository and load it as a custom extension:
+Until the package is on npm, build it from this repository and load it as a custom extension (the SDK comes from npm):
 
 ```bash
-cd sdk-typescript && npm ci && npm run build && cd ..
 cd integrations/n8n && npm ci --legacy-peer-deps && npm run build
 N8N_CUSTOM_EXTENSIONS="$PWD" npx n8n start
 ```

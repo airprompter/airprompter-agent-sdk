@@ -145,7 +145,7 @@ If AirPrompter cannot take a report (no upload grant, network down), the step fa
 ## Develop
 
 ```sh
-cd sdk-typescript && npm ci && npm run build && cd ..   # the SDK this app depends on (file:, copied — see .npmrc)
+cd sdk-typescript && npm ci && npm run build && cd ../cli && npm ci && cd ..   # the tests run `airprompter dev` from source
 cd integrations/zapier && npm ci
 npm run typecheck && TSX_DISABLE_CACHE=1 npm test
 npm run validate                                         # zapier-platform validate; runs without a Zapier login
@@ -159,9 +159,8 @@ None of these steps have been run. They need the owner's Zapier account.
    `sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`).
 2. `npx zapier-platform login`, then `npx zapier-platform register "AirPrompter Agents"`
    (once). This writes `.zapierapprc`, which is gitignored.
-3. `npm run build && npx zapier-platform push`. The SDK dependency is `file:`, installed
-   as a copy (`install-links=true`), so the build zips a real directory. After
-   `@airprompter/agent-sdk` 1.0.0 is published, depend on the version instead.
+3. `npm run build && npx zapier-platform push`. The SDK comes from npm
+   (`@airprompter/agent-sdk`, pinned exactly), so the build zips the published package.
 4. In Zapier, connect with an Agent ID and an Update key. Build a Zap: Get Prompt → AI by
    Zapier (prompt `{{prompt}}`, model `{{model}}`) → Report Run (`{{run_ref}}`, the
    token counts).

@@ -8,6 +8,11 @@ entry names the protocol it speaks. Format: [Keep a Changelog](https://keepachan
 versions follow [SemVer](https://semver.org/) — before 1.0, a minor bump
 may change a public shape and says so here.
 
+## Unreleased
+
+### Steps: the hosted dev root is pinned (AIR-2392)
+- **`HOSTED_ROOTS.dev` is AirPrompter's dev root** (key id `86267aa3…df91`), exactly as the offline ceremony of 2026-09-14 wrote it (AIR-1935). A Steps client pointed at the hosted dev service needs no `root` any more. `HOSTED_ROOTS.prod` stays empty, so the production service still reports `root_not_pinned`, because its root ceremony has not run yet. A test checks the real dev root document against the pinned key and refuses a document signed by any other root.
+
 ## 1.0.0-rc.2 — 2026-11-16
 
 The second release candidate. `1.0.0-rc.1` is kept for AIR-2231 (the adapter contract), which publishes the candidate after this one; npm and PyPI list rc.2 first until then. Protocol unchanged. The CLI moves with it (`cli/v1.0.0-rc.2`).

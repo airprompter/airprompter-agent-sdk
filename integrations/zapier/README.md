@@ -47,8 +47,9 @@ The connection test fetches the signed manifest, verifies it against the pinned 
 stores it.
 
 > **Owner action before production use:** `HOSTED_ROOTS` in
-> the SDK's Steps core ([`sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`](../../sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts)) is empty. Until AirPrompter's production root
-> public key is pinned there, every connection to the hosted API reports
+> the SDK's Steps core ([`sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`](../../sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts)) pins the hosted `dev` root only:
+> the production root ceremony has not run yet. Until AirPrompter's production root
+> public key is pinned there, every connection to the production API reports
 > `root_not_pinned`. The only way around it is to paste the root into the advanced field.
 
 ## Where the signed copy lives (storage decision)

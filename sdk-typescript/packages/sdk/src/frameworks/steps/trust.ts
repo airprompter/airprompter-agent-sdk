@@ -24,10 +24,15 @@ import { createHash, createPrivateKey, createPublicKey, hkdfSync } from "node:cr
 import type { DistributionKey, FetchLike, HostedEnvironment, P256PublicJwk } from "../../core/index.js";
 
 /**
- * AirPrompter's root public key per hosted environment. Empty until the owner pins the production key: until then a
- * connection to the hosted service needs `root` passed in, and `testConnection` says so (`root_not_pinned`).
+ * AirPrompter's root public key per hosted environment, exactly as the offline root ceremony wrote it
+ * (`infrastructure/trust/agent-root/{environment}/root-public.jwk.json` in the service repository). An environment
+ * with no ceremony yet has no entry: a connection to it needs `root` passed in, and `testConnection` says so
+ * (`root_not_pinned`). `prod` is absent until its ceremony runs.
  */
-export const HOSTED_ROOTS: Partial<Record<HostedEnvironment, P256PublicJwk>> = {};
+export const HOSTED_ROOTS: Partial<Record<HostedEnvironment, P256PublicJwk>> = {
+  // Ceremony of 2026-09-14 (AIR-1935); key id 86267aa3dc49005a0c1474d5c9c06bd7e1d0e835da715a864c1eca706545df91.
+  dev: { kty: "EC", crv: "P-256", x: "gAQGIbpqvkYwfGnz2yJjAFcMLZm43fsQ6zXF4CjImss", y: "ImPVZkVwb3KC73p9T3EBtGzhm-s-vI6VVu0ovgka6ek" },
+};
 
 export function pinnedRootFor(environment: HostedEnvironment, override?: P256PublicJwk): P256PublicJwk | null {
   return override ?? HOSTED_ROOTS[environment] ?? null;

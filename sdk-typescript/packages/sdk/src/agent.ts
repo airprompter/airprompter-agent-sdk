@@ -22,7 +22,7 @@
  * const r = ap.prompt("support.triage", { subject: userId }).render({ team: "Billing", ticket: userMessage });
  * const reply = await ap.observe(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }));
  * ap.feedback(r.runRef, { thumbs: "up" });
- * await ap.stop(); // flushes the spool
+ * await ap.stop(); // ends open runs and sends them (bounded by telemetry.stopUploadTimeoutMs)
  * ```
  */
 
@@ -197,6 +197,8 @@ export interface StartOptions {
      * (Lambda), rows in flight are lost with no `dropped` row possible.
      */
     flush?: "await" | "background";
+    /** How long `stop()` may spend sending the runs it ended (default 2000 ms; `0`: no pass). What did not go stays for the next start. */
+    stopUploadTimeoutMs?: number;
   };
   now?: () => number;
   fetch?: FetchLike;
@@ -427,6 +429,20 @@ export function healthzResponse(healthz: Healthz): { status: 200; headers: Recor
   return { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" }, body: JSON.stringify(healthz) };
 }
 
+/** Aborts when either does (`AbortSignal.any` where the runtime has it). */
+function anySignal(a: AbortSignal, b: AbortSignal): AbortSignal {
+  if (typeof AbortSignal.any === "function") return AbortSignal.any([a, b]);
+  const both = new AbortController();
+  const fire = (s: AbortSignal) => () => both.abort(s.reason);
+  for (const s of [a, b]) {
+    if (s.aborted) return s;
+    s.addEventListener("abort", fire(s), { once: true });
+  }
+  return both.signal;
+}
+
+type FlushOutcome = { status: "uploaded"; segment: string; rows: number } | { status: "nothing" } | { status: "held"; reason: string; rows: number };
+
 /** `render()` refused by the control plane's standing instructions: a disable directive. */
 export class RenderRefusedError extends Error {
   constructor(
@@ -615,7 +631,7 @@ export class AirPrompterAgent implements AgentRuntime {
     });
     this.client =
       options.apiKey && options.sync?.mode !== "offline"
-        ? new SyncClient({ baseUrl: options.baseUrl ?? "https://api.airprompter.com", agentId: options.agentId, target: options.target, apiKey: options.apiKey, ...(options.fetch ? { fetch: options.fetch } : {}), userAgent: `${SDK_NAME}/${SDK_VERSION}` })
+        ? new SyncClient({ baseUrl: options.baseUrl ?? "https://api.airprompter.com", agentId: options.agentId, target: options.target, apiKey: options.apiKey, fetch: this.fetchImpl, userAgent: `${SDK_NAME}/${SDK_VERSION}` })
         : null;
   }
 
@@ -1116,7 +1132,7 @@ export class AirPrompterAgent implements AgentRuntime {
         ? { sink: customSink }
         : {
             grantFor: (instanceId: string, report?: Record<string, unknown>) => this.requestUploadGrant({ instanceId, instanceClass: this.options.telemetry?.instanceClass ?? "resident", ...(report ? { report } : {}) }),
-            fetch: this.options.fetch ?? (globalThis.fetch as unknown as FetchLike),
+            fetch: this.fetchImpl,
           }),
       now: () => this.nowMs(),
       ...(this.options.fs ? { fs: this.options.fs } : {}),
@@ -1184,7 +1200,15 @@ export class AirPrompterAgent implements AgentRuntime {
   }
 
   log(event: Record<string, unknown>): void {
-    this.options.logger?.({ sdk: SDK_NAME, agentId: this.options.agentId, target: this.options.target, ...event });
+    const hint = event.reason === "unknown_signing_key" && event.hint === undefined ? { hint: this.signingKeyHint() } : {};
+    this.options.logger?.({ sdk: SDK_NAME, agentId: this.options.agentId, target: this.options.target, ...event, ...hint });
+  }
+
+  private signingKeyHint(): string {
+    const pinned = "pinned" in this.options.root;
+    const environment = pinned ? ((this.options.root as { hostedEnvironment?: HostedEnvironment }).hostedEnvironment ?? "prod") : null;
+    const service = this.options.baseUrl ?? "https://api.airprompter.com";
+    return `The trusted root (keys: ${this.trustedRootKeyIds.join(", ") || "none"}) does not name the manifest's signing key. Check that ${pinned ? `root.pinned is the root of the service at ${service} and root.hostedEnvironment ("${environment}") is its environment (dev needs the dev root)` : `root belongs to the service at ${service}`}, that sync.rootUrl${this.options.sync?.rootUrl ? ` (${this.options.sync.rootUrl})` : ", if set,"} serves that environment's root.json, and that the agent key belongs to it.`;
   }
 
   private nowMs(): number {
@@ -1666,7 +1690,21 @@ export class AirPrompterAgent implements AgentRuntime {
    * grant. Rows that cannot go (no grant, a hold, a refused POST) are put back so the next flush carries them; past the
    * buffer the sink's own eviction reports the loss. Never throws; returns what happened.
    */
-  async flushTelemetry(): Promise<{ status: "uploaded"; segment: string; rows: number } | { status: "nothing" } | { status: "held"; reason: string; rows: number }> {
+  async flushTelemetry(options: { signal?: AbortSignal } = {}): Promise<FlushOutcome> {
+    // After the flush `stop()` stopped waiting for has put its rows back; flushes on the request path never wait on each other.
+    if (this.stopFlush) await this.stopFlush;
+    return this.flushOnce(options);
+  }
+
+  private stopFlush: Promise<unknown> | null = null;
+  /** Aborted at `stop()`'s bound: every request this runtime makes carries it, so none holds the process's exit. */
+  private readonly closing = new AbortController();
+  private readonly fetchImpl: FetchLike = (url, init) => {
+    const base = this.options.fetch ?? (globalThis.fetch as unknown as FetchLike);
+    return base(url, { ...init, signal: init?.signal ? anySignal(init.signal, this.closing.signal) : this.closing.signal });
+  };
+
+  private async flushOnce(options: { signal?: AbortSignal }): Promise<FlushOutcome> {
     // Capability, not class: a buffered sink is one that can hand its rows back (another copy of this package counts too).
     if (typeof this.sink.drain !== "function") return { status: "nothing" };
     const rows = this.sink.drain(this.nowMs());
@@ -1684,7 +1722,7 @@ export class AirPrompterAgent implements AgentRuntime {
     this.lastFlushMinute = minute;
     const segment = segmentName(this.ownInstanceId, minute, this.flushSegmentN);
     const bytes = Buffer.from(rows.map((row) => JSON.stringify(row)).join("\n") + "\n", "utf8");
-    const outcome = await postSegment({ grant: decision.grant, segment, bytes, fetch: this.options.fetch ?? (globalThis.fetch as unknown as FetchLike), now: () => this.nowMs() });
+    const outcome = await postSegment({ grant: decision.grant, segment, bytes, fetch: this.fetchImpl, now: () => this.nowMs(), ...(options.signal ? { signal: options.signal } : {}) });
     if (outcome.status === "ok") {
       this.log({ event: "telemetry_flushed", segment, rows: rows.length });
       return { status: "uploaded", segment, rows: rows.length };
@@ -1698,7 +1736,7 @@ export class AirPrompterAgent implements AgentRuntime {
 
   private async fetchRoot(url: string): Promise<RootMetadata | null> {
     try {
-      const response = await (this.options.fetch ?? (globalThis.fetch as unknown as FetchLike))(url, { headers: { "user-agent": `${SDK_NAME}/${SDK_VERSION}` } });
+      const response = await this.fetchImpl(url, { headers: { "user-agent": `${SDK_NAME}/${SDK_VERSION}` } });
       if (response.status !== 200) return null;
       return JSON.parse(await response.text()) as RootMetadata;
     } catch {
@@ -2335,15 +2373,48 @@ export class AirPrompterAgent implements AgentRuntime {
     this.datastoreTimer = null;
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = null;
-    if (this.heartbeating) await this.heartbeating;
-    if (this.syncing) await this.syncing;
-    if (this.placing) await this.placing;
-    if (this.uploader) await this.uploader.stop();
-    // T33: an observation settled by a wrapped client's stream helper lands a few microtasks after the customer's own
-    // await; one turn of the event loop lets everything in flight reach the spool before the windows close.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    this.runs.endAll();
-    this.spool.closeWindows(this.nowMs());
+    // AIR-2261: one bound from here covers the waits and the last pass; at it every request in flight is aborted.
+    const telemetry = this.options.telemetry;
+    const boundMs = telemetry?.upload === false ? 0 : (telemetry?.stopUploadTimeoutMs ?? 2000);
+    let boundTimer: ReturnType<typeof setTimeout> | null = null;
+    const atBound =
+      boundMs > 0
+        ? new Promise<"bound">((resolve) => {
+            boundTimer = setTimeout(() => {
+              this.closing.abort();
+              this.log({ event: "stop_upload_bounded", boundMs });
+              resolve("bound");
+            }, boundMs);
+          })
+        : null;
+    const wait = (p: Promise<unknown> | null) => (p ? (atBound ? Promise.race([p, atBound]) : p) : undefined);
+    try {
+      await wait(this.heartbeating);
+      await wait(this.syncing);
+      await wait(this.placing);
+      // The uploader first: a pass in flight cannot see a segment closed after it began.
+      const uploader = this.uploader;
+      if (uploader) await wait(uploader.stop());
+      // T33: an observation settled by a wrapped client's stream helper lands a few microtasks after the customer's own
+      // await; one turn of the event loop lets everything in flight reach the spool before the windows close.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      this.runs.endAll();
+      this.spool.closeWindows(this.nowMs());
+      if (atBound && !this.closing.signal.aborted) await this.lastUpload(uploader, atBound);
+    } finally {
+      if (boundTimer) clearTimeout(boundTimer);
+    }
+  }
+
+  /** AIR-2261: one upload pass at `stop()`, until the bound. Never throws. */
+  private async lastUpload(uploader: SpoolUploader | null, atBound: Promise<"bound">): Promise<void> {
+    const signal = this.closing.signal;
+    let pass: Promise<boolean> | null = null;
+    // A directory sink with no uploader of its own (a daemon's folder, or an on_invoke host's) is not this process's to ship.
+    if (uploader) pass = uploader.runOnce({ signal }).then((r) => r.held);
+    else if (!this.directorySink && this.client && typeof this.sink.drain === "function") pass = (this.stopFlush = this.flushOnce({ signal })).then((r) => r.status === "held");
+    if (!pass) return;
+    if ((await Promise.race([pass.catch(() => true), atBound])) === true) this.log({ event: "stop_upload_held" });
   }
 
   /** The runtime's own random id — this process's, fresh at every start (S6); never a hostname, never the store's. */

@@ -52,7 +52,10 @@ export function connectionLabel(input: { updateKey: string; agentId: string; env
 /** `fetch` with a per-request timeout; a timeout surfaces as a network error, which the SDK treats as unreachable. */
 export function timedFetch(base: typeof globalThis.fetch, timeoutMs: number): FetchLike {
   return async (input, init) => {
-    const response = await base(input, { ...(init as RequestInit), signal: AbortSignal.timeout(timeoutMs) });
+    // The caller's own signal (the agent's stop bound) still aborts the request; the timeout is the outer limit.
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = init?.signal ? (typeof AbortSignal.any === "function" ? AbortSignal.any([init.signal, timeout]) : init.signal) : timeout;
+    const response = await base(input, { ...(init as RequestInit), signal });
     return response as unknown as Awaited<ReturnType<FetchLike>>;
   };
 }

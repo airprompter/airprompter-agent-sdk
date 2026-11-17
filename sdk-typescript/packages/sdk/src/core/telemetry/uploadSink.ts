@@ -38,6 +38,11 @@ export interface UploadSegment {
    * segment with no manifest. AirPrompter's sink sends it to obtain that writer's grant.
    */
   report?: Record<string, unknown>;
+  /**
+   * Aborted when the caller stops waiting (the bounded last pass at `stop()`). A sink passes it to its own request so
+   * the socket does not hold the process past the bound; a sink that ignores it is still bounded, only not released.
+   */
+  signal?: AbortSignal;
 }
 
 /**

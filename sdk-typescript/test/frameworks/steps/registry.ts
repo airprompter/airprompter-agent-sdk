@@ -17,18 +17,14 @@ import type { ManifestSlot, P256PublicJwk } from "../../../packages/sdk/src/core
 export const SCOPE = { organizationId: "org_dev", agentId: "agt_dev", target: "dev" } as const;
 export { DEV_API_KEY };
 
-/**
- * `protocol` stamps the manifests this registry signs (default: this repository's `PROTOCOL_VERSION`). Test-only: it
- * lets a consumer pinned to an older published SDK be served the version the real service still emits.
- */
-export async function startRegistry(files: Record<string, string>, options: { leaseSeconds?: number; protocol?: string } = {}) {
+export async function startRegistry(files: Record<string, string>, options: { leaseSeconds?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ap-zapier-registry-"));
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), text);
   }
   const { keys, rootPubPath } = loadOrCreateDevKeys(dir, SCOPE.target);
-  const overrides = { ...(options.leaseSeconds ? { leaseSeconds: options.leaseSeconds } : {}), ...(options.protocol ? { protocol: options.protocol } : {}) };
+  const overrides = options.leaseSeconds ? { leaseSeconds: options.leaseSeconds } : {};
   const plane = devPlane({ scope: { ...SCOPE }, keys, release: readDevRelease(dir), overrides });
   let server = await serveOverHttp(plane, { port: 0 });
   const baseUrl = server.baseUrl;

@@ -8,4 +8,4 @@ Example::
     heartbeat = {"protocol": PROTOCOL_VERSION}
 """
 
-PROTOCOL_VERSION = "3.1.0"
+PROTOCOL_VERSION = "4.0.0"

@@ -253,7 +253,7 @@ test("the uploader honours manifests: another pair's left alone, a mismatch quar
     now: () => clock.ms,
     random: () => 0,
   });
-  const report = { protocol: "3.0.0", instanceId: "i-writerAAAAAAAA", sdk: { name: "agent-sdk-typescript", version: "0.3.0" }, syncMode: "offline", generation: { active: 3 }, applyState: "active", storageProtection: "file_key", catalog: { models: [] }, lease: { expired: false } };
+  const report = { protocol: "4.0.0", instanceId: "i-writerAAAAAAAA", sdk: { name: "agent-sdk-typescript", version: "0.3.0" }, syncMode: "offline", generation: { active: 3 }, applyState: "active", storageProtection: "file_key", catalog: { models: [] }, lease: { expired: false } };
   const write = (instanceId: string, n: number, manifestScope: { agentId: string; target: string } | null) => {
     const name = segmentName(instanceId, epochMinute(clock.ms), n);
     writeFileSync(join(dir, name), `${JSON.stringify(windowRow(instanceId, clock.ms))}\n`);
@@ -293,7 +293,7 @@ test("the uploader honours manifests: another pair's left alone, a mismatch quar
 test("the sink's own eviction takes each evicted segment's manifest with it", () => {
   const dir = mkdtempSync(join(tmpdir(), "ap-tdaemon-evict-"));
   try {
-    const context = { organizationId: scope.organizationId, agentId: scope.agentId, target: scope.target, report: { protocol: "3.0.0" } };
+    const context = { organizationId: scope.organizationId, agentId: scope.agentId, target: scope.target, report: { protocol: "4.0.0" } };
     const sink = new DirectorySink(dir, "i-writerAAAAAAAA", 900, nodeFs, { manifest: () => context, now: () => T0 });
     const writer = new SpoolWriter(sink, { instanceId: "i-writerAAAAAAAA", instanceClass: "resident", sdk: "agent-sdk-ts/0.3.0" });
     for (let i = 0; i < 4; i += 1) {

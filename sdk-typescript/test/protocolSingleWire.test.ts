@@ -1,6 +1,6 @@
 /**
- * One wire: with `protocolVectors.test.ts` (every vector passes), this proves the SDK speaks exactly protocol 3.x.
- * Older majors are refused, any 3.x loads, the capability registry has one source, the older shapes fail the schema,
+ * One wire: with `protocolVectors.test.ts` (every vector passes), this proves the SDK speaks exactly protocol 4.x.
+ * Older majors are refused, any 4.x loads, the capability registry has one source, the older shapes fail the schema,
  * and every refused example is refused for the code it names. Older literals are built here, so the repository's
  * search for them stays clean.
  *
@@ -37,18 +37,18 @@ function promoted(patch: Partial<ManifestPayload> & Record<string, unknown>): { 
 }
 const verdict = ({ plane, manifest }: ReturnType<typeof promoted>) => verifyManifest({ manifest, root: plane.root, now: new Date().toISOString(), scope, storedGeneration: 0, payloads: null });
 
-test("PROTOCOL_VERSION is protocol/VERSION, and the only major this SDK reads is 3", () => {
+test("PROTOCOL_VERSION is protocol/VERSION, and the only major this SDK reads is 4", () => {
   assert.equal(PROTOCOL_VERSION, readFileSync(protocolPath("VERSION"), "utf8").trim());
-  assert.deepEqual([...SUPPORTED_PROTOCOL_MAJORS], [3]);
+  assert.deepEqual([...SUPPORTED_PROTOCOL_MAJORS], [4]);
 });
 
-test("older majors get the unsupported-major refusal", () => {
-  for (const protocol of [[0, 3, 5].join("."), "2.0.0", "4.0.0"]) assert.deepEqual(verdict(promoted({ protocol })), { ok: false, reason: "protocol_unsupported" }, protocol);
+test("other majors get the unsupported-major refusal", () => {
+  for (const protocol of [[0, 3, 5].join("."), "2.0.0", "3.1.0", "5.0.0"]) assert.deepEqual(verdict(promoted({ protocol })), { ok: false, reason: "protocol_unsupported" }, protocol);
 });
 
-test("any 3.x loads: a reader checks the major and the capabilities, never the minor", () => {
-  assert.equal(verdict(promoted({ protocol: "3.7.0" })).ok, true);
-  assert.equal(verdict(promoted({ protocol: "3.0.0" })).ok, true);
+test("any 4.x loads: a reader checks the major and the capabilities, never the minor", () => {
+  assert.equal(verdict(promoted({ protocol: "4.7.0" })).ok, true);
+  assert.equal(verdict(promoted({ protocol: "4.0.0" })).ok, true);
 });
 
 test("a manifest naming a capability this SDK does not implement is refused whole", () => {
@@ -56,7 +56,7 @@ test("a manifest naming a capability this SDK does not implement is refused whol
   assert.equal(verdict(promoted({ requiredCapabilities: [] })).ok, true, "asking for nothing asks for nothing");
 });
 
-test("a 3.0.0 manifest without observations loads", () => {
+test("a 4.0.0 manifest without observations loads", () => {
   const made = promoted({});
   assert.equal("observations" in made.manifest.payload, false);
   assert.equal(verdict(made).ok, true);
@@ -97,7 +97,7 @@ test("the older shapes fail the manifest schema, and a heartbeat with capabiliti
   const { observations: _observations, ...noObservations } = good.payload;
   const withoutAudience = { ...noObservations, experiments: noObservations.experiments.map(({ audience: _audience, ...experiment }: Record<string, unknown>) => experiment) };
   assert.equal(manifest({ ...good, payload: withoutAudience }), true, "observations are optional");
-  assert.equal(manifest({ ...good, payload: { ...good.payload, protocol: "3.7.0" } }), true, "any 3.x");
+  assert.equal(manifest({ ...good, payload: { ...good.payload, protocol: "4.7.0" } }), true, "any 4.x");
   const heartbeat = schema("heartbeat#/$defs/request");
   const request = example("heartbeat.request.json");
   assert.deepEqual(request.capabilities, []);

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/3/manifest.schema.json",
+  "$id": "https://airprompter.com/protocol/4/manifest.schema.json",
   "title": "AirPrompter signed release manifest",
   "description": "What a target is allowed to run, as a signed envelope. The platform signature covers the whole payload; countersignatures cover the releaseDigest of every release the manifest can activate (D58). No prompt text is ever in a manifest: slots name payloads by content hash and the runtime fetches them separately.",
   "type": "object",
@@ -33,9 +33,9 @@
   },
   "$defs": {
     "protocolVersion": {
-      "description": "Any 3.x.y. A feature a reader must understand is gated by requiredCapabilities, never by the minor number; an SDK checks the major and the capabilities only.",
+      "description": "Any 4.x.y. A feature a reader must understand is gated by requiredCapabilities, never by the minor number; an SDK checks the major and the capabilities only.",
       "type": "string",
-      "pattern": "^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+      "pattern": "^4\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
     },
     "identifier": {
       "description": "A canonical team identifier as minted by the control plane.",

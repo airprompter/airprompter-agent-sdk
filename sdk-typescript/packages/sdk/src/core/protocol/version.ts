@@ -8,6 +8,6 @@
  * const body = { protocol: PROTOCOL_VERSION, sdk: { name: "agent-sdk-typescript", version: SDK_VERSION } };
  * ```
  */
-export const PROTOCOL_VERSION = "3.1.0";
+export const PROTOCOL_VERSION = "4.0.0";
 /** The package's own version, as the heartbeat and store.json (S8: the writer) record it. Generated; never edit it. */
 export const SDK_VERSION = "1.0.0-rc.3";

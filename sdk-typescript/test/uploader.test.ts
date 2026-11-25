@@ -39,7 +39,7 @@ function writeSegment(dir: string, instanceId: string, minuteMs: number, n: numb
   return name;
 }
 
-test("spool.json: a reader tolerates what a later 3.x wrote, line by line, and only corruption quarantines", () => {
+test("spool.json: a reader tolerates what a later 4.x wrote, line by line, and only corruption quarantines", () => {
   const sp = vector("spool.json");
   assert.ok(sp.tolerance.length >= 4, "the vector carries the cases");
   const ordered = (values: Array<{ line: number; field: string }>) => [...values].sort((x, y) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1));

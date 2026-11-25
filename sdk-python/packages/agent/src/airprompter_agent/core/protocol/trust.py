@@ -29,7 +29,7 @@ from .._util import b64url_decode, b64url_encode, instant
 from .assignment import AssignmentError, capabilities_implemented, servable_experiments, servable_overrides, servable_slots, valid_audience_manifest, validate_ramp
 from .canonical_json import MAX_SAFE_INTEGER, canonical_bytes, canonical_json, sha256_prefixed
 
-SUPPORTED_PROTOCOL_MAJORS = frozenset({3})
+SUPPORTED_PROTOCOL_MAJORS = frozenset({4})
 _PROTOCOL_SHAPE = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 _CONTENT_HASH = re.compile(r"sha256:[0-9a-f]{64}")
 #: The shape of a stage: the only check a target gets. It feeds store paths and spool directories, so a start refuses anything else.

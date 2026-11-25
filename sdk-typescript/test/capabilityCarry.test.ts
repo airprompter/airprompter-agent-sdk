@@ -684,7 +684,7 @@ test("an audience this reader cannot read: the manifest loads, the run takes arm
   }
 });
 
-test("a store holding a major-2 manifest at generation 1 upgrades to the 3.0.0 manifest of the same generation", async () => {
+test("a store holding a major-2 manifest at generation 1 upgrades to the current-major manifest of the same generation", async () => {
   const plane = new FakeControlPlane(scope);
   const slot = plane.slot({ tag: "support.reply", text: "Reply politely." });
   const manifest = plane.promote([slot]);

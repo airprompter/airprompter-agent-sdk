@@ -2,7 +2,7 @@
   "schema": "heartbeat-request",
   "reason": "content-free by schema: no free-form members",
   "document": {
-    "protocol": "3.1.0",
+    "protocol": "4.0.0",
     "capabilities": [],
     "registration": {
       "tagKeys": [
@@ -25,7 +25,7 @@
     "sdk": {
       "name": "airprompterd",
       "version": "1.0.0",
-      "protocolRange": ">=3.0.0 <4.0.0"
+      "protocolRange": ">=4.0.0 <5.0.0"
     },
     "host": {
       "os": "linux",

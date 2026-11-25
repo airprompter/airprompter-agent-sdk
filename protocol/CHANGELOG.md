@@ -1,19 +1,31 @@
 # Protocol changelog
 
-## Unreleased · Hosted execution leaves the wire (AIR-2317)
+## 4.0.0 · Hosted execution leaves the wire (AIR-2317)
 
-Agents run only on the customer's systems (owner ruling of 2026-11-06), so the managed routes leave the protocol. Version number pending the owner's decision: `VERSION` stays `3.1.0` and no tag is cut.
+Breaking. Agents run only on the customer's systems (owner ruling of 2026-11-06), so the hosted routes, their schemas and the `agent.run` scope leave the protocol. Removing routes, schemas and a scope is a breaking change, and a breaking change is a major (README › Versioning), so this is 4.0.0. The owner chose the major over a 3.x minor exception.
 
 Removed:
 
 - The six function-URL routes from `openapi.yaml`: `POST …/targets/{target}/run`, `GET …/targets/{target}/slots`, `POST …/targets/{target}/feedback`, `POST /v1/agents/{agentId}/openai/chat/completions`, `POST /v1/agents/{agentId}/openai/responses` and `POST /v1/agents/{agentId}/anthropic/v1/messages`. With them go the `managed` tag and the schemas only they used: `RunRequest`, `RunResponse`, `RunSlots`, `CatalogueStaleError`, `AlreadyExecutedError` and the seven `Compat*` schemas.
 - `compatible-endpoints.md`.
 - The `agent.run` scope from `README.md` and `openapi.yaml`, and the "Retired routes" note.
-- The managed-mode `subjectHash` bullet in `assignment-hash.md`. The function and `vectors/assignment.json` are unchanged.
+- The managed-mode `subjectHash` bullet in `assignment-hash.md`. The function and the assignment cases are unchanged.
 
-No schema under `schemas/`, no vector and no example changed. A manifest, payload, heartbeat, countersign or spool reader or writer is unaffected.
+Changed by the major:
 
-Why this is not a major: the README says a breaking change is a major, and removing routes is one. A 4.0.0, though, would make every 3.x reader refuse manifests over routes no customer-run agent ever called: the routes were served from the execution stack's function URL, used only by `ManagedAgent` and the provider-compatible shapes, and had no pilots. The recommendation on AIR-2317 is the next 3.x minor, as a stated exception to that rule. The owner decides the number.
+- `protocolVersion` (`manifest.schema.json › $defs/protocolVersion`) is any `4.x.y`. It types the manifest payload's `protocol`, the bundle's `protocol`, the heartbeat request's `protocol` and the spool manifest report's `protocol`. A key set's `protocol` stays plain semver.
+- Every schema `$id` moves from `https://airprompter.com/protocol/3/…` to `https://airprompter.com/protocol/4/…`, as 3.0.0 moved them to `/3/`.
+- A reader's supported majors are `{4}`. A manifest whose `protocol` major is not 4, including any 3.x, is refused with `protocol_unsupported`. `vectors/manifest-verify.json` and `vectors/audiences.json` gain a major-3 refusal and a major-5 refusal, and the "any later minor loads" cases read `4.7.0`.
+- Vectors and examples carry `4.0.0`; the example `protocolRange` is `>=4.0.0 <5.0.0`.
+
+Nothing else on the wire moved. Manifest, payload, bundle, heartbeat, countersign, spool, store, daemon and datastore shapes are the 3.1.0 shapes, field for field.
+
+What a 3.x reader or writer must change to speak 4.0.0:
+
+- Accept major 4 where it accepted major 3, and refuse major 3, in manifest verification (M-checks) and wherever it validates a `protocol` field.
+- Write `4.0.0` (or later 4.x) in the manifest payload, bundle, heartbeat request and spool manifest report.
+- Resolve schemas under `https://airprompter.com/protocol/4/` instead of `/3/`.
+- Stop calling the six removed routes and stop issuing or expecting `agent.run` keys. A 3.x client that never used them, which is every customer-run agent, needs no other change.
 
 ## 3.1.0 · Tool counts say whether they were seen
 

@@ -251,7 +251,7 @@ export class WindowAggregator {
 }
 
 // ---------------------------------------------------------------------------
-// A reader's tolerance: rows a later 3.x wrote
+// A reader's tolerance: rows a later 4.x wrote
 // ---------------------------------------------------------------------------
 
 const WINDOW_NESTED = { latencyMs: ["buckets", "sum"], tokens: ["input", "cachedInput", "output"], tools: ["calls", "errors"], tokensSq: ["input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput"], checks: ["passed", "failed"] };

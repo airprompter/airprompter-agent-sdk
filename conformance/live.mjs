@@ -67,7 +67,7 @@ addFormats(ajv);
 const schemaDir = join(protocolDir, "schemas");
 for (const file of readdirSync(schemaDir).filter((f) => f.endsWith(".schema.json")).sort()) ajv.addSchema(readJson(join(schemaDir, file)));
 const validate = (name, value) => {
-  const fn = ajv.getSchema(`https://airprompter.com/protocol/3/${name}`);
+  const fn = ajv.getSchema(`https://airprompter.com/protocol/4/${name}`);
   if (!fn) throw new Error(`no schema ${name}`);
   return fn(value) ? null : ajv.errorsText(fn.errors, { separator: "; " });
 };

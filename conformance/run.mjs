@@ -351,7 +351,7 @@ for (const c of readJson(join(protocolDir, "vectors", "manifest-verify.json")).m
 }
 section("vectors: heartbeat readers");
 for (const c of readJson(join(protocolDir, "vectors", "heartbeat-readers.json")).cases) {
-  const writer = ajv.getSchema("https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request")(c.document);
+  const writer = ajv.getSchema("https://airprompter.com/protocol/4/heartbeat.schema.json#/$defs/request")(c.document);
   if (writer === c.writerSchema && c.reader === "accepted") ok(`heartbeat reader: ${c.name}`);
   else fail(`heartbeat reader: ${c.name}`, `writer schema ${writer}, expected ${c.writerSchema}`);
 }

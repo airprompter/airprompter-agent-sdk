@@ -1,5 +1,5 @@
 {
-  "protocol": "3.1.0",
+  "protocol": "4.0.0",
   "description": "ap.feedback(runRef, signals) normalisation against feedback-signals.schema.json: what becomes a window outcome, what is rejected and why. `accepted` is the call's return value. `runRef` pins the one token form (spool-format.md › Run reference): a token minted in either SDK parses in the other.",
   "cases": [
     {

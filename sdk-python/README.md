@@ -411,7 +411,7 @@ tests/test_wrap_live.py` locally).
 
 ## Parity with the TypeScript SDK
 
-Same protocol (3.x, `protocol/VERSION`), same vectors, same store layout. The
+Same protocol (4.x, `protocol/VERSION`), same vectors, same store layout. The
 conformance suite (`tests/test_protocol_vectors.py`, `tests/test_spool.py`)
 runs every vector the TypeScript SDK runs, and `tests/test_interop.py`
 opens a store the TypeScript SDK wrote (encrypted A slot, spool segment,

@@ -87,7 +87,7 @@ const ARM = SLOT_TAG;
 const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const OUTCOME_NAME = /^[a-z][a-zA-Z0-9]{0,31}$/;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
-/** A later 3.x may add an error class, a usage source or a refusal reason: a reader takes the shape, not the list. */
+/** A later 4.x may add an error class, a usage source or a refusal reason: a reader takes the shape, not the list. */
 const SLUG = /^[a-z][a-z0-9_]{0,31}$/;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -105,7 +105,7 @@ const DROPPED_FIELDS = ["type", "v", "at", "instanceId", "segments", "lines", "b
 
 /**
  * `row`: the line as it may leave this host, holding only the fields this reader knows; `stripped` names the rest.
- * `later`: a row this reader cannot read and a later 3.x may have written. It is skipped and counted, and only the line
+ * `later`: a row this reader cannot read and a later 4.x may have written. It is skipped and counted, and only the line
  * goes. Anything else refused is corruption, and quarantines the segment.
  */
 export type RowVerdict = { ok: true; row: SpoolRow; stripped: string[] } | { ok: false; reason: string; later?: true };
@@ -238,7 +238,7 @@ export interface SegmentInspection {
   rows: SpoolRow[];
   /** Corruption, by line (1-based) and reason; empty means the segment may ship. */
   invalid: Array<{ line: number; reason: string }>;
-  /** Lines a later 3.x may have written: skipped one by one, counted in the `dropped` row. */
+  /** Lines a later 4.x may have written: skipped one by one, counted in the `dropped` row. */
   skipped: Array<{ line: number; reason: string }>;
   /** Fields this reader does not know, by line. They never leave the host. */
   stripped: Array<{ line: number; field: string }>;

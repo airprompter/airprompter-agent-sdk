@@ -51,7 +51,7 @@ your application ──(render / wrap)──▶ SDK ──▶ encrypted slot sto
 
 ## Protocol
 
-This SDK speaks protocol 3.x. The hosted service vendors the same tag
+This SDK speaks protocol 4.x. The hosted service vendors the same tag
 (manifest, payload and key routes shipped). The `airprompter` CLI on `main` — pull, verify, apply,
 status, diff, keygen, daemon — is built and smoke-tested on three
 platforms in CI (release tag pending signing identities).

@@ -74,7 +74,7 @@ bytes travel base64url. `→` is the arguments object, `←` the result object;
 | spool-windows | `aggregateWindows` | `{ instanceId, instanceClass, sdk, events: [{ kind: observe \| recordRun \| recordStep \| feedback \| close, at, observation? \| run? \| step? \| feedback? }] }` | `{ windows: [row…], steps: [row…] }` — the window rows the spool writer emitted, any order |
 | feedback | `normalizeFeedback` | `{ signals }` | `{ normalized: { accepted, outcomes, rejected } }` |
 | slot-requires, frozen-runs | `servableSlots` | `{ payload, tags? }` | `{ frozen: [tag…], tags: [tag…], overrides: { experimentId: { arm: [tag…] } } }`: the slots this SDK can serve, in manifest order, and the overrides it keeps |
-| spool-tolerance | `inspectSegment` | `{ instanceId, lines: [text…], nowMs }` | `{ rows, invalid, skipped, stripped }`: lines a later 3.x wrote are skipped and counted, unknown fields stripped, only corruption refused |
+| spool-tolerance | `inspectSegment` | `{ instanceId, lines: [text…], nowMs }` | `{ rows, invalid, skipped, stripped }`: lines a later 4.x wrote are skipped and counted, unknown fields stripped, only corruption refused |
 | run-ref | `runRefKeyFrom` | `{ secret, agentId, target }` | `{ keyHex }` |
 | run-ref | `mintRunRef` | `{ facts, keyHex }` | `{ token }`, or the refusal `run_ref_facts_invalid` |
 | run-ref | `parseRunRef` | `{ token, keysHex: [hex…] }` | `{ facts }`, null for a token no key verifies |

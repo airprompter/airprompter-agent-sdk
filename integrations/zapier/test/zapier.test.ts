@@ -19,6 +19,11 @@ const PROMPTS = {
   "sales/reply.md": "---\nvariables: name, tone=friendly\nversion: reply_v1\n---\nReply to {{name}} in a {{tone}} tone.",
 };
 
+// This integration pins SDK rc.3, which reads protocol 3.x, and the real server emits 3.1.0 manifests until AIR-2317's
+// step 2. The registry plays that server. Remove this when the integration moves to the 4.x SDK.
+const SERVED_PROTOCOL = "3.1.0";
+const startServedRegistry = (files: Record<string, string>, options: { leaseSeconds?: number } = {}) => startRegistry(files, { ...options, protocol: SERVED_PROTOCOL });
+
 const authOf = (registry: Registry, extra: Record<string, string> = {}) => ({ agentId: SCOPE.agentId, updateKey: DEV_API_KEY, environment: SCOPE.target, baseUrl: registry.baseUrl, rootKey: JSON.stringify(registry.root), ...extra });
 
 type Perform = (z: unknown, bundle: unknown) => Promise<unknown>;
@@ -36,7 +41,7 @@ test("the production API is verified against the production root; anything else 
 });
 
 test("connection test, slot dropdown, variable fields, Get prompt", async () => {
-  const registry = await startRegistry(PROMPTS);
+  const registry = await startServedRegistry(PROMPTS);
   const appTester = zapier.createAppTester(App);
   try {
     const authData = authOf(registry);
@@ -67,7 +72,7 @@ test("connection test, slot dropdown, variable fields, Get prompt", async () => 
 });
 
 test("A/B through the app: a Subject is sticky", async () => {
-  const registry = await startRegistry(PROMPTS);
+  const registry = await startServedRegistry(PROMPTS);
   const appTester = zapier.createAppTester(App);
   try {
     const ab = abRelease(registry, { tag: "sales.reply", control: "A {{name}}", candidate: "B {{name}}", weights: [5000, 5000], variables: [{ name: "name", required: false, trust: "operator" }] });
@@ -82,7 +87,7 @@ test("A/B through the app: a Subject is sticky", async () => {
 });
 
 test("z.cache keeps the signed copy: served while the registry is down; tampered or past the lease it is refused", async () => {
-  const registry = await startRegistry(PROMPTS, { leaseSeconds: 3600 });
+  const registry = await startServedRegistry(PROMPTS, { leaseSeconds: 3600 });
   const appTester = zapier.createAppTester(App);
   try {
     const authData = authOf(registry);
@@ -119,7 +124,7 @@ test("z.cache keeps the signed copy: served while the registry is down; tampered
 });
 
 test("Rollout changed: dedupes by id, emits one item per slot change", async () => {
-  const registry = await startRegistry(PROMPTS);
+  const registry = await startServedRegistry(PROMPTS);
   const appTester = zapier.createAppTester(App);
   try {
     const bundle = { authData: authOf(registry), meta: { zap: { id: 101 } } };
@@ -144,7 +149,7 @@ test("Rollout changed: dedupes by id, emits one item per slot change", async () 
 });
 
 test("Report run: delivered, or a ThrottledError so Zapier retries", async () => {
-  const registry = await startRegistry(PROMPTS);
+  const registry = await startServedRegistry(PROMPTS);
   const appTester = zapier.createAppTester(App);
   try {
     const authData = authOf(registry);

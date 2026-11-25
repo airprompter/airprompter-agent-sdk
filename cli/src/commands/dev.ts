@@ -232,17 +232,27 @@ export function loadOrCreateDevKeys(dir: string, target: Target): { keys: DevKey
 }
 
 /** The plane behind `airprompter dev`: the fake control plane with persisted keys and the directory's release. */
-export function devPlane(input: { scope: { organizationId: string; agentId: string; target: Target }; keys: DevKeys; release: DevRelease; overrides?: { applyPolicy?: "auto" | "unlock_required"; leaseSeconds?: number }; generation?: number }): FakeControlPlane {
+/**
+ * What `promoteRelease` may set on a promotion. `protocol` is for tests only: it stamps the manifests with another
+ * protocol version so a test can play a service an older SDK talks to. The `dev` command never sets it.
+ */
+export interface DevPromoteOverrides {
+  applyPolicy?: "auto" | "unlock_required";
+  leaseSeconds?: number;
+  protocol?: string;
+}
+
+export function devPlane(input: { scope: { organizationId: string; agentId: string; target: Target }; keys: DevKeys; release: DevRelease; overrides?: DevPromoteOverrides; generation?: number }): FakeControlPlane {
   const plane = new FakeControlPlane(input.scope, DEV_API_KEY, input.keys);
   plane.requireCountersign = input.release.requireCountersign;
   promoteRelease(plane, input.release, input.overrides, input.generation);
   return plane;
 }
 
-export function promoteRelease(plane: FakeControlPlane, release: DevRelease, overrides: { applyPolicy?: "auto" | "unlock_required"; leaseSeconds?: number } = {}, generation?: number): number {
+export function promoteRelease(plane: FakeControlPlane, release: DevRelease, overrides: DevPromoteOverrides = {}, generation?: number): number {
   const slots: ManifestSlot[] = release.slots.map((spec) => plane.slot({ tag: spec.tag, text: spec.text, model: spec.model, variables: spec.variables, versionId: spec.versionId }));
   plane.requireCountersign = release.requireCountersign;
-  plane.promote(slots, { ...release.options, ...(overrides.applyPolicy ? { applyPolicy: overrides.applyPolicy } : {}), ...(overrides.leaseSeconds ? { leaseSeconds: overrides.leaseSeconds } : {}), ...(generation !== undefined ? { generation } : {}) });
+  plane.promote(slots, { ...release.options, ...(overrides.applyPolicy ? { applyPolicy: overrides.applyPolicy } : {}), ...(overrides.leaseSeconds ? { leaseSeconds: overrides.leaseSeconds } : {}), ...(overrides.protocol ? { protocol: overrides.protocol } : {}), ...(generation !== undefined ? { generation } : {}) });
   return plane.generation;
 }
 

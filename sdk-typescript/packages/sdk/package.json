@@ -111,7 +111,7 @@
       ".": 285000,
       "./core": 315000,
       "./sync": 220000,
-      "./runtime": 260000,
+      "./runtime": 242000,
       "./telemetry": 187000,
       "./testing": 85000,
       "./frameworks/langchain": 30000,

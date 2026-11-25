@@ -292,7 +292,7 @@ def test_the_uploader_honours_manifests(dirs):
         return httpx.Response(204)
 
     uploader = SpoolUploader(directory=directory, instance_id="i-daemonDDDDDDDD", scope={"agentId": SCOPE["agentId"], "target": SCOPE["target"]}, grant_for=grant_for, transport=httpx.MockTransport(bucket), now_ms=clock, rand=lambda: 0)
-    report = {"protocol": "3.0.0", "instanceId": "i-writerAAAAAAAA", "sdk": {"name": "agent-sdk-python", "version": "0.3.0"}, "syncMode": "offline", "generation": {"active": 3}, "applyState": "active", "storageProtection": "file_key", "catalog": {"models": []}, "lease": {"expired": False}}
+    report = {"protocol": "4.0.0", "instanceId": "i-writerAAAAAAAA", "sdk": {"name": "agent-sdk-python", "version": "0.3.0"}, "syncMode": "offline", "generation": {"active": 3}, "applyState": "active", "storageProtection": "file_key", "catalog": {"models": []}, "lease": {"expired": False}}
 
     def write(instance_id: str, scope):
         name = segment_name(instance_id, epoch_minute(clock.ms), 0)
@@ -331,7 +331,7 @@ def test_the_uploader_honours_manifests(dirs):
 
 def test_the_sinks_own_eviction_takes_each_manifest_with_it(dirs):
     directory = dirs("ap-tdaemon-evict-")
-    context = {"organizationId": SCOPE["organizationId"], "agentId": SCOPE["agentId"], "target": SCOPE["target"], "report": {"protocol": "3.0.0"}}
+    context = {"organizationId": SCOPE["organizationId"], "agentId": SCOPE["agentId"], "target": SCOPE["target"], "report": {"protocol": "4.0.0"}}
     sink = DirectorySink(directory, "i-writerAAAAAAAA", 900, manifest=lambda: context, now=lambda: T0)
     writer = SpoolWriter(sink, WriterIdentity("i-writerAAAAAAAA", "resident", "agent-sdk-py/0.3.0"))
     for i in range(4):

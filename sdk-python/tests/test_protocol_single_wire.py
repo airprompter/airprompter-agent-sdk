@@ -1,5 +1,5 @@
-"""One wire: with ``test_protocol_vectors.py`` (every vector passes), this proves the SDK speaks exactly protocol 3.x.
-Parity with ``sdk-typescript/test/protocolSingleWire.test.ts``. Older majors are refused, any 3.x loads, the capability
+"""One wire: with ``test_protocol_vectors.py`` (every vector passes), this proves the SDK speaks exactly protocol 4.x.
+Parity with ``sdk-typescript/test/protocolSingleWire.test.ts``. Older majors are refused, any 4.x loads, the capability
 registry has one source, the older shapes fail the schema, and every refused example is refused for the code it names.
 Older literals are built here, so the repository's search for them stays clean.
 """
@@ -66,20 +66,20 @@ def pointers(error) -> list[str]:
     return [own, *[pointer for child in error.context or [] for pointer in pointers(child)]]
 
 
-def test_protocol_version_is_the_file_and_the_only_major_this_sdk_reads_is_3():
+def test_protocol_version_is_the_file_and_the_only_major_this_sdk_reads_is_4():
     assert PROTOCOL_VERSION == (PROTOCOL / "VERSION").read_text(encoding="utf-8").strip()
-    assert list(SUPPORTED_PROTOCOL_MAJORS) == [3]
+    assert list(SUPPORTED_PROTOCOL_MAJORS) == [4]
 
 
-def test_older_majors_get_the_unsupported_major_refusal():
-    for protocol in (".".join(["0", "3", "5"]), "2.0.0", "4.0.0", "3.0", "03.0.0", "3.0.0-rc.1", "3.0.0\n", "٣.0.0", "1" * 5000 + ".0.0"):
+def test_other_majors_get_the_unsupported_major_refusal():
+    for protocol in (".".join(["0", "3", "5"]), "2.0.0", "3.1.0", "5.0.0", "4.0", "04.0.0", "4.0.0-rc.1", "4.0.0\n", "٤.0.0", "1" * 5000 + ".0.0"):
         result = verdict(promoted(protocol=protocol))
         assert (result.ok, result.reason) == (False, "protocol_unsupported"), protocol
 
 
-def test_any_3x_loads_a_reader_checks_the_major_and_the_capabilities_never_the_minor():
-    assert verdict(promoted(protocol="3.7.0")).ok is True
-    assert verdict(promoted(protocol="3.0.0")).ok is True
+def test_any_4x_loads_a_reader_checks_the_major_and_the_capabilities_never_the_minor():
+    assert verdict(promoted(protocol="4.7.0")).ok is True
+    assert verdict(promoted(protocol="4.0.0")).ok is True
 
 
 def test_a_manifest_naming_a_capability_this_sdk_does_not_implement_is_refused_whole():
@@ -161,7 +161,7 @@ def test_a_ramp_of_null_is_refused_and_an_absent_one_is_not():
 
 def _manifest_payload(**patch):
     slot = {"tag": "a.b"}
-    return {"protocol": "3.0.0", "releaseDigest": "sha256:" + "a" * 64, "slots": [slot, {"tag": "c.d", "requires": ["rubric_slots"]}], **patch}
+    return {"protocol": "4.0.0", "releaseDigest": "sha256:" + "a" * 64, "slots": [slot, {"tag": "c.d", "requires": ["rubric_slots"]}], **patch}
 
 
 OBSERVATION = {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "all"}, "tag": "a.b", "observeFrom": "2026-09-12T14:00:00Z"}
@@ -236,7 +236,7 @@ def test_the_older_shapes_fail_the_manifest_schema_and_a_heartbeat_with_no_capab
     without_audience = {key: value for key, value in good["payload"].items() if key != "observations"}
     without_audience["experiments"] = [{key: value for key, value in experiment.items() if key != "audience"} for experiment in good["payload"]["experiments"]]
     assert manifest.is_valid({**good, "payload": without_audience}), "observations are optional"
-    assert manifest.is_valid({**good, "payload": {**good["payload"], "protocol": "3.7.0"}}), "any 3.x"
+    assert manifest.is_valid({**good, "payload": {**good["payload"], "protocol": "4.7.0"}}), "any 4.x"
     heartbeat = schema("heartbeat#/$defs/request")
     request = example("heartbeat.request.json")
     assert request["capabilities"] == []

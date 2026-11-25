@@ -6,7 +6,7 @@
  * a source stricter than the prompt's declaration fenced and said once, sync `render()` refusing a callable source,
  * a timeout / a throw / an empty required answer as a named failure plus one content-free error row, the slot
  * captured before an await so an activation mid-await cannot mix generations, `needs()` and `status().variables`
- * across arms, a workflow step rendered with its own scan, and the managed client filling before it posts.
+ * across arms, and a workflow step rendered with its own scan.
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -16,9 +16,8 @@ import test from "node:test";
 
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
 import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
-import { ManagedAgent } from "../packages/sdk/src/runtime/managed/client.js";
 import { VariableSourceRegistry, isVariableSourceError, isVariableSourceRequiredError } from "../packages/sdk/src/runtime/variables/sources.js";
-import { fillAsync, fillSync, planFill, stricterSources, unsourced } from "../packages/sdk/src/runtime/variables/fill.js";
+import { fillAsync, fillSync, planFill, unsourced } from "../packages/sdk/src/runtime/variables/fill.js";
 import { renderTemplate } from "../packages/sdk/src/core/render/template.js";
 import { releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
 import type { WindowRow } from "../packages/sdk/src/telemetry/spool/writer.js";
@@ -90,10 +89,6 @@ test("planFill: the call site wins; a source is consulted for a declared variabl
   assert.deepEqual(nobody.missing, ["team", "ticket"]);
   assert.deepEqual(unsourced({ variables, values: { ticket: "x" }, registry: new VariableSourceRegistry() }), ["team"], "declarations only: a required name nobody fills");
   assert.deepEqual(unsourced({ variables, values: { ticket: "x" }, registry }), []);
-  assert.deepEqual(stricterSources(variables, new VariableSourceRegistry({ team: { resolve: async () => "x", trust: "end_user" } })), ["team"], "decidable before any lookup");
-  // Managed mode has no text: the required ones are the whole set, and a required-but-unused one is still filled.
-  const noText = planFill({ tag: "t", variables, text: null, values: { ticket: "hi" }, registry });
-  assert.deepEqual([noText.literal, noText.async], [["team"], []], "optional tier not planned without a text to scan");
 });
 
 test("fillSync refuses a callable source; fillAsync runs sources concurrently under their bounds and tightens trust upward only", async () => {
@@ -302,47 +297,7 @@ test("a workflow step is rendered with its own scan: the source is called for th
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("the managed client fills required declared variables from its sources before it posts, and refuses to send an end_user-sourced value the slot declares operator", async () => {
-  const plane = new FakeControlPlane(scope);
-  plane.promote(slots(plane, { tierInText: true, tierRequired: true }));
-  const posted: Array<Record<string, unknown>> = [];
-  const inner = plane.fetch();
-  const fetchImpl: typeof inner = async (url, init) => {
-    if (url.endsWith("/run")) {
-      posted.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      return { status: 200, headers: { get: (name: string) => (name === "content-type" ? "text/event-stream" : null) }, text: async () => "", body: null } as unknown as Awaited<ReturnType<typeof inner>>;
-    }
-    return inner(url, init);
-  };
-  const agent = await ManagedAgent.start({ agentId: scope.agentId, target: scope.target, apiKey: plane.apiKey, baseUrl: "https://api.test", fetch: fetchImpl as never, variables: { team: "Billing", customer_tier: { resolve: async () => "gold", trust: "operator" } } });
-  assert.deepEqual(agent.needs("support.triage", { ticket: "x" }), []);
-  assert.deepEqual(agent.needs("support.triage"), ["ticket"]);
-  await agent.stream("support.triage", { ticket: "x" }).catch(() => undefined);
-  assert.deepEqual(posted[0]?.variables, { ticket: "x", team: "Billing", customer_tier: "gold" });
-  // A stricter source is refused before any lookup, as a named error.
-  let looked = 0;
-  agent.variables.provide("customer_tier", { resolve: async () => { looked += 1; return "gold"; }, trust: "end_user" });
-  await assert.rejects(agent.stream("support.triage", { ticket: "x" }), (e: unknown) => isVariableSourceError(e) && (e as { reason: string }).reason === "unfenceable");
-  assert.equal(looked, 0, "the customer's system is not called for a value that cannot be sent");
-  // A call-site value for that variable makes the source irrelevant, so the run goes.
-  await agent.stream("support.triage", { ticket: "x", customer_tier: "gold" }).catch(() => undefined);
-  assert.deepEqual(posted.at(-1)?.variables, { ticket: "x", customer_tier: "gold", team: "Billing" });
-  // An optional variable no hosted run posts is never refused, whatever its source's trust.
-  const optionalPlane = new FakeControlPlane(scope);
-  optionalPlane.promote(slots(optionalPlane, { tierInText: true, tierRequired: false }));
-  const optionalFetch: typeof inner = async (url, init) => (url.endsWith("/run") ? fetchImpl(url, init) : optionalPlane.fetch()(url, init));
-  const optionalAgent = await ManagedAgent.start({ agentId: scope.agentId, target: scope.target, apiKey: optionalPlane.apiKey, baseUrl: "https://api.test", fetch: optionalFetch as never, variables: { team: "Billing", customer_tier: { resolve: async () => "gold", trust: "end_user" } } });
-  await optionalAgent.stream("support.triage", { ticket: "x" }).catch((e: unknown) => { if (isVariableSourceError(e)) throw e; });
-  assert.deepEqual(posted.at(-1)?.variables, { ticket: "x", team: "Billing" }, "the optional, unfenceable variable is simply not filled");
-  // An aborted run is not filled.
-  agent.variables.provide("customer_tier", { resolve: async () => { looked += 1; return "gold"; }, trust: "operator" });
-  const controller = new AbortController();
-  controller.abort(new Error("caller gave up"));
-  await assert.rejects(agent.stream("support.triage", { ticket: "x" }, { signal: controller.signal }), /caller gave up/);
-  assert.equal(looked, 0);
-});
-
-test("a source that answers nothing yields to the declared default; managed mode fills a source: runtime variable, required or not", async () => {
+test("a source that answers nothing yields to the declared default", async () => {
   const variables = [
     { name: "ticket", required: true, trust: "end_user" as const },
     { name: "tone", required: false, trust: "operator" as const, default: "warm", source: "runtime" as const },
@@ -353,7 +308,4 @@ test("a source that answers nothing yields to the declared default; managed mode
   const filled = await fillAsync(plan, { tag: "t", subject: undefined, versionId: "v", arm: "none" }, registry);
   assert.equal("tone" in filled.values, false, "nothing from the source");
   assert.equal(renderTemplate({ tag: "t", text: "[{{tone}}]", variables, values: filled.values }), "[warm]", "the default is the last resort");
-  // Managed mode has no text: a `source: runtime` variable is planned as a required one would be; a plain optional one is not.
-  const managed = planFill({ tag: "t", variables: [...variables, { name: "note", required: false, trust: "operator" as const }], text: null, values: { ticket: "x" }, registry });
-  assert.deepEqual([managed.literal, managed.async], [[], ["tone"]]);
 });

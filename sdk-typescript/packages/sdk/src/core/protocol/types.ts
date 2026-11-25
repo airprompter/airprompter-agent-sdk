@@ -1,5 +1,5 @@
 /**
- * Wire types for the protocol (3.x), hand-written to match `protocol/schemas/*`.
+ * Wire types for the protocol (4.x), hand-written to match `protocol/schemas/*`.
  * The conformance vectors, not these types, are what proves agreement; keep
  * them narrow and let the schema tests catch drift.
  *

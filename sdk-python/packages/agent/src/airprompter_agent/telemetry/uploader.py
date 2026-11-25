@@ -2,7 +2,7 @@
 
 Closed segments from ANY writer in ``<store>/spool/telemetry/`` are validated
 line by line against the spool row contract: an unknown field is stripped, a
-row a later 3.x wrote is skipped and counted, and only corruption quarantines
+row a later 4.x wrote is skipped and counted, and only corruption quarantines
 a segment. What is left is POSTed straight to S3 under the heartbeat's presigned grant — one
 in flight per host, oldest first, exponential backoff with full jitter
 (1 s → 5 min), acknowledged segments deleted (S6), ``quarantine/`` and
@@ -75,7 +75,7 @@ _ARM = SLOT_TAG
 _ARTIFACT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _OUTCOME_NAME = re.compile(r"^[a-z][a-zA-Z0-9]{0,31}$")
 _DATE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$", re.ASCII)
-#: A later 3.x may add an error class, a usage source or a refusal reason: a reader takes the shape, not the list.
+#: A later 4.x may add an error class, a usage source or a refusal reason: a reader takes the shape, not the list.
 _SLUG = re.compile(r"[a-z][a-z0-9_]{0,31}")
 _ROW_VERSIONS = {"window": 5, "step": 2, "refusal": 1, "dropped": 1}
 _TOKEN_MOMENTS = ("input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput")
@@ -243,7 +243,7 @@ def _step_reason(value: Mapping[str, Any]) -> Optional[str]:
 @dataclass
 class RowVerdict:
     """``row``: the line as it may leave this host, holding only the fields this reader knows; ``stripped`` names the rest.
-    ``later``: a row this reader cannot read and a later 3.x may have written. It is skipped and counted, and only the
+    ``later``: a row this reader cannot read and a later 4.x may have written. It is skipped and counted, and only the
     line goes. Anything else refused is corruption, and quarantines the segment."""
 
     ok: bool
@@ -302,7 +302,7 @@ class SegmentInspection:
     rows: list[dict[str, Any]] = field(default_factory=list)
     #: Corruption, by line (1-based) and reason; empty means the segment may ship.
     invalid: list[dict[str, Any]] = field(default_factory=list)
-    #: Lines a later 3.x may have written: skipped one by one, counted in the ``dropped`` row.
+    #: Lines a later 4.x may have written: skipped one by one, counted in the ``dropped`` row.
     skipped: list[dict[str, Any]] = field(default_factory=list)
     #: Fields this reader does not know, by line. They never leave the host.
     stripped: list[dict[str, Any]] = field(default_factory=list)

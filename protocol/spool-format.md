@@ -103,7 +103,7 @@ default above (`daemon.md` › What an SDK does).
 
 ## Readers
 
-A reader of 3.x ignores what it does not know. An uploader strips unknown fields, nested ones too, and serialises the line again, so no field it cannot vouch for leaves the host. It skips a row of an unknown `type` or `v`, or a `status` outside its row type's list, line by line, and counts those lines in one `dropped` row: `lines` holds the count and `segments` stays 0, because a line is not a segment. The row schemas are a writer's contract: a reader accepts any slug of 32 characters in `errorClass`, `usageSource` and `reason`. A member of the other row form is a crossed row and corrupt: `step` on a window row, or `tokensSq`, `count`, `outcomes` or `checks` on a step row. Only corruption quarantines a segment: a line that is not JSON, a row from another instance, or a known row whose fields do not fit.
+A reader of 4.x ignores what it does not know. An uploader strips unknown fields, nested ones too, and serialises the line again, so no field it cannot vouch for leaves the host. It skips a row of an unknown `type` or `v`, or a `status` outside its row type's list, line by line, and counts those lines in one `dropped` row: `lines` holds the count and `segments` stays 0, because a line is not a segment. The row schemas are a writer's contract: a reader accepts any slug of 32 characters in `errorClass`, `usageSource` and `reason`. A member of the other row form is a crossed row and corrupt: `step` on a window row, or `tokensSq`, `count`, `outcomes` or `checks` on a step row. Only corruption quarantines a segment: a line that is not JSON, a row from another instance, or a known row whose fields do not fit.
 
 A field that changes a row's identity bumps `v`; a measure keeps it.
 

@@ -51,18 +51,16 @@ export const supplied = (values: RenderValues, name: string): boolean => values[
 
 /**
  * Which declared variables a render must fill from a source: required ones, and any the text uses — never one the
- * current version dropped (a source is not called for a variable no longer in the prompt). `text` is null in
- * managed mode, where only the declarations are known; then the required ones and those the author marked
- * `source: runtime` ("the application fills this") are the set.
+ * current version dropped (a source is not called for a variable no longer in the prompt).
  */
-export function planFill(input: { tag: string; variables: readonly SlotVariable[]; text: string | null; values: RenderValues; registry: VariableSourceRegistry }): FillPlan {
-  const used = input.text === null ? null : placeholdersOf(input.text);
+export function planFill(input: { tag: string; variables: readonly SlotVariable[]; text: string; values: RenderValues; registry: VariableSourceRegistry }): FillPlan {
+  const used = placeholdersOf(input.text);
   const literal: string[] = [];
   const async: string[] = [];
   const missing: string[] = [];
   for (const variable of input.variables) {
     if (supplied(input.values, variable.name)) continue;
-    const needed = variable.required || (used === null ? variable.source === "runtime" : used.has(variable.name));
+    const needed = variable.required || used.has(variable.name);
     if (!needed) continue;
     const entry = input.registry.get(variable.name);
     if (!entry) {
@@ -72,15 +70,6 @@ export function planFill(input: { tag: string; variables: readonly SlotVariable[
     (entry.kind === "literal" ? literal : async).push(variable.name);
   }
   return { tag: input.tag, variables: input.variables, values: input.values, literal, async, missing };
-}
-
-/**
- * The declared variables whose registered source is stricter than the declaration (`end_user` over `operator`).
- * Decidable before any lookup — a hosted run, which cannot fence, refuses these at plan time instead of after
- * calling the customer's system.
- */
-export function stricterSources(variables: readonly SlotVariable[], registry: VariableSourceRegistry): string[] {
-  return variables.filter((variable) => variable.trust !== "end_user" && registry.get(variable.name)?.trust === "end_user").map((variable) => variable.name);
 }
 
 /**

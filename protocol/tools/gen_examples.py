@@ -256,7 +256,7 @@ heartbeat_request = {
     "instanceId": "inst_5f3c9a2b7e1d4c08",
     "instanceClass": "resident",
     "heartbeatIntervalSeconds": 300,
-    "sdk": {"name": "airprompterd", "version": "1.0.0", "protocolRange": ">=3.0.0 <4.0.0"},
+    "sdk": {"name": "airprompterd", "version": "1.0.0", "protocolRange": ">=4.0.0 <5.0.0"},
     "host": {"os": "linux", "arch": "arm64", "runtime": "node/22.11.0"},
     "syncMode": "resident",
     "generation": {"active": 41, "staged": 42},
@@ -317,7 +317,7 @@ refused = {
     "manifest.ramp-step-one-weight.json": {"schema": "manifest", "reason": "a ramp step carries one weight per arm (S9)", "document": {**manifest, "payload": {**manifest_payload, "experiments": [{**manifest_payload["experiments"][0], "ramp": [{"notBefore": "2026-09-13T02:00:00Z", "weightBps": [10000]}]}, manifest_payload["experiments"][1]]}}},
     "manifest.experiments-entry-without-tag.json": {"schema": "manifest", "reason": "every experiments[] entry names the slot it splits (S16)", "document": {**manifest, "payload": {**manifest_payload, "experiments": [{k: v for k, v in manifest_payload["experiments"][0].items() if k != "tag"}, manifest_payload["experiments"][1]]}}},
     # One wire: another major is refused, and the older shapes are unknown members.
-    "manifest.protocol2.json": {"schema": "manifest", "reason": "protocol major 2 is not this wire: only 3.x is", "document": {**manifest, "payload": {**manifest_payload, "protocol": "2.0.0"}}},
+    "manifest.protocol2.json": {"schema": "manifest", "reason": "protocol major 2 is not this wire: only 4.x is", "document": {**manifest, "payload": {**manifest_payload, "protocol": "2.0.0"}}},
     "manifest.audience-empty-conditions.json": {"schema": "manifest", "reason": "an empty condition list cannot mean fleet-wide", "document": {**manifest, "payload": {**manifest_payload, "observations": [{**manifest_payload["observations"][0], "selector": {"mode": "when", "when": {"all": []}}}]}}},
     "manifest.slot-requires-empty.json": {"schema": "manifest", "reason": "a slot of another kind names at least one capability it requires", "document": {**manifest, "payload": {**manifest_payload, "slots": [{"tag": "support.triage", "kind": "rubric", "requires": []}]}}},
     "key-set.wrong-curve.json": {"schema": "key-set", "reason": "only P-256 keys in this protocol major", "document": {**key_set, "signed": {**key_set["signed"], "keys": {key_root: {"keyType": "ecdsa-p256", "scheme": "ES256", "publicKey": {**jwk, "crv": "P-384"}}}}}},
@@ -373,7 +373,7 @@ daemon_discovery = {
     "upload": {"lastUploadAt": "2026-09-12T10:03:30Z", "backoffUntil": None, "sentSegments": 41, "quarantinedSegments": 0, "droppedSegments": 0, "depthSegments": 3, "depthBytes": 41210},
 }
 segment_report = {k: v for k, v in heartbeat_request.items() if k != "spool"}
-segment_report = {**segment_report, "sdk": {"name": "agent-sdk-typescript", "version": "1.0.0", "protocolRange": ">=3.0.0 <4.0.0"}, "syncMode": "offline"}
+segment_report = {**segment_report, "sdk": {"name": "agent-sdk-typescript", "version": "1.0.0", "protocolRange": ">=4.0.0 <5.0.0"}, "syncMode": "offline"}
 spool_manifest = {
     "format": 1,
     "kind": "segment",

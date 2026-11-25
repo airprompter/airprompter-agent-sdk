@@ -6,8 +6,8 @@ service, and by any self-hosted registry that implements it.
 
 | File | Purpose |
 |---|---|
-| `openapi.yaml` | The customer-v1 agent routes: manifest, payloads, heartbeat, countersign, run. Each operation says whether the hosted service serves it yet |
-| `capabilities.md` | The capability registry and the naming rule: how a 3.x minor adds a feature |
+| `openapi.yaml` | The customer-v1 agent routes: manifest, payloads, heartbeat, countersign. Each operation says whether the hosted service serves it yet |
+| `capabilities.md` | The capability registry and the naming rule: how a 4.x minor adds a feature |
 | `schemas/manifest.schema.json` | The signed release manifest: slots, experiment arms, directives, lease, generation; `signatures[]` and `countersignatures[]` |
 | `schemas/key-set.schema.json` | Root metadata (TUF-shaped): offline root keys → online signing keys, threshold, expiry; the same shape for customer countersign keys |
 | `schemas/bundle.schema.json` | The `.apbundle` offline format: manifest + payloads + key-set, encrypted to the target's distribution key (plaintext is a `dev` opt-in) |
@@ -45,16 +45,7 @@ are `trust-chain.md`; `vectors/manifest-verify.json` has a case per refusal.
 ## Scopes named here
 
 `agent.bundle.read` (manifest, payloads), `agent.telemetry.write`
-(heartbeat), `agent.countersign.write` (countersign), `agent.run`
-(managed execution — a separate key kind, never co-granted by default).
-
-## Retired routes
-
-Agents run only on the customer's systems. `openapi.yaml` still lists the
-`managed` routes and the `agent.run` scope, `compatible-endpoints.md` still maps
-them, and `assignment-hash.md` still names `subjectHash`, because removing a route
-is a protocol change. They leave in a later protocol version. Do not implement
-them.
+(heartbeat), `agent.countersign.write` (countersign).
 
 ## Versioning
 
@@ -66,11 +57,11 @@ protocol range they speak. Consumers pin a tag and vendor `schemas/`,
 (`packages/contracts/protocol/` in prompt-haven, refreshed by
 `protocol-sync.mjs`, drift-checked in CI).
 
-Breaking changes are a major. A 3.x minor adds a feature behind a named
+Breaking changes are a major. A 4.x minor adds a feature behind a named
 capability (`capabilities.md`), so a reader never compares minors.
 
 Schemas are a writer's contract for its minor. A reader is not a schema
-validator. A 3.x reader ignores a member it does not know. In a report, it takes
+validator. A 4.x reader ignores a member it does not know. In a report, it takes
 an unknown enum value as unknown, never as a refusal. In a manifest, what it must
 act on and cannot read never widens what runs. Only `requiredCapabilities`
 refuses a manifest for being newer than the reader, and M13's directive kinds are

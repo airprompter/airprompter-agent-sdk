@@ -228,22 +228,6 @@ class FakeControlPlane:
                 return httpx.Response(200, json=self.root)
             if auth != f"Bearer {self.api_key}":
                 return httpx.Response(401, json={"error": "Unauthorized"})
-            slots_match = re.match(r"^/v1/agents/([^/]+)/targets/([^/]+)/slots$", path)
-            if slots_match:
-                if slots_match.group(1) != self.scope["agentId"] or slots_match.group(2) != self.scope["target"]:
-                    return httpx.Response(403, json={"error": "Forbidden", "code": "forbidden", "detail": "agent_mismatch" if slots_match.group(1) != self.scope["agentId"] else "target_mismatch"})
-                if not self._current:
-                    return httpx.Response(404, json={"error": "nothing is promoted to this environment", "code": "nothing_promoted"})
-                payload = self._current["manifest"]["payload"]
-                catalogue = {
-                    "agentId": payload["agentId"],
-                    "target": payload["target"],
-                    "generation": payload["generation"],
-                    "releaseDigest": payload["releaseDigest"],
-                    "slots": [{"tag": p["tag"], "kind": p["kind"], "model": p["model"], "variables": p["variables"], "steps": [{"stepId": s["stepId"]} for s in p["steps"]] if p.get("steps") else None} for p in payload["slots"]],
-                    "experiments": [{"experimentId": e["experimentId"], "tag": e["tag"], "salt": e["salt"], "subjectKey": e["subjectKey"], "arms": [a["arm"] for a in e["arms"]]} for e in payload.get("experiments") or []],
-                }
-                return httpx.Response(200, json=catalogue, headers={"x-agent-generation": str(payload["generation"])})
             heartbeat_match = re.match(r"^/v1/agents/([^/]+)/targets/([^/]+)/heartbeat$", path)
             if heartbeat_match:
                 if heartbeat_match.group(1) != self.scope["agentId"] or heartbeat_match.group(2) != self.scope["target"]:

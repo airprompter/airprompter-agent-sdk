@@ -19,7 +19,7 @@ import { capabilitiesImplemented, isAssignmentError, servableExperiments, servab
 import { canonicalBytes, canonicalJson, sha256Prefixed } from "./canonicalJson.js";
 import { DIRECTIVE_KINDS, experimentConflict, type HostedEnvironment, type Manifest, type ManifestPayload, type ManifestSlot, type P256PrivateJwk, type P256PublicJwk, type RefusalCode, type RootMetadata, type RootMetadataSigned, type Signature, type SlotInference, type Target } from "./types.js";
 
-export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([3]);
+export const SUPPORTED_PROTOCOL_MAJORS: ReadonlySet<number> = new Set([4]);
 const PROTOCOL_SHAPE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
 /** RFC 7638: sha256 over canonical {crv, kty, x, y}, lowercase hex. */

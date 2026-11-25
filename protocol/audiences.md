@@ -1,4 +1,4 @@
-# Audience targeting · protocol 3.x
+# Audience targeting · protocol 4.x
 
 An audience is either **All devices** (`{ "mode": "all" }`) or a condition tree (`{ "mode": "when", "when": … }`). Every SDK evaluates it locally against tags the application set. `matchesAudience` is the one predicate, and `validAudienceManifest` is where a manifest's selectors are checked.
 

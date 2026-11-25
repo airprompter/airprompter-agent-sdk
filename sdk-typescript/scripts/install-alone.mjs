@@ -30,7 +30,7 @@ const SDK_SUBPATHS = {
   "@airprompter/agent-sdk": ["AirPrompterAgent", "isAgentStartError"],
   "@airprompter/agent-sdk/core": ["verifyManifest", "BundleRelease", "assignArm"],
   "@airprompter/agent-sdk/sync": ["SlotStore", "syncOnce", "fileKey"],
-  "@airprompter/agent-sdk/runtime": ["ReleaseResolver", "wrapClient", "ManagedAgent"],
+  "@airprompter/agent-sdk/runtime": ["ReleaseResolver", "wrapClient"],
   "@airprompter/agent-sdk/telemetry": ["SpoolWriter", "DirectorySink", "SpoolUploader"],
   "@airprompter/agent-sdk/testing": ["FakeControlPlane", "MemoryFs"],
   // No peers: the Steps core uses Node built-ins only, so it imports with the SDK alone.

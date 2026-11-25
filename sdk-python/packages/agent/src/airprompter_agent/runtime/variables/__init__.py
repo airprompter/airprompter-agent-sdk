@@ -13,7 +13,7 @@ Example::
     filled = fill_sync(plan, VariableSourceContext("support.triage", "", "cust-1", "rev-6", "none"), registry)
 """
 
-from .fill import Filled, FilledRender, FillPlan, RenderValues, fill_async, fill_sync, plan_fill, stricter_sources, supplied, unsourced
+from .fill import Filled, FilledRender, FillPlan, RenderValues, fill_async, fill_sync, plan_fill, supplied, unsourced
 from .sources import (
     DEFAULT_SOURCE_MAX_BYTES,
     DEFAULT_SOURCE_TIMEOUT_SECONDS,
@@ -47,7 +47,6 @@ __all__ = [
     "is_variable_source_error",
     "is_variable_source_required_error",
     "plan_fill",
-    "stricter_sources",
     "supplied",
     "unsourced",
 ]

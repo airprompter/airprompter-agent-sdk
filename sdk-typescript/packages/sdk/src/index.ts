@@ -1,6 +1,6 @@
 /**
  * `@airprompter/agent-sdk`: one install. The root is `AirPrompterAgent`, its
- * option and result types, and the hosted client. Everything else is reached
+ * option and result types. Everything else is reached
  * through a subpath, so each name has one home and a customer who wants less
  * imports less: `/core` is the protocol with no I/O, `/sync` pulls and holds
  * releases, `/runtime` renders and assigns over a release you hold, `/telemetry`
@@ -27,7 +27,3 @@ export type { AgentRampStatus, AgentStatus, Healthz, Rendered, RunReport, StartO
 // The run: what an adapter and `ap.run` see.
 export type { AgentRuntime, ModelCallRecord, ModelResolver, Placement, RunInput, RunSession, TokenUsage, ToolCallRecord, UnavailableReason } from "./runtime/index.js";
 export type { RunRefEntry } from "./core/index.js";
-
-// The hosted client: the README's quick start for running with no release on the host.
-export { ManagedAgent, ManagedRunError, isManagedRunError } from "./runtime/index.js";
-export type { ManagedStartOptions, ManagedRunOptions, ManagedRunResult, ManagedRunStream } from "./runtime/index.js";

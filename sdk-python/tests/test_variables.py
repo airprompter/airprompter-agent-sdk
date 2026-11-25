@@ -3,8 +3,7 @@
 The registry's rules; the plan (a source is consulted only for a declared variable the render needs, never one the
 version dropped); the fills (call site wins, literals sync, plain callables on worker threads, coroutine functions
 awaited, every failure named and bounded); the agent path (fenced by the stricter trust, said once, one error row
-under the slot's tag, status across arm overrides, a release activating mid-lookup); workflow steps; the managed
-client (filled before the POST, an unfenceable source refused before any lookup).
+under the slot's tag, status across arm overrides, a release activating mid-lookup); workflow steps.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ import tempfile
 import threading
 import time
 
-import httpx
 import pytest
 
 from airprompter_agent import AirPrompterAgent
@@ -24,7 +22,6 @@ from airprompter_agent.agent import SyncOptions
 from airprompter_agent.core._util import instant
 from airprompter_agent.core.protocol.trust import public_jwk_of, release_digest
 from airprompter_agent.core.render.template import MissingVariableError, UnknownVariableError, placeholders_of, render_template
-from airprompter_agent.runtime.managed import ManagedAgent
 from airprompter_agent.runtime.variables import (
     VariableSource,
     VariableSourceContext,
@@ -36,7 +33,6 @@ from airprompter_agent.runtime.variables import (
     is_variable_source_error,
     is_variable_source_required_error,
     plan_fill,
-    stricter_sources,
     unsourced,
 )
 
@@ -129,12 +125,9 @@ def test_plan_unsourced_and_stricter():
     assert (supplied.literal, supplied.async_) == ([], []), "the call site wins: nothing to fill"
     required_absent = plan_fill(tag="t", variables=VARIABLES, text="{{ticket}}", values={"ticket": "hi"}, registry=VariableSourceRegistry())
     assert required_absent.missing == ["team"], "required, unsupplied, unsourced: the render will refuse"
-    managed = plan_fill(tag="t", variables=VARIABLES, text=None, values={"ticket": "hi"}, registry=registry)
-    assert (managed.literal, managed.async_) == (["team"], []), "without the text only the required ones count"
 
     assert unsourced(variables=VARIABLES, values={"ticket": "x"}, registry=VariableSourceRegistry()) == ["team"], "declarations only: a required name nobody fills"
     assert unsourced(variables=VARIABLES, values={"ticket": "x"}, registry=registry) == []
-    assert stricter_sources(VARIABLES, registry) == ["last_ticket"], "decidable before any lookup"
 
 
 # ----------------------------------------------------------------------------- the fills
@@ -497,7 +490,7 @@ def test_workflow_steps_fill_per_step_and_the_row_names_the_slot(state_dir):
         ap.stop()
 
 
-def test_a_source_answering_nothing_yields_to_the_default_and_managed_plans_source_runtime():
+def test_a_source_answering_nothing_yields_to_the_default():
     variables = [{"name": "ticket", "required": True, "trust": "end_user"}, {"name": "tone", "required": False, "trust": "operator", "default": "warm", "source": "runtime"}]
     registry = VariableSourceRegistry({"tone": {"resolve": lambda ctx: None, "trust": "operator"}})
     plan = plan_fill(tag="t", variables=variables, text="{{ticket}} {{tone}}", values={"ticket": "x"}, registry=registry)
@@ -505,72 +498,3 @@ def test_a_source_answering_nothing_yields_to_the_default_and_managed_plans_sour
     filled = fill_sync(plan, CTX, registry)
     assert "tone" not in filled.values
     assert render_template(tag="t", text="[{{tone}}]", variables=variables, values=filled.values) == "[warm]", "the default is the last resort"
-    managed = plan_fill(tag="t", variables=[*variables, {"name": "note", "required": False, "trust": "operator"}], text=None, values={"ticket": "x"}, registry=registry)
-    assert (managed.literal, managed.async_) == ([], ["tone"]), "no text: a source: runtime variable is planned as a required one would be"
-
-
-# ----------------------------------------------------------------------------- managed mode
-
-CATALOGUE = {
-    "agentId": "agent-1",
-    "target": "prod",
-    "generation": 3,
-    "releaseDigest": "sha256:" + "a" * 64,
-    "slots": [{"tag": "support.triage", "kind": "prompt", "model": "gpt-5", "variables": VARIABLES, "steps": None}],
-}
-DONE = {"runId": "run_1", "runRef": "x", "output": "ok", "model": "gpt-5", "versionId": "rev-5", "arm": "none", "generation": 3, "usage": {"inputTokens": 1, "cachedInputTokens": 0, "outputTokens": 1}, "latencyMs": 1, "priceMicros": 1, "priceBookRevision": "apb", "stopReason": "end_turn", "source": "executed"}
-RUN_SSE = f"event: delta\ndata: {json.dumps({'delta': 'ok'})}\n\nevent: done\ndata: {json.dumps(DONE)}\n\n"
-
-
-def managed(variables):
-    posted: list[dict] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/slots"):
-            return httpx.Response(200, headers={"x-agent-generation": "3"}, content=json.dumps(CATALOGUE).encode("utf-8"))
-        posted.append(json.loads(request.content))
-        return httpx.Response(200, stream=httpx.ByteStream(RUN_SSE.encode("utf-8")))
-
-    agent = ManagedAgent.start(agent_id="agent-1", target="prod", api_key="apr_run_key", base_url="https://run.example/", transport=httpx.MockTransport(handler), sleep=lambda _s: None, variables=variables)
-    return agent, posted
-
-
-def test_managed_fills_before_the_post_and_refuses_an_unfenceable_source_before_any_lookup():
-    looked: list[str] = []
-    agent, posted = managed({"team": "Billing", "customer_tier": {"resolve": lambda ctx: looked.append(ctx.tag) or "gold", "trust": "operator"}})
-    assert agent.needs("support.triage") == ["ticket"] and agent.needs("support.triage", {"ticket": "x"}) == []
-    with pytest.raises(KeyError):
-        agent.needs("nope")
-    agent.run("support.triage", {"ticket": "x"})
-    assert posted[-1]["variables"] == {"ticket": "x", "team": "Billing"}, "required and unfilled: the literal; optional customer_tier is not posted"
-    assert looked == [], "an optional variable no run posts is never looked up"
-    # A stricter source for a planned variable is refused before any lookup, as a named error.
-    agent.variables.provide("team", {"resolve": lambda ctx: looked.append("team") or "Sales", "trust": "end_user"})
-    with pytest.raises(VariableSourceError) as refused:
-        agent.run("support.triage", {"ticket": "x"})
-    assert (refused.value.variable, refused.value.reason) == ("team", "unfenceable") and looked == [], "the customer's system is not called for a value that cannot be sent"
-    # An optional variable's stricter source is not refused: no run posts it.
-    agent.variables.provide("team", "Billing")
-    agent.variables.provide("customer_tier", {"resolve": lambda ctx: "gold", "trust": "end_user"})
-    agent.run("support.triage", {"ticket": "x"})
-    assert posted[-1]["variables"] == {"ticket": "x", "team": "Billing"}
-    # A call-site value for that variable makes the source irrelevant, so the run goes with it.
-    agent.run("support.triage", {"ticket": "x", "team": "Sales"})
-    assert posted[-1]["variables"] == {"ticket": "x", "team": "Sales"}
-    # A source that runs: filled before the POST, subject passed, version and arm unknown in managed mode.
-    seen: list[VariableSourceContext] = []
-    agent.variables.provide("team", {"resolve": lambda ctx: seen.append(ctx) or "Ops", "trust": "operator"})
-    agent.run("support.triage", {"ticket": "x"}, subject="cust-9")
-    assert posted[-1]["variables"] == {"ticket": "x", "team": "Ops"}
-    assert (seen[0].tag, seen[0].subject, seen[0].version_id, seen[0].arm) == ("support.triage", "cust-9", None, None)
-    # The managed client is synchronous throughout: a coroutine-function source is refused, and the message says why.
-    async def team_async(ctx):
-        return "Ops"
-
-    agent.variables.provide("team", {"resolve": team_async, "trust": "operator"})
-    with pytest.raises(VariableSourceRequiredError, match="managed runs are synchronous"):
-        agent.run("support.triage", {"ticket": "x"})
-    agent.variables.provide("team", {"resolve": lambda ctx: team_async(ctx), "trust": "operator"})
-    with pytest.raises(VariableSourceRequiredError, match="managed runs are synchronous"):
-        agent.run("support.triage", {"ticket": "x"})
-    agent.close()

@@ -48,9 +48,9 @@ class VariableSourceContext:
     name: str
     #: The subject the caller rendered for (sticky A/B assignment), when it gave one.
     subject: Optional[str]
-    #: The prompt version and the experiment arm the render resolved to; None in managed mode, where the run route resolves them.
-    version_id: Optional[str]
-    arm: Optional[str]
+    #: The prompt version and the experiment arm the render resolved to.
+    version_id: str
+    arm: str
 
 
 @dataclass(frozen=True)
@@ -107,15 +107,14 @@ _REASON_TEXT = {
     "empty": "returned nothing for a required variable",
     "too_large": "returned more than its byte bound",
     "not_text": "returned something other than text",
-    "unfenceable": "is end_user trust but the slot declares operator, and a hosted run cannot fence it — declare the variable end_user in AirPrompter",
 }
 
-Reason = Literal["threw", "timeout", "empty", "too_large", "not_text", "unfenceable"]
+Reason = Literal["threw", "timeout", "empty", "too_large", "not_text"]
 
 
 class VariableSourceError(Exception):
     """A source threw, timed out, answered nothing for a required variable, answered more than its byte bound or not
-    text — or cannot be fenced where it is going. ``code`` is ``variable_source``; ``reason`` says which."""
+    text. ``code`` is ``variable_source``; ``reason`` says which."""
 
     code = "variable_source"
 

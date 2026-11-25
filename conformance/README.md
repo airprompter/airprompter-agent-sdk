@@ -37,7 +37,7 @@ the pipe transport, `npm pack` self-containment).
 the same trust chain: the root, the edge pointer, the manifest (401 without
 a key, 403/404 for another agent, 304 on its ETag, verified against the
 root the caller pins), every referenced payload fetched and hashed, the
-catalogue, the heartbeat (a schema-valid answer, a lease in the future, a
+heartbeat (a schema-valid answer, a lease in the future, a
 400 for a field the schema does not name). `airprompter dev` is the target
 CI runs it against; Hangar and the hosted service are the same target with
 their own URL, root and key.

@@ -1,6 +1,6 @@
 {
   "schema": "manifest",
-  "reason": "protocol major 2 is not this wire: only 3.x is",
+  "reason": "protocol major 2 is not this wire: only 4.x is",
   "document": {
     "payload": {
       "protocol": "2.0.0",

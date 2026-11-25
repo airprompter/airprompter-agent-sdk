@@ -187,7 +187,7 @@ def test_manifest_verify_vectors_a_slot_with_an_unmet_requires_is_absent_and_eve
 def test_heartbeat_reader_vectors_each_document_gets_the_writer_schema_verdict_the_vector_names():
     documents = [json.loads(path.read_text(encoding="utf-8")) for path in (Path(VECTORS).parent / "schemas").glob("*.schema.json")]
     registry = Registry().with_resources((document["$id"], Resource.from_contents(document, default_specification=DRAFT202012)) for document in documents)
-    writer = Draft202012Validator({"$ref": "https://airprompter.com/protocol/3/heartbeat.schema.json#/$defs/request"}, registry=registry, format_checker=Draft202012Validator.FORMAT_CHECKER)
+    writer = Draft202012Validator({"$ref": "https://airprompter.com/protocol/4/heartbeat.schema.json#/$defs/request"}, registry=registry, format_checker=Draft202012Validator.FORMAT_CHECKER)
     cases = vector("heartbeat-readers.json")["cases"]
     assert len(cases) >= 3, "the vector carries the cases"
     assert {c["writerSchema"] for c in cases} == {True, False}, "a verdict each way"

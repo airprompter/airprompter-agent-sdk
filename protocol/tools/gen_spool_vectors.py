@@ -638,7 +638,7 @@ def spool_vectors():
     }
 
 def tolerance_cases():
-    """What a reader does with rows a later 3.x wrote. Expected answers are written here by hand."""
+    """What a reader does with rows a later 4.x wrote. Expected answers are written here by hand."""
     aggregator = Aggregator(INSTANCE, "resident", SDK)
     aggregator.observe(T0, {"tag": "support.triage", "artifactId": "prm_support_triage", "versionId": "ver_1", "arm": "none", "model": "gpt-5", "status": "ok", "latencyMs": 10})
     aggregator.close(T0)

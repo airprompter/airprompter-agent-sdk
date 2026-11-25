@@ -100,7 +100,7 @@ export function verifyRootMetadata({ candidate, trusted, now }) {
   return { ok: true };
 }
 
-const SUPPORTED_PROTOCOL_MAJORS = new Set([3]);
+const SUPPORTED_PROTOCOL_MAJORS = new Set([4]);
 /** capabilities.md: 3.0.0 registers none. */
 const SUPPORTED_CAPABILITIES = new Set();
 /** M13 (S4): the directive kinds a runtime honours. */

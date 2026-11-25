@@ -187,7 +187,7 @@ distribution key, so the column is as sensitive as the key.
 A team whose prompts live in git wants the runtime to follow the working
 tree, not a release. `airprompter dev ./prompts` serves the directory as a
 registry over the protocol's own routes — the manifest, the payloads, the
-heartbeat, the catalogue, the edge pointer and the root — signed with a
+heartbeat, the edge pointer and the root — signed with a
 dev key under a dev root it makes once and keeps beside the prompts
 (`.airprompter-dev/keys.json`, mode 0600; `root.pub.json` is what a client
 pins). Every save that changes the release is a new generation; an

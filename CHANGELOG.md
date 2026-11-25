@@ -10,6 +10,17 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### Hosted execution is removed (AIR-2317 slice 4)
+- **Breaking for the rc line.** Every agent runs on your own systems, so the managed client goes from both SDKs and the CLI.
+- **Protocol 4.0.0.** Both SDKs, the CLI and the conformance harness speak protocol 4.0.0 (`PROTOCOL_VERSION`), read only major 4 (`SUPPORTED_PROTOCOL_MAJORS`), and refuse a 3.x manifest with `protocol_unsupported`. Heartbeats, bundles and spool reports carry `4.0.0`. A service must emit `protocol: "4.x.y"` in the manifest payload for this SDK to load it; see `protocol/CHANGELOG.md` › 4.0.0.
+- **TypeScript, `@airprompter/agent-sdk` root:** `ManagedAgent`, `ManagedRunError`, `isManagedRunError`, and the types `ManagedStartOptions`, `ManagedRunOptions`, `ManagedRunResult`, `ManagedRunStream`.
+- **TypeScript, `@airprompter/agent-sdk/runtime`:** the same, plus `parseSse`, `MANAGED_SDK_USER_AGENT`, and the types `ManagedCatalogue`, `ManagedSlot`, `ManagedRefusalCode`, `ManagedFetchLike`, `ManagedTarget`. The `runtime/managed/` module is gone.
+- **Python, `airprompter_agent` and `airprompter_agent.runtime`:** `ManagedAgent`, `ManagedRunError`, `ManagedRunResult`, `ManagedRunStream`, `ManagedWorkflow`, `MANAGED_REFUSAL_CODES`, `MANAGED_SDK_USER_AGENT`, `parse_sse`. The `airprompter_agent.runtime.managed` module is gone.
+- **Variables, managed-only parts (both SDKs):** `stricterSources` (TypeScript `/runtime`) and `stricter_sources` (Python `airprompter_agent`, `.runtime`, `.runtime.variables`) are gone. `VariableSourceError` loses the `"unfenceable"` reason. `planFill` / `plan_fill` take `text` as a string, never null, so a `source: runtime` hint no longer plans a variable the text does not use. `VariableSourceContext.versionId` / `version_id` and `arm` are always set (`string` / `str`, no longer nullable).
+- **CLI:** `airprompter pull --tags-only` (the hosted catalogue) is gone.
+- **Testing kit:** `FakeControlPlane` in both languages no longer serves `GET …/slots`.
+- **Conformance:** the OpenAPI hosted-compatibility section of `run.mjs` and the catalogue section of `live.mjs` are gone with the routes they checked.
+
 ### Zapier and n8n on 1.0.0-rc.3
 - **`integrations/zapier` and `integrations/n8n` depend on `@airprompter/agent-sdk` `1.0.0-rc.3`** (exact pin, registry lockfiles). They get the pinned hosted dev root, and a new connection's first Report run no longer fails.
 

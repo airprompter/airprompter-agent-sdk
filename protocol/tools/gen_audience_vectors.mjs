@@ -159,8 +159,8 @@ const accepted = { ok: true };
 const withSelector = (audienceSelector) => ({ experiments: [experiment({ audienceId: AUDIENCE, selector: audienceSelector })], observations: [observation(audienceSelector)] });
 
 const manifests = [
-  manifestCase("signed protocol 3 audience accepted", payload(), accepted, true),
-  manifestCase("a later minor is accepted", payload({ protocol: "3.7.0" }), accepted, true),
+  manifestCase("signed protocol 4 audience accepted", payload(), accepted, true),
+  manifestCase("a later minor is accepted", payload({ protocol: "4.7.0" }), accepted, true),
   manifestCase("a manifest with no observations accepted", payload({ experiments: undefined, observations: undefined }), accepted, true),
   manifestCase("an experiment with no audience accepted", payload({ experiments: [defined({ ...experiment(), audience: undefined })], observations: undefined }), accepted, true),
   manifestCase("unknown capability refused", payload({ requiredCapabilities: ["future_feature"] }), refused, true),
@@ -174,8 +174,8 @@ const manifests = [
     entry.manifest.payload = { ...entry.manifest.payload, ...withSelector(tampered) };
     return entry;
   })(),
-  ...["0x3.0.0", "+3.0.0", ".0.0", "03.0.0"].map((protocol) => manifestCase(`malformed protocol ${protocol} refused`, payload({ protocol }), refused, false)),
-  ...["0.9.0", "1.0.0", "2.0.0", "4.0.0"].map((protocol) => manifestCase(`protocol major ${protocol[0]} refused`, payload({ protocol }), refused, false)),
+  ...["0x4.0.0", "+4.0.0", ".0.0", "04.0.0"].map((protocol) => manifestCase(`malformed protocol ${protocol} refused`, payload({ protocol }), refused, false)),
+  ...["0.9.0", "1.0.0", "2.0.0", "3.1.0", "5.0.0"].map((protocol) => manifestCase(`protocol major ${protocol[0]} refused`, payload({ protocol }), refused, false)),
   manifestCase("an unknown selector mode loads and matches nothing", payload(withSelector({ mode: "tags", conditions: [{ key: "region", operator: "is", value: "west" }] })), accepted, false),
   manifestCase("a non-object condition loads and matches nothing", payload(withSelector({ mode: "when", when: "region" })), accepted, false),
   manifestCase("an unknown selector member loads and matches nothing", payload(withSelector({ ...selector, match: "any" })), accepted, false),

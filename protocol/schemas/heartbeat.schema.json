@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://airprompter.com/protocol/3/heartbeat.schema.json",
+  "$id": "https://airprompter.com/protocol/4/heartbeat.schema.json",
   "title": "AirPrompter heartbeat",
   "description": "One route, one Lambda (D41): an instance reports its state and receives the presigned S3 upload grant for its spool (§9.1). Telemetry bytes never pass through this route. Everything here is content-free by schema: no prompt text, no outputs, no end-user identifiers.",
   "$defs": {

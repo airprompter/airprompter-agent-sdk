@@ -11,7 +11,7 @@
   "target": "prod",
   "closedAt": "2026-09-12T10:04:10Z",
   "report": {
-    "protocol": "3.1.0",
+    "protocol": "4.0.0",
     "capabilities": [],
     "registration": {
       "tagKeys": [
@@ -34,7 +34,7 @@
     "sdk": {
       "name": "agent-sdk-typescript",
       "version": "1.0.0",
-      "protocolRange": ">=3.0.0 <4.0.0"
+      "protocolRange": ">=4.0.0 <5.0.0"
     },
     "host": {
       "os": "linux",

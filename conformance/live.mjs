@@ -67,7 +67,7 @@ addFormats(ajv);
 const schemaDir = join(protocolDir, "schemas");
 for (const file of readdirSync(schemaDir).filter((f) => f.endsWith(".schema.json")).sort()) ajv.addSchema(readJson(join(schemaDir, file)));
 const validate = (name, value) => {
-  const fn = ajv.getSchema(`https://airprompter.com/protocol/3/${name}`);
+  const fn = ajv.getSchema(`https://airprompter.com/protocol/4/${name}`);
   if (!fn) throw new Error(`no schema ${name}`);
   return fn(value) ? null : ajv.errorsText(fn.errors, { separator: "; " });
 };
@@ -206,25 +206,6 @@ if (manifest) {
     if (full.ok) ok("GET manifest + payloads", "every payload's bytes and length match the manifest (M9–M10)");
     else fail("GET manifest + payloads", "every payload's bytes and length match the manifest (M9–M10)", full.reason);
   }
-}
-
-// ---------------------------------------------------------------------------
-section("the catalogue");
-try {
-  const response = await get(`${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/targets/${target}/slots`, authed);
-  if (response.status !== 200) fail("GET slots", "answers 200 under the key", `HTTP ${response.status}`);
-  else {
-    const catalogue = await response.json();
-    const tags = (catalogue.slots ?? []).map((s) => s.tag).sort();
-    const expected = (manifest?.payload.slots ?? []).map((s) => s.tag).sort();
-    if (JSON.stringify(tags) === JSON.stringify(expected)) ok("GET slots", "names exactly the manifest's tags");
-    else fail("GET slots", "names exactly the manifest's tags", `${tags.join(",")} vs ${expected.join(",")}`);
-    const leaked = JSON.stringify(catalogue).includes("contentHash") || (catalogue.slots ?? []).some((s) => "text" in s || "content" in s);
-    if (!leaked) ok("GET slots", "carries no payload bytes or hashes");
-    else fail("GET slots", "carries no payload bytes or hashes");
-  }
-} catch (error) {
-  fail("GET slots", "reachable", error.message);
 }
 
 // ---------------------------------------------------------------------------

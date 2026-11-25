@@ -3,7 +3,7 @@
  * subject gets under which arm (the ramp walked on this host's clock, a
  * retreat honoured), the rendered text with its run reference, the
  * provider wrappers that attribute a model call to a render and classify
- * what came back, and the hosted-execution client. Consumes a
+ * what came back. Consumes a
  * `LoadedRelease` from `@airprompter/agent-sdk/core` — the slot store or a
  * bundle the customer loaded — and never imports the sync or the
  * telemetry layer. `variables/` is how the application fills a
@@ -28,7 +28,7 @@ export { MAX_OPEN_RUNS, pinVerdict, type PinVerdict } from "./run/index.js";
 export type { AgentRuntime, ModelCallRecord, ModelResolver, Placement, RunHost, RunInput, RunRecorder, RunSession, TokenUsage, ToolCallRecord, UnavailableReason } from "./run/index.js";
 export { VariableSourceRegistry, VariableSourceError, VariableSourceRequiredError, isVariableSourceError, isVariableSourceRequiredError, DEFAULT_SOURCE_TIMEOUT_MS, DEFAULT_SOURCE_MAX_BYTES } from "./variables/sources.js";
 export type { VariableSource, VariableSourceInput, VariableSourceContext, RegisteredSource } from "./variables/sources.js";
-export { planFill, fillSync, fillAsync, unsourced, stricterSources, supplied } from "./variables/fill.js";
+export { planFill, fillSync, fillAsync, unsourced, supplied } from "./variables/fill.js";
 export type { FillPlan, FilledRender, RenderValues } from "./variables/fill.js";
 export type { Rendered, Disabled, ResolverInput, ResolveOutcome } from "./release/resolver.js";
 export { applyInference, temperatureOf, topPOf, INFERENCE_KEYS } from "./wrap/inference.js";
@@ -41,6 +41,3 @@ export { RenderRegistry, requestTexts, hashText, withAttribution, currentAttribu
 export type { Attribution } from "./wrap/attribution.js";
 export { aiSdkMiddleware, generateResultShape } from "./wrap/aiSdk.js";
 export type { AiSdkMiddleware, AiSdkMiddlewareOptions, AiSdkMiddlewareHooks } from "./wrap/aiSdk.js";
-
-export { ManagedAgent, ManagedRunError, isManagedRunError, parseSse, MANAGED_SDK_USER_AGENT } from "./managed/client.js";
-export type { ManagedStartOptions, ManagedRunOptions, ManagedRunResult, ManagedRunStream, ManagedCatalogue, ManagedSlot, ManagedRefusalCode, ManagedFetchLike, ManagedTarget } from "./managed/client.js";

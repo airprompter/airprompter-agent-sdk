@@ -271,14 +271,6 @@ export class FakeControlPlane {
         return respond(reply.status, reply.body, { "content-type": "application/xml" });
       }
       if (auth !== `Bearer ${this.apiKey}`) return respond(401, JSON.stringify({ error: "Unauthorized" }));
-      // T23: the hosted catalogue — the manifest's tags, variables, step ids and experiment, no payloads.
-      const slotsMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/slots$/.exec(parsed.pathname);
-      if (slotsMatch) {
-        if (slotsMatch[1] !== this.scope.agentId || slotsMatch[2] !== this.scope.target) return respond(403, JSON.stringify({ error: "Forbidden", code: "forbidden", detail: slotsMatch[1] !== this.scope.agentId ? "agent_mismatch" : "target_mismatch" }));
-        if (!this.current) return respond(404, JSON.stringify({ error: "nothing is promoted to this environment", code: "nothing_promoted" }));
-        const payload = this.current.manifest.payload;
-        return respond(200, JSON.stringify({ agentId: payload.agentId, target: payload.target, generation: payload.generation, releaseDigest: payload.releaseDigest, slots: payload.slots.map((pin) => ({ tag: pin.tag, kind: pin.kind, model: pin.model, variables: pin.variables, ...(pin.inference ? { inference: pin.inference } : {}), steps: pin.steps ? pin.steps.map((s) => ({ stepId: s.stepId, ...(s.inference ? { inference: s.inference } : {}) })) : null })), experiments: (payload.experiments ?? []).map((e) => ({ experimentId: e.experimentId, tag: e.tag, salt: e.salt, subjectKey: e.subjectKey, arms: e.arms.map((a) => a.arm) })) }), { "x-agent-generation": String(payload.generation) });
-      }
       // T9: the heartbeat — the protocol schema's required keys, content-free; answers the cadence and the expiry.
       const heartbeatMatch = /^\/v1\/agents\/([^/]+)\/targets\/([^/]+)\/heartbeat$/.exec(parsed.pathname);
       if (heartbeatMatch) {

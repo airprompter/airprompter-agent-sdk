@@ -1,6 +1,6 @@
-# Capabilities · protocol 3.x
+# Capabilities · protocol 4.x
 
-A capability names a feature a reader must understand. Protocol 3.x adds features in minors without a new major: a reader checks the major and the capabilities it is asked for, and never compares minors.
+A capability names a feature a reader must understand. Protocol 4.x adds features in minors without a new major: a reader checks the major and the capabilities it is asked for, and never compares minors.
 
 A manifest asks for a capability in one of two places:
 
@@ -26,4 +26,4 @@ This table, `SUPPORTED_CAPABILITIES` in the TypeScript SDK (`core/protocol/capab
 | Name | Added in | What a reader must do |
 | -- | -- | -- |
 
-3.0.0 ships the registry empty: every 3.0.0 SDK speaks everything 3.0.0 defines, so nothing needs asking for.
+4.0.0 ships the registry empty, as 3.0.0 did: every 4.0.0 SDK speaks everything 4.0.0 defines, so nothing needs asking for.

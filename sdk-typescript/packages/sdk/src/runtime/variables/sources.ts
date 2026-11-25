@@ -35,9 +35,9 @@ export interface VariableSourceContext {
   name: string;
   /** The subject the caller rendered for (sticky A/B assignment), when it gave one. */
   subject: string | undefined;
-  /** The prompt version and the experiment arm the render resolved to; null in managed mode, where the run route resolves them. */
-  versionId: string | null;
-  arm: string | null;
+  /** The prompt version and the experiment arm the render resolved to. */
+  versionId: string;
+  arm: string;
 }
 
 /** A callable source: how the application fills one variable from its own system. */
@@ -85,16 +85,15 @@ const REASON_TEXT = {
   empty: "returned nothing for a required variable",
   too_large: "returned more than its byte bound",
   not_text: "returned something other than text",
-  unfenceable: "is end_user trust but the slot declares operator, and a hosted run cannot fence it — declare the variable end_user in AirPrompter",
 } as const;
 
-/** A source threw, timed out, answered nothing for a required variable, answered more than its byte bound or not text — or cannot be fenced where it is going. */
+/** A source threw, timed out, answered nothing for a required variable, answered more than its byte bound or not text. */
 export class VariableSourceError extends Error {
   readonly code = "variable_source";
   constructor(
     readonly tag: string,
     readonly variable: string,
-    readonly reason: "threw" | "timeout" | "empty" | "too_large" | "not_text" | "unfenceable",
+    readonly reason: "threw" | "timeout" | "empty" | "too_large" | "not_text",
     cause?: unknown,
   ) {
     super(`render ${tag}: source for ${variable} ${REASON_TEXT[reason]}`, cause === undefined ? undefined : { cause });

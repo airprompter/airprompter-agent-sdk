@@ -17,7 +17,7 @@ import test from "node:test";
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
 import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
 import { VariableSourceRegistry, isVariableSourceError, isVariableSourceRequiredError } from "../packages/sdk/src/runtime/variables/sources.js";
-import { fillAsync, fillSync, planFill, stricterSources, unsourced } from "../packages/sdk/src/runtime/variables/fill.js";
+import { fillAsync, fillSync, planFill, unsourced } from "../packages/sdk/src/runtime/variables/fill.js";
 import { renderTemplate } from "../packages/sdk/src/core/render/template.js";
 import { releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
 import type { WindowRow } from "../packages/sdk/src/telemetry/spool/writer.js";
@@ -89,10 +89,6 @@ test("planFill: the call site wins; a source is consulted for a declared variabl
   assert.deepEqual(nobody.missing, ["team", "ticket"]);
   assert.deepEqual(unsourced({ variables, values: { ticket: "x" }, registry: new VariableSourceRegistry() }), ["team"], "declarations only: a required name nobody fills");
   assert.deepEqual(unsourced({ variables, values: { ticket: "x" }, registry }), []);
-  assert.deepEqual(stricterSources(variables, new VariableSourceRegistry({ team: { resolve: async () => "x", trust: "end_user" } })), ["team"], "decidable before any lookup");
-  // Managed mode has no text: the required ones are the whole set, and a required-but-unused one is still filled.
-  const noText = planFill({ tag: "t", variables, text: null, values: { ticket: "hi" }, registry });
-  assert.deepEqual([noText.literal, noText.async], [["team"], []], "optional tier not planned without a text to scan");
 });
 
 test("fillSync refuses a callable source; fillAsync runs sources concurrently under their bounds and tightens trust upward only", async () => {
@@ -301,7 +297,7 @@ test("a workflow step is rendered with its own scan: the source is called for th
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("a source that answers nothing yields to the declared default; managed mode fills a source: runtime variable, required or not", async () => {
+test("a source that answers nothing yields to the declared default", async () => {
   const variables = [
     { name: "ticket", required: true, trust: "end_user" as const },
     { name: "tone", required: false, trust: "operator" as const, default: "warm", source: "runtime" as const },
@@ -312,7 +308,4 @@ test("a source that answers nothing yields to the declared default; managed mode
   const filled = await fillAsync(plan, { tag: "t", subject: undefined, versionId: "v", arm: "none" }, registry);
   assert.equal("tone" in filled.values, false, "nothing from the source");
   assert.equal(renderTemplate({ tag: "t", text: "[{{tone}}]", variables, values: filled.values }), "[warm]", "the default is the last resort");
-  // Managed mode has no text: a `source: runtime` variable is planned as a required one would be; a plain optional one is not.
-  const managed = planFill({ tag: "t", variables: [...variables, { name: "note", required: false, trust: "operator" as const }], text: null, values: { ticket: "x" }, registry });
-  assert.deepEqual([managed.literal, managed.async], [[], ["tone"]]);
 });

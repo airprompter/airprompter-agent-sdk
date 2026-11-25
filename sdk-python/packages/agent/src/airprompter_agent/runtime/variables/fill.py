@@ -81,12 +81,10 @@ def supplied(values: RenderValues, name: str) -> bool:
     return values.get(name) is not None
 
 
-def plan_fill(*, tag: str, variables: Sequence[Mapping[str, Any]], text: Optional[str], values: RenderValues, registry: VariableSourceRegistry) -> FillPlan:
+def plan_fill(*, tag: str, variables: Sequence[Mapping[str, Any]], text: str, values: RenderValues, registry: VariableSourceRegistry) -> FillPlan:
     """Which declared variables a render must fill from a source: required ones, and any the text uses — never one
-    the current version dropped (a source is not called for a variable no longer in the prompt). ``text`` is None in
-    managed mode, where only the declarations are known; then the required ones and those the author marked
-    ``source: runtime`` ("the application fills this") are the set."""
-    used = None if text is None else placeholders_of(text)
+    the current version dropped (a source is not called for a variable no longer in the prompt)."""
+    used = placeholders_of(text)
     literal: list[str] = []
     async_: list[str] = []
     missing: list[str] = []
@@ -94,7 +92,7 @@ def plan_fill(*, tag: str, variables: Sequence[Mapping[str, Any]], text: Optiona
         name = str(variable["name"])
         if supplied(values, name):
             continue
-        needed = bool(variable.get("required")) or (variable.get("source") == "runtime" if used is None else name in used)
+        needed = bool(variable.get("required")) or name in used
         if not needed:
             continue
         entry = registry.get(name)
@@ -104,18 +102,6 @@ def plan_fill(*, tag: str, variables: Sequence[Mapping[str, Any]], text: Optiona
             continue
         (literal if entry.kind == "literal" else async_).append(name)
     return FillPlan(tag=tag, variables=list(variables), values=dict(values), literal=literal, async_=async_, missing=missing)
-
-
-def stricter_sources(variables: Sequence[Mapping[str, Any]], registry: VariableSourceRegistry) -> list[str]:
-    """The declared variables whose registered source is stricter than the declaration (``end_user`` over
-    ``operator``). Decidable before any lookup — a hosted run, which cannot fence, refuses these at plan time
-    instead of after calling the customer's system."""
-    names: list[str] = []
-    for variable in variables:
-        entry = registry.get(str(variable["name"]))
-        if variable.get("trust") != "end_user" and entry is not None and entry.trust == "end_user":
-            names.append(str(variable["name"]))
-    return names
 
 
 def unsourced(*, variables: Sequence[Mapping[str, Any]], values: RenderValues, registry: VariableSourceRegistry) -> list[str]:

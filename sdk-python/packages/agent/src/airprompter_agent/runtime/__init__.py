@@ -36,7 +36,6 @@ from .variables import (
     is_variable_source_error,
     is_variable_source_required_error,
     plan_fill,
-    stricter_sources,
     supplied,
     unsourced,
 )
@@ -62,7 +61,6 @@ __all__ = [
     "is_variable_source_error",
     "is_variable_source_required_error",
     "plan_fill",
-    "stricter_sources",
     "supplied",
     "unsourced",
     "AppliedInference",

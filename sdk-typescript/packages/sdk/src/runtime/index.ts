@@ -28,7 +28,7 @@ export { MAX_OPEN_RUNS, pinVerdict, type PinVerdict } from "./run/index.js";
 export type { AgentRuntime, ModelCallRecord, ModelResolver, Placement, RunHost, RunInput, RunRecorder, RunSession, TokenUsage, ToolCallRecord, UnavailableReason } from "./run/index.js";
 export { VariableSourceRegistry, VariableSourceError, VariableSourceRequiredError, isVariableSourceError, isVariableSourceRequiredError, DEFAULT_SOURCE_TIMEOUT_MS, DEFAULT_SOURCE_MAX_BYTES } from "./variables/sources.js";
 export type { VariableSource, VariableSourceInput, VariableSourceContext, RegisteredSource } from "./variables/sources.js";
-export { planFill, fillSync, fillAsync, unsourced, stricterSources, supplied } from "./variables/fill.js";
+export { planFill, fillSync, fillAsync, unsourced, supplied } from "./variables/fill.js";
 export type { FillPlan, FilledRender, RenderValues } from "./variables/fill.js";
 export type { Rendered, Disabled, ResolverInput, ResolveOutcome } from "./release/resolver.js";
 export { applyInference, temperatureOf, topPOf, INFERENCE_KEYS } from "./wrap/inference.js";

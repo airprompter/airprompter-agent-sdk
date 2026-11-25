@@ -1,7 +1,7 @@
 /**
  * `airprompter dev ./dir` (S12): a directory of prompts served as a registry
  * over the protocol's own routes — the manifest, the payloads, the heartbeat,
- * the catalogue, the edge pointer and the root — signed with a dev key under
+ * the edge pointer and the root — signed with a dev key under
  * a dev root, so an SDK or the CLI syncs from it exactly as from
  * the hosted service. Git customers get live sync while they edit; Hangar (a
  * self-hosted registry) gets a runnable conformance target; the conformance

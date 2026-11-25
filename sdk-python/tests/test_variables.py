@@ -33,7 +33,6 @@ from airprompter_agent.runtime.variables import (
     is_variable_source_error,
     is_variable_source_required_error,
     plan_fill,
-    stricter_sources,
     unsourced,
 )
 
@@ -126,12 +125,9 @@ def test_plan_unsourced_and_stricter():
     assert (supplied.literal, supplied.async_) == ([], []), "the call site wins: nothing to fill"
     required_absent = plan_fill(tag="t", variables=VARIABLES, text="{{ticket}}", values={"ticket": "hi"}, registry=VariableSourceRegistry())
     assert required_absent.missing == ["team"], "required, unsupplied, unsourced: the render will refuse"
-    managed = plan_fill(tag="t", variables=VARIABLES, text=None, values={"ticket": "hi"}, registry=registry)
-    assert (managed.literal, managed.async_) == (["team"], []), "without the text only the required ones count"
 
     assert unsourced(variables=VARIABLES, values={"ticket": "x"}, registry=VariableSourceRegistry()) == ["team"], "declarations only: a required name nobody fills"
     assert unsourced(variables=VARIABLES, values={"ticket": "x"}, registry=registry) == []
-    assert stricter_sources(VARIABLES, registry) == ["last_ticket"], "decidable before any lookup"
 
 
 # ----------------------------------------------------------------------------- the fills
@@ -494,7 +490,7 @@ def test_workflow_steps_fill_per_step_and_the_row_names_the_slot(state_dir):
         ap.stop()
 
 
-def test_a_source_answering_nothing_yields_to_the_default_and_managed_plans_source_runtime():
+def test_a_source_answering_nothing_yields_to_the_default():
     variables = [{"name": "ticket", "required": True, "trust": "end_user"}, {"name": "tone", "required": False, "trust": "operator", "default": "warm", "source": "runtime"}]
     registry = VariableSourceRegistry({"tone": {"resolve": lambda ctx: None, "trust": "operator"}})
     plan = plan_fill(tag="t", variables=variables, text="{{ticket}} {{tone}}", values={"ticket": "x"}, registry=registry)
@@ -502,5 +498,3 @@ def test_a_source_answering_nothing_yields_to_the_default_and_managed_plans_sour
     filled = fill_sync(plan, CTX, registry)
     assert "tone" not in filled.values
     assert render_template(tag="t", text="[{{tone}}]", variables=variables, values=filled.values) == "[warm]", "the default is the last resort"
-    managed = plan_fill(tag="t", variables=[*variables, {"name": "note", "required": False, "trust": "operator"}], text=None, values={"ticket": "x"}, registry=registry)
-    assert (managed.literal, managed.async_) == ([], ["tone"]), "no text: a source: runtime variable is planned as a required one would be"

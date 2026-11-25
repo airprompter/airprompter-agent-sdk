@@ -8,7 +8,11 @@ entry names the protocol it speaks. Format: [Keep a Changelog](https://keepachan
 versions follow [SemVer](https://semver.org/) — before 1.0, a minor bump
 may change a public shape and says so here.
 
-## Unreleased
+## 1.0.0-rc.4 — 2026-11-25 (protocol 4.0.0)
+
+The fourth release candidate, on protocol 4.0.0 (`protocol/v4.0.0`, #105): hosted (managed) execution is removed from both SDKs, the CLI and the testing kit, and both SDKs read only protocol major 4. The CLI moves with it (`cli/v1.0.0-rc.4`). `1.0.0-rc.1` stays reserved for AIR-2231.
+
+**Upgrade with your server.** rc.4 refuses a 3.x manifest (`protocol_unsupported`), and rc.3 does not read 4.x. Move from rc.3 to rc.4 at the same time as your AirPrompter server starts emitting `4.0.0` manifests. AirPrompter's dev server switches with this release; prod switches with its next release.
 
 ### Hosted execution is removed (AIR-2317 slice 4)
 - **Breaking for the rc line.** Every agent runs on your own systems, so the managed client goes from both SDKs and the CLI.

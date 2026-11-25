@@ -25,7 +25,6 @@ from airprompter_agent.core.protocol.canonical_json import canonical_bytes, sha2
 from airprompter_agent.core.protocol.trust import carried_payloads, experiment_conflict, optional_payloads, public_jwk_of, referenced_payloads, release_digest, slot_hashes, trusted_root_from_pinned_key, verify_manifest
 from airprompter_agent.core.release.bundle_release import BundleRelease, BundleReleaseRefused
 from airprompter_agent.core.render.run_ref import parse_run_ref, run_ref_key_from
-from airprompter_agent.runtime.managed import ManagedAgent, ManagedRunError
 from airprompter_agent.runtime.observe import ObserveTarget, observe_call, observe_call_async
 from airprompter_agent.sync import pull_bundle
 from airprompter_agent.sync.store.key_provider import file_key
@@ -777,26 +776,20 @@ def test_arms_of_a_shape_this_reader_cannot_read_do_not_raise_in_the_conflict_ch
 
 
 @pytest.mark.parametrize("agent_id", ["../../escape", "a/b", "", ".hidden", "a" * 129, "agent\n", None])
-def test_an_agent_id_outside_the_grammar_never_reaches_the_filesystem_in_either_start(state_dir, agent_id):
+def test_an_agent_id_outside_the_grammar_never_reaches_the_filesystem(state_dir, agent_id):
     plane = FakeControlPlane(SCOPE)
     with pytest.raises(AgentStartError) as refused:
         AirPrompterAgent.start(organization_id="org_1", agent_id=agent_id, target="prod", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network))
     assert refused.value.code == "invalid_options"
-    with pytest.raises(ManagedRunError) as managed:
-        ManagedAgent.start(agent_id=agent_id, target="prod", api_key="apr_run_key", base_url="https://run.example", transport=httpx.MockTransport(no_network))
-    assert managed.value.code == "invalid_options"
     assert os.listdir(state_dir) == [], "nothing was written"
 
 
 @pytest.mark.parametrize("target", ["../../escape", "Prod", "", "a" * 33, "with/slash", "prod\n", "ｑａ", None])
-def test_a_target_that_is_not_a_slug_never_reaches_the_filesystem_in_either_start(state_dir, target):
+def test_a_target_that_is_not_a_slug_never_reaches_the_filesystem(state_dir, target):
     plane = FakeControlPlane(SCOPE)
     with pytest.raises(AgentStartError) as refused:
         AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target=target, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network))
     assert refused.value.code == "invalid_options"
-    with pytest.raises(ManagedRunError) as managed:
-        ManagedAgent.start(agent_id="agent-1", target=target, api_key="apr_run_key", base_url="https://run.example", transport=httpx.MockTransport(no_network))
-    assert managed.value.code == "invalid_options"
     assert os.listdir(state_dir) == [], "nothing was written"
 
 

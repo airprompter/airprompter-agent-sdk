@@ -3,7 +3,7 @@
  * subject gets under which arm (the ramp walked on this host's clock, a
  * retreat honoured), the rendered text with its run reference, the
  * provider wrappers that attribute a model call to a render and classify
- * what came back, and the hosted-execution client. Consumes a
+ * what came back. Consumes a
  * `LoadedRelease` from `@airprompter/agent-sdk/core` — the slot store or a
  * bundle the customer loaded — and never imports the sync or the
  * telemetry layer. `variables/` is how the application fills a
@@ -41,6 +41,3 @@ export { RenderRegistry, requestTexts, hashText, withAttribution, currentAttribu
 export type { Attribution } from "./wrap/attribution.js";
 export { aiSdkMiddleware, generateResultShape } from "./wrap/aiSdk.js";
 export type { AiSdkMiddleware, AiSdkMiddlewareOptions, AiSdkMiddlewareHooks } from "./wrap/aiSdk.js";
-
-export { ManagedAgent, ManagedRunError, isManagedRunError, parseSse, MANAGED_SDK_USER_AGENT } from "./managed/client.js";
-export type { ManagedStartOptions, ManagedRunOptions, ManagedRunResult, ManagedRunStream, ManagedCatalogue, ManagedSlot, ManagedRefusalCode, ManagedFetchLike, ManagedTarget } from "./managed/client.js";

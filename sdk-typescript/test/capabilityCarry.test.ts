@@ -17,7 +17,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AirPrompterAgent, AgentStartError, RenderRefusedError } from "../packages/sdk/src/agent.js";
-import { ManagedAgent, ManagedRunError } from "../packages/sdk/src/index.js";
 import { createEncryptedBundle, createPlaintextBundle, openBundle } from "../packages/sdk/src/core/bundle/apbundle.js";
 import { generateX25519KeyPair } from "../packages/sdk/src/core/bundle/hpke.js";
 import { SUPPORTED_CAPABILITIES } from "../packages/sdk/src/core/protocol/capabilities.js";
@@ -711,15 +710,13 @@ test("arms of a shape this reader cannot read do not throw in the conflict check
   assert.equal(experimentConflict(payload as never), null);
 });
 
-test("a target that is not a slug never reaches the filesystem, in either start", async () => {
+test("a target that is not a slug never reaches the filesystem", async () => {
   const dir = tempDir();
   for (const agentId of ["../../escape", "a/b", "", ".hidden", "a".repeat(129), undefined]) {
     await assert.rejects(AirPrompterAgent.start({ ...scope, agentId: agentId as string, stateDir: dir, root: { pinned: publicJwkOf(new FakeControlPlane(scope).rootKey) }, fetch: noNetwork }), (error: unknown) => error instanceof AgentStartError && error.code === "invalid_options", String(agentId));
-    await assert.rejects(ManagedAgent.start({ agentId: agentId as string, target: "prod", apiKey: "apr_run_key", baseUrl: "https://run.example", fetch: noNetwork as never }), (error: unknown) => error instanceof ManagedRunError && error.code === "invalid_options", String(agentId));
   }
   for (const target of ["../../escape", "Prod", "", "a".repeat(33), "with/slash"]) {
     await assert.rejects(AirPrompterAgent.start({ ...scope, target: target as "prod", stateDir: dir, root: { pinned: publicJwkOf(new FakeControlPlane(scope).rootKey) }, fetch: noNetwork }), (error: unknown) => error instanceof AgentStartError && error.code === "invalid_options", target);
-    await assert.rejects(ManagedAgent.start({ agentId: "agent-1", target: target as "prod", apiKey: "apr_run_key", baseUrl: "https://run.example", fetch: noNetwork as never }), (error: unknown) => error instanceof ManagedRunError && error.code === "invalid_options", target);
   }
   assert.deepEqual(readdirSync(dir), [], "nothing was written");
   rmSync(dir, { recursive: true, force: true });

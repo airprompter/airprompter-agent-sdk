@@ -15,7 +15,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AgentStartError, isAgentStartError } from "../packages/sdk/src/agent.js";
-import { ManagedRunError, isManagedRunError } from "../packages/sdk/src/runtime/managed/client.js";
 import { errorNamed } from "../packages/sdk/src/core/protocol/errors.js";
 import { DirectorySink, MemorySink, SpoolWriter, type SpoolRow, type SpoolSink } from "../packages/sdk/src/telemetry/spool/writer.js";
 import { PayloadDecryptError, isPayloadDecryptError } from "../packages/sdk/src/sync/store/payloadCrypto.js";
@@ -30,7 +29,6 @@ test("every SDK error is recognised by name and code, including one thrown by an
   const cases: Array<[string, (e: unknown) => boolean, Error, Error, Error]> = [
     ["StoreError", isStoreError, new StoreError("store_corrupt", "x"), foreign("StoreError", { code: "store_corrupt" }), foreign("StoreError", {})],
     ["AgentStartError", isAgentStartError, new AgentStartError("no_verified_release", "x"), foreign("AgentStartError", { code: "no_verified_release" }), foreign("AgentStartError", { code: 7 })],
-    ["ManagedRunError", isManagedRunError, new ManagedRunError("forbidden", 403, "x", "d"), foreign("ManagedRunError", { code: "forbidden" }), foreign("StoreError", { code: "forbidden" })],
     ["PayloadDecryptError", isPayloadDecryptError, new PayloadDecryptError(), foreign("PayloadDecryptError", { code: "payload_decrypt_failed" }), foreign("PayloadDecryptError", {})],
   ];
   for (const [name, guard, own, copy, nearMiss] of cases) {

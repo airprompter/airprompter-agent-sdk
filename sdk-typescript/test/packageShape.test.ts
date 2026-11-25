@@ -63,7 +63,7 @@ test("the direction is core → sync, runtime, telemetry → agent, frameworks �
   const clean = lint(["--json"]);
   assert.equal(clean.status, 0, clean.stderr);
   const { edges } = JSON.parse(clean.stdout.slice(0, clean.stdout.lastIndexOf("}") + 1)) as { edges: string[] };
-  assert.deepEqual(edges, ["agent-otel→core", "agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "cli→agent", "cli→agent-otel", "cli→core", "cli→runtime", "cli→sync", "cli→telemetry", "datastore-postgres→sync", "datastore-redis→sync", "datastore-s3→sync", "frameworks→core", "frameworks→runtime", "n8n→steps", "runtime→core", "steps→agent", "steps→core", "steps→sync", "sync→core", "telemetry→core", "zapier→steps"], "the middle layers never import each other; core imports nothing of ours; the exporter uses core alone and the datastores sync alone; Steps drives the agent and the integrations reach the SDK only through Steps");
+  assert.deepEqual(edges, ["agent-otel→core", "agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "cli→agent", "cli→agent-otel", "cli→core", "cli→sync", "cli→telemetry", "datastore-postgres→sync", "datastore-redis→sync", "datastore-s3→sync", "frameworks→core", "frameworks→runtime", "n8n→steps", "runtime→core", "steps→agent", "steps→core", "steps→sync", "sync→core", "telemetry→core", "zapier→steps"], "the middle layers never import each other; core imports nothing of ours; the exporter uses core alone and the datastores sync alone; Steps drives the agent and the integrations reach the SDK only through Steps");
   const src = join(root, "packages", "sdk", "src");
   const upward = planted(join(src, "telemetry", "_lintProbe.ts"), 'import { SlotStore } from "../sync/index.js";\nexport const probe = typeof SlotStore;\n');
   assert.equal(upward.status, 1, "a sideways import is refused");
@@ -211,13 +211,13 @@ test("the exports map, the type map and the root's names are exactly these; noth
   assert.deepEqual(Object.keys(sdk.typesVersions["*"]!).sort(), SUBPATHS.slice(1).map((subpath) => subpath.slice(2)).sort());
   assert.deepEqual(Object.keys(manifestOf("agent-otel").exports), ["./exporter"], "the exporter is the first subpath; a processor or baggage subpath adds to it");
   const surface = (await import("../packages/sdk/src/index.js")) as Record<string, unknown>;
-  assert.deepEqual(Object.keys(surface).sort(), ["AgentStartError", "AirPrompterAgent", "ManagedAgent", "ManagedRunError", "PROTOCOL_VERSION", "RenderRefusedError", "SDK_NAME", "SDK_VERSION", "VENDORED_BUNDLE_EXPIRY_WARNING_DAYS", "healthzOf", "healthzResponse", "isAgentStartError", "isManagedRunError"], "the root is the agent, its results and the hosted client; everything else is a subpath");
+  assert.deepEqual(Object.keys(surface).sort(), ["AgentStartError", "AirPrompterAgent", "PROTOCOL_VERSION", "RenderRefusedError", "SDK_NAME", "SDK_VERSION", "VENDORED_BUNDLE_EXPIRY_WARNING_DAYS", "healthzOf", "healthzResponse", "isAgentStartError"], "the root is the agent and its results; everything else is a subpath");
   const index = readFileSync(join(root, "packages", "sdk", "src", "index.ts"), "utf8");
   assert.doesNotMatch(index, /^export \*/m, "no star export: a layer's new name is not public by accident");
   assert.doesNotMatch(index, /^export \{[^}]*\btype\s/m, "no inline `export { type X }`: the type pin below reads `export type { … }` only");
   const typeNames = [...index.matchAll(/^export type \{([^}]*)\}/gm)].flatMap((match) => match[1]!.split(",").map((name) => name.trim())).filter(Boolean).sort();
   // The run types are on the root too (AIR-2242): an adapter and `ap.run` need them beside the agent.
-  assert.deepEqual(typeNames, ["AgentRampStatus", "AgentRuntime", "AgentStatus", "BundleOutcome", "DatastoreStatus", "Healthz", "HeartbeatSdkName", "HydrateOutcome", "ManagedRunOptions", "ManagedRunResult", "ManagedRunStream", "ManagedStartOptions", "ModelCallRecord", "ModelResolver", "Placement", "ReleaseChange", "ReleaseSource", "Rendered", "RunInput", "RunRefEntry", "RunReport", "RunSession", "SpoolReport", "StartOptions", "SyncMode", "TelemetryPlacement", "TokenUsage", "ToolCallRecord", "UnavailableReason"], "the root's type names are a promise too");
+  assert.deepEqual(typeNames, ["AgentRampStatus", "AgentRuntime", "AgentStatus", "BundleOutcome", "DatastoreStatus", "Healthz", "HeartbeatSdkName", "HydrateOutcome", "ModelCallRecord", "ModelResolver", "Placement", "ReleaseChange", "ReleaseSource", "Rendered", "RunInput", "RunRefEntry", "RunReport", "RunSession", "SpoolReport", "StartOptions", "SyncMode", "TelemetryPlacement", "TokenUsage", "ToolCallRecord", "UnavailableReason"], "the root's type names are a promise too");
   ensureBuilt();
   const resolve = (spec: string) => spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(spec)});`], { cwd: root, encoding: "utf8" });
   assert.equal(resolve("@airprompter/agent-sdk/core").status, 0, "a declared subpath resolves");

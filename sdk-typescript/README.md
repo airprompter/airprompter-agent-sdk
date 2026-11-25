@@ -36,9 +36,7 @@ the old split packages in beside this one. npm's default range,
 | `@airprompter/agent-sdk/frameworks/langchain` | Middleware for LangChain's `createAgent`. `langchain`, `@langchain/core` and `zod` are optional peers: install them to use this subpath, and no other subpath loads them. |
 | `@airprompter/agent-sdk/frameworks/steps` | A no-code automation step (one invocation per step, nothing kept warm): `createAutomationClient` — Get prompt, Report run (through `ap.reportRun`, the run's one count), slots and variables for field schemas, rollout events for a polling trigger — over a signed copy kept in the platform's own storage. The core of the [Zapier app](../integrations/zapier/) and the [n8n nodes](../integrations/n8n/), which import the SDK only through it. Outside the 1.0 promise for now; TypeScript only. |
 
-Everything runs on your systems: there is no hosted mode. `ManagedAgent` and
-its `runtime/managed/` module are retired. They stay in the source only until a
-later release removes them, so do not build on them.
+Everything runs on your systems.
 
 Beside it, separate packages only where a dependency footprint earns one. Each
 takes `@airprompter/agent-sdk` as a peer at the same version, so an application

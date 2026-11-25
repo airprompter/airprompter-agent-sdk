@@ -39,9 +39,7 @@ and `uv pip install` resolves the same pins with no flag.
 | `airprompter_agent.runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `.core` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`). |
 | `airprompter_agent.telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
 
-Everything runs on your systems: there is no hosted mode. `ManagedAgent` is
-retired. It stays in the source only until a later release removes it, so do not
-build on it.
+Everything runs on your systems.
 
 Beside it, separate distributions only where a dependency footprint earns one.
 Each pins `airprompter-agent` to the same version, so an environment holds one

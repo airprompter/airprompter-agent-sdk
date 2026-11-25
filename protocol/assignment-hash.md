@@ -2,8 +2,8 @@
 
 An experiment (or a staged rollout, which is the same machinery — D19)
 splits traffic between arms without any coordination between instances and
-without the subject ever leaving the customer's process. Every SDK, the CLI
-and the hosted run route must split identically, so the function is pinned
+without the subject ever leaving the customer's process. Every SDK and the CLI
+must split identically, so the function is pinned
 here and `vectors/assignment.json` is the test.
 
 ## Inputs
@@ -34,11 +34,8 @@ arm    = first arm i such that bucket < weightBps[0] + … + weightBps[i]
 
 ## What travels
 
-* **Client mode:** nothing. The hash is computed locally and only the arm
-  name appears on evidence and in telemetry.
-* **Managed mode (§18):** the SDK sends `subjectHash = hex(h)` (lowercase,
-  64 characters) to the run route, which reduces it to the bucket exactly
-  as above. The raw subject is never sent.
+Nothing. The hash is computed locally and only the arm name appears on
+evidence and in telemetry.
 
 Each experiment carries its own random salt, so an assignment never carries
 over between experiments on the same tag, and a subject's bucket in one

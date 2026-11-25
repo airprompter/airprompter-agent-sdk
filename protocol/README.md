@@ -6,7 +6,7 @@ service, and by any self-hosted registry that implements it.
 
 | File | Purpose |
 |---|---|
-| `openapi.yaml` | The customer-v1 agent routes: manifest, payloads, heartbeat, countersign, run. Each operation says whether the hosted service serves it yet |
+| `openapi.yaml` | The customer-v1 agent routes: manifest, payloads, heartbeat, countersign. Each operation says whether the hosted service serves it yet |
 | `capabilities.md` | The capability registry and the naming rule: how a 3.x minor adds a feature |
 | `schemas/manifest.schema.json` | The signed release manifest: slots, experiment arms, directives, lease, generation; `signatures[]` and `countersignatures[]` |
 | `schemas/key-set.schema.json` | Root metadata (TUF-shaped): offline root keys → online signing keys, threshold, expiry; the same shape for customer countersign keys |
@@ -45,16 +45,7 @@ are `trust-chain.md`; `vectors/manifest-verify.json` has a case per refusal.
 ## Scopes named here
 
 `agent.bundle.read` (manifest, payloads), `agent.telemetry.write`
-(heartbeat), `agent.countersign.write` (countersign), `agent.run`
-(managed execution — a separate key kind, never co-granted by default).
-
-## Retired routes
-
-Agents run only on the customer's systems. `openapi.yaml` still lists the
-`managed` routes and the `agent.run` scope, `compatible-endpoints.md` still maps
-them, and `assignment-hash.md` still names `subjectHash`, because removing a route
-is a protocol change. They leave in a later protocol version. Do not implement
-them.
+(heartbeat), `agent.countersign.write` (countersign).
 
 ## Versioning
 

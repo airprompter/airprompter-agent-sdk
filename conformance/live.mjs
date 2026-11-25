@@ -209,25 +209,6 @@ if (manifest) {
 }
 
 // ---------------------------------------------------------------------------
-section("the catalogue");
-try {
-  const response = await get(`${baseUrl}/v1/agents/${encodeURIComponent(agentId)}/targets/${target}/slots`, authed);
-  if (response.status !== 200) fail("GET slots", "answers 200 under the key", `HTTP ${response.status}`);
-  else {
-    const catalogue = await response.json();
-    const tags = (catalogue.slots ?? []).map((s) => s.tag).sort();
-    const expected = (manifest?.payload.slots ?? []).map((s) => s.tag).sort();
-    if (JSON.stringify(tags) === JSON.stringify(expected)) ok("GET slots", "names exactly the manifest's tags");
-    else fail("GET slots", "names exactly the manifest's tags", `${tags.join(",")} vs ${expected.join(",")}`);
-    const leaked = JSON.stringify(catalogue).includes("contentHash") || (catalogue.slots ?? []).some((s) => "text" in s || "content" in s);
-    if (!leaked) ok("GET slots", "carries no payload bytes or hashes");
-    else fail("GET slots", "carries no payload bytes or hashes");
-  }
-} catch (error) {
-  fail("GET slots", "reachable", error.message);
-}
-
-// ---------------------------------------------------------------------------
 section("the heartbeat");
 try {
   const example = readJson(join(protocolDir, "examples", "heartbeat.request.json"));

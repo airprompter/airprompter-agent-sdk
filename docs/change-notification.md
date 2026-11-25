@@ -70,7 +70,7 @@ against API Gateway + Lambda. The API sees one request per puller per
 *promotion*, which is the only number that grows with real activity.
 
 A CloudFront 304 also carries no per-organization Lambda concurrency, so a
-fleet of pullers cannot starve the long-poll gate or the run route.
+fleet of pullers cannot starve the long-poll gate.
 
 ## 3. Proposed: an optional nudge on a channel the customer owns
 

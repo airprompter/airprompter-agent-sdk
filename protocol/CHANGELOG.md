@@ -1,5 +1,20 @@
 # Protocol changelog
 
+## Unreleased · Hosted execution leaves the wire (AIR-2317)
+
+Agents run only on the customer's systems (owner ruling of 2026-11-06), so the managed routes leave the protocol. Version number pending the owner's decision: `VERSION` stays `3.1.0` and no tag is cut.
+
+Removed:
+
+- The six function-URL routes from `openapi.yaml`: `POST …/targets/{target}/run`, `GET …/targets/{target}/slots`, `POST …/targets/{target}/feedback`, `POST /v1/agents/{agentId}/openai/chat/completions`, `POST /v1/agents/{agentId}/openai/responses` and `POST /v1/agents/{agentId}/anthropic/v1/messages`. With them go the `managed` tag and the schemas only they used: `RunRequest`, `RunResponse`, `RunSlots`, `CatalogueStaleError`, `AlreadyExecutedError` and the seven `Compat*` schemas.
+- `compatible-endpoints.md`.
+- The `agent.run` scope from `README.md` and `openapi.yaml`, and the "Retired routes" note.
+- The managed-mode `subjectHash` bullet in `assignment-hash.md`. The function and `vectors/assignment.json` are unchanged.
+
+No schema under `schemas/`, no vector and no example changed. A manifest, payload, heartbeat, countersign or spool reader or writer is unaffected.
+
+Why this is not a major: the README says a breaking change is a major, and removing routes is one. A 4.0.0, though, would make every 3.x reader refuse manifests over routes no customer-run agent ever called: the routes were served from the execution stack's function URL, used only by `ManagedAgent` and the provider-compatible shapes, and had no pilots. The recommendation on AIR-2317 is the next 3.x minor, as a stated exception to that rule. The owner decides the number.
+
 ## 3.1.0 · Tool counts say whether they were seen
 
 A cut-over: 3.1.0 writers write only the new row versions, and nothing reads the old ones.

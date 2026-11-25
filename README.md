@@ -13,7 +13,7 @@ release goes live, calls the model, and reports content-free measurements.
 Nothing in AirPrompter can open a connection to you, read your end-user
 content, or make bytes live on a locked runtime.
 
-> Status: **protocol 4.0.0** (`protocol/v4.0.0`) on `main`; the published **SDK 1.0.0-rc.3** speaks protocol 3.1.0 until the next release candidate.
+> Status: **protocol 4.0.0** (`protocol/v4.0.0`) and **SDK 1.0.0-rc.4**, the release candidate for 1.0.0.
 > One SDK release publishes five lockstep npm packages and five lockstep
 > PyPI distributions through the repository release workflow.
 

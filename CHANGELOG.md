@@ -8,6 +8,12 @@ entry names the protocol it speaks. Format: [Keep a Changelog](https://keepachan
 versions follow [SemVer](https://semver.org/) — before 1.0, a minor bump
 may change a public shape and says so here.
 
+## Unreleased
+
+### Zapier and n8n on 1.0.0-rc.4
+- **`integrations/zapier` and `integrations/n8n` depend on `@airprompter/agent-sdk` `1.0.0-rc.4`** (exact pin, registry lockfiles). Both now speak protocol 4.0.0 and refuse 3.x manifests, matching AirPrompter's dev server.
+- **The temporary protocol override is removed** (added in #105). The Zapier tests run against the repository's registry at 4.0.0 again: `SERVED_PROTOCOL` is gone from `zapier.test.ts`, `startRegistry` loses its `protocol` option, and `devPlane` / `promoteRelease` in the CLI lose the test-only `protocol` override (`DevPromoteOverrides`). The n8n tests use rc.4's own `FakeControlPlane`, which stamps 4.0.0.
+
 ## 1.0.0-rc.4 — 2026-11-25 (protocol 4.0.0)
 
 The fourth release candidate, on protocol 4.0.0 (`protocol/v4.0.0`, #105): hosted (managed) execution is removed from both SDKs, the CLI and the testing kit, and both SDKs read only protocol major 4. The CLI moves with it (`cli/v1.0.0-rc.4`). `1.0.0-rc.1` stays reserved for AIR-2231.

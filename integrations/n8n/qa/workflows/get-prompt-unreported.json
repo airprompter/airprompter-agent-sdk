@@ -1,0 +1,25 @@
+{
+  "id": "apQaUnreported01",
+  "name": "AirPrompter QA: Get Prompt with no Report Run (not counted)",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "connections": { "Start": { "main": [[{ "node": "Get Prompt", "type": "main", "index": 0 }]] } },
+  "nodes": [
+    { "id": "6f3b2c61-0011-4a53-9d0e-3a5c1f0b0011", "name": "Start", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+    {
+      "id": "6f3b2c61-0012-4a53-9d0e-3a5c1f0b0012",
+      "name": "Get Prompt",
+      "type": "n8n-nodes-airprompter.airPrompter",
+      "typeVersion": 1,
+      "position": [220, 0],
+      "credentials": { "airPrompterAgentApi": { "id": "apQaCredential01", "name": "AirPrompter QA" } },
+      "parameters": {
+        "operation": "getPrompt",
+        "slot": "triage",
+        "variables": { "mappingMode": "defineBelow", "value": { "ticket": "Refund for order 1042 has not arrived" }, "matchingColumns": [], "schema": [] },
+        "subject": "qa-n8n-subject-1"
+      }
+    }
+  ],
+  "pinData": {}
+}

@@ -691,7 +691,7 @@ test("ap.attribute on a workflow step and ap.report with step write the slot tag
   try {
     const flow = ap.workflow("docs.flow");
     const stepOne = flow.steps[0]!;
-    const inner = ap.attribute({ stepId: stepOne.stepId, artifactId: stepOne.artifactId, versionId: stepOne.versionId, model: stepOne.model, runRef: stepOne.runRef }, () => ap.attributionFor({}));
+    const inner = ap.attribute({ stepId: stepOne.stepId, artifactId: stepOne.artifactId, versionId: stepOne.versionId, model: stepOne.model, runRef: stepOne.runRef }, () => ap.currentAttribution());
     assert.deepEqual([inner?.tag, inner?.step, inner?.arm], ["docs.flow", "docs.flow#1", "none"]);
     await ap.observe(inner!, async () => ({ usage: { input_tokens: 3, output_tokens: 2 } }), { toolCalls: { calls: 3, errors: 0 } });
     ap.report({ tag: "docs.flow", step: "docs.flow#1", artifactId: stepOne.artifactId, versionId: stepOne.versionId, arm: "none", model: stepOne.model, status: "ok", latencyMs: 5, toolCalls: { calls: 2, errors: 1 } });
@@ -766,30 +766,12 @@ test("audience registration evicts stale names, keeps active names, and serves o
   }
 });
 
-import { RenderRegistry, withAttribution, currentAttribution } from "../packages/sdk/src/runtime/wrap/attribution.js";
+import { withAttribution, currentAttribution } from "../packages/sdk/src/runtime/wrap/attribution.js";
 import { validAudienceInstant } from "../packages/sdk/src/core/protocol/assignment.js";
-test("identical text never guesses different captured cohorts; explicit attribution remains available", () => {
-  const registry=new RenderRegistry(2);
+test("explicit attribution is the one way a direct call names its render; audience instants are strict", () => {
   const a={tag:"support.reply",artifactId:"prm_1",versionId:"ver_a",arm:"control",model:"gpt-5",audienceIds:["aud_AAAAAAAAAAAAAAAAAAAAAA"],runMinute:"2026-09-12T14:03:00Z"};
-  const b={...a,audienceIds:[]};
-  registry.register("identical",a);assert.deepEqual(registry.match(["identical"]),a);
-  registry.register("identical",b);assert.equal(registry.match(["identical"]),undefined);
-  registry.register("identical",a);assert.equal(registry.match(["identical"]),undefined);
+  assert.equal(currentAttribution(),undefined);
   withAttribution(a,()=>assert.deepEqual(currentAttribution(),a));
-  const artifacts=new RenderRegistry(2);
-  artifacts.register("same prompt text",{tag:"support.reply",artifactId:"prm_alpha",versionId:"ver_1",arm:"none",model:"gpt-5"});
-  artifacts.register("same prompt text",{tag:"support.reply",artifactId:"prm_beta",versionId:"ver_1",arm:"none",model:"gpt-5"});
-  assert.equal(artifacts.match(["same prompt text"]),undefined);
-  const versions=new RenderRegistry(2);
-  versions.register("same artifact text",{tag:"support.reply",artifactId:"prm_alpha",versionId:"ver_1",arm:"control",model:"gpt-5"});
-  versions.register("same artifact text",{tag:"support.reply",artifactId:"prm_alpha",versionId:"ver_2",arm:"candidate",model:"gpt-5"});
-  assert.equal(versions.match(["same artifact text"]),undefined);
-  const minutes=new RenderRegistry(2);
-  const firstMinute={tag:"support.reply",artifactId:"prm_alpha",versionId:"ver_1",arm:"candidate",model:"gpt-5",audienceIds:["aud_AAAAAAAAAAAAAAAAAAAAAA"],runMinute:"2026-09-12T14:03:00Z"};
-  const secondMinute={...firstMinute,runMinute:"2026-09-12T14:04:00Z"};
-  minutes.register("repeated prompt text",firstMinute);
-  minutes.register("repeated prompt text",secondMinute);
-  assert.deepEqual(minutes.match(["repeated prompt text"]),secondMinute);
   assert.equal(validAudienceInstant("2026-02-30T12:00:00Z"),false);
   assert.equal(validAudienceInstant("2026-09-12T24:00:00Z"),false);
 });

@@ -5,6 +5,6 @@
 
 Planned:
 
-- `node-service/` — an Express service rendering a slot with `ap.wrap(openai)`
+- `node-service/` — an Express service serving a slot through `instrument(openai, ap, { slot })`
 - `serverless/` — an AWS Lambda handler with the vendored bundle and on-invoke sync
 - `air-gapped/` — applying an `.apbundle` from a file and exporting telemetry

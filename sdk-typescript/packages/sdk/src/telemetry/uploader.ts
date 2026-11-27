@@ -317,7 +317,9 @@ export async function postSegment(input: { grant: UploadGrant; segment: string; 
   const body = multipartBody(boundary, fields, { name: input.segment, contentType, bytes: input.bytes });
   try {
     if (input.signal?.aborted) return { status: "network", reason: "aborted" };
-    const response = await input.fetch(grant.url, { method: "POST", headers: { "content-type": `multipart/form-data; boundary=${boundary}`, "content-length": String(body.length) }, body, ...(input.signal ? { signal: input.signal } : {}) });
+    // No `content-length` (or any framing header): fetch derives it from the Buffer body, and a userland undici installed
+    // as the global dispatcher (n8n does this) refuses a caller-set one with "invalid content-length header".
+    const response = await input.fetch(grant.url, { method: "POST", headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, body, ...(input.signal ? { signal: input.signal } : {}) });
     if (response.status >= 200 && response.status < 300) return { status: "ok", key };
     const text = await response.text().catch(() => "");
     return { status: "refused", httpStatus: response.status, expired: response.status === 403 && /expired|Policy expired|signature/i.test(text) };

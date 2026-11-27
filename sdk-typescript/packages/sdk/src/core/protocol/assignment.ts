@@ -304,14 +304,6 @@ export function capturedAudienceIds(observations: readonly AudienceObservation[]
   return observations.filter(o => o.tag === tag && Date.parse(o.observeFrom) <= nowMs && matchesAudience(o.selector,tags)).map(o=>o.audienceId).sort();
 }
 
-/** Text-only attribution is unsafe when identical text names distinct original cohorts. */
-export function ambiguousAudienceAttribution(previous: {tag:string;artifactId?:string;versionId:string;arm:string;audienceIds?:readonly string[];runMinute?:string} | null | undefined, next: {tag:string;artifactId?:string;versionId:string;arm:string;audienceIds?:readonly string[];runMinute?:string}): boolean {
-  if (previous === null) return true;
-  if (previous === undefined) return false;
-  if (previous.artifactId === undefined && next.artifactId === undefined && previous.audienceIds === undefined && next.audienceIds === undefined) return false;
-  return JSON.stringify([previous.tag,previous.artifactId,previous.versionId,previous.arm,previous.audienceIds]) !== JSON.stringify([next.tag,next.artifactId,next.versionId,next.arm,next.audienceIds]);
-}
-
 /** What `disable` directives say, as data. An arm-scoped disable always names its experiment (M15). */
 export function disabledFrom(directives: readonly import("./types.js").Directive[]): {agent:boolean;slots:string[];armsByExperiment:Record<string,string[]>} {
   const slots: string[] = [];

@@ -1,5 +1,5 @@
 /**
- * T33: `ap.wrap()` and the AI SDK middleware against the REAL provider
+ * The OpenAI, Anthropic and AI SDK adapters against the REAL provider
  * packages (`openai`, `@anthropic-ai/sdk`, `ai`) with recorded responses
  * served through each client's own `fetch` option — the public extension
  * point, so nothing here reaches the network. The packages are not
@@ -7,7 +7,7 @@
  * in the weekly `wrap-latest` workflow, which installs their latest
  * releases (`WRAP_LIVE=1` turns a skip into a failure there).
  *
- *   npm i --no-save openai @anthropic-ai/sdk ai && WRAP_LIVE=1 npx tsx --test test/wrapLive.test.ts
+ *   npm i --no-save openai @anthropic-ai/sdk ai && WRAP_LIVE=1 npx tsx --test test/frameworks/live.test.ts
  */
 
 import assert from "node:assert/strict";
@@ -16,10 +16,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
-import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
-import type { WindowRow } from "../packages/sdk/src/telemetry/spool/writer.js";
-import { FakeControlPlane } from "./helpers/controlPlane.js";
+import { AirPrompterAgent } from "../../packages/sdk/src/agent.js";
+import { publicJwkOf } from "../../packages/sdk/src/core/protocol/trust.js";
+import type { WindowRow } from "../../packages/sdk/src/telemetry/spool/writer.js";
+import { FakeControlPlane } from "../helpers/controlPlane.js";
+import { instrument as instrumentOpenAI } from "../../packages/sdk/src/frameworks/openai.js";
+import { instrument as instrumentAnthropic } from "../../packages/sdk/src/frameworks/anthropic.js";
+import { airprompterMiddleware } from "../../packages/sdk/src/frameworks/ai-sdk.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
 const required = process.env.WRAP_LIVE === "1";
@@ -109,10 +112,9 @@ test("openai: chat.completions.create (plain and stream: true), chat.completions
       }),
   });
   const { ap, windows } = await startAgent();
-  const openai = ap.wrap(new OpenAI({ apiKey: "sk-test", fetch: fetchImpl }));
-  const triage = ap.prompt("support.triage").render({});
+  const openai = instrumentOpenAI(new OpenAI({ apiKey: "sk-test", fetch: fetchImpl }), ap, { slot: "support.triage" });
   const messages = [
-    { role: "system", content: triage.text },
+    { role: "system", content: "the caller's own prompt" },
     { role: "user", content: "hello" },
   ];
   const plain = await openai.chat.completions.create({ model: "gpt-5", messages });
@@ -125,15 +127,18 @@ test("openai: chat.completions.create (plain and stream: true), chat.completions
   const helper = openai.chat.completions.stream({ model: "gpt-5", messages });
   const final = await helper.finalChatCompletion();
   assert.equal(final.choices[0].message.content, "Regards, us");
-  const responses = await openai.responses.create({ model: "gpt-5", instructions: triage.text, input: "hello" });
+  const responses = await openai.responses.create({ model: "gpt-5", instructions: "mine", input: "hello" });
   assert.equal(responses.output_text, "No signature");
   assert.equal(seen.length, 5);
   assert.equal(seen[0]!.body.model, "gpt-5");
+  assert.deepEqual((seen[0]!.body.messages as unknown[])[0], { role: "system", content: "Triage this ticket." }, "the approved text reached the wire");
+  assert.deepEqual((seen[3]!.body.messages as unknown[])[0], { role: "system", content: "the caller's own prompt" }, "the .stream() helper passed through");
+  assert.equal(seen[4]!.body.instructions, "Triage this ticket.");
   const rows = (await windows()).sort((a, b) => `${a.status}${a.errorClass}`.localeCompare(`${b.status}${b.errorClass}`));
   assert.deepEqual(
     rows.map((r) => [r.tag, r.model, r.status, r.errorClass ?? null, r.count, r.tokens, r.checks ?? null]),
     [
-      ["support.triage", "gpt-5", "error", "truncated", 2, { input: 20, cachedInput: 4, output: 8 }, { passed: 2, failed: 0 }],
+      ["support.triage", "gpt-5", "error", "truncated", 1, { input: 10, cachedInput: 2, output: 4 }, { passed: 1, failed: 0 }],
       ["support.triage", "gpt-5", "ok", null, 3, { input: 29, cachedInput: 4, output: 11 }, { passed: 2, failed: 1 }],
     ],
   );
@@ -155,30 +160,30 @@ test("@anthropic-ai/sdk: messages.create (plain and stream: true) and messages.s
   ];
   const { fetchImpl, seen } = recordedFetch({ "/v1/messages": (body) => (body.stream ? sse(events) : json(message)) });
   const { ap, windows } = await startAgent();
-  const anthropic = ap.wrap(new Anthropic({ apiKey: "sk-ant-test", fetch: fetchImpl }));
-  const reply = ap.prompt("support.reply").render({});
-  const plain = await anthropic.messages.create({ model: "claude-haiku-4-5", max_tokens: 64, system: reply.text, messages: [{ role: "user", content: "hi" }] });
+  const anthropic = instrumentAnthropic(new Anthropic({ apiKey: "sk-ant-test", fetch: fetchImpl }), ap, { slot: "support.reply" });
+  const plain = await anthropic.messages.create({ model: "claude-haiku-4-5", max_tokens: 64, system: "mine", messages: [{ role: "user", content: "hi" }] });
   assert.equal(plain.content[0].text, "Hello there");
   let streamed = "";
-  for await (const event of await anthropic.messages.create({ model: "claude-haiku-4-5", max_tokens: 64, system: reply.text, messages: [{ role: "user", content: "hi" }], stream: true })) {
+  for await (const event of await anthropic.messages.create({ model: "claude-haiku-4-5", max_tokens: 64, messages: [{ role: "user", content: "hi" }], stream: true })) {
     if (event.type === "content_block_delta" && event.delta.type === "text_delta") streamed += event.delta.text;
   }
   assert.equal(streamed, "Hello there");
-  const helper = anthropic.messages.stream({ model: "claude-haiku-4-5", max_tokens: 64, system: [{ type: "text", text: reply.text }], messages: [{ role: "user", content: "hi" }] });
+  const helper = anthropic.messages.stream({ model: "claude-haiku-4-5", max_tokens: 64, messages: [{ role: "user", content: "hi" }] });
   const final = await helper.finalMessage();
   assert.equal(final.content[0].text, "Hello there");
   assert.equal(seen.length, 3);
+  assert.deepEqual([seen[0]!.body.system, seen[1]!.body.system, seen[2]!.body.system], ["Reply politely.", "Reply politely.", undefined], "the helper passed through");
   const rows = (await windows()).sort((a, b) => `${a.status}`.localeCompare(`${b.status}`));
   assert.deepEqual(
     rows.map((r) => [r.tag, r.model, r.status, r.errorClass ?? null, r.count, r.tokens]),
     [
-      ["support.reply", "claude-haiku-4-5", "error", "truncated", 2, { input: 14, cachedInput: 6, output: 4 }],
+      ["support.reply", "claude-haiku-4-5", "error", "truncated", 1, { input: 7, cachedInput: 3, output: 2 }],
       ["support.reply", "claude-haiku-4-5", "ok", null, 1, { input: 7, cachedInput: 3, output: 2 }],
     ],
   );
 });
 
-test("ai: wrapLanguageModel({ middleware: ap.aiSdkMiddleware() }) with generateText and streamText over the AI SDK's own mock model", async (t) => {
+test("ai: wrapLanguageModel({ middleware: airprompterMiddleware(ap, { slot }) }) with generateText and streamText over the AI SDK's own mock model; ai hands the transformed params on as the same object", async (t) => {
   const ai = await load("ai");
   const aiTest = await load("ai/test");
   if (!ai || !aiTest) return t.skip("ai is not installed");
@@ -191,17 +196,19 @@ test("ai: wrapLanguageModel({ middleware: ap.aiSdkMiddleware() }) with generateT
   const usage = (input: number, output: number) => (objectShapes ? { inputTokens: { total: input, noCache: input, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: output, text: output, reasoning: 0 } } : { inputTokens: input, outputTokens: output, totalTokens: input + output });
   const finish = (unified: string) => (objectShapes ? { unified, raw: unified } : unified);
   const { ap, windows } = await startAgent();
-  const triage = ap.prompt("support.triage").render({});
+  const middleware = airprompterMiddleware(ap, { slot: "support.triage" });
+  const transformed: unknown[] = [];
+  const received: unknown[] = [];
   const model = wrapLanguageModel({
     model: new Mock({
-      modelId: "mock-gpt",
-      doGenerate: async () => ({
+      modelId: "gpt-5",
+      doGenerate: async (params: unknown) => (received.push(params), {
         content: [{ type: "text", text: "Regards, mock" }],
         finishReason: finish("stop"),
         usage: usage(11, 3),
         warnings: [],
       }),
-      doStream: async () => ({
+      doStream: async (params: unknown) => (received.push(params), {
         stream: simulateReadableStream({
           chunks: [
             { type: "stream-start", warnings: [] },
@@ -214,11 +221,13 @@ test("ai: wrapLanguageModel({ middleware: ap.aiSdkMiddleware() }) with generateT
         }),
       }),
     }),
-    middleware: ap.aiSdkMiddleware(),
+    middleware: { ...middleware, transformParams: async (options: never) => { const out = await middleware.transformParams(options); transformed.push(out); return out; } },
   });
-  const generated = await generateText({ model, system: triage.text, prompt: "hello" });
+  const generated = await generateText({ model, system: "mine", prompt: "hello" });
   assert.equal(generated.text, "Regards, mock");
-  const result = streamText({ model, system: triage.text, prompt: "hello" });
+  assert.equal(received[0], transformed[0], "the model received the object transformParams returned");
+  assert.deepEqual((received[0] as { prompt: unknown[] }).prompt[0], { role: "system", content: "Triage this ticket." });
+  const result = streamText({ model, prompt: "hello" });
   let streamed = "";
   for await (const delta of result.textStream) streamed += delta;
   assert.equal(streamed, "No sign");
@@ -226,8 +235,8 @@ test("ai: wrapLanguageModel({ middleware: ap.aiSdkMiddleware() }) with generateT
   assert.deepEqual(
     rows.map((r) => [r.tag, r.model, r.status, r.errorClass ?? null, r.count, r.tokens, r.checks ?? null]),
     [
-      ["support.triage", "mock-gpt", "error", "truncated", 1, { input: 11, output: 2 }, { passed: 0, failed: 1 }],
-      ["support.triage", "mock-gpt", "ok", null, 1, { input: 11, output: 3 }, { passed: 1, failed: 0 }],
+      ["support.triage", "gpt-5", "error", "truncated", 1, { input: 11, output: 2 }, { passed: 0, failed: 1 }],
+      ["support.triage", "gpt-5", "ok", null, 1, { input: 11, output: 3 }, { passed: 1, failed: 0 }],
     ],
   );
 });

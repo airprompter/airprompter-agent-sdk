@@ -37,7 +37,9 @@ const root = process.cwd();
 const scope = { organizationId: "org_1", agentId: "agt_split", target: "prod" as const };
 const SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"] as const;
 const PACKAGES = ["sdk", ...SATELLITES] as const;
-const SUBPATHS = [".", "./core", "./sync", "./runtime", "./telemetry", "./testing", "./frameworks/langchain", "./frameworks/steps"];
+const SUBPATHS = [".", "./core", "./sync", "./runtime", "./telemetry", "./testing", "./frameworks/contract", "./frameworks/openai", "./frameworks/anthropic", "./frameworks/ai-sdk", "./frameworks/langchain", "./frameworks/steps"];
+/** Rule 4 of section 3.2: the facade's line count after AIR-2231's deletions. A change that grows it moves this number on purpose. */
+const AGENT_TS_LINES = 2461;
 type Manifest = { name: string; version: string; private?: boolean; dependencies?: Record<string, string>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }>; devDependencies?: Record<string, string>; exports: Record<string, { types: string; import: string; require: string }>; typesVersions: Record<string, Record<string, string[]>>; airprompter: { sizeBudgetBytes: number | Record<string, number> } };
 const manifestOf = (name: string): Manifest => JSON.parse(readFileSync(join(root, "packages", name, "package.json"), "utf8")) as Manifest;
 
@@ -100,6 +102,52 @@ test("the direction is core → sync, runtime, telemetry → agent, frameworks �
   assert.match(platformPath.stderr, /leaves integrations[\\/]zapier/);
   const platformOk = planted(integration, 'import { usageFrom } from "@airprompter/agent-sdk/frameworks/steps";\nexport const probe = typeof usageFrom;\n');
   assert.equal(platformOk.status, 0, `the Steps subpath is allowed: ${platformOk.stderr}`);
+});
+
+test("adapters (AIR-2231): an adapter imports only ./contract.js and its framework; the layers below import no framework; the contract imports two barrels", () => {
+  const src = join(root, "packages", "sdk", "src");
+  const unlisted = planted(join(src, "frameworks", "_lintProbe.ts"), 'import { chooseModel } from "./contract.js";\nexport const probe = typeof chooseModel;\n');
+  assert.equal(unlisted.status, 1, "an adapter with no allowlist entry fails");
+  assert.match(unlisted.stderr, /frameworks\/_lintProbe\.ts has no entry in ADAPTERS/);
+  const openai = join(src, "frameworks", "openai.ts");
+  const original = readFileSync(openai, "utf8");
+  try {
+    for (const [line, message] of [
+      ['import { normalizeUsage } from "../runtime/index.js";', /openai\.ts:\d+: an adapter imports only \.\/contract\.js and its framework, not \.\.\/runtime\/index\.js/],
+      ['import { airprompterMiddleware } from "./ai-sdk.js";', /an adapter imports only \.\/contract\.js and its framework, not \.\/ai-sdk\.js/],
+      ['import Anthropic from "@anthropic-ai/sdk";', /@anthropic-ai\/sdk is not in frameworks\/openai's allowlist/],
+    ] as const) {
+      writeFileSync(openai, `${original}\n${line}\n`);
+      const result = lint();
+      assert.equal(result.status, 1, line);
+      assert.match(result.stderr, message);
+    }
+  } finally {
+    writeFileSync(openai, original);
+  }
+  const runtimeFramework = planted(join(src, "runtime", "_lintProbe.ts"), 'import OpenAI from "openai";\nexport const probe = typeof OpenAI;\n');
+  assert.equal(runtimeFramework.status, 1, "the runtime imports no framework package");
+  assert.match(runtimeFramework.stderr, /runtime imports the framework package openai/);
+  const agentFramework = planted(join(src, "_lintProbe.ts"), 'import { createAgent } from "langchain";\nexport const probe = typeof createAgent;\n');
+  assert.match(agentFramework.stderr, /agent imports the framework package langchain/);
+  const runTelemetry = planted(join(src, "runtime", "run", "_lintProbe.ts"), 'import { SpoolWriter } from "../../telemetry/index.js";\nexport const probe = typeof SpoolWriter;\n');
+  assert.match(runTelemetry.stderr, /runtime \(layer 1\) may not import telemetry/, "runtime/run imports neither telemetry nor sync");
+  const contract = join(src, "frameworks", "contract.ts");
+  const contractSource = readFileSync(contract, "utf8");
+  try {
+    writeFileSync(contract, `${contractSource}\nexport { SpoolWriter } from "../telemetry/index.js";\n`);
+    assert.match(lint().stderr, /frameworks\/contract imports only the runtime and core barrels/);
+  } finally {
+    writeFileSync(contract, contractSource);
+  }
+});
+
+test("rule 4: agent.ts is pinned at its line count, and no adapter file passes 300 lines", () => {
+  assert.equal(readFileSync(join(root, "packages", "sdk", "src", "agent.ts"), "utf8").trimEnd().split("\n").length, AGENT_TS_LINES, "agent.ts grew or shrank: move AGENT_TS_LINES on purpose");
+  for (const entry of readdirSync(join(root, "packages", "sdk", "src", "frameworks"))) {
+    if (!entry.endsWith(".ts")) continue;
+    assert.ok(readFileSync(join(root, "packages", "sdk", "src", "frameworks", entry), "utf8").split("\n").length <= 300, `frameworks/${entry} is over 300 lines`);
+  }
 });
 
 test("two copies agree: an error, a release and a sink from one copy are recognised by the other (no instanceof coupling)", async () => {
@@ -266,7 +314,7 @@ test("every package carries one version and SDK_VERSION is it; satellites peer o
   }
   ensureBuilt();
   const sizes = JSON.parse(execFileSync(process.execPath, [join(root, "scripts", "size-budget.mjs"), "--json"], { encoding: "utf8" })) as Record<string, { bytes: number; budget: number }>;
-  assert.deepEqual(Object.keys(sizes).sort(), ["agent-otel", "datastore-postgres", "datastore-redis", "datastore-s3", "sdk", "sdk/core", "sdk/frameworks/langchain", "sdk/frameworks/steps", "sdk/runtime", "sdk/sync", "sdk/telemetry", "sdk/testing"]);
+  assert.deepEqual(Object.keys(sizes).sort(), ["agent-otel", "datastore-postgres", "datastore-redis", "datastore-s3", "sdk", "sdk/core", "sdk/frameworks/ai-sdk", "sdk/frameworks/anthropic", "sdk/frameworks/contract", "sdk/frameworks/langchain", "sdk/frameworks/openai", "sdk/frameworks/steps", "sdk/runtime", "sdk/sync", "sdk/telemetry", "sdk/testing"]);
   for (const [name, { bytes, budget }] of Object.entries(sizes)) {
     assert.ok(bytes > 0, `${name} built`);
     assert.ok(bytes <= budget, `${name}: ${bytes} bytes over its ${budget}-byte budget`);

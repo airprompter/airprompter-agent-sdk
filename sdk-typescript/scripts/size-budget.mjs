@@ -3,7 +3,9 @@
 // its budget (`airprompter.sizeBudgetBytes`: a number for a satellite, one
 // entry per `exports` key for the SDK): the bytes of the .js under dist/esm and
 // dist/cjs that belong to it. An export with no budget fails, so a new adapter
-// cannot arrive without one. Exit 1 over budget; `--json` prints the numbers.
+// cannot arrive without one. An adapter file (`src/frameworks/<name>.ts`) over
+// 300 lines fails too: an adapter is translation only (CONTRIBUTING.md).
+// Exit 1 over budget; `--json` prints the numbers.
 //
 //   $ npm run size                              # from sdk-typescript/, after npm run build
 
@@ -62,6 +64,20 @@ for (const name of SATELLITES) {
   const dir = join(root, "packages", name);
   const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
   record(name, jsFiles(join(dir, "dist")).reduce((total, file) => total + file.bytes, 0), manifest.airprompter?.sizeBudgetBytes ?? 0);
+}
+
+// An adapter is one file of translation: past 300 lines it is doing the run's job.
+const ADAPTER_MAX_LINES = 300;
+const frameworks = join(sdkDir, "src", "frameworks");
+const longAdapters = [];
+for (const entry of readdirSync(frameworks)) {
+  if (!entry.endsWith(".ts")) continue;
+  const lines = readFileSync(join(frameworks, entry), "utf8").split("\n").length;
+  if (lines > ADAPTER_MAX_LINES) longAdapters.push(`src/frameworks/${entry}: ${lines} lines, over ${ADAPTER_MAX_LINES}`);
+}
+if (longAdapters.length > 0) {
+  over = true;
+  for (const line of longAdapters) console.error(`size: ${line}`);
 }
 
 if (process.argv.includes("--json")) {

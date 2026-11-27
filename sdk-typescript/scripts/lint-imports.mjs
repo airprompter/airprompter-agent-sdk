@@ -14,6 +14,18 @@
 //                                          (Decision L, AIR-2231/AIR-2405); tests exempt
 //   binary   cli/src                       imports any source, by path
 //
+// Framework adapters (AIR-2231, the rules of section 3.2):
+//
+//   1. `frameworks/<name>.ts` imports only `./contract.js` and the packages in
+//      its ADAPTERS entry below. `frameworks/contract.ts` imports the runtime
+//      and core barrels only, and no package. A framework file with no entry
+//      fails. `langchain` is exempt from the contract-only rule until AIR-2234
+//      moves it onto the contract.
+//   2. core, sync, runtime, telemetry and the agent import no framework
+//      package (FRAMEWORK_PACKAGES).
+//   3. `runtime/run/` imports neither telemetry nor sync: held by the layer
+//      rule, since runtime may import neither.
+//
 // A file reaches another layer only through that layer's barrel
 // (`../core/index.js`; the agent's is the root `index.js`, Steps' is
 // `frameworks/steps/index.js`), never a deeper path, so what a layer exports
@@ -39,6 +51,22 @@ const barrelOf = (layer) => (layer === "agent" ? "index" : layer === "steps" ? "
 const STEPS_SPEC = "@airprompter/agent-sdk/frameworks/steps";
 const SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"];
 const SUBPATH = /^@airprompter\/agent-sdk\/(core|sync|runtime|telemetry)$/;
+/** Rule 1: each adapter's own packages. An adapter ticket adds its entry; `*` matches one scoped name. */
+const ADAPTERS = {
+  openai: ["openai"],
+  anthropic: ["@anthropic-ai/sdk"],
+  "ai-sdk": ["ai", "@ai-sdk/*"],
+  langchain: ["langchain", "langchain/*", "@langchain/*", "zod"],
+};
+/** Not on the contract yet (AIR-2234): may still reach the runtime and core barrels. */
+const CONTRACT_EXEMPT = new Set(["langchain"]);
+/** Rule 2: no layer below the adapters imports any of these. */
+const FRAMEWORK_PACKAGES = ["openai", "openai/*", "@anthropic-ai/*", "ai", "ai/*", "@ai-sdk/*", "langchain", "langchain/*", "@langchain/*", "@openai/agents", "@openai/agents*", "@mastra/*"];
+const matches = (spec, pattern) => {
+  if (pattern.endsWith("/*")) return spec.startsWith(pattern.slice(0, -1));
+  if (pattern.endsWith("*")) return spec.startsWith(pattern.slice(0, -1));
+  return spec === pattern;
+};
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -77,6 +105,38 @@ const insideSdk = (path) => !posix(relative(sdkSrc, path)).startsWith("..");
 const offenders = [];
 const edges = [];
 
+/** `frameworks/<name>.ts` → name; the Steps folder and anything deeper is not an adapter file. */
+function adapterOf(file) {
+  const rel = posix(relative(sdkSrc, file));
+  const m = /^frameworks\/([^/]+)\.ts$/.exec(rel);
+  return m ? m[1] : null;
+}
+
+function lintAdapter(file, name) {
+  const shown = relative(root, file);
+  if (name === "contract") {
+    for (const { spec, line } of specifiersOf(file)) {
+      const target = spec.startsWith(".") ? posix(relative(sdkSrc, resolve(dirname(file), spec))).replace(/\.(js|ts)$/, "") : null;
+      if (target !== "runtime/index" && target !== "core/index") offenders.push(`${shown}:${line}: frameworks/contract imports only the runtime and core barrels (${spec})`);
+    }
+    return true;
+  }
+  const allowed = ADAPTERS[name];
+  if (!allowed) {
+    offenders.push(`${shown}: frameworks/${name}.ts has no entry in ADAPTERS (scripts/lint-imports.mjs) or in tools/lint_imports.py; see CONTRIBUTING.md › Adding a framework adapter`);
+    return false;
+  }
+  if (CONTRACT_EXEMPT.has(name)) return false;
+  for (const { spec, line } of specifiersOf(file)) {
+    if (spec.startsWith(".")) {
+      if (spec !== "./contract.js") offenders.push(`${shown}:${line}: an adapter imports only ./contract.js and its framework, not ${spec}`);
+      continue;
+    }
+    if (!allowed.some((pattern) => matches(spec, pattern))) offenders.push(`${shown}:${line}: ${spec} is not in frameworks/${name}'s allowlist (${allowed.join(", ")})`);
+  }
+  return true;
+}
+
 function lintSdkFile(file) {
   const shown = relative(root, file);
   const layer = layerOf(file);
@@ -84,7 +144,19 @@ function lintSdkFile(file) {
     offenders.push(`${shown}: packages/sdk/src/${layer} is not a layer; add it to LAYER or move the file`);
     return;
   }
+  const adapter = adapterOf(file);
+  if (adapter && lintAdapter(file, adapter)) {
+    for (const { spec } of specifiersOf(file)) if (spec.startsWith(".")) {
+      const into = layerOf(resolve(dirname(file), spec));
+      if (into !== layer) edges.push([layer, into]);
+    }
+    return;
+  }
   for (const { spec, line } of specifiersOf(file)) {
+    if (!spec.startsWith(".") && layer !== "frameworks" && layer !== "steps" && FRAMEWORK_PACKAGES.some((pattern) => matches(spec, pattern))) {
+      offenders.push(`${shown}:${line}: ${layer} imports the framework package ${spec}; only frameworks/<name> may`);
+      continue;
+    }
     if (spec.startsWith("@airprompter/")) {
       offenders.push(`${shown}:${line}: the package imports ${spec} by name; use a relative path through the layer's barrel`);
       continue;

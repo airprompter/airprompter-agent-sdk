@@ -3,9 +3,11 @@
 // packed (`npm pack`, what `npm publish` would ship) and installed into a
 // fresh project, with nothing else present.
 //
-//   - `@airprompter/agent-sdk` alone: every subpath but the framework adapter
-//     imports, ESM and CommonJS, with no optional peer installed; the adapter
-//     names the peer it is missing, and imports once that peer is there.
+//   - `@airprompter/agent-sdk` alone: every subpath but the LangChain adapter
+//     imports, ESM and CommonJS, with no optional peer installed (the OpenAI,
+//     Anthropic and AI SDK adapters import nothing of their framework at run
+//     time); the LangChain adapter names the peer it is missing, and imports
+//     once that peer is there.
 //   - each satellite beside it: exactly one copy of the SDK resolves, and the
 //     satellite's own import works, ESM and CommonJS.
 //
@@ -30,9 +32,14 @@ const SDK_SUBPATHS = {
   "@airprompter/agent-sdk": ["AirPrompterAgent", "isAgentStartError"],
   "@airprompter/agent-sdk/core": ["verifyManifest", "BundleRelease", "assignArm"],
   "@airprompter/agent-sdk/sync": ["SlotStore", "syncOnce", "fileKey"],
-  "@airprompter/agent-sdk/runtime": ["ReleaseResolver", "wrapClient"],
+  "@airprompter/agent-sdk/runtime": ["ReleaseResolver", "instrumentClient"],
   "@airprompter/agent-sdk/telemetry": ["SpoolWriter", "DirectorySink", "SpoolUploader"],
   "@airprompter/agent-sdk/testing": ["FakeControlPlane", "MemoryFs"],
+  // The contract and the direct-client and AI SDK adapters: no peer is needed to import them.
+  "@airprompter/agent-sdk/frameworks/contract": ["chooseModel", "settingsFor", "measureCall", "instrumentClient"],
+  "@airprompter/agent-sdk/frameworks/openai": ["instrument", "applyPlacement"],
+  "@airprompter/agent-sdk/frameworks/anthropic": ["instrument", "applyPlacement"],
+  "@airprompter/agent-sdk/frameworks/ai-sdk": ["airprompterMiddleware", "generateResultShape"],
   // No peers: the Steps core uses Node built-ins only, so it imports with the SDK alone.
   "@airprompter/agent-sdk/frameworks/steps": ["createAutomationClient", "usageFrom"],
 };

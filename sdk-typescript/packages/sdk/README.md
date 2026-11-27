@@ -2,8 +2,8 @@
 
 One install for `AirPrompterAgent`: signed pull-only updates, the encrypted
 restart-safe slot store, offline operation, rendering with trust-aware
-variables, `ap.wrap()` for the OpenAI, Anthropic and Vercel AI SDK clients, and
-content-free telemetry.
+variables, framework adapters for the OpenAI and Anthropic clients, the Vercel
+AI SDK and LangChain, and content-free telemetry.
 
 ```ts
 import { AirPrompterAgent } from "@airprompter/agent-sdk";
@@ -21,10 +21,13 @@ Everything else is a subpath, and a subpath you do not import is not loaded:
 | --- | --- |
 | `/core` | The protocol with no I/O: trust chain, assignment, render, bundles, row schemas, the control-plane client |
 | `/sync` | Pull and verify, the encrypted slot store, the apply policy, the customer's datastore |
-| `/runtime` | Render and assign over a release you hold, the provider wrappers |
+| `/runtime` | Render and assign over a release you hold, the run session |
 | `/telemetry` | The spool and its uploader |
 | `/testing` | The CI kit: `FakeControlPlane`, `MemoryFs`, `FakeClock` |
+| `/frameworks/openai`, `/frameworks/anthropic` | `instrument(client, ap, { slot })`: the approved text, model and settings on every call; the provider package is an optional peer |
+| `/frameworks/ai-sdk` | `airprompterMiddleware(ap, { slot })` for `wrapLanguageModel`; `ai` is an optional peer |
 | `/frameworks/langchain` | LangChain middleware; `langchain`, `@langchain/core` and `zod` are optional peers |
+| `/frameworks/contract` | The contract every adapter follows, for writing your own; outside the 1.0 promise |
 | `/frameworks/steps` | No-code automation steps (the core of the Zapier and n8n integrations); outside the 1.0 promise for now |
 
 Separate packages exist only for dependency footprint and take this one as a

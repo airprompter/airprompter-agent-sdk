@@ -24,7 +24,8 @@ writeFileSync(`${asset}.sha256`, line);
 
 // Read it back: exactly one line, the bare name, the asset's digest.
 const written = readFileSync(`${asset}.sha256`, "utf8");
-if (written !== line || !/^[0-9a-f]{64} {2}[^/\\\s][^/\\]*\n$/.test(written)) {
+// (No CR anywhere: macOS `shasum -c` and `sha256sum -c` both fail on a CRLF line.)
+if (written !== line || !/^[0-9a-f]{64} {2}[^/\\\s][^/\\\r\n]*\n$/.test(written)) {
   console.error(`checksum.mjs: ${asset}.sha256 is not "<hex>  ${name}": ${JSON.stringify(written)}`);
   process.exit(1);
 }

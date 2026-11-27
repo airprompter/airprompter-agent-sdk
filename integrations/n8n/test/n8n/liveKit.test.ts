@@ -5,9 +5,10 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import test from "node:test";
 import type { TestContext } from "node:test";
 
@@ -21,7 +22,10 @@ function scratch(t: TestContext): string {
 }
 
 function run(args: string[], env: Record<string, string> = {}, script = KIT) {
-  const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env: { ...process.env, AIRPROMPTER_AGENT_ID: "agent_x", AIRPROMPTER_UPDATE_KEY: "apa_never_used", N8N_BIN: "", AIRPROMPTER_KIT_NODES_DIR: "", AIRPROMPTER_KIT_COMMIT: "", ...env } });
+  const base = { ...process.env };
+  delete base.N8N_NODES_DIR;
+  delete base.AIRPROMPTER_KIT_NODES_DIR;
+  const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env: { ...base, AIRPROMPTER_AGENT_ID: "agent_x", AIRPROMPTER_UPDATE_KEY: "apa_never_used", N8N_BIN: "", AIRPROMPTER_KIT_COMMIT: "", ...env } });
   return { status: result.status, json: JSON.parse(result.stdout.trim().split("\n").pop() || "{}"), stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -50,6 +54,8 @@ test("--nodes-dir: N8N_BIN is required, the folder must be prepared, and nothing
   const dir = scratch(t);
   assert.match(run(["--nodes-dir", dir]).json.error, /needs N8N_BIN/);
   assert.equal(run([], { AIRPROMPTER_KIT_NODES_DIR: dir }).status, 2, "the environment variable means the same");
+  assert.match(run([], { N8N_NODES_DIR: dir }).json.error, /is not read/, "the old name is refused, not ignored");
+  assert.match(run([], { AIRPROMPTER_KIT_NODES_DIR: "  " }).json.error, /set but empty/);
   assert.match(run(["--nodes-dir", dir], { N8N_BIN: "   " }).json.error, /needs N8N_BIN/, "a blank N8N_BIN is no N8N_BIN");
   const before = readdirSync(tmpdir()).filter((name) => name.startsWith("airprompter-live-n8n-")).length;
   const unprepared = run(["--nodes-dir", dir], { N8N_BIN: "/nonexistent/n8n" });
@@ -58,6 +64,61 @@ test("--nodes-dir: N8N_BIN is required, the folder must be prepared, and nothing
   assert.equal(readdirSync(tmpdir()).filter((name) => name.startsWith("airprompter-live-n8n-")).length, before, "no run folder was made");
   assert.ok(!unprepared.stdout.includes("apa_never_used") && !unprepared.stderr.includes("apa_never_used"), "the Update key is in no output");
 });
+
+/** The kit's own content hash, written out here so a test can build a manifest that matches. */
+function contentSha256(dir: string): string {
+  const hash = createHash("sha256");
+  const files = readdirSync(dir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => relative(dir, join(entry.parentPath ?? (entry as unknown as { path: string }).path, entry.name))).sort();
+  for (const file of files) hash.update(`${file}\0`).update(readFileSync(join(dir, file))).update("\0");
+  return hash.digest("hex");
+}
+
+function fakeTools(t: TestContext) {
+  const bin = scratch(t);
+  const called = join(bin, "called");
+  for (const tool of ["npm", "npx"]) {
+    writeFileSync(join(bin, tool), `#!/bin/sh\necho ${tool} >> "${called}"\nexit 1\n`);
+    chmodSync(join(bin, tool), 0o755);
+  }
+  writeFileSync(join(bin, "n8n"), '#!/bin/sh\ncase "$1" in --version) echo 2.49.8;; --help) echo usage;; *) echo "stand-in n8n" >&2; exit 1;; esac\n');
+  chmodSync(join(bin, "n8n"), 0o755);
+  return { bin, called, env: { N8N_BIN: join(bin, "n8n"), PATH: `${bin}:${process.env.PATH}` } };
+}
+
+const PIN = "c0ffee0000000000000000000000000000000000";
+const manifest = (dir: string, commit: string) => writeFileSync(join(dir, "airprompter-kit.json"), JSON.stringify({ package: "n8n-nodes-airprompter", packageVersion: require(join(PACKAGE, "package.json")).version, sdkVersion: "1.0.0-rc.4", contentSha256: contentSha256(join(dir, "node_modules")), commit }));
+const preparedCheck = (json: { checks: Array<{ id: string; state: string; detail?: Record<string, unknown> }> }) => json.checks.find((entry) => entry.id === "nodes.prepared");
+
+test("nodes.prepared passes only for an intact folder and the exact pinned commit; otherwise n8n is never started", (t) => {
+  const { dir } = preparedFolder(t);
+  const tools = fakeTools(t);
+  manifest(dir, PIN);
+  // Outside git, so the pin is the only commit known (in a checkout, its HEAD must match as well).
+  const kit = copyOfKit(t);
+  const pointer = join(scratch(t), "current");
+  symlinkSync(dir, pointer);
+  const good = run(["--nodes-dir", pointer], { ...tools.env, AIRPROMPTER_KIT_COMMIT: PIN }, kit);
+  assert.equal(preparedCheck(good.json)?.state, "pass", `${good.stderr} (a --nodes-dir that is a symlink is followed once)`);
+  assert.match(good.json.error, /import:credentials failed/, "the run went on to n8n");
+  for (const [why, env] of [["another pin", { AIRPROMPTER_KIT_COMMIT: "c0ffee0000000000000000000000000000000001" }], ["no pin known (outside git)", {}]] as const) {
+    const result = run(["--nodes-dir", dir], { ...tools.env, ...env }, kit);
+    assert.equal(preparedCheck(result.json)?.state, "fail", why);
+    assert.match(result.json.error, /does not match.*n8n was not started/, why);
+  }
+  assert.equal(run(["--nodes-dir", dir], { ...tools.env, AIRPROMPTER_KIT_COMMIT: "c0ffee" }).status, 2, "a short pin is refused");
+  manifest(dir, "");
+  assert.equal(preparedCheck(run(["--nodes-dir", dir], { ...tools.env, AIRPROMPTER_KIT_COMMIT: PIN }, kit).json)?.state, "fail", "an empty manifest commit matches nothing");
+  assert.ok(!existsSync(tools.called), "npm and npx were never called");
+});
+
+/** The kit and its package.json outside any git checkout, so it knows no checkout commit of its own. */
+function copyOfKit(t: TestContext): string {
+  const copy = scratch(t);
+  mkdirSync(join(copy, "scripts"), { recursive: true });
+  cpSync(KIT, join(copy, "scripts", "live-n8n.mjs"));
+  cpSync(join(PACKAGE, "package.json"), join(copy, "package.json"));
+  return join(copy, "scripts", "live-n8n.mjs");
+}
 
 test("an offline run copies the prepared folder and calls neither npm nor npx", (t) => {
   const { dir } = preparedFolder(t);
@@ -79,7 +140,7 @@ test("an offline run copies the prepared folder and calls neither npm nor npx", 
   const prepared = result.json.checks.find((entry: { id: string }) => entry.id === "nodes.prepared");
   assert.equal(prepared.state, "fail", "a manifest whose content hash does not match the folder fails nodes.prepared");
   assert.equal(prepared.detail.contentHashMatches, false);
-  assert.match(result.json.error, /import:credentials failed/, "the run got as far as n8n");
+  assert.match(result.json.error, /does not match.*n8n was not started/, "a folder that is not what was prepared stops the run before n8n");
   assert.ok(!existsSync(called), "npm and npx were never called");
 });
 

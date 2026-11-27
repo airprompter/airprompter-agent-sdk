@@ -55,15 +55,17 @@ AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n.mjs --prepare-nodes-di
 
 - **What it writes:**
   - `node_modules/n8n-nodes-airprompter`, with the SDK under it (about 3.5 MB);
-  - `airprompter-kit.json`: package and SDK versions, the tarball's sha256, a `contentSha256` over the installed
-    package, the commit, and `preparedAt`.
+  - `airprompter-kit.json`: package and SDK versions, the tarball's sha256, a `contentSha256` over all of
+    `node_modules`, the commit, and `preparedAt`.
 - **The target** must be empty or new. The kit installs into a sibling folder and renames it at the end, so a failed
   build can simply be retried.
 - **The commit is required.** It comes from git when this is a clean checkout of the repository, or from
   `AIRPROMPTER_KIT_COMMIT` for a copy without `.git`. A Docker build context usually has no `.git`, so pass the sha
   as `ARG`/`--build-arg` and set the variable.
   - If both exist, they must agree.
-  - A tree with uncommitted changes under `integrations/n8n` is refused.
+  - A tree with uncommitted changes to tracked files under `integrations/n8n` is refused. Untracked files are
+    ignored.
+  - `AIRPROMPTER_KIT_COMMIT` must be the full 40-character sha.
   - `--no-build` is refused: prepare always builds.
 - **Install n8n with Node 24's own npm** (`PATH=/opt/node24/bin:$PATH npm i n8n@2.49.8 --prefix /opt/n8n`), so its
   native add-ons are built for Node 24.
@@ -88,7 +90,7 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=â€
 ```
 
 - **No npm at all.** The run does no build, pack, install or `npx`, and does not need `npm ci`. The kit uses only
-  Node's built-in modules, so test time needs Node 20 or later and the checkout.
+  Node's built-in modules, so test time needs Node 20.1 or later and the checkout.
   - **The copy:** the prepared folder is copied into the run's fresh user folder, and n8n runs with
     `npm_config_offline=true`.
   - **`N8N_BIN` is required:** without it, the run exits 2 rather than reach the registry through `npx`.
@@ -97,8 +99,10 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=â€
 - **The `nodes.prepared` check compares the copy with the prepared folder:**
   - its content hash (nothing changed after prepare);
   - the package and SDK versions, and the checkout's `package.json` version;
-  - the commit: `AIRPROMPTER_KIT_COMMIT` if set at test time, else the checkout's own when it is a git checkout. Set
-    it, so the check tests your pin.
+  - the commit, exactly, as a full 40-character sha: against `AIRPROMPTER_KIT_COMMIT` and against the checkout's
+    own when it is a git checkout. Each is used when known. With neither, the check fails, so set
+    `AIRPROMPTER_KIT_COMMIT` to your pin.
+- **If `nodes.prepared` fails, the run stops before n8n.** Nothing is sent to AirPrompter.
 - **The summary adds:**
 
   ```json
@@ -118,7 +122,8 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=â€
 | A flag without its value, an unknown flag, both modes | 2 | `--nodes-dir needs a folder` / `unknown argument â€¦` |
 | `N8N_BIN` runs n8n on Node below 24 | 1 | `N8N_BIN runs n8n on a Node older than it accepts` |
 | `N8N_BIN` missing, not executable, or no shebang | 1 | `n8n did not start: â€¦` (`ENOENT`, `EACCES`, `ENOEXEC`) |
-| The prepared folder changed, or a commit or version differs | 1 | check `nodes.prepared` fails, with `detail` |
+| The prepared folder changed, a commit or version differs, or no commit to compare | 1 | check `nodes.prepared` fails, with `detail`; n8n is not started |
+| `AIRPROMPTER_KIT_COMMIT` that is not a full 40-character sha | 2 | `AIRPROMPTER_KIT_COMMIT must be a full 40-character commit sha` |
 
 `--prepare-nodes-dir` prints one JSON line of its own: `{ok, exitCode, nodesDir, kit}`, or `{ok: false, exitCode,
 nodesDir, error}`.
@@ -164,7 +169,7 @@ The JSON fields a test reads:
 }
 ```
 
-Check ids, which are stable: `n8n.version`, `workflow.get_and_report`, `get_prompt.network`,
+Check ids, which are stable: `nodes.prepared` (only with `--nodes-dir`), `n8n.version`, `workflow.get_and_report`, `get_prompt.network`,
 `get_prompt.run_ref`, `report_run.accepted`, `release.stored`, `get_prompt.unreported`, `get_prompt.stored_copy`.
 
 ## What to assert

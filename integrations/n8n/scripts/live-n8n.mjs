@@ -54,7 +54,7 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
@@ -136,13 +136,14 @@ function checkoutCommit() {
   try {
     if (resolve(git(["rev-parse", "--show-toplevel"]), "integrations", "n8n") !== PACKAGE_DIR) return null;
     git(["ls-files", "--error-unmatch", "package.json"]);
-    return { commit: git(["rev-parse", "HEAD"]), dirty: git(["status", "--porcelain", "--", "."]) !== "" };
+    // Untracked files (a run's own output) do not change what is packed; modified tracked ones do.
+    return { commit: git(["rev-parse", "HEAD"]), dirty: git(["status", "--porcelain", "--untracked-files=no", "--", "."]) !== "" };
   } catch {
     return null;
   }
 }
 
-/** A sha256 over every file of the installed package (paths and bytes, sorted), the SDK under it included. */
+/** A sha256 over every file under the folder's node_modules (paths and bytes, sorted): the package and everything it brought. */
 function contentSha256(dir) {
   const hash = createHash("sha256");
   const files = readdirSync(dir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => relative(dir, join(entry.parentPath ?? entry.path, entry.name))).sort();
@@ -178,10 +179,12 @@ function installedIn(nodesDir) {
   if (!existsSync(pkg)) throw new Error(`${nodesDir} has no node_modules/n8n-nodes-airprompter`);
   const sdkManifest = [join(nodesDir, "node_modules", "n8n-nodes-airprompter", "node_modules"), join(nodesDir, "node_modules")].map((dir) => join(dir, "@airprompter", "agent-sdk", "package.json")).find((path) => existsSync(path));
   if (!sdkManifest) throw new Error(`${nodesDir} has no @airprompter/agent-sdk under the package`);
-  return { packageVersion: JSON.parse(readFileSync(pkg, "utf8")).version, sdkVersion: JSON.parse(readFileSync(sdkManifest, "utf8")).version, contentSha256: contentSha256(join(nodesDir, "node_modules", "n8n-nodes-airprompter")) };
+  return { packageVersion: JSON.parse(readFileSync(pkg, "utf8")).version, sdkVersion: JSON.parse(readFileSync(sdkManifest, "utf8")).version, contentSha256: contentSha256(join(nodesDir, "node_modules")) };
 }
 
 const bad = (message) => Object.assign(new Error(message), { exitCode: 2 });
+/** A commit is a full 40-character sha: a branch name, a tag or a short prefix would match too much. */
+const FULL_SHA = /^[0-9a-f]{40}$/;
 
 // --prepare-nodes-dir: steps 1–2 only, into a folder of its own, for an image built ahead of offline runs.
 if (parsed.values.has("--prepare-nodes-dir")) {
@@ -196,8 +199,9 @@ if (parsed.values.has("--prepare-nodes-dir")) {
     // tree is clean), else AIRPROMPTER_KIT_COMMIT (a copy without .git, such as a Docker build). Both: they must agree.
     const fromGit = checkoutCommit();
     const declared = process.env.AIRPROMPTER_KIT_COMMIT?.trim() || null;
+    if (declared && !FULL_SHA.test(declared)) throw bad(`AIRPROMPTER_KIT_COMMIT must be a full 40-character commit sha, not ${JSON.stringify(declared)}`);
     if (fromGit?.dirty) throw bad(`integrations/n8n has changes not committed in ${fromGit.commit}; commit them, or prepare from a clean checkout`);
-    if (fromGit && declared && fromGit.commit !== declared && !fromGit.commit.startsWith(declared)) throw bad(`AIRPROMPTER_KIT_COMMIT ${declared} is not this checkout's commit ${fromGit.commit}`);
+    if (fromGit && declared && fromGit.commit !== declared) throw bad(`AIRPROMPTER_KIT_COMMIT ${declared} is not this checkout's commit ${fromGit.commit}`);
     const commit = fromGit?.commit ?? declared;
     if (!commit) throw bad("no commit to record: run from a git checkout of the repository, or set AIRPROMPTER_KIT_COMMIT to the commit this copy is");
     // Install into a sibling folder and rename at the end, so a failure leaves the target as it was.
@@ -223,6 +227,12 @@ if (parsed.values.has("--prepare-nodes-dir")) {
   process.exit(outcome.exitCode);
 }
 const preinstalled = parsed.values.get("--nodes-dir") ?? (process.env.AIRPROMPTER_KIT_NODES_DIR?.trim() || undefined);
+// Set but unusable must not fall back quietly to the npm path: the old name, or a blank value.
+const nodesDirEnvProblem = process.env.N8N_NODES_DIR !== undefined
+  ? "N8N_NODES_DIR is not read; the variable is AIRPROMPTER_KIT_NODES_DIR"
+  : process.env.AIRPROMPTER_KIT_NODES_DIR !== undefined && !process.env.AIRPROMPTER_KIT_NODES_DIR.trim() && !parsed.values.has("--nodes-dir")
+    ? "AIRPROMPTER_KIT_NODES_DIR is set but empty"
+    : null;
 const n8nBin = process.env.N8N_BIN?.trim() || "";
 
 const env = {
@@ -241,10 +251,13 @@ const base = { agentId: env.agentId ?? null, environment: env.environment, apiUr
 let variables = { ticket: "Refund for order 1042 has not arrived" };
 try {
   if (!env.agentId || !env.updateKey) throw new Error("set AIRPROMPTER_AGENT_ID and AIRPROMPTER_UPDATE_KEY (an Update key bound to that agent and AIRPROMPTER_ENVIRONMENT)");
+  if (nodesDirEnvProblem) throw new Error(nodesDirEnvProblem);
   if (preinstalled) {
     // Offline means no npm at all: npx would fetch n8n from the registry.
     if (!n8nBin) throw new Error("--nodes-dir runs offline and needs N8N_BIN (a pre-installed n8n), not npx");
-    const source = resolve(preinstalled);
+    const pinned = process.env.AIRPROMPTER_KIT_COMMIT?.trim();
+    if (pinned && !/^[0-9a-f]{40}$/.test(pinned)) throw new Error(`AIRPROMPTER_KIT_COMMIT must be a full 40-character commit sha, not ${JSON.stringify(pinned)}`);
+    const source = existsSync(preinstalled) ? realpathSync(preinstalled) : resolve(preinstalled);
     if (!existsSync(join(source, KIT_MANIFEST))) throw new Error(`${source} has no ${KIT_MANIFEST}: make it with --prepare-nodes-dir`);
     installedIn(source);
     refuseSymlinks(source);
@@ -285,16 +298,21 @@ try {
   // 1–2. Build, pack, install where n8n keeps community packages; or copy a folder prepared ahead (no npm, offline).
   const checkout = checkoutCommit();
   if (preinstalled) {
-    const source = resolve(preinstalled);
+    const source = realpathSync(preinstalled); // a pointer such as /opt/…/current is followed once, here
     const kit = JSON.parse(readFileSync(join(source, KIT_MANIFEST), "utf8"));
     cpSync(source, nodesDir, { recursive: true });
     const copied = installedIn(nodesDir);
     const checkoutVersion = JSON.parse(readFileSync(join(PACKAGE_DIR, "package.json"), "utf8")).version;
-    // The commit to compare with: the one the caller pins (AIRPROMPTER_KIT_COMMIT), else this checkout's own.
-    const expected = process.env.AIRPROMPTER_KIT_COMMIT?.trim() || checkout?.commit || null;
+    // The commits to compare with, exactly: the one the caller pins (AIRPROMPTER_KIT_COMMIT) and this checkout's own,
+    // each when known. With neither known the check fails: it never passes without having compared a commit.
+    const expected = [process.env.AIRPROMPTER_KIT_COMMIT?.trim(), checkout?.commit].filter(Boolean);
+    const commitOk = FULL_SHA.test(kit.commit ?? "") && expected.length > 0 && expected.every((commit) => commit === kit.commit);
     base.nodes = { mode: "preinstalled", from: source, kit, checkoutCommit: checkout?.commit ?? null };
     log(`using the community-nodes folder prepared in ${source} (commit ${kit.commit}); no npm`);
-    check("nodes.prepared", "the prepared folder is intact and is the package this checkout runs: same content hash, versions and commit", copied.contentSha256 === kit.contentSha256 && copied.packageVersion === kit.packageVersion && copied.sdkVersion === kit.sdkVersion && kit.packageVersion === checkoutVersion && (expected === null || kit.commit === expected || kit.commit?.startsWith(expected) || expected.startsWith(kit.commit ?? "\u0000")), { kitCommit: kit.commit, expectedCommit: expected ?? "not known (set AIRPROMPTER_KIT_COMMIT)", contentHashMatches: copied.contentSha256 === kit.contentSha256, packageVersion: copied.packageVersion, checkoutVersion });
+    const contentOk = copied.contentSha256 === kit.contentSha256 && copied.packageVersion === kit.packageVersion && copied.sdkVersion === kit.sdkVersion && kit.packageVersion === checkoutVersion;
+    check("nodes.prepared", "the prepared folder is intact and is the package this checkout runs: same content hash, versions and commit", contentOk && commitOk, { kitCommit: kit.commit, expectedCommits: expected.length ? expected : "none known: set AIRPROMPTER_KIT_COMMIT to the full sha you pin", contentHashMatches: copied.contentSha256 === kit.contentSha256, packageVersion: copied.packageVersion, checkoutVersion });
+    // A folder that is not what was pinned must not record a Report Run: stop before n8n.
+    if (!(contentOk && commitOk)) throw new Error("the prepared folder does not match (check nodes.prepared); n8n was not started, nothing was sent to AirPrompter");
   } else {
     base.nodes = { mode: "packed", kit: { ...packAndInstall(nodesDir, work), commit: checkout?.commit ?? null, dirty: checkout?.dirty ?? null } };
   }

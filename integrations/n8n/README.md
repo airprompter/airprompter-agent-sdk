@@ -38,7 +38,7 @@ Create an **AirPrompter Agent API** credential:
 | Agent ID | The agent in AirPrompter that holds the slots. |
 | Update Key | The agent's Update key (key kind "agent", bound to one agent and one environment). It reads approved releases and nothing more. |
 | Environment | The environment the key is bound to, such as `prod`. |
-| Root Public Key | AirPrompter's root public key (a JSON Web Key) for the deployment. Every release is verified against it before it is stored or used. Optional for a deployment whose root the SDK's Steps core pins (`HOSTED_ROOTS` in `sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`): `dev` today; `prod` once its root ceremony runs. |
+| Root Public Key | AirPrompter's root public key (a JSON Web Key) for the deployment. Every release is verified against it before it is stored or used. Optional for a deployment whose root the SDK's Steps core pins (`HOSTED_ROOTS` in `sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`): `dev`, and `prod` from the first SDK release after `1.0.0-rc.4` (ceremony of 2026-11-27). |
 | API Base URL | `https://api.airprompter.com` by default. For testing, use a dev URL or a local `airprompter dev` registry. |
 | AirPrompter Deployment | The deployment that signs the releases: `prod`, `staging` or `dev`. This is not the agent's environment. |
 | Root Document URL | Optional. Defaults to *API Base URL*`/roots/<deployment>/root.json`. |

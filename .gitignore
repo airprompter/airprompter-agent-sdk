@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 # The conformance package bundles a copy of protocol/ at pack time (npm run prepack).
 conformance/protocol/
+# A lockfile a local `npm install` writes in an example. The examples ship none: the SDK pin may name a version that
+# is not on npm until its release, and a lockfile cannot resolve it (examples/README.md › Pins).
+examples/*/package-lock.json

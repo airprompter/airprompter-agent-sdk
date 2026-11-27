@@ -105,6 +105,9 @@ release. The rules are in the header of
   <framework>@latest` (or `pip install --upgrade`) line and its test files in
   the run step, so the latest framework release runs the tests weekly.
 - A section in the SDK READMEs (*Use with your framework*).
+- A runnable example in `examples/<framework>-<language>/`, once the adapter
+  is released ([`examples/README.md`](examples/README.md) › Adding an
+  example).
 - The framework's section in prompt-haven's public `frameworks.mdx`
   (AIR-2239).
 

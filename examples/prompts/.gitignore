@@ -1,0 +1,2 @@
+# `airprompter dev` keeps its dev keys here. keys.json holds the registry's private signing key: never commit it.
+.airprompter-dev/

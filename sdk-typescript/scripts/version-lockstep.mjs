@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 // One version across the packages, `@airprompter/*` peers exact-pinned to it.
+// The runnable examples (`../examples/*/package.json`) pin the SDK exactly too, and
+// `--set` moves them with the packages, so an example never names a version
+// this commit is not.
 // A tag may name a prerelease in the PEP 440 form the Python packages use
 // (`1.0.0rc0`); it equals the npm form (`1.0.0-rc.0`).
 //
@@ -7,7 +10,7 @@
 //   node scripts/version-lockstep.mjs --expect V  check, and V must be the version
 //   node scripts/version-lockstep.mjs --set V     rewrite every package.json (and the workspace root) to V
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +24,8 @@ const set = args.includes("--set") ? args[args.indexOf("--set") + 1] : null;
 const expect = args.includes("--expect") ? args[args.indexOf("--expect") + 1] : null;
 
 const manifestPath = (name) => join(root, "packages", name, "package.json");
+const examples = join(root, "..", "examples");
+const EXAMPLES = existsSync(examples) ? readdirSync(examples).map((name) => join(examples, name, "package.json")).filter(existsSync) : [];
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
 const write = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
 
@@ -34,6 +39,11 @@ if (set) {
     manifest.version = set;
     for (const field of PINNED_FIELDS) for (const dep of Object.keys(manifest[field] ?? {})) if (dep.startsWith("@airprompter/")) manifest[field][dep] = set;
     write(manifestPath(name), manifest);
+  }
+  for (const path of EXAMPLES) {
+    const manifest = read(path);
+    for (const field of PINNED_FIELDS) for (const dep of Object.keys(manifest[field] ?? {})) if (dep.startsWith("@airprompter/")) manifest[field][dep] = set;
+    write(path, manifest);
   }
   const workspace = read(join(root, "package.json"));
   workspace.version = set;
@@ -55,6 +65,16 @@ for (const name of PACKAGES) {
   }
 }
 const distinct = new Set(versions.values());
+for (const path of EXAMPLES) {
+  const manifest = read(path);
+  const name = `examples/${path.split(/[\\/]/).at(-2)}`;
+  for (const field of PINNED_FIELDS) {
+    for (const [dep, range] of Object.entries(manifest[field] ?? {})) {
+      if (!dep.startsWith("@airprompter/")) continue;
+      if (distinct.size === 1 && range !== [...distinct][0]) problems.push(`${name} pins ${dep}@${range} in ${field}; the lockstep version is ${[...distinct][0]} (--set moves it)`);
+    }
+  }
+}
 if (distinct.size !== 1) problems.push(`versions differ: ${[...versions].map(([n, v]) => `${n}=${v}`).join(", ")}`);
 const version = [...distinct][0];
 if (expect && version !== npmForm(expect)) problems.push(`the tag says ${expect}; the packages say ${version}`);

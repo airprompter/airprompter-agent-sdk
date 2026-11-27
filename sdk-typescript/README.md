@@ -448,7 +448,7 @@ while the LangChain and OpenAI Agents adapters prove its shapes. See
 
 ### LangChain
 
-Add one line to the agent you already have. Your framework, tools and data stay where they are.
+Add one line to the agent you already have. Your framework, tools and data stay where they are. [`examples/langchain-typescript/`](../examples/langchain-typescript/) is a whole agent to copy, runnable with no AirPrompter account.
 
 ```ts
 import { createAgent } from "langchain";

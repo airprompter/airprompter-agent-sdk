@@ -45,7 +45,7 @@ class DevServer:
         self.process = subprocess.Popen(["node", "--import", "tsx", CLI_MAIN, "dev", directory, "--port", "0", "--json"], cwd=TS_DIR, stdout=subprocess.PIPE, stderr=self._log, text=True)
         line = self.process.stdout.readline()
         if not line:
-            self.process.wait(timeout=10)
+            self.stop()
             raise AssertionError(f"airprompter dev did not start: {self.log()}")
         self.facts = json.loads(line)
 
@@ -62,9 +62,18 @@ class DevServer:
             return 0
 
     def stop(self) -> None:
-        self.process.terminate()
-        self.process.wait(timeout=10)
-        self._log.close()
+        """SIGTERM, then SIGKILL if it has not exited within 10 s; the pipe and the log are closed either way."""
+        try:
+            if self.process.poll() is None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=10)
+        finally:
+            self.process.stdout.close()
+            self._log.close()
 
 
 @pytest.mark.skipif(not _node_available(), reason="node + sdk-typescript/node_modules (npm ci) needed to run airprompter dev from source")
@@ -102,12 +111,14 @@ def test_python_sdk_syncs_from_airprompter_dev_and_honours_unlock_required_local
             with open(os.path.join(prompts, "support", "triage.md"), "w", encoding="utf-8") as f:
                 f.write("---\nvariables: ticket!\n---\nTriage {{ticket}} carefully.\n")
             _wait(lambda: server.promoted() >= 2, lambda: f"the server to promote generation 2 (dev: {server.log()})")
+            assert server.promoted() == 2, f"one save, one generation: the server promoted past generation 2 (dev: {server.log()})"
             _wait(lambda: ap.generation == 2, lambda: f"the runtime on generation 2 (status: {ap.status()}; dev: {server.log()})")
             assert ap.prompt("support.triage").render(ticket="T-2").text == "Triage T-2 carefully."
             # release.json turns unlock_required on: generation 3 is staged and waits for the unlock.
             with open(os.path.join(prompts, "release.json"), "w", encoding="utf-8") as f:
                 json.dump({"applyPolicy": "unlock_required"}, f)
             _wait(lambda: server.promoted() >= 3, lambda: f"the server to promote generation 3 (dev: {server.log()})")
+            assert server.promoted() == 3, f"one save, one generation: the server promoted past generation 3 (dev: {server.log()})"
             _wait(lambda: ap.status().staged_generation == 3, lambda: f"generation 3 staged (status: {ap.status()}; dev: {server.log()})")
             assert ap.generation == 2
             assert ap.status().apply_state == "awaiting_unlock"

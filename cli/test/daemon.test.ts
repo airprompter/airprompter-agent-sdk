@@ -34,6 +34,7 @@ import { FakeControlPlane, serveOverHttp } from "../../sdk-typescript/test/helpe
 import { minimalReport } from "../src/commands/daemon.js";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";
+import { childLines } from "./helpers/child.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
 const cliRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -55,10 +56,8 @@ interface Daemon {
 
 function startDaemon(args: string[], env: Record<string, string>): Daemon {
   const child = spawn(process.execPath, ["--import", "tsx", join(cliRoot, "src", "main.ts"), "daemon", ...args, "--json"], { cwd: cliRoot, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
-  const stderr: string[] = [];
-  child.stderr!.setEncoding("utf8");
-  child.stderr!.on("data", (chunk: string) => stderr.push(...chunk.split("\n").filter(Boolean)));
-  const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+  // Whole lines, and the exit once stderr is drained: a `final_upload` written just before exit is in by then.
+  const { stderr, closed: exited } = childLines(child);
   return { child, stderr, exited };
 }
 

@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,6 +19,7 @@ import test from "node:test";
 import { AirPrompterAgent } from "../../sdk-typescript/packages/sdk/src/agent.js";
 import type { P256PublicJwk } from "../../sdk-typescript/packages/sdk/src/core/protocol/types.js";
 import { parsePromptFile, parseVariables, readDevRelease, tagFromPath, DEV_API_KEY } from "../src/commands/dev.js";
+import { childLines } from "./helpers/child.js";
 
 const cliRoot = join(import.meta.dirname, "..");
 const skip = process.platform === "win32" ? "unix sockets and recursive watch differ on Windows; the ubuntu lane covers this" : false;
@@ -43,13 +44,7 @@ interface DevProcess {
 
 function startDev(dir: string, args: string[] = []): DevProcess {
   const child = spawn(process.execPath, ["--import", "tsx", join(cliRoot, "src", "main.ts"), "dev", dir, "--port", "0", "--json", ...args], { cwd: cliRoot, stdio: ["ignore", "pipe", "pipe"] });
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  child.stdout!.setEncoding("utf8");
-  child.stdout!.on("data", (chunk: string) => stdout.push(...chunk.split("\n").filter(Boolean)));
-  child.stderr!.setEncoding("utf8");
-  child.stderr!.on("data", (chunk: string) => stderr.push(...chunk.split("\n").filter(Boolean)));
-  const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
+  const { stdout, stderr, closed: exited } = childLines(child);
   return {
     child,
     stdout,
@@ -62,6 +57,18 @@ function startDev(dir: string, args: string[] = []): DevProcess {
       await exited;
     },
   };
+}
+
+/**
+ * Save a file in the watched directory the way an editor's atomic save does: the bytes go to a temp file outside it
+ * (same filesystem), then one rename puts them in place. A plain writeFileSync truncates first and writes after; if
+ * this process stalls between the two for longer than the server's 200 ms debounce, the server reads an empty file
+ * and promotes a real generation without that slot, and every generation count below is off by one.
+ */
+function save(work: string, path: string, text: string): void {
+  const temp = join(work, `.save-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  writeFileSync(temp, text);
+  renameSync(temp, path);
 }
 
 function fixture(root: string): string {
@@ -145,18 +152,18 @@ test("an SDK syncs from airprompter dev as from the hosted service; a save is a 
       assert.deepEqual(ap.prompt("support.triage").variables().map((v) => [v.name, v.required, v.trust]), [["ticket", true, "operator"], ["team", false, "operator"], ["customer", true, "end_user"]]);
 
       // A save that changes the release: generation 2 on the server, then on the client within a poll.
-      writeFileSync(join(dir, "support", "reply.txt"), "Reply warmly to {{name}}.");
+      // (The server sees the save through fs.watch, AIR-2268: the test waits on what it logs, with a deadline.)
+      save(work, join(dir, "support", "reply.txt"), "Reply warmly to {{name}}.");
       await until(() => dev.events().some((e) => e.event === "generation" && e.generation === 2), () => `generation 2 (dev said: ${dev.stderr.join(" | ")})`);
       await until(() => ap.generation === 2, "the client on generation 2");
       assert.equal(ap.prompt("support.reply").render({ name: "Bo" }).text, "Reply warmly to Bo.");
-      // A save that changes nothing (the same bytes again): no generation.
-      writeFileSync(join(dir, "support", "reply.txt"), "Reply warmly to {{name}}.");
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      assert.equal(dev.events().filter((e) => e.event === "generation").length, 1, "an unchanged save is not a generation");
-      // A file that does not parse: reported; generation 2 keeps serving.
-      writeFileSync(join(dir, "Bad Name.md", ), "oops");
-      await until(() => dev.events().some((e) => e.event === "problem"), "the problem reported");
-      assert.equal(dev.events().filter((e) => e.event === "generation").length, 1);
+      // A save that changes nothing (the same bytes again): no generation. Then a file that does not parse: reported,
+      // and generation 2 keeps serving. The reload that reports the problem read the directory after the unchanged
+      // save, so once it is logged neither save can still be on its way; the count is final when the server has
+      // stopped and its stderr is drained (below), rather than after a fixed sleep.
+      save(work, join(dir, "support", "reply.txt"), "Reply warmly to {{name}}.");
+      save(work, join(dir, "Bad Name.md"), "oops");
+      await until(() => dev.events().some((e) => e.event === "problem"), () => `the problem reported (dev said: ${dev.stderr.join(" | ")})`);
       rmSync(join(dir, "Bad Name.md"));
     } finally {
       await ap.stop();
@@ -164,6 +171,9 @@ test("an SDK syncs from airprompter dev as from the hosted service; a save is a 
 
     // Restart: the same keys, the counter continues (a client that holds 2 never sees a fresh 1 or 2).
     await dev.stop();
+    const generations = dev.events().filter((e) => e.event === "generation").map((e) => e.generation);
+    assert.deepEqual(generations, [2], `one save, one generation: the unchanged save and the bad file are not generations (dev said: ${dev.stderr.join(" | ")})`);
+    assert.equal(dev.events().find((e) => e.event === "stopped")?.generation, 2, "the server stopped on generation 2");
     writeFileSync(join(dir, "release.json"), JSON.stringify({ applyPolicy: "unlock_required" }));
     dev = startDev(dir);
     await until(() => dev.stdout.length > 0, "restarted");
@@ -200,15 +210,11 @@ test("the live conformance runner passes against airprompter dev; a resident SDK
     // The runner needs the conformance package's own dependencies (ajv); CI installs them before this suite.
     assert.ok(existsSync(join(cliRoot, "..", "conformance", "node_modules", "ajv")), "conformance/node_modules is installed (npm ci in conformance/)");
     const live = spawn(process.execPath, [join(cliRoot, "..", "conformance", "live.mjs"), "--base-url", String(facts.baseUrl), "--agent", "agt_dev", "--environment", "dev", "--api-key", DEV_API_KEY, "--root", String(facts.root), "--json"], { cwd: join(cliRoot, "..", "conformance"), stdio: ["ignore", "pipe", "pipe"] });
-    let output = "";
-    let liveErr = "";
-    live.stdout.setEncoding("utf8");
-    live.stdout.on("data", (chunk: string) => (output += chunk));
-    live.stderr.setEncoding("utf8");
-    live.stderr.on("data", (chunk: string) => (liveErr += chunk));
-    const code = await new Promise<number | null>((resolve) => live.once("exit", resolve));
-    const last = output.trim().split("\n").pop() ?? "";
-    assert.ok(last.startsWith("{"), `the runner printed no report (exit ${code}): ${liveErr.slice(0, 400)}`);
+    // `closed` waits for the runner's stdout to drain: on `exit` alone the report line can still be in the pipe.
+    const runner = childLines(live);
+    const code = await runner.closed;
+    const last = runner.stdout.at(-1) ?? "";
+    assert.ok(last.startsWith("{"), `the runner printed no report (exit ${code}): ${runner.stderr.join("\n").slice(0, 400)}`);
     const report = JSON.parse(last) as { checks: number; failures: number; results: Array<{ route: string; rule: string; ok: boolean; detail?: string }> };
     assert.equal(code, 0, report.results.filter((r) => !r.ok).map((r) => `${r.route} ${r.rule}: ${r.detail}`).join("\n"));
     assert.ok(report.checks >= 20 && report.failures === 0, JSON.stringify({ checks: report.checks, failures: report.failures }));
@@ -227,7 +233,7 @@ test("the live conformance runner passes against airprompter dev; a resident SDK
     });
     try {
       assert.equal(ap.generation, 1);
-      writeFileSync(join(dir, "support", "reply.txt"), "Reply again to {{name}}.");
+      save(work, join(dir, "support", "reply.txt"), "Reply again to {{name}}.");
       await until(() => readFileSync(join(dir, ".airprompter-dev", "generation"), "utf8").trim() === "2", () => `generation 2 promoted (dev said: ${dev.stderr.slice(-4).join(" | ")})`, 20_000);
       await ap.syncNow();
       assert.equal(ap.generation, 2);

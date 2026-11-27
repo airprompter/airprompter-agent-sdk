@@ -8,23 +8,22 @@
  * never failed. The wire carries integers (canonical-json.md); the providers
  * take floats, converted here.
  *
- * Settings sealed for one model are refused by another (Anthropic Messages
- * takes one of `temperature` / `top_p`, and none beside `thinking`; an
- * OpenAI reasoning model takes neither), so they go only on a call to the
- * release's model: a call site that names another model keeps its own
- * parameters and is told why.
+ * Settings are sealed for the release's model, and the adapter has already
+ * put that model on the call (`chooseModel`): a call to another model is
+ * declined before it gets here.
  *
  * @example
  * ```ts
  * // The slot sealed { temperatureMilli: 200, maxOutputTokens: 800 }; the call site wrote temperature: 0.7.
- * const applied = applyInference("chat", params, r.inference!, { model: r.model });
+ * const applied = applyInference("chat", params, r.inference!);
  * applied.params; // { ...params, temperature: 0.2, max_completion_tokens: 800 } — a copy; params is untouched
  * applied.overridden; // ["temperature"]: logged once, never a failure
- * applied.skipped; // "model_mismatch" when params.model is not the release's: nothing applied
  * ```
  */
 import type { SlotInference } from "../../core/index.js";
-import type { StreamKind } from "./client.js";
+
+/** The request shape a direct client call takes: OpenAI chat, OpenAI Responses, Anthropic Messages. */
+export type RequestKind = "chat" | "responses" | "messages";
 
 /** The settings in one order, so every log line and every SDK names them alike. */
 export const INFERENCE_KEYS = ["temperatureMilli", "topPBps", "maxOutputTokens", "stopSequences", "reasoningEffort"] as const satisfies readonly (keyof SlotInference)[];
@@ -36,13 +35,13 @@ export const temperatureOf = (inference: SlotInference): number | undefined => (
 export const topPOf = (inference: SlotInference): number | undefined => (unset(inference.topPBps) ? undefined : inference.topPBps / 10000);
 
 /** The provider parameter each setting lands on, per request shape; `null` when the shape has no such parameter. */
-const PARAMETER: Record<StreamKind, Record<keyof SlotInference, string | null>> = {
+const PARAMETER: Record<RequestKind, Record<keyof SlotInference, string | null>> = {
   chat: { temperatureMilli: "temperature", topPBps: "top_p", maxOutputTokens: "max_completion_tokens", stopSequences: "stop", reasoningEffort: "reasoning_effort" },
   responses: { temperatureMilli: "temperature", topPBps: "top_p", maxOutputTokens: "max_output_tokens", stopSequences: null, reasoningEffort: "reasoning" },
   messages: { temperatureMilli: "temperature", topPBps: "top_p", maxOutputTokens: "max_tokens", stopSequences: "stop_sequences", reasoningEffort: null },
 };
 
-function valueFor(key: keyof SlotInference, inference: SlotInference, kind: StreamKind): unknown {
+function valueFor(key: keyof SlotInference, inference: Readonly<SlotInference>, kind: RequestKind): unknown {
   switch (key) {
     case "temperatureMilli": return temperatureOf(inference);
     case "topPBps": return topPOf(inference);
@@ -67,13 +66,6 @@ export interface AppliedInference {
   overridden: string[];
   /** Settings that were not applied, each with why. */
   unsupported: Array<{ setting: keyof SlotInference; reason: InferenceUnsupportedReason }>;
-  /** Set when nothing was applied because the call names a model other than the release's. */
-  skipped?: "model_mismatch";
-}
-
-export interface ApplyInferenceOptions {
-  /** The release's model for the slot; when the call names another model the settings stay off it. */
-  model?: string;
 }
 
 const same = (left: unknown, right: unknown): boolean => {
@@ -85,11 +77,8 @@ const same = (left: unknown, right: unknown): boolean => {
 };
 
 /** A copy of `params` with the slot's settings applied; the original object is never mutated. */
-export function applyInference(kind: StreamKind, params: Record<string, unknown>, inference: SlotInference, options: ApplyInferenceOptions = {}): AppliedInference {
+export function applyInference(kind: RequestKind, params: Record<string, unknown>, inference: Readonly<SlotInference>): AppliedInference {
   const out: Record<string, unknown> = { ...params };
-  if (options.model !== undefined && typeof params.model === "string" && params.model !== options.model) {
-    return { params: out, overridden: [], unsupported: [], skipped: "model_mismatch" };
-  }
   const overridden: string[] = [];
   const unsupported: AppliedInference["unsupported"] = [];
   const thinking = kind === "messages" && !unset(out.thinking);

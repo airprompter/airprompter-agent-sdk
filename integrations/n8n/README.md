@@ -15,19 +15,25 @@ No model ever runs on AirPrompter.
 all set in AirPrompter, and none of them can be changed in n8n. A step only picks a slot, fills its variables and
 can name a **Subject**.
 
-> Status: not yet published to npm and not verified by n8n (see [n8n verification](#n8n-verification)). The package
-> targets **self-hosted n8n**.
+> **Self-hosted n8n only at launch.** This package does not run on n8n Cloud: n8n Cloud installs only community
+> nodes that n8n has verified, and this one cannot be verified as built (see [n8n verification](#n8n-verification)).
+>
+> **Not yet published to npm.** Publishing waits for the first `@airprompter/agent-sdk` release after
+> `1.0.0-rc.4`, which pins AirPrompter's Production root. Until then, a Production credential needs the root key
+> (see [Credentials](#credentials)).
 
 ## Install (self-hosted)
 
-Until the package is on npm, build it from this repository and load it as a custom extension (the SDK comes from npm):
+Once it is published: **Settings › Community Nodes › Install** › `n8n-nodes-airprompter`. n8n runs npm, which
+installs the package with its one dependency, `@airprompter/agent-sdk`.
+
+Until then, pack it from this repository and install the tarball where n8n keeps community packages, the same way
+n8n's manual install works. Then restart n8n:
 
 ```bash
-cd integrations/n8n && npm ci --legacy-peer-deps && npm run build
-N8N_CUSTOM_EXTENSIONS="$PWD" npx n8n start
+cd integrations/n8n && npm ci --legacy-peer-deps && npm run build && npm pack
+mkdir -p ~/.n8n/nodes && cd ~/.n8n/nodes && npm install --omit=dev --omit=peer /path/to/n8n-nodes-airprompter-0.1.0.tgz
 ```
-
-Once it is published: **Settings › Community Nodes › Install** › `n8n-nodes-airprompter`.
 
 ## Credentials
 
@@ -38,15 +44,25 @@ Create an **AirPrompter Agent API** credential:
 | Agent ID | The agent in AirPrompter that holds the slots. |
 | Update Key | The agent's Update key (key kind "agent", bound to one agent and one environment). It reads approved releases and nothing more. |
 | Environment | The environment the key is bound to, such as `prod`. |
-| Root Public Key | AirPrompter's root public key (a JSON Web Key) for the deployment. Every release is verified against it before it is stored or used. Optional for a deployment whose root the SDK's Steps core pins (`HOSTED_ROOTS` in `sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`): `dev`, and `prod` from the first SDK release after `1.0.0-rc.4` (ceremony of 2026-11-27). |
+| Root Public Key | AirPrompter's root public key (a JSON Web Key) for the deployment. Every release is verified against it before it is stored or used. Leave it empty for **Dev**: this version pins Dev's root. **Production needs it in this version**, because the SDK it depends on (`1.0.0-rc.4`) does not pin the Production root yet. Use the key below. The next SDK release pins it, and then the field can be left empty for Production too. |
 | API Base URL | `https://api.airprompter.com` by default. For testing, use a dev URL or a local `airprompter dev` registry. |
 | AirPrompter Deployment | The deployment that signs the releases: `prod`, `staging` or `dev`. This is not the agent's environment. |
 | Root Document URL | Optional. Defaults to *API Base URL*`/roots/<deployment>/root.json`. |
 | Organization ID | Optional. It is learned from the first verified release. |
-| Keep the Stored Copy In | **n8n User Folder** (self-hosted) or **Workflow Static Data** (no disk). See [Where the release is kept](#where-the-release-is-kept). |
+| Keep the Stored Copy In | **n8n User Folder** or **Workflow Static Data**. See [Where the release is kept](#where-the-release-is-kept). |
 | Starting Bundle Path | Optional, user folder only. A `.apbundle` to serve from before AirPrompter has ever been reached. |
 
-The credential test fetches the signed manifest and **verifies** it. A wrong key, the wrong environment or the wrong
+AirPrompter's Production root public key (ceremony of 2026-11-27, key id
+`044af6e83353a2ea3758cc3feb3b1b7031c82bda5d6cd9287ba7730363e11793`). It is the same key the SDK pins in source,
+`HOSTED_ROOTS.prod` in
+[`frameworks/steps/trust.ts`](https://github.com/airprompter/airprompter-agent-sdk/blob/main/sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts):
+
+```json
+{"kty":"EC","crv":"P-256","x":"hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE","y":"OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE"}
+```
+
+The credential test fetches the signed manifest and **verifies** it. A wrong key, the wrong environment, a missing
+root or the wrong
 root key each fail the test with the reason.
 
 ## Using it
@@ -118,21 +134,20 @@ again.
 
 | Hosting | Storage | Limits |
 |---|---|---|
-| Self-hosted (default) | `N8N_USER_FOLDER/.n8n/airprompter/<agent>/<environment>/releases` (`~/.n8n/...` without the variable) | All workflows on the instance share it. It is written by one process at a time (an atomic rename per file). In **queue mode**, each worker needs this folder on a shared volume, or each worker keeps its own copy. |
-| No disk (*Workflow Static Data*) | The workflow's static data under the key `airprompter` | n8n saves static data **only after production executions** (an active workflow started by its trigger, schedule or webhook), never after a manual test run. Each workflow keeps its own copy. The data is stored in n8n's database next to the workflow, so it holds at most two releases. Two executions that run at the same time each save, and the later save wins. This is harmless because rows are immutable and verified on load. |
+| n8n User Folder (default) | `N8N_USER_FOLDER/.n8n/airprompter/<agent>/<environment>/releases` (`~/.n8n/...` without the variable) | All workflows on the instance share it. It is written by one process at a time (an atomic rename per file). In **queue mode**, each worker needs this folder on a shared volume, or each worker keeps its own copy. |
+| *Workflow Static Data* (queue mode or an external database without a shared volume) | The workflow's static data under the key `airprompter`, in n8n's database | n8n saves static data **only after production executions** (an active workflow started by its trigger, schedule or webhook), never after a manual test run. Each workflow keeps its own copy. The data is stored in n8n's database next to the workflow, so it holds at most two releases. Two executions that run at the same time each save, and the later save wins. This is harmless because rows are immutable and verified on load. |
 | Fully offline | *Starting Bundle Path*: a plaintext `.apbundle` (`airprompter pull --plaintext`, dev environment) is copied into an empty stored copy | It is verified like any other release and serves within its manifest's lease, counted from when the manifest was issued. Export it with a lease that covers the offline period. A bundle sealed to another key cannot be read. |
 
-**n8n Cloud.** A custom node *can* call `getWorkflowStaticData` from `execute`, `poll` and load-options methods (it is
-on `FunctionsBase` in `n8n-workflow`), so static data is the storage that needs no disk. **Data tables** were
-considered and not used for three reasons:
+**Why Workflow Static Data, not data tables.** A node can call `getWorkflowStaticData` from `execute`, `poll` and
+load-options methods (it is on `FunctionsBase` in `n8n-workflow`), and static data lives in n8n's own database. So
+it suits workers that share a database but no folder. **Data tables** were considered and not used for three
+reasons:
 
 - Their helpers (`getDataTableProxy`) are not available to polling triggers.
 - They require the user to create a table first.
 - They are scoped to a project.
 
-Their advantage would be persisting after manual runs. However, n8n Cloud installs only **verified** community nodes,
-and this package cannot be verified as built (next section). The no-disk mode therefore matters today for
-containers without a persistent volume.
+Their advantage would be persisting after manual runs.
 
 **Telemetry.** Each Report Run sends its rows synchronously, under its own upload grant. Nothing is spooled on disk.
 
@@ -147,11 +162,22 @@ and its linter (`npm run lint:cloud`) refuse four things this package needs or h
    next two points.
 2. **File system and environment access.** This covers the user-folder storage and `N8N_USER_FOLDER`. The SDK
    itself also uses `node:fs`, a temporary store per call and `process.env`.
-3. **Restricted globals.** `setTimeout`, used for request timeouts, and `process`.
-4. **License.** n8n requires MIT. This repository is BSD-3-Clause.
+3. **Restricted globals.** `process`, and the SDK's timers.
+4. **License.** n8n requires MIT. This repository is BSD-3-Clause, which is a business choice, not a technical
+   need.
 
 `npm run lint` runs n8n's own rule set for packages that do not target n8n Cloud (`@n8n/node-cli`'s
 `configWithoutCloudSupport`), with only the licence and dependency rules relaxed. It passes.
+
+## Design decisions
+
+1. **This node depends on `@airprompter/agent-sdk`.** n8n's rule against runtime dependencies applies to
+   *verified* community nodes, the ones n8n Cloud can install. A self-hosted install runs npm, which installs the
+   dependency. The SDK holds the trust chain, the sealed store, the A/B assignment and the run reference, and
+   copying those into the node would fork the protocol.
+2. **Self-hosted only at launch, not n8n Cloud.** n8n Cloud needs verification, which this package fails on its
+   runtime dependency, file system and environment access, restricted globals and licence. A Cloud build would be a
+   separate package.
 
 ## How it is built
 
@@ -170,7 +196,16 @@ and its linter (`npm run lint:cloud`) refuse four things this package needs or h
 Report Run is the run's one count: the Steps core calls the SDK's `ap.reportRun`. Get Prompt renders outside any
 run and writes no run row.
 
+**Requests inside n8n.** n8n installs its own `undici` as the global `fetch` dispatcher, and that undici refuses a
+request whose `content-length` the caller also set. The SDK's telemetry upload sets one (1.0.0-rc.4), which made
+every Report Run fail in real n8n. `src/n8n/connect.ts` therefore hands the core a `fetch` that drops the header,
+since `fetch` computes it from the body anyway. `test/n8n/dispatcher.test.ts` runs under such a dispatcher and will
+fail once the SDK stops setting the header. When it does, remove the workaround.
+
 ## Develop
+
+To run the node in a real, headless n8n against a live AirPrompter, see [`qa/README.md`](https://github.com/airprompter/airprompter-agent-sdk/blob/main/integrations/n8n/qa/README.md).
+
 
 ```bash
 cd sdk-typescript && npm ci && npm run build && cd ../cli && npm ci && cd ../integrations/n8n

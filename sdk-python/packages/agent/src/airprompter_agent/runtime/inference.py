@@ -4,16 +4,14 @@ effort are reviewed and sealed with the prompt text, so the call goes out with t
 wrote — and a call site that wrote a different value is told once, in the log, never failed. The wire carries integers
 (canonical-json.md); the providers take floats, converted here.
 
-Settings sealed for one model are refused by another (Anthropic Messages takes one of ``temperature`` / ``top_p``, and
-none beside ``thinking``; an OpenAI reasoning model takes neither), so they go only on a call to the release's model: a
-call site that names another model keeps its own parameters and is told why.
+Settings are sealed for the release's model, and the adapter has already put that model on the call
+(``choose_model``): a call to another model is declined before it gets here.
 
 Example::
 
-    applied = apply_inference("chat", {"model": "gpt-5", "temperature": 1, "max_tokens": 900}, {"temperatureMilli": 200, "maxOutputTokens": 400}, model="gpt-5")
+    applied = apply_inference("chat", {"model": "gpt-5", "temperature": 1, "max_tokens": 900}, {"temperatureMilli": 200, "maxOutputTokens": 400})
     applied.params       # {"model": "gpt-5", "temperature": 0.2, "max_completion_tokens": 400} — max_tokens dropped: one lever, not two
     applied.overridden   # ["temperature", "max_tokens"]: told once in the log, never failed
-    apply_inference("chat", {"model": "gpt-5-mini"}, inference, model="gpt-5").skipped   # "model_mismatch": another model keeps its own
 """
 
 from __future__ import annotations
@@ -73,19 +71,12 @@ class AppliedInference:
     overridden: list[str] = field(default_factory=list)
     #: Settings that were not applied, each as ``{"setting": …, "reason": …}``.
     unsupported: list[dict[str, str]] = field(default_factory=list)
-    #: Set when nothing was applied because the call names a model other than the release's.
-    skipped: Optional[Literal["model_mismatch"]] = None
 
 
-def apply_inference(kind: str, params: Mapping[str, Any], inference: Mapping[str, Any], *, model: Optional[str] = None) -> AppliedInference:
-    """A copy of ``params`` with the slot's settings applied; the original mapping is never mutated. With ``model`` (the
-    release's model for the slot), a call that names another model is left alone and reported as ``model_mismatch``."""
+def apply_inference(kind: str, params: Mapping[str, Any], inference: Mapping[str, Any]) -> AppliedInference:
+    """A copy of ``params`` with the slot's settings applied; the original mapping is never mutated."""
     out: dict[str, Any] = dict(params)
     applied = AppliedInference(params=out)
-    called = params.get("model")
-    if model is not None and isinstance(called, str) and called != model:
-        applied.skipped = "model_mismatch"
-        return applied
     table = _PARAMETER.get(kind, {})
     thinking = kind == "messages" and out.get("thinking") is not None
     both_sampling = kind == "messages" and inference.get("temperatureMilli") is not None and inference.get("topPBps") is not None

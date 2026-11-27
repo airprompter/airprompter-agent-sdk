@@ -2,8 +2,8 @@
 
 One install for `AirPrompterAgent`: signed pull-only updates, the encrypted
 restart-safe slot store, offline operation, rendering with trust-aware
-variables, `ap.wrap()` for the openai and anthropic clients (and a LiteLLM
-callback), and content-free telemetry.
+variables, framework adapters for the openai and anthropic clients and LiteLLM
+(`airprompter_agent.frameworks.*`), and content-free telemetry.
 
 ```python
 from airprompter_agent import AirPrompterAgent
@@ -16,8 +16,9 @@ ap.feedback(rendered.run_ref, thumbs="up")
 
 The parts are subpackages: `airprompter_agent.core` (the protocol with no I/O),
 `.sync` (pull and verify, the encrypted slot store, the apply policy), `.runtime`
-(render and assign over a release you hold, the provider wrappers) and
-`.telemetry` (the spool and its uploader). Extras: `[kms]`, `[vault]`, `[keyring]`,
+(render and assign over a release you hold, the run session) and
+`.telemetry` (the spool and its uploader); the adapters are `airprompter_agent.frameworks.openai`, `.anthropic` and
+`.litellm`, on the contract in `.frameworks.contract` (outside the 1.0 promise). Extras: `[kms]`, `[vault]`, `[keyring]`,
 `[openai]`, `[anthropic]`, `[litellm]`.
 
 Separate distributions exist only for dependency footprint and pin this one to

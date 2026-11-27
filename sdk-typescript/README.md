@@ -15,25 +15,28 @@ One install. Everything below is in the one package; you import the part you
 use, and a part you do not import is not loaded.
 
 ```bash
-npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.4   # the 1.0 release candidate
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.5   # the 1.0 release candidate
 # With a satellite, pin each one to the same candidate:
-npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.4 @airprompter/datastore-s3@1.0.0-rc.4 @airprompter/agent-otel@1.0.0-rc.4
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.5 @airprompter/datastore-s3@1.0.0-rc.5 @airprompter/agent-otel@1.0.0-rc.5
 ```
 
 Pin every package exactly. An unpinned datastore installs 0.6.0, which brings
 the old split packages in beside this one. npm's default range,
-`^1.0.0-rc.4`, also matches later candidates, and a later candidate removes
-`ap.wrap`.
+`^1.0.0-rc.5`, also matches later candidates, which may still change before
+1.0.0. rc.5 removes the wrapped clients of rc.4 (see *Coming from an earlier
+candidate?* below).
 
 | Import | Use it when |
 | --- | --- |
 | `@airprompter/agent-sdk` | `AirPrompterAgent` and its option and result types. Everything else is reached through a subpath. |
 | `@airprompter/agent-sdk/core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane HTTP client, the port interfaces. Nothing here opens a file, a socket or a timer at import. |
 | `@airprompter/agent-sdk/sync` | Your CI pulls and verifies releases (`syncOnce`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). |
-| `@airprompter/agent-sdk/runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `/core` + `ReleaseResolver`); the provider wrappers (`wrapClient`, `aiSdkMiddleware`, `observeCall`). |
+| `@airprompter/agent-sdk/runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `/core` + `ReleaseResolver`); the run session, `observeCall`, and the `ap.attribute` scope. What the framework adapters share is on `/frameworks/contract`, not here. |
 | `@airprompter/agent-sdk/telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
 | `@airprompter/agent-sdk/testing` | The kit a customer's CI imports: `FakeControlPlane`, `MemoryFs`, `FakeClock`. Never loaded by the runtime. |
+| `@airprompter/agent-sdk/frameworks/openai`, `/frameworks/anthropic`, `/frameworks/ai-sdk` | The OpenAI and Anthropic clients and the Vercel AI SDK as adapters: the approved text, model and settings go on every call, measured into the run ([Use with your framework](#use-with-your-framework)). Their frameworks are optional peers, and these subpaths import nothing of them at run time. |
 | `@airprompter/agent-sdk/frameworks/langchain` | Middleware for LangChain's `createAgent`. `langchain`, `@langchain/core` and `zod` are optional peers: install them to use this subpath, and no other subpath loads them. |
+| `@airprompter/agent-sdk/frameworks/contract` | The contract every adapter follows, for writing your own. Outside the 1.0 promise: a minor may change it. |
 | `@airprompter/agent-sdk/frameworks/steps` | A no-code automation step (one invocation per step, nothing kept warm): `createAutomationClient` — Get prompt, Report run (through `ap.reportRun`, the run's one count), slots and variables for field schemas, rollout events for a polling trigger — over a signed copy kept in the platform's own storage. The core of the [Zapier app](../integrations/zapier/) and the [n8n nodes](../integrations/n8n/), which import the SDK only through it. Outside the 1.0 promise for now; TypeScript only. |
 
 Everything runs on your systems.
@@ -90,9 +93,8 @@ const r = ap.prompt("support.triage").render({ team: "Billing", ticket: userMess
 // observe() times the call, reads `usage` off the provider's response (OpenAI, Anthropic, Bedrock),
 // classifies a failure into the closed error set, and returns the result unchanged.
 const reply = await ap.observe(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }));
-// …or wrap the client once and change nothing at the call site: the call is attributed to the render whose text it carries.
-const openai = ap.wrap(new OpenAI());
-const reply2 = await openai.chat.completions.create({ model: r.model, messages: [{ role: "system", content: r.text }, { role: "user", content: userMessage }] });
+// …or let an adapter place the approved text, model and settings for you (see "Use with your framework"):
+//   const openai = instrument(new OpenAI(), ap, { slot: "support.triage" });
 // …or report by hand: ap.report({ tag: r.tag, artifactId: r.artifactId, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs, tokens: { input, output } });
 ap.feedback(r.runRef, { thumbs: "up" });
 ```
@@ -346,67 +348,105 @@ the requests it has surfaced) and adopts the cadence the server answers
 with; a key past its 500-live-instance cap is refused and reported in
 `status().heartbeat.lastRefusal`.
 
-## Wrapped clients (`ap.wrap`, D65)
+## Use with your framework
 
-`ap.wrap(client)` returns the same client with its public model-call
-methods observed — a proxy, never a patched internal, never a vendored
-copy of a provider SDK, and no import of one (the packages are optional
-peers). Each call is timed, its `usage` and finish reason read off the
-response or the stream as it goes by, the slot's declared checks run on
-the text here, and one content-free observation filed. Nothing the wrapper
-does can fail the call: attribution and tapping are guarded, an
-unattributed call passes straight through (logged `wrap_unattributed`),
-and a stream a consumer abandons reports what was seen.
+Each framework has an adapter under `@airprompter/agent-sdk/frameworks/<name>`.
+Every adapter does the same job: it asks the run for the approved prompt,
+model and settings, puts them into the framework's call, and reports what the
+call cost. The framework package is an optional peer: install it to use its
+subpath, and no other subpath loads it.
 
-| Client | Observed methods | Streams |
+| Framework | Import | One line |
 | --- | --- | --- |
-| `openai` (`OpenAI`) | `chat.completions.create` / `.parse` / `.stream()`, `responses.create` / `.parse` / `.stream()`, `beta.chat.completions.parse` | `stream: true` (usage from the last chunk — send `stream_options: { include_usage: true }`), the `.stream()` helpers through `finalChatCompletion()` / `finalResponse()` |
-| `@anthropic-ai/sdk` (`Anthropic`) | `messages.create`, `messages.stream()`, `beta.messages.*` | `stream: true` (usage from `message_start` + `message_delta`), `messages.stream()` through `finalMessage()` |
-| Vercel AI SDK (`ai`) | `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })` — every provider the AI SDK drives | `wrapStream` taps the parts; the `finish` part's usage and reason count |
+| OpenAI (`openai`) | `@airprompter/agent-sdk/frameworks/openai` | `const openai = instrument(new OpenAI(), ap, { slot: "support.reply" })` |
+| Anthropic (`@anthropic-ai/sdk`) | `@airprompter/agent-sdk/frameworks/anthropic` | `const anthropic = instrument(new Anthropic(), ap, { slot: "support.reply" })` |
+| Vercel AI SDK (`ai`) | `@airprompter/agent-sdk/frameworks/ai-sdk` | `wrapLanguageModel({ model, middleware: airprompterMiddleware(ap, { slot: "support.reply" }) })` |
+| LangChain (`langchain`) | `@airprompter/agent-sdk/frameworks/langchain` | `createAgent({ model, tools, middleware: [airprompter(ap, { slots: "support-reply" })] })` (below) |
 
-Not observed (the client's own): `withResponse()` is (its `data` is
-observed); `.tee()`'d streams, `with_raw_response`-style surfaces, and any
-method not in the table are forwarded untouched.
+```ts
+import OpenAI from "openai";
+import { instrument } from "@airprompter/agent-sdk/frameworks/openai";
 
-**The release's inference settings (protocol 0.3.1 / 0.3.2).** A prompt
-version declares how its model is called — temperature, top-p, the output
-cap, stop sequences, reasoning effort — and the release seals those with
-the text (`rendered.inference`, integers on the wire: `temperatureMilli`
-200 is 0.2, `topPBps` 9000 is 0.9; a workflow step carries its own). A
-wrapped call attributed to that render goes out with the release's values:
-`temperature`, `top_p`, `max_completion_tokens` / `max_output_tokens` /
-`max_tokens`, `stop` / `stop_sequences`, `reasoning_effort` /
-`reasoning.effort` (the Responses `reasoning` object is merged, its other
-members kept). A call site that wrote a different value is told once —
-`wrap_inference_overridden` names the parameters — never failed. The
-settings go only on a call to the release's model: a call that names
-another model keeps its own parameters (`wrap_inference_model_mismatch`),
-since settings sealed for one model are refused by another. A setting the
-call cannot carry is reported, not sent (`wrap_inference_unsupported`, with
-a reason): a stop sequence on Responses or a reasoning effort on Messages
-(`shape`); on Anthropic Messages, which takes one sampling parameter,
-temperature goes and top-p does not (`one_sampling_parameter`), and neither
-goes beside a `thinking` block the call site set (`thinking`). The AI SDK
-middleware applies the same rules through `transformParams`. Instrumentation
-that calls a provider itself uses `applyInference(kind, params, inference,
-{ model })` (exported from `@airprompter/agent-sdk/runtime`); a
-golden-set `invoke` receives `inference` so the activation gate samples as
-production does.
+const openai = instrument(new OpenAI(), ap, { slot: "support.reply" });
+const reply = await ap.run({ subject: userId }, () =>
+  openai.chat.completions.create({ model: "gpt-5", messages: [{ role: "user", content: question }] }),
+); // the system message is the approved text, on the release's model and settings: one run row
+```
 
-**Which render a call belongs to.** In order: an enclosing
-`ap.attribute(rendered, () => …)` scope (`AsyncLocalStorage`, so it
-follows `await`s); else a request text — `system`, `instructions`, then
-each message's string or `text` parts — that is exactly one of the last
-256 renders (matched by SHA-256; the registry keeps hashes and dimension
-names, never a prompt); else the call is unattributed and passed through.
-The request's `model` names the window (a router that chose another model
-than the slot's is reported as such). Tested against clients shaped like
-the real ones in CI, and against the latest `openai`, `@anthropic-ai/sdk`
-and `ai` releases weekly (`.github/workflows/wrap-latest.yml`,
-`npm run test:wrap-live`); the supported ranges are the package's
-`peerDependencies`.
+What every adapter does:
 
-## LangChain
+- **The approved text goes in the system position.** Chat Completions: a
+  leading `system` or `developer` message is replaced, or one is prepended.
+  Responses: `instructions`. Messages: `system`. The AI SDK: the head of
+  `prompt`. The caller's request object is never mutated.
+- **The release's model wins, or the slot declines.** A call that names the
+  release's model, or none, runs on it. A call that names another model
+  needs `modelFor` (an Azure deployment, a Bedrock id, a gateway alias, or
+  for the AI SDK the model object itself); without one the slot declines for
+  the run (`model_unresolved`, logged once, one error row against that
+  version) and the call goes out exactly as you wrote it. Approved text never
+  runs on a model the release did not pin.
+- **The sealed settings go on the call.** A prompt version declares how its
+  model is called (temperature, top-p, the output cap, stop sequences,
+  reasoning effort) and the release seals them with the text, integers on
+  the wire (`temperatureMilli` 200 is 0.2). They land on the framework's own
+  parameter names; a call site that wrote a different value is told
+  (`adapter_inference_overridden`), never failed; a setting the call cannot
+  carry is reported, not sent (`adapter_inference_unsupported`: a stop
+  sequence on Responses, a reasoning effort on Messages, top-p beside
+  temperature or either beside `thinking` on Messages). On Messages the
+  approved text replaces `system` whole, so your own `system` blocks and their
+  `cache_control` do not go out.
+- **When nothing can be served,** your own prompt and model run, untouched,
+  and nothing is measured: nothing promoted, a staged release waiting for an
+  unlock, a disable, or a slot that is not in the release.
+- **One request is one run.** Inside `ap.run(...)` every call joins that run
+  and `ap.run` ends it; with no run open, each call is a one-call run that
+  ends when the response or the stream settles. Consume a stream inside
+  `ap.run`: anything still going after it returns is dropped with one log.
+- **Nothing the adapter does fails your call.** Usage, the finish reason and
+  the slot's declared checks are read off the response or the stream as it
+  goes by; a chunk it cannot read passes through.
+
+The direct clients (`openai`, `@anthropic-ai/sdk`) have two more rules. With
+a slot, stream with `create({ stream: true })`: the `.stream()` helpers
+answer synchronously, so they cannot wait for the placement and pass through
+unmeasured (one `adapter_stream_helper_unmeasured` log). Without a slot, the
+client only measures, inside `ap.attribute(rendered, fn)` where you placed
+the text yourself: a call to the release's model (or naming none) gets that
+model and the sealed settings, and is observed against that render; a call
+to another model with no `modelFor` goes out unchanged and is not observed
+(`model_unresolved`, once), so another model's numbers never count against
+the version. A call with neither a slot nor a scope passes
+through unobserved (one `adapter_unattributed` log per method). Nothing
+guesses which prompt a call belongs to from its text. Instrumenting a client
+twice is once: the first slot stays.
+
+Every adapter logs the same events (`ADAPTER_EVENTS` on
+`/frameworks/contract`), each with `adapter`, `slot` and `method`. Pass the
+agent's clock as `now` to an adapter when you replay recorded runs.
+
+**Coming from an earlier candidate?** The wrapped clients, the AI SDK
+method on the agent and the match on rendered text are gone; the
+[CHANGELOG](../CHANGELOG.md) entry for this release maps each one to its
+adapter. To keep placing the text yourself, leave out `slot` and call inside
+`ap.attribute(rendered, fn)`. An Azure deployment or a gateway alias whose id
+is not the release's needs `modelFor`, or nothing is measured.
+
+Tested against clients shaped like the real ones and the real `ai` in CI,
+and against the latest `openai`, `@anthropic-ai/sdk` and `ai` releases
+weekly (`.github/workflows/wrap-latest.yml`, `npm run test:wrap-live`); the
+supported ranges are the package's `peerDependencies`.
+
+**Writing an adapter.** `@airprompter/agent-sdk/frameworks/contract` is the
+contract every adapter here follows: `acquireRun`, `chooseModel`,
+`settingsFor`, `measureCall` / `beginMeasure`, `ADAPTER_EVENTS` and the run
+types. It is public so a third-party adapter can
+read it, but it is outside the 1.0 promise: a minor release may change it
+while the LangChain and OpenAI Agents adapters prove its shapes. See
+[CONTRIBUTING.md › Adding a framework adapter](../CONTRIBUTING.md#adding-a-framework-adapter).
+
+### LangChain
 
 Add one line to the agent you already have. Your framework, tools and data stay where they are.
 
@@ -477,7 +517,8 @@ ap.explain(answer.runRef);                                   // which version, a
 | `packages/sdk/src/sync/store/` | `SlotStore`: two slots, stage → fsync → activate, AAD `agentId target generation contentHash` per payload, anti-rollback counter outside the slots, DEK wrapped by a `KeyProvider` (file key default; custom / KMS via `customKeyProvider`) |
 | `packages/sdk/src/sync/sync/`, `apply/` | `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `pullToDatastore`, the apply policy's update windows |
 | `packages/sdk/src/runtime/release/` | `ReleaseResolver`: which slot a subject gets under which arm (the plan walked on this host's clock, a retreat honoured), the rendered text with its run reference — over any `LoadedRelease` |
-| `packages/sdk/src/runtime/wrap/`, `observe.ts` | `ap.wrap()`: the client proxy and stream taps (`client.ts`), attribution by scope or rendered text (`attribution.ts`), the AI SDK middleware (`aiSdk.ts`); `observeCall` (usage off the provider's answer, the closed error set) |
+| `packages/sdk/src/runtime/wrap/`, `adapter/`, `observe.ts` | What the adapters share, behind the internal barrel `runtime/adapter/` that only `frameworks/contract` imports: the client proxy and stream taps (`proxy.ts`), placement and measurement for a direct client (`instrument.ts`), `acquireRun` / `chooseModel` / `settingsFor` / `measureCall` / `beginMeasure` (`adapt.ts`), the log events (`events.ts`); the `ap.attribute` scope (`attribution.ts`) and the settings table (`inference.ts`) are on `/runtime`; `observeCall` (usage off the provider's answer, the closed error set) |
+| `packages/sdk/src/frameworks/` | The adapters, one file each, translation only: `contract.ts` (re-exports what they may use), `openai.ts`, `anthropic.ts`, `ai-sdk.ts`, `langchain.ts`; `steps/` (the no-code automation core) |
 | `packages/sdk/src/telemetry/spool/`, `uploader.ts` | Minute windows per dimension set, segment naming and rotation (`SegmentPlanner`), `DirectorySink` (0600, `.open` until fsync + rename, crash recovery, a manifest per closed segment) and `MemorySink`; `SpoolUploader` (grant, budget, quarantine, manifests, the marker); `spool/manifest.ts` (the daemon's `daemon.json` and the segment manifest) |
 
 Every file in `protocol/vectors/` runs through these modules in `test/`;
@@ -527,7 +568,7 @@ npm run size           # each subpath and satellite against its size budget
 ```
 
 Optional key providers ship as separate packages:
-`@airprompter/keyprovider-aws-kms`, `-vault`, `-os-keystore`. The provider
-packages `ap.wrap()` observes are optional peers: nothing here imports
-them; `npm run test:wrap-live` runs the wrapper suites against whichever
-are installed.
+`@airprompter/keyprovider-aws-kms`, `-vault`, `-os-keystore`. The framework
+packages the adapters serve are optional peers: nothing outside
+`frameworks/<name>` imports them; `npm run test:wrap-live` runs the adapter
+suites against whichever are installed.

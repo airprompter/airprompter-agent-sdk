@@ -3,29 +3,18 @@ shapes as dicts AND as SDK-style objects (attributes), the OpenAI cached
 split, truncation and filtering as error classes, raised failures
 classified by class name, code and status (never by carrying the message),
 the result returned unchanged and the error re-raised; the coroutine
-variant; and the provider wrappers (OpenAI, Anthropic, LiteLLM callback)
-against fake clients — no provider library installed.
+variant. The framework adapters' own tests are ``test_frameworks_*.py`` and ``test_litellm.py``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
-import shutil
-import tempfile
 import types
 
 import pytest
 
-from airprompter_agent.agent import AirPrompterAgent, SyncOptions
-from airprompter_agent.integrations.anthropic import messages_create, messages_create_async
-from airprompter_agent.integrations.litellm import AirPrompterLiteLLMCallback, litellm_metadata
-from airprompter_agent.integrations.openai import chat_completion, chat_completion_async, responses_create
-from airprompter_agent.core.protocol.trust import public_jwk_of
-from airprompter_agent.core.render.run_ref import RunRefFacts, mint_run_ref, new_run_id
 from airprompter_agent.runtime.observe import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
 
-from .control_plane import FakeControlPlane
 
 TARGET = ObserveTarget("support.triage", "ver_1", "none", "gpt-5", "art_1")
 
@@ -134,168 +123,3 @@ def test_observe_call_async():
 
 
 # ----------------------------------------------------------------------------- wrappers against fake clients
-
-
-class FakeOpenAI:
-    def __init__(self):
-        self.calls = []
-        self.chat = obj(completions=obj(create=self._create))
-        self.responses = obj(create=self._responses)
-
-    def _create(self, **kwargs):
-        self.calls.append(("chat", kwargs))
-        return obj(choices=[obj(finish_reason="stop", message=obj(content="hi"))], usage=obj(prompt_tokens=50, completion_tokens=5, prompt_tokens_details=obj(cached_tokens=20)))
-
-    def _responses(self, **kwargs):
-        self.calls.append(("responses", kwargs))
-        return obj(output_text="hi", usage=obj(input_tokens=30, output_tokens=6, input_tokens_details=obj(cached_tokens=0)), status="completed")
-
-
-class FakeAsyncOpenAI(FakeOpenAI):
-    async def _create(self, **kwargs):  # type: ignore[override]
-        return FakeOpenAI._create(self, **kwargs)
-
-
-class FakeAnthropic:
-    def __init__(self, stop_reason="end_turn"):
-        self.calls = []
-        self.stop_reason = stop_reason
-        self.messages = obj(create=self._create)
-
-    def _create(self, **kwargs):
-        self.calls.append(kwargs)
-        return obj(content=[obj(type="text", text="hi")], stop_reason=self.stop_reason, usage=obj(input_tokens=40, output_tokens=7, cache_read_input_tokens=10))
-
-
-class FakeAsyncAnthropic(FakeAnthropic):
-    async def _create(self, **kwargs):  # type: ignore[override]
-        return FakeAnthropic._create(self, **kwargs)
-
-
-@pytest.fixture
-def agent():
-    state_dir = tempfile.mkdtemp(prefix="ap-integrations-")
-    plane = FakeControlPlane({"organizationId": "org_1", "agentId": "agt_1", "target": "prod"})
-    plane.promote([plane.slot(tag="support.triage", text="Triage for {{team}}: {{ticket}}", variables=[{"name": "team", "required": True, "trust": "operator"}, {"name": "ticket", "required": True, "trust": "end_user"}], model="gpt-5"), plane.slot(tag="support.reply", text="Reply.", model="claude-sonnet-5")])
-    ap = AirPrompterAgent.start(
-        organization_id="org_1", agent_id="agt_1", target="prod", api_key=plane.api_key, base_url="https://api.test", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, sync=SyncOptions(mode="on_invoke", root_url="https://edge.test/roots/prod/root.json"), transport=plane.transport(), telemetry={"sink": "memory"}
-    )
-    yield ap
-    ap.stop()
-    shutil.rmtree(state_dir, ignore_errors=True)
-
-
-def _windows(ap):
-    ap.spool.close_windows(ap._now_ms())
-    return [r for r in ap.drain_memory_sink() if r["type"] == "window"]
-
-
-def test_openai_wrappers(agent):
-    rendered = agent.prompt("support.triage").render(team="Billing", ticket="refund")
-    client = FakeOpenAI()
-    completion = chat_completion(agent, rendered, client, messages=[{"role": "user", "content": "refund"}], temperature=0)
-    assert completion.choices[0].message.content == "hi"
-    kind, kwargs = client.calls[0]
-    assert kind == "chat" and kwargs["model"] == "gpt-5" and kwargs["temperature"] == 0
-    assert kwargs["messages"][0] == {"role": "system", "content": "Triage for Billing: <ticket>refund</ticket>"}
-    responses_create(agent, rendered, client, input="refund", model="gpt-5-mini")
-    assert client.calls[1][1]["instructions"].startswith("Triage for Billing") and client.calls[1][1]["model"] == "gpt-5-mini"
-    async_client = FakeAsyncOpenAI()
-    asyncio.run(chat_completion_async(agent, rendered, async_client, messages=[], system_from_rendered=False))
-    assert async_client.calls[0][1]["messages"] == []
-    assert agent.feedback(rendered.run_ref, rating=5, model="gpt-5-mini")
-    windows = _windows(agent)
-    by_model = {w["model"]: w for w in windows}
-    assert by_model["gpt-5"]["count"] == 2 and by_model["gpt-5"]["tokens"] == {"input": 60, "cachedInput": 40, "output": 10}
-    assert by_model["gpt-5-mini"]["count"] == 1 and by_model["gpt-5-mini"]["tokens"]["input"] == 30
-    assert by_model["gpt-5-mini"]["outcomes"] == {"rating": {"n": 1, "sum": 5, "sumSq": 25}}
-    assert "Billing" not in str(windows) and "refund" not in str(windows)
-
-
-def test_anthropic_wrappers(agent):
-    rendered = agent.prompt("support.reply").render()
-    client = FakeAnthropic()
-    message = messages_create(agent, rendered, client, messages=[{"role": "user", "content": "hello"}], max_tokens=64)
-    assert message.content[0].text == "hi"
-    assert client.calls[0]["system"] == "Reply." and client.calls[0]["model"] == "claude-sonnet-5" and client.calls[0]["max_tokens"] == 64
-    truncating = FakeAnthropic(stop_reason="max_tokens")
-    messages_create(agent, rendered, truncating, messages=[{"role": "user", "content": "hello"}])
-    asyncio.run(messages_create_async(agent, rendered, FakeAsyncAnthropic(), messages=[{"role": "user", "content": "hello"}]))
-    windows = _windows(agent)
-    ok = next(w for w in windows if w["status"] == "ok")
-    truncated = next(w for w in windows if w["errorClass"] == "truncated")
-    assert ok["count"] == 2 and ok["tokens"] == {"input": 80, "cachedInput": 20, "output": 14}
-    assert truncated["count"] == 1 and truncated["model"] == "claude-sonnet-5"
-
-
-def test_litellm_callback(agent):
-    rendered = agent.prompt("support.triage").render(team="Billing", ticket="refund")
-    callback = AirPrompterLiteLLMCallback(agent)
-    metadata = litellm_metadata(rendered)
-    assert set(metadata["airprompter"]) == {"tag", "versionId", "arm", "model", "runRef"}
-    assert "Billing" not in str(metadata)
-    start = dt.datetime(2026, 9, 12, 14, 3, 10)
-    end = start + dt.timedelta(milliseconds=812)
-    response = obj(choices=[obj(finish_reason="stop")], usage=obj(prompt_tokens=100, completion_tokens=20))
-    callback.log_success_event({"model": "gpt-5", "litellm_params": {"metadata": metadata}}, response, start, end)
-    callback.log_failure_event({"model": "gpt-5", "litellm_params": {"metadata": metadata}, "exception": type("RateLimitError", (Exception,), {})("429")}, None, start, end)
-    callback.log_success_event({"model": "gpt-5", "litellm_params": {"metadata": {"other": 1}}}, response, start, end)  # no attribution: ignored
-    asyncio.run(callback.async_log_success_event({"model": "gpt-5", "metadata": metadata}, response, start, end))
-    windows = _windows(agent)
-    ok = next(w for w in windows if w["status"] == "ok")
-    failed = next(w for w in windows if w["status"] == "error")
-    assert ok["count"] == 2 and ok["tokens"] == {"input": 200, "output": 40} and ok["latencyMs"]["sum"] == 1624
-    assert failed["errorClass"] == "provider_rate_limited" and failed["count"] == 1
-    assert all(w["v"] == 5 and w["artifactId"] == rendered.artifact_id for w in windows)
-
-
-def test_litellm_callback_preserves_authenticated_audience_dimensions(agent):
-    entry = {"tag": "support.triage", "artifactId": "prm_targeted", "versionId": "ver_targeted", "model": "gpt-5", "arm": "candidate", "bucket": 42, "runMinute": "2026-09-12T14:03:00Z", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"]}
-    run_ref = mint_run_ref(RunRefFacts("agt_1", "prod", new_run_id(), [entry]), agent._run_ref_key)
-    metadata = {"airprompter": {"tag": "untrusted", "versionId": "untrusted", "runRef": run_ref}}
-    start = dt.datetime(2026, 9, 12, 14, 3, 10)
-    AirPrompterLiteLLMCallback(agent).log_success_event({"model": "gpt-5-mini", "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
-    assert agent.feedback(run_ref, rating=5, model="gpt-5-mini")
-    windows = _windows(agent)
-    assert all((window["artifactId"], window["tag"], window["versionId"], window["arm"], window["model"]) == ("prm_targeted", "support.triage", "ver_targeted", "candidate", "gpt-5-mini") for window in windows)
-    assert all(window["audienceIds"] == ["aud_AAAAAAAAAAAAAAAAAAAAAA"] for window in windows)
-    measured = next(window for window in windows if window["count"] == 1)
-    feedback = next(window for window in windows if window.get("outcomes"))
-    assert measured["tokens"] == {"input": 3, "output": 2}
-    assert feedback["count"] == 0 and feedback["outcomes"] == {"rating": {"n": 1, "sum": 5, "sumSq": 25}}
-
-
-def test_litellm_callback_rejects_forged_cohort_attribution(agent):
-    callback = AirPrompterLiteLLMCallback(agent)
-    start = dt.datetime(2026, 9, 12, 14, 3, 10)
-    response = {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}
-    forged = {"airprompter": {"tag": "forged", "versionId": "forged", "runRef": "forged.token", "artifactId": "prm_forged", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "runMinute": "2026-09-12T14:03:00Z"}}
-    callback.log_success_event({"model": "gpt-5", "litellm_params": {"metadata": forged}}, response, start, start + dt.timedelta(milliseconds=5))
-    assert _windows(agent) == []
-
-    unsigned = {"airprompter": {"tag": "support.unsigned", "versionId": "ver_unsigned", "arm": "none", "model": "gpt-5", "artifactId": "prm_forged", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"], "runMinute": "2026-09-12T14:03:00Z"}}
-    callback.log_success_event({"model": "gpt-5-mini", "litellm_params": {"metadata": unsigned}}, response, start, start + dt.timedelta(milliseconds=5))
-    assert _windows(agent) == [], "a row needs an artifact id, and unsigned metadata cannot name one"
-
-    no_entries = {"airprompter": {"tag": "x", "versionId": "x", "runRef": mint_run_ref(RunRefFacts("agt_1", "prod", new_run_id(), []), agent._run_ref_key)}}
-    callback.log_success_event({"model": "gpt-5", "litellm_params": {"metadata": no_entries}}, response, start, start + dt.timedelta(milliseconds=5))
-    assert _windows(agent) == []
-
-
-def test_litellm_callback_reports_a_workflow_step_under_the_slot_tag():
-    state_dir = tempfile.mkdtemp(prefix="ap-integrations-")
-    plane = FakeControlPlane({"organizationId": "org_1", "agentId": "agt_1", "target": "prod"})
-    plane.promote([plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Step one"}])])
-    ap = AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target="prod", api_key=plane.api_key, base_url="https://api.test", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, sync=SyncOptions(mode="on_invoke", root_url="https://edge.test/roots/prod/root.json"), transport=plane.transport(), telemetry={"sink": "memory"})
-    try:
-        step = ap.workflow("docs.flow").steps[0]
-        metadata = litellm_metadata(step)
-        start = dt.datetime(2026, 9, 12, 14, 3, 10)
-        AirPrompterLiteLLMCallback(ap).log_success_event({"model": "gpt-5", "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
-        ap.spool.close_windows(ap._now_ms())
-        rows = ap.drain_memory_sink()
-        assert [(row["tag"], row["count"]) for row in rows if row["type"] == "window"] == [("docs.flow", 1)]
-        assert [(row["tag"], row["step"]) for row in rows if row["type"] == "step"] == [("docs.flow", "docs.flow#1")]
-    finally:
-        ap.stop()
-        shutil.rmtree(state_dir, ignore_errors=True)

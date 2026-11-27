@@ -62,7 +62,6 @@ export { normalizeFeedback, BOOLEAN_SIGNALS, UNIT_SIGNALS, COUNT_SIGNALS, RUNTIM
 export { AUDIENCE_LIMITS, validAudienceKey, validAudienceLabel, validAudienceIds, validAudienceSelector, matchesAudience, copyAudienceTags, validAudienceManifest, capturedAudienceIds } from "./protocol/assignment.js";
 export type { AudienceCondition, AudienceSelector, AudienceSnapshot, AudienceObservation } from "./protocol/assignment.js";
 
-export { ambiguousAudienceAttribution } from "./protocol/assignment.js";
 
 export { disabledFrom } from "./protocol/assignment.js";
 

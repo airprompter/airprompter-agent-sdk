@@ -76,8 +76,11 @@ def litellm_metadata(target: Union[Any, tuple[RunSession, str]], *, model: Optio
         step = getattr(target, "step_id", None)
         fields = {"tag": step.split("#")[0], "step": step, "runRef": target.run_ref} if step else {"tag": target.tag, "runRef": target.run_ref}
         if getattr(target, "run_bound", False):
-            # Rendered inside ``ap.run``: its reference is the run's, so a late record is the run's too, never a second row.
+            # Rendered inside ``ap.run``: the call is the run's, so a late record is dropped, never a second row. A
+            # workflow step's own reference names no run (``runRefIsRun``): the logger's open run is then the step's.
             fields["run"] = True
+            if step:
+                fields["runRefIsRun"] = False
     if model:
         fields["model"] = model
     return {METADATA_KEY: fields}
@@ -159,6 +162,11 @@ class AirPrompterLiteLLMCallback(_Base):
             run.record_model_call(slot, model=model, latency_ms=latency, step=step, usage=usage, error_class=error_class, output_text=output_text_of(response_obj) if error is None else None)
             return
         if fields.get("run") is True:
+            # A workflow step keeps its own reference, which names no run: in the logger's context, the open run is its.
+            current = self._ap.current_run()
+            if current is not None and not fields.get("runRefIsRun", True):
+                current.record_model_call(slot, model=model, latency_ms=latency, step=step, usage=usage, error_class=error_class, output_text=output_text_of(response_obj) if error is None else None)
+                return
             # The run this call belonged to ended before LiteLLM logged it: counted once, in that run, or not at all.
             self._log(ADAPTER_EVENTS["late_record"], slot=slot, method="completion")
             return

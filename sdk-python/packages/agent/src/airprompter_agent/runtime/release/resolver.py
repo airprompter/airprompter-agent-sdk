@@ -76,6 +76,9 @@ class WorkflowStep:
     model: Optional[str] = None
     audience_ids: Optional[tuple[str, ...]] = None
     run_minute: Optional[str] = None
+    #: True when the workflow was resolved inside an open run: a call measured later for this step belongs to that run,
+    #: although ``run_ref`` (each step keeps its own) does not name it.
+    run_bound: bool = False
 
 
 @dataclass(frozen=True)

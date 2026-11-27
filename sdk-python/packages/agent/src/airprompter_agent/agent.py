@@ -2065,7 +2065,8 @@ class AirPrompterAgent:
             plan = plan_fill(tag=step.step_id, variables=declared, text=step.text, values=values, registry=self.variables)
             return finish(step, await self._fill_observed_async(lambda: fill_async(plan, context(step), self.variables), step.step_id, row))
 
-        return WorkflowHandle(model=workflow.model, arm=workflow.arm, steps=workflow.steps, variables=workflow.variables, _render_step=render_step, _render_step_async=render_step_async)
+        steps = tuple(replace(step, run_bound=True) for step in workflow.steps) if _run is not None and not _run.is_ended else workflow.steps
+        return WorkflowHandle(model=workflow.model, arm=workflow.arm, steps=steps, variables=workflow.variables, _render_step=render_step, _render_step_async=render_step_async)
 
     def _variables_status(self) -> dict[str, Any]:
         """Per slot and arm of the active release: the required variables neither a literal nor a source fills, so the

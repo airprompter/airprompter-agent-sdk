@@ -238,3 +238,24 @@ def test_a_prompt_rendered_inside_a_run_is_marked_as_the_runs_so_a_late_record_i
     _success(callback, litellm_metadata(inside))  # LiteLLM logged it after the run ended
     windows = _windows(agent)
     assert sum(w["count"] for w in windows) == 1, "the run counted once; the late record is not a second row"
+
+
+def test_a_workflow_step_inside_a_run_is_that_runs_in_context_and_a_late_record_is_dropped_not_doubled():
+    state_dir = tempfile.mkdtemp(prefix="ap-integrations-")
+    plane = FakeControlPlane({"organizationId": "org_1", "agentId": "agt_1", "target": "prod"})
+    plane.promote([plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Step one"}])])
+    ap = AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target="prod", api_key=plane.api_key, base_url="https://api.test", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, sync=SyncOptions(mode="on_invoke", root_url="https://edge.test/roots/prod/root.json"), transport=plane.transport(), telemetry={"sink": "memory"})
+    try:
+        callback = AirPrompterLiteLLMCallback(ap)
+        with ap.run(subject="u1"):
+            step = ap.workflow("docs.flow").steps[0]
+            assert step.run_bound
+            _success(callback, litellm_metadata(step), model=step.model)  # in context: the open run takes it
+        _success(callback, litellm_metadata(step), model=step.model)  # late: dropped
+        assert not ap.workflow("docs.flow").steps[0].run_bound
+        ap.spool.close_windows(ap._now_ms())
+        rows = [row for row in ap.drain_memory_sink() if row["type"] == "window"]
+        assert (sum(r["count"] for r in rows), sum(r.get("modelCalls", 0) for r in rows)) == (1, 1), "one run with its one in-context call; the late one is no second row"
+    finally:
+        ap.stop()
+        shutil.rmtree(state_dir, ignore_errors=True)

@@ -15,8 +15,9 @@ No model ever runs on AirPrompter.
 all set in AirPrompter, and none of them can be changed in n8n. A step only picks a slot, fills its variables and
 can name a **Subject**.
 
-> Status: not yet published to npm and not verified by n8n (see [n8n verification](#n8n-verification)). The package
-> targets **self-hosted n8n**.
+> **Self-hosted n8n only at launch.** This package does not run on n8n Cloud: n8n Cloud installs only community
+> nodes that n8n has verified, and this one cannot be verified as built (see [n8n verification](#n8n-verification)).
+> It is not yet published to npm.
 
 ## Install (self-hosted)
 
@@ -122,7 +123,7 @@ again.
 | No disk (*Workflow Static Data*) | The workflow's static data under the key `airprompter` | n8n saves static data **only after production executions** (an active workflow started by its trigger, schedule or webhook), never after a manual test run. Each workflow keeps its own copy. The data is stored in n8n's database next to the workflow, so it holds at most two releases. Two executions that run at the same time each save, and the later save wins. This is harmless because rows are immutable and verified on load. |
 | Fully offline | *Starting Bundle Path*: a plaintext `.apbundle` (`airprompter pull --plaintext`, dev environment) is copied into an empty stored copy | It is verified like any other release and serves within its manifest's lease, counted from when the manifest was issued. Export it with a lease that covers the offline period. A bundle sealed to another key cannot be read. |
 
-**n8n Cloud.** A custom node *can* call `getWorkflowStaticData` from `execute`, `poll` and load-options methods (it is
+**n8n Cloud: not supported at launch.** A custom node *can* call `getWorkflowStaticData` from `execute`, `poll` and load-options methods (it is
 on `FunctionsBase` in `n8n-workflow`), so static data is the storage that needs no disk. **Data tables** were
 considered and not used for three reasons:
 
@@ -153,6 +154,47 @@ and its linter (`npm run lint:cloud`) refuse four things this package needs or h
 `npm run lint` runs n8n's own rule set for packages that do not target n8n Cloud (`@n8n/node-cli`'s
 `configWithoutCloudSupport`), with only the licence and dependency rules relaxed. It passes.
 
+## Decisions (AIR-2393, 2026-11-27)
+
+Decided by the orchestrator under owner delegation, 2026-11-27:
+
+1. **Depending on `@airprompter/agent-sdk` is acceptable for this node.** n8n's rule against runtime dependencies
+   applies to *verified* community nodes, the ones n8n Cloud can install. A self-hosted install (**Settings ›
+   Community Nodes › Install**) runs npm, which installs the package's dependencies. The SDK holds
+   the trust chain, the sealed store, the A/B assignment and the run reference, and copying those into the node
+   would fork the protocol. `scripts/live-n8n.mjs` installs the packed tarball the way n8n installs a community
+   package, and real n8n loads it.
+2. **Self-hosted only at launch, not on n8n Cloud.** n8n Cloud needs verification, which this package fails on its
+   runtime dependency, file system and environment access, restricted globals and licence. Workflow Static Data
+   (no disk) stays as a storage choice for self-hosted containers without a persistent volume. It is not a Cloud
+   build. A Cloud build would be a separate package and a new owner decision.
+
+## Run it against a live AirPrompter
+
+`scripts/live-n8n.mjs` runs this package in a real, headless n8n and checks the results. It does the following:
+
+1. Builds and packs the package, then installs the tarball as n8n installs a community package.
+2. Starts n8n with a fresh user folder and imports [`qa/workflows/`](qa/workflows/).
+3. Runs the workflows with `n8n execute-batch`:
+   - **Get Prompt → model stub (123 / 7 tokens) → Report Run**: one counted run.
+   - **Get Prompt only**: not counted.
+   - **Get Prompt with AirPrompter unreachable**: served from the stored copy.
+4. Prints a JSON summary and exits 0 when every check passes.
+
+It needs an agent with a release promoted to the environment, and an Update key bound to that agent and
+environment:
+
+```bash
+cd integrations/n8n && npm ci --legacy-peer-deps
+AIRPROMPTER_AGENT_ID=agt_… AIRPROMPTER_UPDATE_KEY=apa_… AIRPROMPTER_ENVIRONMENT=dev AIRPROMPTER_SLOT=triage \
+AIRPROMPTER_VARIABLES='{"ticket":"Refund for order 1042 has not arrived"}' node scripts/live-n8n.mjs
+```
+
+The defaults are `api.airprompter.dev` and the `dev` deployment, whose root the SDK pins. It uses `n8n` on `PATH`,
+`N8N_BIN`, or else `npx n8n@2.49.8`. It writes one counted run, so the agent's Metrics for that slot and environment
+should show exactly one more run. The script cannot read Metrics itself, because that needs the owner's console
+session.
+
 ## How it is built
 
 - The platform-agnostic client is the SDK's Steps subpath, `@airprompter/agent-sdk/frameworks/steps`, shared with
@@ -169,6 +211,12 @@ and its linter (`npm run lint:cloud`) refuse four things this package needs or h
 
 Report Run is the run's one count: the Steps core calls the SDK's `ap.reportRun`. Get Prompt renders outside any
 run and writes no run row.
+
+**Requests inside n8n.** n8n installs its own `undici` as the global `fetch` dispatcher, and that undici refuses a
+request whose `content-length` the caller also set. The SDK's telemetry upload sets one (1.0.0-rc.4), which made
+every Report Run fail in real n8n. `src/n8n/connect.ts` therefore hands the core a `fetch` that drops the header,
+since `fetch` computes it from the body anyway. `test/n8n/dispatcher.test.ts` runs under such a dispatcher and will
+fail once the SDK stops setting the header. When it does, remove the workaround.
 
 ## Develop
 

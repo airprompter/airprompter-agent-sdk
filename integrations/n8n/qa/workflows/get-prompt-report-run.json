@@ -1,0 +1,55 @@
+{
+  "id": "apQaGetReport001",
+  "name": "AirPrompter QA: Get Prompt, model stub, Report Run",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "connections": {
+    "Start": { "main": [[{ "node": "Get Prompt", "type": "main", "index": 0 }]] },
+    "Get Prompt": { "main": [[{ "node": "Model (stub)", "type": "main", "index": 0 }]] },
+    "Model (stub)": { "main": [[{ "node": "Report Run", "type": "main", "index": 0 }]] }
+  },
+  "nodes": [
+    { "id": "6f3b2c61-0001-4a53-9d0e-3a5c1f0b0001", "name": "Start", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+    {
+      "id": "6f3b2c61-0002-4a53-9d0e-3a5c1f0b0002",
+      "name": "Get Prompt",
+      "type": "CUSTOM.airPrompter",
+      "typeVersion": 1,
+      "position": [220, 0],
+      "credentials": { "airPrompterAgentApi": { "id": "apQaCredOnline01", "name": "AirPrompter QA (online)" } },
+      "parameters": {
+        "operation": "getPrompt",
+        "slot": "triage",
+        "variables": { "mappingMode": "defineBelow", "value": { "ticket": "Refund for order 1042 has not arrived" }, "matchingColumns": [], "schema": [] },
+        "subject": "qa-n8n-subject-1"
+      }
+    },
+    {
+      "id": "6f3b2c61-0003-4a53-9d0e-3a5c1f0b0003",
+      "name": "Model (stub)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [440, 0],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Route to billing.\"}}],\"usage\":{\"prompt_tokens\":123,\"completion_tokens\":7,\"total_tokens\":130}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "6f3b2c61-0004-4a53-9d0e-3a5c1f0b0004",
+      "name": "Report Run",
+      "type": "CUSTOM.airPrompter",
+      "typeVersion": 1,
+      "position": [660, 0],
+      "credentials": { "airPrompterAgentApi": { "id": "apQaCredOnline01", "name": "AirPrompter QA (online)" } },
+      "parameters": {
+        "operation": "reportRun",
+        "runRef": "={{ $('Get Prompt').item.json.runRef }}",
+        "usageFrom": "detect",
+        "additional": { "thumbs": "up" }
+      }
+    }
+  ],
+  "pinData": {}
+}

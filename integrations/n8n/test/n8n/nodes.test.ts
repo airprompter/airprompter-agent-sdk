@@ -46,6 +46,11 @@ test("the credential declares the fields the nodes read, and its test verifies t
     const badRoot = await node.methods.credentialTest.airPrompterAgentApiTest.call({} as never, { id: "c", name: "c", type: "airPrompterAgentApi", data: { ...credentialsFor(h.plane, server.baseUrl), rootKey: "not json" } } as never);
     assert.equal(badRoot.status, "Error");
     assert.match(badRoot.message, /JSON Web Key/);
+    // The root is optional (the SDK pins hosted roots), and a deployment with no pinned root and none given fails the test with the reason.
+    assert.ok(!new AirPrompterAgentApi().properties.find((p) => p.name === "rootKey")!.required, "Root Public Key is optional");
+    const unpinned = await node.methods.credentialTest.airPrompterAgentApiTest.call({} as never, { id: "c", name: "c", type: "airPrompterAgentApi", data: { ...credentialsFor(h.plane, server.baseUrl), rootKey: "", hostedEnvironment: "staging" } } as never);
+    assert.equal(unpinned.status, "Error");
+    assert.match(unpinned.message, /root key is pinned/i);
   } finally {
     await server.close();
   }

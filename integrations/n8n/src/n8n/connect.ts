@@ -18,8 +18,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { AutomationError, createAutomationClient, fsKvStore, kvAutomationDatastore, seedDatastoreFromBundle } from "@airprompter/agent-sdk/frameworks/steps";
-import type { AutomationClient, AutomationClientOptions, AutomationDatastore, Bundle, HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/frameworks/steps";
+import { AutomationError, createAutomationClient, fsKvStore, kvAutomationDatastore, seedDatastoreFromBundle, timedFetch } from "@airprompter/agent-sdk/frameworks/steps";
+import type { AutomationClient, AutomationClientOptions, AutomationDatastore, Bundle, FetchLike, HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/frameworks/steps";
 import { staticDataKvStore } from "./staticDataKvStore";
 
 export type StorageMode = "userFolder" | "workflowStaticData";
@@ -78,6 +78,25 @@ export function datastoreFor(credentials: AirPrompterCredentials, context: N8nSt
   return kvAutomationDatastore(fsKvStore(join(userFolder(env), "airprompter", safeSegment(credentials.agentId), safeSegment(environment), "releases")));
 }
 
+/** The Steps core's own default per-request limit (`requestTimeoutMs`), kept when the fetch below replaces its default. */
+export const REQUEST_TIMEOUT_MS = 8000;
+
+/**
+ * `fetch` for requests made inside n8n. n8n installs its own `undici` (8.x) as the global dispatcher, and that undici
+ * refuses a request whose `content-length` the caller set as well as `fetch` (`invalid content-length header`). The
+ * SDK's telemetry upload sets one (`@airprompter/agent-sdk` 1.0.0-rc.4, `telemetry/uploader.ts`), so every Report Run
+ * failed in a real n8n with `network:fetch failed` and nothing recorded. `fetch` computes the length from the body
+ * itself, so dropping the header changes nothing on the wire. Remove once the SDK stops setting it.
+ */
+export function withoutContentLength(base: typeof globalThis.fetch): typeof globalThis.fetch {
+  return (input, init) => {
+    if (!init?.headers) return base(input, init);
+    const headers = new Headers(init.headers);
+    headers.delete("content-length");
+    return base(input, { ...init, headers });
+  };
+}
+
 export function clientOptions(credentials: AirPrompterCredentials, datastore: AutomationDatastore, extra: Partial<AutomationClientOptions> = {}): AutomationClientOptions {
   if (!credentials.agentId?.trim()) throw new AutomationError("invalid_input", "Agent ID is required.", false);
   if (!credentials.updateKey?.trim()) throw new AutomationError("invalid_input", "Update Key is required.", false);
@@ -92,6 +111,7 @@ export function clientOptions(credentials: AirPrompterCredentials, datastore: Au
     ...(root ? { root } : {}),
     ...(credentials.rootUrl?.trim() ? { rootUrl: credentials.rootUrl.trim() } : {}),
     ...(credentials.organizationId?.trim() ? { organizationId: credentials.organizationId.trim() } : {}),
+    fetch: timedFetch(withoutContentLength((input, init) => globalThis.fetch(input, init)), REQUEST_TIMEOUT_MS) as FetchLike,
     ...extra,
   };
 }

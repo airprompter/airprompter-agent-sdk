@@ -219,7 +219,7 @@ def test_anthropic_sync_and_async_clients(state_dir):
     ]
 
 
-def test_litellm_callback_records_into_the_run_sync_and_async_and_files_a_sync_stream_on_its_own(state_dir):
+def test_litellm_every_call_shape_inside_a_run_is_that_run_and_a_forged_or_stale_reference_attaches_to_nothing(state_dir):
     litellm = load("litellm")
     from airprompter_agent.frameworks.litellm import AirPrompterLiteLLMCallback, litellm_metadata, litellm_params
 
@@ -237,38 +237,58 @@ def test_litellm_callback_records_into_the_run_sync_and_async_and_files_a_sync_s
     assert isinstance(callback, litellm.integrations.custom_logger.CustomLogger), "the extension point"
     for hook in ("log_success_event", "log_failure_event", "async_log_success_event", "async_log_failure_event"):
         assert callable(getattr(litellm.integrations.custom_logger.CustomLogger, hook)), hook
+
+    def hooked(n: int = 1, timeout: float = 10.0) -> None:
+        for _ in range(n):
+            assert seen.acquire(timeout=timeout), "the logger hook fired"
+
+    async def hooked_async(n: int = 1) -> None:
+        for _ in range(n):
+            for _ in range(200):
+                if seen.acquire(blocking=False):
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("the async logger hook fired")
+
     litellm.callbacks = [callback]
     try:
         # A call with no metadata is never guessed at.
         litellm.completion(model="gpt-4o-mini", messages=[{"role": "user", "content": "hello"}], mock_response="unrelated")
-        assert seen.acquire(timeout=10)
-        with ap.run(subject="u1") as run:
-            placed = run.place("support.triage")
-            params = litellm_params(placed)
-            assert params["model"] == "gpt-5"
-            messages = [{"role": "system", "content": placed.instructions}, {"role": "user", "content": "hello"}]
-            completion = litellm.completion(messages=messages, mock_response="Regards, mock", metadata=litellm_metadata((run, "support.triage")), **params)
-            assert completion.choices[0].message.content == "Regards, mock"
-            assert seen.acquire(timeout=10), "the sync success hook fired"
-            # A sync stream: LiteLLM logs it on a worker thread without the caller's context, so it is its own one-call row.
-            for _ in litellm.completion(messages=messages, mock_response="No signature", stream=True, metadata=litellm_metadata((run, "support.triage")), **params):
-                pass
-            assert seen.acquire(timeout=10), "the sync stream's hook fired"
+        hooked()
+        # One run, four call shapes: sync, sync stream (logged on a worker thread without the caller's context), async, async stream.
+        async def one_run() -> str:
+            async with ap.run(subject="u1") as run:
+                placed = run.place("support.triage")
+                params = litellm_params(placed)
+                assert params["model"] == "gpt-5"
+                messages = [{"role": "system", "content": placed.instructions}, {"role": "user", "content": "hello"}]
+                litellm.completion(messages=messages, mock_response="Regards, mock", metadata=litellm_metadata((run, "support.triage")), **params)
+                hooked()
+                for _ in litellm.completion(messages=messages, mock_response="No signature", stream=True, metadata=litellm_metadata((run, "support.triage")), **params):
+                    pass
+                hooked()
+                await litellm.acompletion(messages=messages, mock_response="Regards, async", metadata=litellm_metadata((run, "support.triage")), **params)
+                await hooked_async()
+                stream = await litellm.acompletion(messages=messages, mock_response="Regards, async stream", stream=True, metadata=litellm_metadata((run, "support.triage")), **params)
+                async for _ in stream:
+                    pass
+                await hooked_async()
+                return run.run_ref
 
-        async def run_async():
-            async with ap.run(subject="u2") as arun:
-                placed = arun.place("support.triage")
-                await litellm.acompletion(messages=[{"role": "user", "content": "hello"}], mock_response="Regards, async", metadata=litellm_metadata((arun, "support.triage")), **litellm_params(placed))
-                for _ in range(50):
-                    if seen.acquire(blocking=False):
-                        return
-                    await asyncio.sleep(0.05)
-                raise AssertionError("the async success hook fired inside the run")
-
-        asyncio.run(run_async())
+        ended_ref = asyncio.run(one_run())
+        # The run has ended: its reference now names no live run, so a late call is a one-call row, never a revived run.
+        open_before = ap._runs.open_runs
+        for _ in litellm.completion(model="gpt-5", messages=[{"role": "user", "content": "late"}], mock_response="Regards", stream=True, metadata={"airprompter": {"tag": "support.triage", "runRef": ended_ref}}):
+            pass
+        hooked()
+        assert ap._runs.open_runs == open_before, "the lookup opened nothing"
+        # A forged reference attaches to nothing and files nothing.
+        litellm.completion(model="gpt-5", messages=[{"role": "user", "content": "forged"}], mock_response="Regards", metadata={"airprompter": {"tag": "support.triage", "runRef": ended_ref[:-4] + "AAAA"}})
+        hooked()
+        assert ap._runs.open_runs == open_before
     finally:
         litellm.callbacks = []
     rows = windows()
-    # Two runs (the sync and the async call, each recorded into its run) and the sync stream filed as its own one-call
-    # row: three counted runs, three model calls. Inside one run the stream would have made it two.
-    assert [(r["tag"], r["model"], r["status"], r["count"], r["modelCalls"], r["agentRun"]) for r in rows] == [("support.triage", "gpt-5", "ok", 3, 3, 3)]
+    # The run: one count, four model calls; the late sync stream after it ended: its own one-call row. The forged call: nothing.
+    assert [(r["tag"], r["model"], r["count"], r["modelCalls"], r["agentRun"]) for r in rows] == [("support.triage", "gpt-5", 2, 5, 2)], rows

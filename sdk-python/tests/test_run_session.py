@@ -1278,3 +1278,37 @@ def test_a_run_ref_entry_that_cannot_be_minted_is_left_out_alone(fx):
         run._minted = None
         assert [entry["tag"] for entry in ap.explain(run.run_ref)] == [OTHER]
     ap.stop()
+
+
+def test_the_internal_lookup_finds_only_a_live_run_by_its_verified_reference_and_never_opens_extends_or_revives_one(fx):
+    """AIR-2231, exception granted by the orchestrator: one read-only lookup in the registry, for adapters whose hooks run
+    without the caller's context. The twin is runSession.test.ts › the internal lookup."""
+    fx.plane.promote([fx.slot_of("Hello", "ver_1")])
+    ap = fx.start()
+    registry = ap._runs
+    run = ap.open_run(subject="u1")
+    run.place(TAG)
+    ref = run.run_ref
+    touched = run.last_active
+    fx.advance(1_000)
+    assert registry._find_live(ref) is run, "the live run its reference names"
+    assert run.last_active == touched, "a lookup does not extend the run"
+    opened = registry.open_runs
+    for bad in (None, 42, "", "not.a.ref", ref[:-4] + "AAAA", ref + "x"):
+        assert registry._find_live(bad) is None, bad
+    run.end()
+    assert registry._find_live(ref) is None, "an ended run is not revived"
+    assert registry.open_runs == opened - 1, "nothing was opened"
+    idle = ap.open_run(subject="u2")
+    idle.place(TAG)
+    idle_ref = idle.run_ref
+    fx.advance(ap._runs._host.idle_timeout_ms + 1)
+    assert registry._find_live(idle_ref) is None, "an idle-expired run is not found, though the sweep has not ended it yet"
+    assert not idle.is_ended, "the lookup ends nothing either"
+    from airprompter_agent.core import RunRefFacts, mint_run_ref
+    # The same run id under another key, as another agent or process would sign it.
+    foreign = mint_run_ref(RunRefFacts(SCOPE["agentId"], SCOPE["target"], run_id_of(ref), []), b"\x02" * 32)
+    assert registry._find_live(foreign) is None, "a reference signed under another key names no run"
+    assert "_find_run" not in dir(__import__("airprompter_agent")), "not on the package root"
+    import airprompter_agent.frameworks.contract as contract
+    assert "_find_run" not in contract.__all__ and not hasattr(ap, "find_run"), "internal: not on the contract's public list, not on ap"

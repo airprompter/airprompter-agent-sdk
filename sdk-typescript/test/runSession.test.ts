@@ -15,6 +15,8 @@ import { canonicalBytes } from "../packages/sdk/src/core/protocol/canonicalJson.
 import { FakeControlPlane } from "../packages/sdk/src/core/testing/index.js";
 import type { Directive, Experiment, ManifestSlot } from "../packages/sdk/src/core/protocol/types.js";
 import type { ErrorClass } from "../packages/sdk/src/core/telemetry/rows.js";
+import { mintRunRef } from "../packages/sdk/src/core/render/runRef.js";
+import { DEFAULT_RUN_IDLE_TIMEOUT_MS } from "../packages/sdk/src/runtime/run/registry.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_run", target: "prod" as const };
 const TAG = "support.reply";
@@ -1101,5 +1103,35 @@ test("review: a slot disable keeps the direct-path pin, so the run keeps its ver
   });
   const written = rows(ap).filter((row) => row.count > 0);
   assert.equal(texts[2], "Version B", "the pin stays across a disable");
+  await ap.stop();
+});
+
+test("the internal lookup finds only a live run by its verified reference and never opens, extends or revives one", async () => {
+  // AIR-2231, exception granted by the orchestrator: one read-only lookup in the registry, for adapters whose hooks run
+  // without the caller's context. The twin is test_run_session.py › the internal lookup.
+  const { plane, clock, start, slotOf } = fixture();
+  plane.promote([slotOf("Hello", "ver_1")]);
+  const ap = await start();
+  const registry = (ap as unknown as { runs: import("../packages/sdk/src/runtime/run/registry.js").RunRegistry }).runs;
+  const run = ap.openRun({ subject: "u1" });
+  await run.place(TAG);
+  const ref = run.runRef;
+  const touched = (run as unknown as { lastActive: number }).lastActive;
+  clock.ms += 1_000;
+  assert.equal(registry.findLive(ref), run, "the live run its reference names");
+  assert.equal((run as unknown as { lastActive: number }).lastActive, touched, "a lookup does not extend the run");
+  const opened = registry.openRuns;
+  for (const bad of [undefined, 42, "", "not.a.ref", `${ref.slice(0, -4)}AAAA`, `${ref}x`]) assert.equal(registry.findLive(bad), undefined, String(bad));
+  const foreign = mintRunRef({ agentId: scope.agentId, target: scope.target, runId: runIdOf(ref), entries: [] }, Buffer.alloc(32, 2));
+  assert.equal(registry.findLive(foreign), undefined, "a reference signed under another key names no run");
+  run.end();
+  assert.equal(registry.findLive(ref), undefined, "an ended run is not revived");
+  assert.equal(registry.openRuns, opened - 1, "nothing was opened");
+  const idle = ap.openRun({ subject: "u2" });
+  await idle.place(TAG);
+  clock.ms += DEFAULT_RUN_IDLE_TIMEOUT_MS + 1;
+  assert.equal(registry.findLive(idle.runRef), undefined, "an idle-expired run is not found, though the sweep has not ended it yet");
+  assert.equal((idle as unknown as { isEnded: boolean }).isEnded, false, "the lookup ends nothing either");
+  assert.equal("findRun" in ap, false, "not on the agent");
   await ap.stop();
 });

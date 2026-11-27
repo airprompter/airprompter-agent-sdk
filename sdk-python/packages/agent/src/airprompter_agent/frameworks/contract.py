@@ -47,6 +47,8 @@ Example::
         return measure_call(run, "support.reply", lambda: request.next(system=placed.instructions, model=model, **mapped.values), model=placed.model)
 """
 
+from typing import Any, Optional
+
 from airprompter_agent.core import output_text_of
 from airprompter_agent.runtime import AgentRuntime, AppliedInference, Approved, Attribution, ModelResolver, Passthrough, Placement, RunInput, RunSession, UsageNormalized, classify_error, classify_result, normalize_usage
 from airprompter_agent.runtime.adapter import (
@@ -68,6 +70,18 @@ from airprompter_agent.runtime.adapter import (
     read_field,
     settings_for,
 )
+
+def _find_run(ap: Any, run_ref: str) -> Optional[RunSession]:
+    """Internal, for adapters whose hooks run without the caller's context (LiteLLM's sync stream logger): the live run a
+    verified reference names, or None. It never opens, extends or revives a run. Not on the public list, not on ``ap``."""
+    find = getattr(ap, "_find_run", None)
+    if not callable(find):
+        return None
+    try:
+        return find(run_ref)
+    except Exception:  # noqa: BLE001 — a lookup never fails the customer's call
+        return None
+
 
 __all__ = [
     "ADAPTER_EVENTS",

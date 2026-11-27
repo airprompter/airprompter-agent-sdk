@@ -15,15 +15,16 @@ One install. Everything below is in the one package; you import the part you
 use, and a part you do not import is not loaded.
 
 ```bash
-npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.4   # the 1.0 release candidate
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.5   # the 1.0 release candidate
 # With a satellite, pin each one to the same candidate:
-npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.4 @airprompter/datastore-s3@1.0.0-rc.4 @airprompter/agent-otel@1.0.0-rc.4
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.5 @airprompter/datastore-s3@1.0.0-rc.5 @airprompter/agent-otel@1.0.0-rc.5
 ```
 
 Pin every package exactly. An unpinned datastore installs 0.6.0, which brings
 the old split packages in beside this one. npm's default range,
-`^1.0.0-rc.4`, also matches later candidates, and a later candidate removes
-the wrapped clients (see *Coming from an earlier candidate?* below).
+`^1.0.0-rc.5`, also matches later candidates, which may still change before
+1.0.0. rc.5 removes the wrapped clients of rc.4 (see *Coming from an earlier
+candidate?* below).
 
 | Import | Use it when |
 | --- | --- |

@@ -12,7 +12,7 @@ conformance vectors and the same on-disk store as the TypeScript SDK — a
 store one SDK wrote is a store the other (and the `airprompter` CLI) opens.
 
 ```bash
-pip install "airprompter-agent==1.0.0rc4"   # the 1.0 release candidate; extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
+pip install "airprompter-agent==1.0.0rc5"   # the 1.0 release candidate; extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
 ```
 
 ## Packages
@@ -22,7 +22,7 @@ you use. The tree mirrors the TypeScript SDK's subpaths.
 
 ```bash
 # With a satellite, pin each one to the same candidate:
-pip install "airprompter-agent==1.0.0rc4" "airprompter-datastore-s3==1.0.0rc4" "airprompter-agent-otel==1.0.0rc4"
+pip install "airprompter-agent==1.0.0rc5" "airprompter-datastore-s3==1.0.0rc5" "airprompter-agent-otel==1.0.0rc5"
 ```
 
 Pin every distribution exactly. Unpinned, `airprompter-agent` installs 0.5.0,
@@ -336,7 +336,7 @@ host as a finding instead of hiding it.
 | Provider | `storageProtection` | Extra |
 |---|---|---|
 | `file_key(path)` (default: `store.key` beside the store, 0600) | `file_key` | — |
-| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install "airprompter-agent[kms]==1.0.0rc4"` |
+| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install "airprompter-agent[kms]==1.0.0rc5"` |
 | `vault(transit_key)` — HashiCorp Vault transit | `vault` | `[vault]` |
 | `os_keystore()` — Keychain / Credential Locker / Secret Service | `os_keystore` | `[keyring]` |
 | `custom_key_provider(wrap=…, unwrap=…)` | `custom` | — |
@@ -396,9 +396,8 @@ runs.
 **LiteLLM** has no client object, so the adapter is a callback, and your call site places the text and passes
 `**litellm_params(placed)` (the release's model and settings). The callback reads only `metadata["airprompter"]`: the
 slot's tag and a signed run reference, which is the authority (a reference that does not verify, or names no entry for
-that tag, files nothing). Inside a run the call is recorded into it; with none open it is a one-call row. LiteLLM logs a
-sync `stream=True` call on a worker thread without your context, so such a call inside `ap.run` is filed as its own
-one-call row.
+that tag, files nothing). The call is recorded into the live run that reference names, whichever thread LiteLLM logs it
+on (a sync `stream=True` call is logged on a worker thread without your context); with no live run it is a one-call row.
 
 **Coming from an earlier candidate?** The wrapped clients, the explicit helpers, the old integrations package and the
 match on rendered text are gone; the [CHANGELOG](../CHANGELOG.md) entry for this release maps each one to its adapter.

@@ -14,12 +14,10 @@ a callback, and the call site puts the release's model and settings on the call 
 
 The callback attributes a call only from ``metadata["airprompter"]``, which carries the slot's ``tag`` and a signed
 ``runRef``. The reference is the authority: the entry whose tag matches is read, and a reference that does not verify
-is dropped. Nothing is matched by text. Inside a run (``ap.current_run()`` in the logger) the call is recorded into it;
-with none, it is filed as a one-call row through ``ap.report``.
-
-LiteLLM runs its sync logger on a worker thread. For a sync ``completion`` it copies the caller's context there, so the
-run is seen; for a sync ``stream=True`` call it does not (litellm 1.111), so such a call inside ``ap.run`` is filed as its
-own one-call row. Async calls and async streams log on the caller's loop and are recorded into the run.
+is dropped. Nothing is matched by text. The call is recorded into the live run the reference names, found by a lookup
+that never opens, extends or revives a run, so it lands on its run whichever thread LiteLLM logs on (a sync
+``stream=True`` call logs on a worker thread without the caller's context, litellm 1.111). With no such run (the run
+ended, or it lives in another process), it is filed as a one-call row through ``ap.report``.
 
 The class derives from ``litellm.integrations.custom_logger.CustomLogger`` when LiteLLM is installed and from ``object``
 otherwise, so it imports (and tests) without the library.
@@ -30,6 +28,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Mapping, Optional, Protocol, Sequence, Union
 
+from .contract import _find_run
 from .contract import ADAPTER_EVENTS, AgentRuntime, Approved, Placement, RunSession, apply_settings, classify_error, classify_result, normalize_usage, output_text_of
 
 try:  # pragma: no cover - exercised only when litellm is installed
@@ -116,7 +115,9 @@ class AirPrompterLiteLLMCallback(_Base):
         latency = _latency_ms(start_time, end_time)
         usage = normalize_usage(response_obj) if error is None else None
         error_class = classify_error(error) if error is not None else classify_result(response_obj)
-        run = self._ap.current_run()
+        # The run this call belongs to is the live run its signed reference names, whatever context the logger runs in
+        # (an open run in the logger's context that the reference does not name is another request's). Never a new one.
+        run = _find_run(self._ap, fields["runRef"])
         if run is not None:
             run.record_model_call(slot, model=model, latency_ms=latency, step=step, usage=usage, error_class=error_class, output_text=output_text_of(response_obj) if error is None else None)
             return

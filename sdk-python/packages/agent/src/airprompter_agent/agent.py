@@ -2321,6 +2321,10 @@ class AirPrompterAgent:
         ``fields`` are ``RunInput``'s: ``subject``, ``conversation_id``, ``tags``, ``variables``, ``resume``."""
         return self._runs.open(input if input is not None else RunInput(**fields))
 
+    def _find_run(self, run_ref: str) -> Optional[RunSession]:
+        """Internal (the adapter contract's ``_find_run``): the live run a verified reference names; never opens one."""
+        return self._runs._find_live(run_ref)
+
     def current_run(self) -> Optional[RunSession]:
         """The run this context is inside, if any, and only this agent's. A worker thread sees it when run in ``contextvars.copy_context()``."""
         return self._runs.current()

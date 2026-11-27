@@ -178,7 +178,7 @@ export function planCompatTags(manifest, sdkVersion, { readAtTag, forkTags, regi
 /** `git ls-remote --tags <url>`, parsed. The URL may carry a token; it is never printed. */
 export function lsRemoteTags(url) {
   try {
-    return parseLsRemote(execFileSync("git", ["ls-remote", "--tags", url], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }));
+    return parseLsRemote(execFileSync("git", ["ls-remote", "--tags", url], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 15 * 60_000, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }));
   } catch (error) {
     // The URL may carry the token; say which repository without it.
     throw new Error(`git ls-remote ${url.replace(/\/\/[^@/]+@/, "//")} failed: ${String(error.stderr || error.message).replace(/\/\/[^@/\s]+@/g, "//").trim().split("\n").pop()}`);

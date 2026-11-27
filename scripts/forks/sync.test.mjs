@@ -33,12 +33,18 @@ function world() {
   const manifest = join(root, "forks.json");
   const writeManifest = (extra = {}) => writeFileSync(manifest, JSON.stringify({ forks: [{ repo: "airprompter/lib", upstream: "up/lib", kind: "fork", branch: "main", ...extra }] }));
   writeManifest();
-  const run = () => {
-    const result = spawnSync("node", [SYNC], { encoding: "utf8", env: { ...process.env, FORK_SYNC_GIT_BASE: base, FORK_SYNC_MANIFEST: manifest, FORK_SYNC_TOKEN: "test-token", GITHUB_STEP_SUMMARY: "" } });
+  // GitHub's answer to GET /repos/<mirror>, for the private-mirror check.
+  const githubStub = (answer) => {
+    const path = join(root, `github-${Math.random()}.mjs`);
+    writeFileSync(path, `globalThis.fetch = async () => new Response(${JSON.stringify(JSON.stringify(answer))}, { status: 200, headers: { "content-type": "application/json" } });\n`);
+    return path;
+  };
+  const run = (stub = null) => {
+    const result = spawnSync("node", [...(stub ? ["--import", stub] : []), SYNC], { encoding: "utf8", env: { ...process.env, FORK_SYNC_GIT_BASE: base, FORK_SYNC_MANIFEST: manifest, FORK_SYNC_TOKEN: "test-token", GITHUB_STEP_SUMMARY: "" } });
     return { status: result.status, report: JSON.parse(result.stdout.trim().split("\n").pop()).reports[0], stderr: result.stderr };
   };
   const refs = (repo) => Object.fromEntries(git(root, "ls-remote", repo).split("\n").filter(Boolean).map((line) => line.split("\t").reverse()));
-  return { root, clone, upstream, ours, commit, first, run, refs, writeManifest };
+  return { root, clone, upstream, ours, commit, first, run, refs, writeManifest, githubStub };
 }
 
 test("fast-forwards the branch and adds new tags; compat/* and ours stay", () => {
@@ -92,4 +98,33 @@ test("a branch that diverged is refused, never merged or forced", () => {
   assert.equal(status, 1);
   assert.equal(report.branch.status, "not a fast-forward");
   assert.equal(w.refs(w.ours)["refs/heads/main"], oursHead);
+});
+
+test("a private mirror is pushed to only while GitHub confirms it is private", () => {
+  const w = world();
+  w.writeManifest({ kind: "private-mirror" });
+  const second = w.commit("two");
+  git(w.clone, "tag", "v2");
+  git(w.clone, "push", "--quiet", "origin", "main", "v2");
+  const before = w.refs(w.ours);
+  const refused = w.run(w.githubStub({ private: false }));
+  assert.equal(refused.status, 1);
+  assert.equal(refused.report.branch.status, "refused: the mirror is public");
+  assert.deepEqual(w.refs(w.ours), before, "neither the branch nor any tag reached a public mirror");
+  const synced = w.run(w.githubStub({ private: true }));
+  assert.equal(synced.status, 0, synced.stderr);
+  assert.equal(w.refs(w.ours)["refs/heads/main"], second);
+  assert.equal(w.refs(w.ours)["refs/tags/v2"], second);
+});
+
+test("a push GitHub refuses keeps git's own message, not a false 'not a fast-forward'", () => {
+  const w = world();
+  writeFileSync(join(w.ours, "hooks", "pre-receive"), "#!/bin/sh\necho 'refusing to allow a token to update .github/workflows/ci.yml without workflow scope' >&2\nexit 1\n", { mode: 0o755 });
+  w.commit("two");
+  git(w.clone, "push", "--quiet", "origin", "main");
+  const { status, report } = w.run();
+  assert.equal(status, 1);
+  assert.equal(report.branch.status, "failed");
+  assert.match(report.branch.message, /declined|workflow scope/);
+  assert.match(report.branch.message, /Workflows: read and write/);
 });

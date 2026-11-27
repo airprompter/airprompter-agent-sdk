@@ -71,9 +71,14 @@ Open the run summary, or the `fork-sync-report` artifact, which lists both commi
   - After the PR merges, run the workflow with `only: airprompter/<repo>`.
 - **"not a fast-forward" on the default branch.** Our branch has a commit upstream lacks, or
   upstream rewrote its history. Do not force-push: the forks' code never changes without an owner decision.
-- **HTTP 401 or 403, or "Repository not found".** `FORK_SYNC_TOKEN` has expired or is missing that repository. See
-  Owner setup.
-- **compat-tags: "no upstream tag on our fork yet".** The release tested a version newer than the last sync. Run
+- **"failed … remote rejected" on the default branch.** GitHub refused the push. Usually `FORK_SYNC_TOKEN` lacks
+  **Workflows: read and write** (the message names a workflow file), or a branch rule on the fork blocks it. Fix the
+  token or the rule, then run the workflow with `only: airprompter/<repo>`.
+- **HTTP 401, 403 or 404, or "Repository not found".** `FORK_SYNC_TOKEN` has expired or is missing that repository.
+  See Owner setup.
+- **"refused: the mirror is public" or "could not confirm the mirror is private".** Nothing was pushed to that
+  mirror. Make it private again, or fix the token, before the next run.
+- **compat-tags: "has no tag … sync the fork first".** The release tested a version newer than the last sync. Run
   the sync for that repository, then re-run the release's `compat-tags` job. Tags it already created show as
   `present`.
 
@@ -149,7 +154,7 @@ When a new framework joins the epic, take these steps in one PR:
 2. Add the repository to `forks.json`, with `packages`, the upstream's tag pattern and `testedVersionFrom`.
 3. Add the repository to `FORK_SYNC_TOKEN`'s repository list.
 4. Add the name to the manifest test in `scripts/forks/lib.test.mjs`.
-5. Run `node scripts/forks/sync.mjs --dry-run --only airprompter/<new>`, and acknowledge any floating tags in the
-   same PR.
+5. Run `node scripts/forks/sync.mjs --dry-run --only airprompter/<new>`, and put any floating tags it reports as
+   moved under `ignoreTags` in the same PR.
 
 A Python package gets no `testedVersionFrom` yet (see above).

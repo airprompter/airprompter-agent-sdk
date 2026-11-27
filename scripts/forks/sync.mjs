@@ -24,7 +24,7 @@
  *   $ FORK_SYNC_TOKEN=… node scripts/forks/sync.mjs --only airprompter/langgraphjs
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,24 +51,26 @@ const redact = (text) => (token ? String(text).replaceAll(token, "***") : String
 async function syncBranch(fork, work) {
   if (dryRun) return { status: "skipped (dry run)" };
   try {
-    if (fork.kind === "private-mirror") {
-      // A mirror of code whose licence forbids redistribution must never be pushed to while it is public.
-      const repo = await github("GET", `/repos/${fork.repo}`, token);
-      if (!repo.private) return { status: "refused: the mirror is public", problem: true, message: `${fork.repo} is public. Make it private again; nothing was pushed.` };
-    }
     // Fast-forward only, the same way for forks and mirrors: fetch upstream's branch and ours, push without force.
     // (GitHub's merge-upstream would write a merge commit on a fork that has diverged; we never change the forks.)
     git(work, ["fetch", "--quiet", "--filter=blob:none", "--no-tags", "upstream", `+refs/heads/${fork.branch}:refs/remotes/upstream/${fork.branch}`]);
-    git(work, ["fetch", "--quiet", "--filter=blob:none", "--no-tags", "ours", `+refs/heads/${fork.branch}:refs/remotes/ours/${fork.branch}`]);
-    const before = git(work, ["rev-parse", `refs/remotes/ours/${fork.branch}`]).trim();
+    // A mirror created empty has no branch yet: then the push creates it.
+    const hasBranch = git(work, ["ls-remote", "--heads", "ours", fork.branch]).trim() !== "";
+    if (hasBranch) git(work, ["fetch", "--quiet", "--filter=blob:none", "--no-tags", "ours", `+refs/heads/${fork.branch}:refs/remotes/ours/${fork.branch}`]);
+    const before = hasBranch ? git(work, ["rev-parse", `refs/remotes/ours/${fork.branch}`]).trim() : null;
     const after = git(work, ["rev-parse", `refs/remotes/upstream/${fork.branch}`]).trim();
     if (before === after) return { status: "up to date" };
+    // Decided from the commits, before pushing: only then is "not a fast-forward" what happened.
+    if (before && spawnSync("git", ["merge-base", "--is-ancestor", before, after], { cwd: work }).status !== 0) {
+      return { status: "not a fast-forward", problem: true, message: `${fork.repo} ${fork.branch} has commits upstream lacks, or upstream rewrote its history; nothing was pushed (forks/README.md › When the sync fails)` };
+    }
     git(work, ["push", "--quiet", "ours", `refs/remotes/upstream/${fork.branch}:refs/heads/${fork.branch}`]);
     return { status: "fast-forwarded", from: before, to: after };
   } catch (error) {
-    const text = redact(error.stderr || error.message);
-    const nonFastForward = /non-fast-forward|fetch first|rejected/.test(text);
-    return { status: nonFastForward ? "not a fast-forward" : "failed", problem: true, message: nonFastForward ? `${fork.repo} ${fork.branch} has commits upstream lacks, or upstream rewrote its history; nothing was pushed (forks/README.md › When the sync fails)` : text.split("\n").slice(-4).join(" ") };
+    // git's own words, so the cause is visible: a refused push is usually the token or a branch rule.
+    const text = redact(error.stderr || error.message).trim().split("\n").slice(-4).join(" ");
+    const hint = /workflow/i.test(text) ? " FORK_SYNC_TOKEN needs Workflows: read and write." : "";
+    return { status: "failed", problem: true, message: `${text}${hint}` };
   }
 }
 
@@ -85,6 +87,16 @@ function pushTags(work, tags, report) {
 async function syncOne(fork) {
   const report = { repo: fork.repo, upstream: fork.upstream, kind: fork.kind };
   if (fork.kind === "private-mirror" && !token) return { ...report, branch: { status: "skipped: a private mirror needs FORK_SYNC_TOKEN" }, tags: null };
+  if (fork.kind === "private-mirror" && !dryRun) {
+    // Code whose licence forbids redistribution: nothing is pushed unless the mirror is confirmed private.
+    let meta;
+    try {
+      meta = await github("GET", `/repos/${fork.repo}`, token);
+    } catch (error) {
+      return { ...report, problem: true, branch: { status: "refused: could not confirm the mirror is private", message: redact(error.message) }, tags: null };
+    }
+    if (meta?.private !== true) return { ...report, problem: true, branch: { status: "refused: the mirror is public", message: `${fork.repo} is public. Make it private again; nothing was pushed.` }, tags: null };
+  }
   const work = mkdtempSync(join(tmpdir(), "sync-forks-"));
   try {
     git(work, ["init", "--quiet", "--bare"]);

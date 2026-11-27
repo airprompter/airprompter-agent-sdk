@@ -9,11 +9,11 @@
  * The fake plane signs with its own root (AIRPROMPTER_ROOT_KEY), so the pinned dev root is not exercised here.
  *
  * It passes only when the kit exits 0 with every check `pass` (none skipped), including `get_prompt.rendered` (the
- * expected text's sha256 is set for it), and when the fake plane received exactly one counted run on `ver_smoke`
- * with 123 input and 7 output tokens. It prints one JSON line every time: the kit's, with `ok`/`exitCode` set to
+ * expected text's sha256 is set for it), and when the fake plane received exactly one `ok` run on `ver_smoke`
+ * with 123 input and 7 output tokens, and one thumbs up. It prints one JSON line every time: the kit's, with `ok`/`exitCode` set to
  * the smoke's verdict and a `smoke` object (`problems` lists what failed), and exits 0 or 1 (2: bad input; 130 or
  * 143 when interrupted, after the kit has stopped).
- * SMOKE_TIMEOUT_MS (default 900000) kills the kit's whole process group if it hangs.
+ * SMOKE_TIMEOUT_MS (default 900000) stops the kit's whole process group if it hangs (SIGTERM, then SIGKILL 15 s later).
  *
  * @example
  * ```sh
@@ -36,6 +36,11 @@ const say = (verdict) => process.stdout.write(`${JSON.stringify(verdict)}\n`);
 
 if (!process.env.N8N_BIN?.trim()) {
   say({ ok: false, exitCode: 2, startedAt, error: "set N8N_BIN: the smoke never falls back to npx" });
+  process.exit(2);
+}
+const timeoutMs = process.env.SMOKE_TIMEOUT_MS === undefined ? 900_000 : Number(process.env.SMOKE_TIMEOUT_MS);
+if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+  say({ ok: false, exitCode: 2, startedAt, error: "SMOKE_TIMEOUT_MS must be a positive whole number of milliseconds" });
   process.exit(2);
 }
 
@@ -74,6 +79,7 @@ try {
   const expectedPromptSha256 = createHash("sha256").update(TEXT.replaceAll("{{ticket}}", () => TICKET), "utf8").digest("hex");
 
   const problemsAtSpawn = [];
+  if (interrupted) throw new Error(`interrupted (${interrupted}) before the kit started`);
   // Its own process group, so a timeout or an interrupt reaches n8n and its task runner too.
   child = spawn(process.execPath, [KIT, ...process.argv.slice(2)], {
     detached: true,
@@ -93,11 +99,13 @@ try {
   });
   let stdout = "";
   child.stdout.on("data", (chunk) => (stdout += chunk));
-  const timeoutMs = Number(process.env.SMOKE_TIMEOUT_MS || 900_000);
   let timedOut = false;
+  let killTimer = null;
+  // SIGTERM first, so the kit removes its run folder; SIGKILL if it is still there 15 s later.
   const timer = setTimeout(() => {
     timedOut = true;
-    stop("SIGKILL");
+    stop("SIGTERM");
+    killTimer = setTimeout(() => stop("SIGKILL"), 15_000);
   }, timeoutMs);
   const code = await new Promise((done) => {
     child.on("error", (error) => {
@@ -107,6 +115,7 @@ try {
     child.on("close", (status) => done(status ?? 1));
   });
   clearTimeout(timer);
+  if (killTimer) clearTimeout(killTimer);
 
   let summary = null;
   try {
@@ -117,10 +126,25 @@ try {
   // What the fake bucket received: window rows, one per run window, `count` runs each.
   const rows = [...plane.objects.values()].flatMap((body) => {
     const text = (body[0] === 0x1f && body[1] === 0x8b ? gunzipSync(body) : body).toString("utf8");
-    return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    return text.split("\n").filter(Boolean).map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return { type: "unparsed" };
+      }
+    });
   });
+  // Run rows have count > 0; a feedback-only row (count 0) carries the thumbs as outcomes.thumbs {n, sum}.
   const windows = rows.filter((row) => row.type === "window" && row.count > 0);
-  const delivered = { runs: windows.reduce((sum, row) => sum + row.count, 0), versionIds: [...new Set(windows.map((row) => row.versionId))], inputTokens: windows.reduce((sum, row) => sum + (row.tokens?.input ?? 0), 0), outputTokens: windows.reduce((sum, row) => sum + (row.tokens?.output ?? 0), 0) };
+  const delivered = {
+    runs: windows.reduce((sum, row) => sum + row.count, 0),
+    statuses: [...new Set(windows.map((row) => row.status))],
+    versionIds: [...new Set(windows.map((row) => row.versionId))],
+    inputTokens: windows.reduce((sum, row) => sum + (row.tokens?.input ?? 0), 0),
+    outputTokens: windows.reduce((sum, row) => sum + (row.tokens?.output ?? 0), 0),
+    thumbsUp: rows.filter((row) => row.type === "window").reduce((sum, row) => sum + (row.outcomes?.thumbs?.sum ?? 0), 0),
+    unparsedRows: rows.filter((row) => row.type === "unparsed").length,
+  };
 
   const problems = [...problemsAtSpawn];
   if (interrupted) problems.push(`interrupted (${interrupted})`);
@@ -132,7 +156,7 @@ try {
   if (summary && !(summary.checks ?? []).some((entry) => entry.id === "get_prompt.rendered")) problems.push("the kit did not run get_prompt.rendered");
   if (process.argv.slice(2).some((arg) => arg === "--nodes-dir" || arg.startsWith("--nodes-dir=")) && summary?.nodes?.mode !== "preinstalled") problems.push("--nodes-dir given but the kit did not use the prepared folder");
   if (summary?.getPrompt && (summary.getPrompt.versionId !== VERSION || summary.getPrompt.servedFrom !== "network")) problems.push(`Get Prompt served ${summary.getPrompt.versionId} from ${summary.getPrompt.servedFrom}, not ${VERSION} from network`);
-  if (delivered.runs !== 1 || delivered.versionIds.join() !== VERSION || delivered.inputTokens !== 123 || delivered.outputTokens !== 7) problems.push(`the fake plane received ${JSON.stringify(delivered)}, not exactly one run on ${VERSION} with 123/7 tokens`);
+  if (delivered.runs !== 1 || delivered.statuses.join() !== "ok" || delivered.versionIds.join() !== VERSION || delivered.inputTokens !== 123 || delivered.outputTokens !== 7 || delivered.thumbsUp !== 1 || delivered.unparsedRows > 0) problems.push(`the fake plane received ${JSON.stringify(delivered)}, not exactly one ok run on ${VERSION} with 123/7 tokens and one thumbs up`);
   const ok = problems.length === 0;
   verdict = { ...(summary ?? {}), ok, exitCode: interrupted ? (interrupted === "SIGINT" ? 130 : 143) : ok ? 0 : 1, smoke: { expectedPromptSha256, delivered, problems, kitExitCode: code } };
 } catch (error) {

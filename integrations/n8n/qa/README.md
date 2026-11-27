@@ -64,7 +64,7 @@ AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n.mjs --prepare-nodes-di
   as `ARG`/`--build-arg` and set the variable.
   - If both exist, they must agree.
   - A tree with uncommitted changes to tracked files under `integrations/n8n` is refused, and so is an untracked
-    build input (`src`, `nodes`, `credentials`, the package files, `tsconfig.json`, `README*`, `LICENSE*`). Other
+    build input (`src`, `nodes`, `credentials`, the package files, `tsconfig.json`, `README*`, `LICENSE*`, `LICENCE*`). Other
     untracked files are ignored.
   - `AIRPROMPTER_KIT_COMMIT` must be the full 40-character sha, lowercase, as `git rev-parse` prints it.
   - `--no-build` is refused: prepare always builds.
@@ -123,7 +123,7 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=�
 n8n, wrapper or prepared folder fails the image build instead of a QA run.
 
 ```bash
-cd integrations/n8n   # its npm ci --legacy-peer-deps already ran: the fake plane is a dev dependency
+cd integrations/n8n   # its npm ci --legacy-peer-deps already ran: the fake plane is @airprompter/agent-sdk/testing
 N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n-smoke.mjs --nodes-dir /opt/airprompter/n8n-nodes
 ```
 
@@ -136,11 +136,14 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n-s
     sha256 the smoke sets;
   - with `--nodes-dir`, the prepared folder was used (`nodes.mode`);
   - Get Prompt served `ver_smoke` from the network;
-  - the fake plane received exactly one counted run on `ver_smoke`, with 123 input and 7 output tokens.
+  - the fake plane received exactly one `ok` run on `ver_smoke`, with 123 input and 7 output tokens, and one thumbs
+    up.
 - **Output:** one JSON line every time. It is the kit's line with `ok` and `exitCode` set to the smoke's verdict,
   plus a `smoke` object (`expectedPromptSha256`, `delivered`, `problems`, `kitExitCode`).
-- **Exit codes:** 0 or 1, and 2 for no `N8N_BIN`.
-- **Timeout:** `SMOKE_TIMEOUT_MS` (default 15 minutes) kills the kit's whole process group if it hangs.
+- **Exit codes:** 0 or 1. 2 means no `N8N_BIN`, or a `SMOKE_TIMEOUT_MS` that is not a positive whole number. 130
+  or 143 means interrupted, after the kit has stopped.
+- **Timeout:** `SMOKE_TIMEOUT_MS` (default 15 minutes) stops the kit's whole process group if it hangs: SIGTERM, then
+  SIGKILL 15 s later.
 - **Trust root:** the fake plane signs with its own root, so this step does not exercise the pinned dev root. The
   live run does.
 - **Time:** about 30 to 60 s. Peak memory for the whole tree (kit, n8n, task runner) was about 570 MB on
@@ -157,6 +160,7 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n-s
 | `N8N_BIN` missing, not executable, or no shebang | 1 | `n8n did not start: …` (`ENOENT`, `EACCES`, `ENOEXEC`) |
 | The prepared folder changed, a commit or version differs, or no commit to compare | 1 | check `nodes.prepared` fails, with `detail`; n8n is not started |
 | `AIRPROMPTER_KIT_COMMIT` that is not a full 40-character sha | 2 | `AIRPROMPTER_KIT_COMMIT must be a full 40-character commit sha` |
+| `AIRPROMPTER_EXPECTED_PROMPT_SHA256` that is not 64 lowercase hex | 2 | `AIRPROMPTER_EXPECTED_PROMPT_SHA256 must be a sha256 in lowercase hex` |
 
 `--prepare-nodes-dir` prints one JSON line of its own: `{ok, exitCode, nodesDir, kit}`, or `{ok: false, exitCode,
 nodesDir, error}`.
@@ -194,7 +198,7 @@ The JSON fields a test reads:
   "ok": true, "exitCode": 0, "startedAt": "…", "finishedAt": "…",
   "agentId": "agent_…", "environment": "dev", "slot": "triage", "subject": "qa-n8n-subject-1",
   "n8nVersion": "2.49.8", "sdkVersion": "1.0.0-rc.4",
-  "getPrompt": { "promptSha256": "…", "versionId": "…", "arm": "none", "generation": 1, "model": "gpt-5-mini", "servedFrom": "network", "leaseExpiresAt": "…" },
+  "getPrompt": { "promptSha256": "…", "promptBytes": 54, "versionId": "…", "arm": "none", "generation": 1, "model": "gpt-5-mini", "servedFrom": "network", "leaseExpiresAt": "…" },
   "reported": { "runRef": "…", "inputTokens": 123, "outputTokens": 7, "thumbs": "up" },
   "expected": { "runs": 1, "inputTokens": 123, "outputTokens": 7, "thumbsUp": 1, "versionId": "…", "arm": "none" },
   "notCounted": ["<runRef of the unreported Get Prompt>", "<runRef of the stored-copy Get Prompt>"],
@@ -202,7 +206,8 @@ The JSON fields a test reads:
 }
 ```
 
-Check ids, which are stable: `nodes.prepared` (only with `--nodes-dir`), `n8n.version`, `workflow.get_and_report`, `get_prompt.network`,
+Check ids, which are stable: `nodes.prepared` (only with `--nodes-dir`), `get_prompt.rendered` (only with
+`AIRPROMPTER_EXPECTED_PROMPT_SHA256`), `n8n.version`, `workflow.get_and_report`, `get_prompt.network`,
 `get_prompt.run_ref`, `report_run.accepted`, `release.stored`, `get_prompt.unreported`, `get_prompt.stored_copy`.
 
 ## What to assert

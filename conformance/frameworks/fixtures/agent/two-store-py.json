@@ -1,0 +1,120 @@
+{
+  "framework": "agent",
+  "language": "py",
+  "frameworkVersion": "1.0.0rc5",
+  "kind": "two-store",
+  "note": "A run on agent A, its subject on the experiment's candidate; feedback on agent B over another store with the shared secret files on A's version, arm and model; on C after a rotation (A's secret among its previous ones) too; on D, with another secret, it is refused. B, C and D hold no release.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ],
+    "experiments": [
+      {
+        "experimentId": "exp_1",
+        "tag": "support.reply",
+        "salt": "_____________________w",
+        "arms": [
+          {
+            "arm": "control",
+            "weightBps": 9000
+          },
+          {
+            "arm": "candidate",
+            "weightBps": 1000,
+            "overrides": [
+              {
+                "tag": "support.reply",
+                "text": "You answer support tickets for Acme, kindly.",
+                "versionId": "ver_b",
+                "model": "gpt-5"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "slot": "support.reply",
+    "sharedSecret": "conformance-run-ref-secret-0001",
+    "rotatedSecret": "conformance-run-ref-secret-0002",
+    "otherSecret": "conformance-another-agent-secret"
+  },
+  "input": {
+    "subject": "user-42"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "ok",
+        "usage": {
+          "input": 12,
+          "output": 4
+        }
+      }
+    ]
+  },
+  "expect": {
+    "calls": [],
+    "runRef": {
+      "entries": 1,
+      "count": 1
+    },
+    "results": {
+      "feedback": [
+        true,
+        true,
+        false
+      ],
+      "explained": [
+        1,
+        null
+      ]
+    },
+    "rows": [
+      {
+        "tag": "support.reply",
+        "versionId": "ver_b",
+        "arm": "candidate",
+        "model": "gpt-5",
+        "count": 1,
+        "modelCalls": 1,
+        "tokens": {
+          "input": 12,
+          "output": 4
+        }
+      },
+      {
+        "tag": "support.reply",
+        "versionId": "ver_b",
+        "arm": "candidate",
+        "model": "gpt-5",
+        "count": 0,
+        "outcomes": {
+          "thumbs": {
+            "n": 1,
+            "sum": 1
+          }
+        }
+      },
+      {
+        "tag": "support.reply",
+        "versionId": "ver_b",
+        "arm": "candidate",
+        "model": "gpt-5",
+        "count": 0,
+        "outcomes": {
+          "rating": {
+            "n": 1,
+            "sum": 4
+          }
+        }
+      }
+    ]
+  }
+}

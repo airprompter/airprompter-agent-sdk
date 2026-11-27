@@ -1,0 +1,84 @@
+{
+  "framework": "ai-sdk",
+  "language": "ts",
+  "frameworkVersion": "7.0.162",
+  "packages": {
+    "ai": "7.0.162",
+    "@ai-sdk/provider": "4.0.35",
+    "zod": "4.6.7"
+  },
+  "kind": "streaming",
+  "note": "A streamed call with no ap.run: the adapter owns a one-call run, which ends when the stream ends.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply",
+        "modelFor": {
+          "gpt-5": "gpt-5"
+        }
+      }
+    ],
+    "scope": "none",
+    "steps": [
+      {
+        "client": 0,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt.",
+        "stream": true
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "calls": [
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "gpt-5",
+        "stream": true
+      }
+    ],
+    "rows": [
+      {
+        "tag": "support.reply",
+        "model": "gpt-5",
+        "versionId": "ver_a",
+        "count": 1,
+        "agentRun": 1,
+        "modelCalls": 1,
+        "status": "ok",
+        "usageSource": "reported",
+        "tokens": {
+          "input": 30,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  }
+}

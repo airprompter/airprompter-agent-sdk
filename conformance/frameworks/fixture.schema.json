@@ -123,7 +123,7 @@
           "items": {
             "type": "object"
           },
-          "description": "What the provider saw, call by call: system, model, settings in the provider's own key names, or `untouched` (byte-identical to the unwrapped call)."
+          "description": "What the provider saw, call by call: system, model, settings in the provider's own key names, stream; with a `baseline` program, `untouched` (the bytes equal the bare client's)."
         },
         "runRef": {
           "type": "object",
@@ -173,6 +173,10 @@
           },
           "description": "Strings that must not appear in what AirPrompter wrote to framework state (canary-checkpoint).",
           "minItems": 1
+        },
+        "results": {
+          "type": "object",
+          "description": "What the driver's own calls answered (a feedback filed, a reference explained), matched as a deep subset."
         }
       },
       "required": [
@@ -221,7 +225,6 @@
             "enum": [
               "tool-loop",
               "handoff",
-              "streaming",
               "interrupted",
               "split-invocation",
               "two-store"

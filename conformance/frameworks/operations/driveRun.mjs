@@ -46,7 +46,8 @@ export default {
       const label = `${fixture.framework} ${fixture.kind}: ${file}`;
       const sealer = newSealer({ organizationId: FIXTURE_AGENT.organizationId, agentId: FIXTURE_AGENT.agentId, target: FIXTURE_AGENT.target });
       const bundle = fixture.release ? sealer.seal(fixture.release, { nowMs: FIXTURE_AGENT.t0 }) : null;
-      const answer = await adapter.call("driveRun", { fixture, bundle, agent: { ...FIXTURE_AGENT, rootPublicJwk: sealer.rootPublicJwk } });
+      const pkg = helpers.FRAMEWORK_PACKAGES[fixture.framework]?.[fixture.language];
+      const answer = await adapter.call("driveRun", { fixture, bundle, agent: { ...FIXTURE_AGENT, rootPublicJwk: sealer.rootPublicJwk }, ...(pkg ? { package: pkg } : {}) });
       if (answer.error) {
         fail(label, `driveRun refused: ${answer.error.reason} ${answer.error.message ?? ""}`.trim());
         continue;
@@ -54,12 +55,17 @@ export default {
       const r = answer.result;
       const misses = [];
       const miss = (where, detail) => misses.push([where, detail]);
+      // The fixture says what it was recorded from; the run says what ran. On the pinned lanes they are one version.
+      const latest = process.env.AIRPROMPTER_FRAMEWORKS_LATEST === "1";
+      if (pkg && !latest && r.frameworkVersion !== fixture.frameworkVersion) miss("frameworkVersion", `${pkg} ${r.frameworkVersion ?? "(not reported)"} is installed; the fixture was recorded from ${fixture.frameworkVersion}`);
       const expect = fixture.expect;
       const ordered = (name, actual, expected) => {
         if (!Array.isArray(actual)) return miss(name, `the adapter reported no ${name}`);
         if (actual.length !== expected.length) miss(`${name}.length`, `${actual.length}, expected ${expected.length}: ${short(actual)}`);
         expected.forEach((want, i) => {
           if (i < actual.length && !subsetMatches(actual[i], want)) miss(`${name}[${i}]`, `got ${short(actual[i])}, expected ${short(want)}`);
+          // Settings a call names are the call's settings, exactly: a key the release did not seal must not ride along.
+          else if (i < actual.length && want?.settings !== undefined && !sameJson(actual[i].settings, want.settings)) miss(`${name}[${i}].settings`, `got ${short(actual[i].settings)}, expected exactly ${short(want.settings)}`);
         });
       };
       if (expect.placements) ordered("placements", r.placements, expect.placements);
@@ -82,6 +88,7 @@ export default {
         const verdict = matchRowSet(r.steps ?? [], expect.steps, "step row");
         if (verdict !== true) miss("steps", verdict);
       }
+      if (expect.results && !subsetMatches(r.results, expect.results)) miss("results", `got ${short(r.results)}, expected ${short(expect.results)}`);
       if (expect.runCounters && !sameJson(r.runCounters, expect.runCounters)) miss("runCounters", `got ${short(r.runCounters)}, expected ${short(expect.runCounters)}`);
       for (const [name, count] of Object.entries(expect.events ?? {})) {
         const seen = (r.log ?? []).filter((event) => event?.event === name).length;
@@ -92,8 +99,9 @@ export default {
         const text = JSON.stringify(r.state ?? null);
         for (const needle of expect.stateExcludes) if (text.includes(needle)) miss("state", `framework state written by AirPrompter contains ${short(needle)}`);
       }
-      if (misses.length === 0) ok(label);
-      else for (const [where, detail] of misses) fail(`${label} › ${where}`, detail);
+      const ran = latest && pkg ? ` (${pkg} ${r.frameworkVersion ?? "?"})` : "";
+      if (misses.length === 0) ok(`${label}${ran}`);
+      else for (const [where, detail] of misses) fail(`${label}${ran} › ${where}`, detail);
     }
   },
 };

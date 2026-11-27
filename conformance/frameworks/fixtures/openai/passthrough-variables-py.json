@@ -1,0 +1,88 @@
+{
+  "framework": "openai",
+  "language": "py",
+  "frameworkVersion": "3.60.0",
+  "kind": "passthrough",
+  "note": "A version whose required variable the run does not fill passes through untouched as variables_unfilled, and writes one error row against that version.",
+  "release": {
+    "slots": [
+      {
+        "tag": "needs.variable",
+        "text": "Hello {{name}}",
+        "versionId": "ver_v",
+        "model": "gpt-5",
+        "variables": [
+          {
+            "name": "name",
+            "required": true,
+            "trust": "operator"
+          }
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "needs.variable"
+      }
+    ],
+    "baseline": true,
+    "steps": [
+      {
+        "client": 0,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt."
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "needs.variable",
+        "kind": "passthrough",
+        "reason": "variables_unfilled",
+        "versionId": "ver_v"
+      }
+    ],
+    "calls": [
+      {
+        "untouched": true,
+        "system": [
+          "The caller's own prompt."
+        ],
+        "model": "gpt-4.1"
+      }
+    ],
+    "rows": [
+      {
+        "tag": "needs.variable",
+        "model": "gpt-5",
+        "versionId": "ver_v",
+        "count": 1,
+        "status": "error",
+        "errorClass": "render_missing_variable"
+      }
+    ],
+    "runCounters": {
+      "passthrough": {
+        "variables_unfilled": 1
+      }
+    }
+  }
+}

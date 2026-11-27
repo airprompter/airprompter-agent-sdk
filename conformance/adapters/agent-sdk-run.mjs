@@ -92,7 +92,7 @@ const core = await barrel("core");
 // ---------------------------------------------------------------------------
 // The host: one offline agent per scenario or fixture.
 
-async function startAgent(agent, { stateDir, clock, log, variableSources = {}, sourceCalls = {} }) {
+async function startAgent(agent, { stateDir, clock, log, variableSources = {}, sourceCalls = {}, runRefSecret = agent.runRefSecret, runRefPreviousSecrets = [] }) {
   const variables = Object.fromEntries(Object.entries(variableSources).map(([name, value]) => [name, {
     trust: "operator",
     resolve: async () => {
@@ -104,7 +104,8 @@ async function startAgent(agent, { stateDir, clock, log, variableSources = {}, s
   return sdk.AirPrompterAgent.start({
     organizationId: agent.organizationId, agentId: agent.agentId, target: agent.target, stateDir,
     root: { pinned: agent.rootPublicJwk }, telemetry: { sink: "memory" }, now: () => clock.ms, logger: (event) => log.push(event),
-    runRefSecret: agent.runRefSecret, runIdleTimeoutMs: agent.idleTimeoutMs,
+    runRefSecret, runIdleTimeoutMs: agent.idleTimeoutMs,
+    ...(runRefPreviousSecrets.length ? { runRefPreviousSecrets } : {}),
     ...(Object.keys(variables).length ? { variables } : {}),
   });
 }
@@ -298,7 +299,7 @@ export function placementsOf(log) {
   return out;
 }
 
-async function driveRun({ fixture, bundle, agent }) {
+async function driveRun({ fixture, bundle, agent, package: pkg }) {
   const path = join(driversDir, `${fixture.framework}.mjs`);
   if (!existsSync(path)) throw Object.assign(new Error(`no TypeScript driver for ${fixture.framework} (frameworks/drivers/${fixture.framework}.mjs)`), { reason: "no_driver" });
   const driver = await import(pathToFileURL(path).href);
@@ -307,16 +308,36 @@ async function driveRun({ fixture, bundle, agent }) {
   const stateDir = mkdtempSync(join(tmpdir(), "ap-conformance-drive-"));
   const out = newOut();
   const ap = await startAgent(agent, { stateDir, clock, log });
+  // More agents a fixture asks for (another pod, another store): each on its own store and the same clock, with the
+  // release applied unless `release: false`, and its own run-reference secrets. Every one is stopped and drained.
+  const others = [];
+  const host = {
+    async startAgent({ runRefSecret = agent.runRefSecret, runRefPreviousSecrets = [], release = true } = {}) {
+      const dir = mkdtempSync(join(tmpdir(), "ap-conformance-drive-"));
+      const started = await startAgent(agent, { stateDir: dir, clock, log, runRefSecret, runRefPreviousSecrets });
+      others.push({ ap: started, dir, stopped: false });
+      if (release && bundle) await applyBundle(started, bundle);
+      return started;
+    },
+  };
   let stopped = false;
   try {
     if (bundle) await applyBundle(ap, bundle);
-    // The context is an object, so a later part adds to it (a second agent, a framework root) without breaking a driver.
-    const driven = await driver.driveRun({ ap, fixture, clock, load });
+    // The context is an object, so a later part adds to it without breaking a driver.
+    const driven = await driver.driveRun({ ap, fixture, clock, load, host });
     stopped = true;
     await finish(ap, out);
-    return { placements: placementsOf(log), calls: driven.calls, runRefs: driven.runRefs ?? [], ...out, log, ...(driven.state !== undefined ? { state: driven.state } : {}) };
+    for (const other of others) {
+      other.stopped = true;
+      await finish(other.ap, out);
+    }
+    return { placements: placementsOf(log), calls: driven.calls, runRefs: driven.runRefs ?? [], ...out, log, ...(pkg ? { frameworkVersion: versionOf(pkg) } : {}), ...(driven.results !== undefined ? { results: driven.results } : {}), ...(driven.state !== undefined ? { state: driven.state } : {}) };
   } finally {
     if (!stopped) await ap.stop().catch(() => {});
+    for (const other of others) {
+      if (!other.stopped) await other.ap.stop().catch(() => {});
+      rmSync(other.dir, { recursive: true, force: true });
+    }
     rmSync(stateDir, { recursive: true, force: true });
   }
 }

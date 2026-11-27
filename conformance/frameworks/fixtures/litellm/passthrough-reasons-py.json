@@ -1,0 +1,153 @@
+{
+  "framework": "litellm",
+  "language": "py",
+  "frameworkVersion": "1.111.0",
+  "kind": "passthrough",
+  "note": "A slot absent from the release, a disabled slot and a workflow slot each pass through: the request is the bare client's (URL, method, headers and body), no window row is written, and runCounters move.",
+  "release": {
+    "slots": [
+      {
+        "tag": "off.slot",
+        "text": "Off",
+        "versionId": "ver_off",
+        "model": "gpt-5"
+      },
+      {
+        "tag": "a.flow",
+        "text": "flow",
+        "versionId": "ver_flow",
+        "model": "gpt-5",
+        "steps": [
+          {
+            "text": "Step one"
+          }
+        ]
+      },
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ],
+    "directives": [
+      {
+        "kind": "disable",
+        "scope": "slot",
+        "tag": "off.slot"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "absent.slot"
+      },
+      {
+        "slot": "off.slot"
+      },
+      {
+        "slot": "a.flow"
+      }
+    ],
+    "baseline": true,
+    "steps": [
+      {
+        "client": 0,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt."
+      },
+      {
+        "client": 1,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt."
+      },
+      {
+        "client": 2,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt."
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      },
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      },
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "absent.slot",
+        "kind": "passthrough",
+        "reason": "no_slot"
+      },
+      {
+        "slot": "off.slot",
+        "kind": "passthrough",
+        "reason": "slot_disabled"
+      },
+      {
+        "slot": "a.flow",
+        "kind": "passthrough",
+        "reason": "slot_kind_unsupported"
+      }
+    ],
+    "calls": [
+      {
+        "untouched": true,
+        "system": [
+          "The caller's own prompt."
+        ],
+        "model": "gpt-4.1"
+      },
+      {
+        "untouched": true,
+        "system": [
+          "The caller's own prompt."
+        ],
+        "model": "gpt-4.1"
+      },
+      {
+        "untouched": true,
+        "system": [
+          "The caller's own prompt."
+        ],
+        "model": "gpt-4.1"
+      }
+    ],
+    "rows": [],
+    "runCounters": {
+      "passthrough": {
+        "no_slot": 1,
+        "slot_disabled": 1,
+        "slot_kind_unsupported": 1
+      }
+    }
+  }
+}

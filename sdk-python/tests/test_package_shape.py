@@ -44,7 +44,7 @@ SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-red
 PACKAGES = ["agent", *SATELLITES]
 SRC = os.path.join(SDK_PY, "packages", "agent", "src", "airprompter_agent")
 #: Rule 4 of section 3.2: the facade's line count after AIR-2231's deletions. A change that grows it moves this on purpose.
-AGENT_PY_LINES = 2578
+AGENT_PY_LINES = 2639
 #: Modules that import but promise nothing (docs/stability.md, "Outside the promise").
 OUTSIDE = {"airprompter_agent.frameworks.contract"}
 #: The 1.0 promise, module by module (docs/stability.md): each ``__all__``, sorted, one name per line. A name added here is

@@ -93,6 +93,11 @@ await ap.invoke(async () => ap.reportRun(runRef, { inputTokens: 812, outputToken
 ap.feedback(runRef, { thumbs: "up" }); // a quality signal, when the step has one
 ```
 
+```python
+# Python: the same call and the same rules, as keywords.
+ap.invoke(lambda: ap.report_run(run_ref, input_tokens=812, output_tokens=164, latency_ms=2300))
+```
+
 It writes one ordinary one-call run row (`count` 1, `agentRun` 1,
 `modelCalls` 1) on the slot, version, arm and audience the reference
 carries, never on the release the reporting process holds by then, so

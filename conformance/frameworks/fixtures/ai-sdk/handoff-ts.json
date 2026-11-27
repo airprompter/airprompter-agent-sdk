@@ -1,0 +1,175 @@
+{
+  "framework": "ai-sdk",
+  "language": "ts",
+  "frameworkVersion": "7.0.162",
+  "packages": {
+    "ai": "7.0.162",
+    "@ai-sdk/provider": "4.0.35",
+    "zod": "4.6.7"
+  },
+  "kind": "handoff",
+  "note": "Two instrumented clients on two slots in one ap.run, the reply slot under an experiment: one run, one reference with two entries, two run rows whose agentRun sums to 1, and feedback on the reference reaches both arms.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.triage",
+        "text": "Triage the ticket into billing or technical.",
+        "versionId": "ver_t",
+        "model": "gpt-5"
+      },
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ],
+    "experiments": [
+      {
+        "experimentId": "exp_reply",
+        "tag": "support.reply",
+        "salt": "AAECAwQFBgcICQoLDA0ODw",
+        "arms": [
+          {
+            "arm": "control",
+            "weightBps": 0
+          },
+          {
+            "arm": "candidate",
+            "weightBps": 10000,
+            "overrides": [
+              {
+                "tag": "support.reply",
+                "text": "You answer support tickets for Acme, kindly.",
+                "versionId": "ver_b",
+                "model": "gpt-5"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.triage",
+        "modelFor": {
+          "gpt-5": "gpt-5"
+        }
+      },
+      {
+        "slot": "support.reply",
+        "modelFor": {
+          "gpt-5": "gpt-5"
+        }
+      }
+    ],
+    "steps": [
+      {
+        "client": 0,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt."
+      },
+      {
+        "client": 1,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt."
+      }
+    ],
+    "feedback": {
+      "thumbs": "up"
+    }
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "billing",
+        "usage": {
+          "input": 20,
+          "output": 1
+        }
+      },
+      {
+        "content": "Here is your refund.",
+        "usage": {
+          "input": 30,
+          "output": 6
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.triage",
+        "kind": "approved",
+        "versionId": "ver_t",
+        "arm": "none"
+      },
+      {
+        "slot": "support.reply",
+        "kind": "approved",
+        "versionId": "ver_b",
+        "arm": "candidate"
+      }
+    ],
+    "calls": [
+      {
+        "system": [
+          "Triage the ticket into billing or technical."
+        ],
+        "model": "gpt-5"
+      },
+      {
+        "system": [
+          "You answer support tickets for Acme, kindly."
+        ],
+        "model": "gpt-5"
+      }
+    ],
+    "runRef": {
+      "entries": 2,
+      "runIdStable": true,
+      "count": 2
+    },
+    "results": {
+      "feedback": true
+    },
+    "rows": [
+      {
+        "tag": "support.triage",
+        "model": "gpt-5",
+        "versionId": "ver_t",
+        "arm": "none",
+        "count": 1,
+        "agentRun": 1,
+        "modelCalls": 1,
+        "outcomes": {
+          "thumbs": {
+            "n": 1,
+            "sum": 1
+          }
+        }
+      },
+      {
+        "tag": "support.reply",
+        "model": "gpt-5",
+        "versionId": "ver_b",
+        "arm": "candidate",
+        "count": 1,
+        "agentRun": 0,
+        "modelCalls": 1,
+        "outcomes": {
+          "thumbs": {
+            "n": 1,
+            "sum": 1
+          }
+        }
+      }
+    ]
+  }
+}

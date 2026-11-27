@@ -1,0 +1,90 @@
+{
+  "framework": "anthropic",
+  "language": "ts",
+  "frameworkVersion": "0.129.0",
+  "kind": "streaming",
+  "note": "A streamed call consumed inside ap.run: its usage arrives from the stream and counts once.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "claude-sonnet-4-5"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply",
+        "modelFor": {
+          "claude-sonnet-4-5": "claude-sonnet-4-5"
+        }
+      }
+    ],
+    "steps": [
+      {
+        "client": 0,
+        "model": "claude-haiku-4-5",
+        "system": "The caller's own prompt.",
+        "stream": true
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.reply",
+        "kind": "approved",
+        "versionId": "ver_a",
+        "arm": "none"
+      }
+    ],
+    "calls": [
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "claude-sonnet-4-5",
+        "stream": true
+      }
+    ],
+    "runRef": {
+      "entries": 1,
+      "count": 1
+    },
+    "rows": [
+      {
+        "tag": "support.reply",
+        "model": "claude-sonnet-4-5",
+        "versionId": "ver_a",
+        "count": 1,
+        "agentRun": 1,
+        "modelCalls": 1,
+        "status": "ok",
+        "usageSource": "reported",
+        "tokens": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  }
+}

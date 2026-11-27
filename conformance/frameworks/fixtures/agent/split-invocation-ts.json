@@ -1,0 +1,90 @@
+{
+  "framework": "agent",
+  "language": "ts",
+  "frameworkVersion": "1.0.0-rc.5",
+  "kind": "split-invocation",
+  "note": "The prompt renders on agent A, its subject on the experiment's candidate; only its run reference crosses to agent B, which holds no release and reports the model step (reportRun / report_run): one run row on the version and arm A served, usage attached once, and A writes nothing.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ],
+    "experiments": [
+      {
+        "experimentId": "exp_1",
+        "tag": "support.reply",
+        "salt": "_____________________w",
+        "arms": [
+          {
+            "arm": "control",
+            "weightBps": 9000
+          },
+          {
+            "arm": "candidate",
+            "weightBps": 1000,
+            "overrides": [
+              {
+                "tag": "support.reply",
+                "text": "You answer support tickets for Acme, kindly.",
+                "versionId": "ver_b",
+                "model": "gpt-5"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "agent": {
+    "slot": "support.reply"
+  },
+  "input": {
+    "subject": "user-42"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "ok",
+        "usage": {
+          "input": 812,
+          "cachedInput": 12,
+          "output": 96
+        }
+      }
+    ]
+  },
+  "expect": {
+    "calls": [],
+    "runRef": {
+      "entries": 1,
+      "count": 1
+    },
+    "results": {
+      "reported": true,
+      "servedVersion": "ver_b",
+      "servedArm": "candidate"
+    },
+    "rows": [
+      {
+        "tag": "support.reply",
+        "versionId": "ver_b",
+        "arm": "candidate",
+        "model": "gpt-5",
+        "count": 1,
+        "agentRun": 1,
+        "modelCalls": 1,
+        "status": "ok",
+        "usageSource": "reported",
+        "tokens": {
+          "input": 800,
+          "cachedInput": 12,
+          "output": 96
+        }
+      }
+    ]
+  }
+}

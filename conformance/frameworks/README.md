@@ -111,7 +111,13 @@ framework as a developer would, with the adapter in place, run it against
 they were handed. A TypeScript driver exports `driveRun({ ap, fixture,
 clock, load })`; a Python one `def drive_run(*, ap, fixture, clock, **_)`,
 sync or async (both contexts grow, so take what you use). Each returns `{
-calls, runRefs, state? }`. A driver imports only what a developer's code
+calls, runRefs, results?, state? }`; `results` (what the driver's own calls
+answered) is matched against `expect.results`. `host.startAgent({ release,
+runRefSecret, runRefPreviousSecrets })` (Python `host.start_agent(...)`)
+starts another agent on its own store and the same clock, for the kinds about
+another pod (`two-store`, `split-invocation`); its rows are collected too.
+The direct-client drivers share one program shape (`drivers/program.mjs`,
+`drivers/program.py`), described in `fixtures/openai/README.md`. A driver imports only what a developer's code
 imports: the SDK's root, the framework's subpath, the framework (TypeScript
 through `load`, which resolves from `sdk-typescript/node_modules` and refuses
 anything else of the SDK at run time). If a driver needs an SDK internal, the

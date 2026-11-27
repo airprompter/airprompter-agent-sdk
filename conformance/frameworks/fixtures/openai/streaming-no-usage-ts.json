@@ -1,0 +1,85 @@
+{
+  "framework": "openai",
+  "language": "ts",
+  "frameworkVersion": "7.50.0",
+  "kind": "streaming",
+  "note": "stream: true without stream_options.include_usage, as most code writes it: the provider sends no usage, the adapter does not ask for it, so the run counts its call with usage unavailable.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply",
+        "modelFor": {
+          "gpt-5": "gpt-5"
+        }
+      }
+    ],
+    "steps": [
+      {
+        "client": 0,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt.",
+        "stream": true,
+        "includeUsage": false
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.reply",
+        "kind": "approved",
+        "versionId": "ver_a",
+        "arm": "none"
+      }
+    ],
+    "calls": [
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "gpt-5",
+        "stream": true
+      }
+    ],
+    "rows": [
+      {
+        "tag": "support.reply",
+        "model": "gpt-5",
+        "versionId": "ver_a",
+        "count": 1,
+        "modelCalls": 1,
+        "status": "ok",
+        "usageSource": "unavailable",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    ]
+  }
+}

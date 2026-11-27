@@ -4,8 +4,9 @@ measures the call into the run. Without a slot the client only measures, inside 
 the caller placed the text; outside any scope a call passes through unobserved. The ``openai`` package is never
 imported: the shapes read here are its documented response and stream-event shapes, as SDK objects or dicts.
 
-With a slot, stream with ``create(stream=True)``: a ``.stream()`` helper passes through unmeasured, with one log, as it
-does in TypeScript.
+With a slot, stream with ``create(stream=True)``: a ``.stream()`` helper passes through unmeasured, with one log. That
+is for parity with TypeScript, where the helper answers before a placement could be awaited; one behaviour in both
+SDKs keeps the conformance suite to one rule. ``with_raw_response.create`` is placed, and measured for latency only.
 
 Example::
 
@@ -29,7 +30,7 @@ def _first(value: Any) -> Any:
     return value[0] if isinstance(value, (list, tuple)) and value else None
 
 
-class ChatAccumulator:
+class _ChatAccumulator:
     """Chat Completions chunks folded into one completion: text deltas, the finish reason, the last chunk's usage."""
 
     def __init__(self) -> None:
@@ -56,7 +57,7 @@ class ChatAccumulator:
         return result
 
 
-class ResponsesAccumulator:
+class _ResponsesAccumulator:
     """Responses events folded into the final response: the terminal event's response, or the text deltas seen."""
 
     def __init__(self) -> None:
@@ -78,13 +79,16 @@ class ResponsesAccumulator:
 
 #: The OpenAI client's model-call methods. Anything else on the client is its own.
 OPENAI_METHODS = (
-    ClientMethod(("chat", "completions", "create"), "chat", ChatAccumulator),
-    ClientMethod(("chat", "completions", "parse"), "chat", ChatAccumulator),
-    ClientMethod(("chat", "completions", "stream"), "chat", ChatAccumulator, helper=True),
-    ClientMethod(("beta", "chat", "completions", "parse"), "chat", ChatAccumulator),
-    ClientMethod(("responses", "create"), "responses", ResponsesAccumulator),
-    ClientMethod(("responses", "parse"), "responses", ResponsesAccumulator),
-    ClientMethod(("responses", "stream"), "responses", ResponsesAccumulator, helper=True),
+    ClientMethod(("chat", "completions", "create"), "chat", _ChatAccumulator),
+    ClientMethod(("chat", "completions", "parse"), "chat", _ChatAccumulator),
+    ClientMethod(("chat", "completions", "stream"), "chat", _ChatAccumulator, helper=True),
+    ClientMethod(("beta", "chat", "completions", "parse"), "chat", _ChatAccumulator),
+    ClientMethod(("responses", "create"), "responses", _ResponsesAccumulator),
+    ClientMethod(("responses", "parse"), "responses", _ResponsesAccumulator),
+    ClientMethod(("responses", "stream"), "responses", _ResponsesAccumulator, helper=True),
+    # The raw response is the caller's to parse: placed, and measured for latency only, as ``asResponse()`` is in TypeScript.
+    ClientMethod(("chat", "completions", "with_raw_response", "create"), "chat", _ChatAccumulator),
+    ClientMethod(("responses", "with_raw_response", "create"), "responses", _ResponsesAccumulator),
 )
 
 _SYSTEM_ROLES = ("system", "developer")
@@ -117,4 +121,4 @@ def instrument(client: Any, ap: InstrumentRuntime, *, slot: Optional[str] = None
     return instrument_client(client, ap, adapter="openai", methods=OPENAI_METHODS, apply=apply_placement, slot=slot, model_for=model_for, now=now)
 
 
-__all__ = ["OPENAI_METHODS", "ChatAccumulator", "ResponsesAccumulator", "apply_placement", "instrument"]
+__all__ = ["OPENAI_METHODS", "apply_placement", "instrument"]

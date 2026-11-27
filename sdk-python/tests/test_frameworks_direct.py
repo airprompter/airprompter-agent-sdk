@@ -111,7 +111,7 @@ def test_a_different_model_declines_and_sends_the_callers_request_and_model_for_
         mapped.chat.completions.create(**params)
     assert client.calls[1]["model"] == "azure-gpt-5-for-gpt-4o"
     out = by_key(rows())
-    assert [(r["status"], r.get("errorClass")) for r in out] == [("error", "model_unresolved"), ("error", "truncated")] or [r.get("errorClass") for r in out].count("model_unresolved") == 1
+    assert sorted((r["status"], r.get("errorClass") or "", r["count"]) for r in out) == [("error", "model_unresolved", 1), ("ok", "", 1)], "one declined run, one mapped run on the version"
     assert all(r["model"] == "gpt-5" for r in out), "every row names the release's model"
 
 
@@ -258,3 +258,76 @@ def test_apply_placement_keeps_a_developer_role_and_never_mutates():
     assert out == {"model": "gpt-5", "temperature": 0.3, "stop": ["END"], "messages": [{"role": "developer", "content": "new"}, {"role": "user", "content": "hi"}]}
     assert params["messages"][0]["content"] == "old" and params["temperature"] == 1
     assert anthropic_placement({"system": [{"type": "text", "text": "old"}], "messages": []}, Approved(slot="s", instructions="new", model="claude-haiku-4-5", settings={})) == {"model": "claude-haiku-4-5", "system": "new", "messages": []}
+
+
+def test_two_instrumented_clients_with_different_slots_in_one_run_give_two_run_rows(state_dir):
+    def slots(plane):
+        return [plane.slot(tag="support.triage", text="Triage.", model="gpt-5", variables=[]), plane.slot(tag="support.reply", text="Reply.", model="gpt-5", variables=[])]
+
+    ap, rows = start_agent(state_dir, slots)
+    triage = instrument_openai(FakeOpenAI(), ap, slot="support.triage")
+    reply = instrument_openai(FakeOpenAI(), ap, slot="support.reply")
+    with ap.run():
+        triage.chat.completions.create(messages=[])
+        reply.chat.completions.create(messages=[])
+    out = by_key(rows())
+    assert [(r["tag"], r["modelCalls"]) for r in out] == [("support.reply", 1), ("support.triage", 1)]
+    assert sum(r.get("agentRun", 0) for r in out) == 1, "one run"
+
+
+def test_a_stream_the_caller_breaks_out_of_settles_and_ends_the_run_it_opened(state_dir):
+    ap, rows = start_agent(state_dir, support)
+    openai = instrument_openai(FakeOpenAI(), ap, slot="support.reply")
+    for _ in openai.chat.completions.create(stream=True, messages=[]):
+        break  # never closed, never exhausted
+    assert ap._runs.open_runs == 0, "the one-call run ended when the loop left"
+    out = rows()
+    assert [(r["tag"], r["count"], r["modelCalls"]) for r in out] == [("support.reply", 1, 1)]
+
+
+def test_a_cancelled_async_placement_ends_the_run_it_opened(state_dir):
+    ap, rows = start_agent(state_dir, support)
+    client = FakeAsyncOpenAI()
+    openai = instrument_openai(client, ap, slot="support.reply")
+
+    async def go():
+        task = asyncio.ensure_future(openai.chat.completions.create(messages=[]))
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        never = openai.chat.completions.create(messages=[])
+        never.close()  # created and never awaited: it opened nothing
+
+    asyncio.run(go())
+    assert ap._runs.open_runs == 0
+    rows()
+
+
+def test_scope_mode_never_fails_the_call_when_observing_fails(state_dir):
+    events: list = []
+    ap, rows = start_agent(state_dir, support, events)
+    client = FakeOpenAI()
+    openai = instrument_openai(client, ap)
+    rendered = ap.prompt("support.reply").render()
+    original = ap.begin_observation
+    ap.begin_observation = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("spool exploded"))  # type: ignore[method-assign]
+    try:
+        with ap.attribute(rendered):
+            completion = openai.chat.completions.create(model="claude-haiku-4-5", messages=[])
+    finally:
+        ap.begin_observation = original  # type: ignore[method-assign]
+    assert completion.choices[0].message.content == "answer 1 refund guaranteed"
+    assert [e["event"] for e in events if e.get("adapter") == "openai"] == [ADAPTER_EVENTS["attribution_failed"]]
+    rows()
+
+
+def test_the_intercepted_method_keeps_its_name_and_an_async_one_reads_as_a_coroutine_function(state_dir):
+    import inspect
+
+    ap, rows = start_agent(state_dir, support)
+    sync, asynchronous = instrument_openai(FakeOpenAI(), ap, slot="support.reply"), instrument_openai(FakeAsyncOpenAI(), ap, slot="support.reply")
+    assert sync.chat.completions.create.__name__ == "_chat_create"
+    assert not inspect.iscoroutinefunction(sync.chat.completions.create)
+    if hasattr(inspect, "markcoroutinefunction"):
+        assert inspect.iscoroutinefunction(asynchronous.chat.completions.create), "libraries that route on it see an async client"
+    rows()

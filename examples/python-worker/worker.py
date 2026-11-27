@@ -32,7 +32,8 @@ ap = AirPrompterAgent.start(
     models=["claude-sonnet-5", "claude-haiku-4-5"],  # what this worker can call; promotion refuses a slot whose model is absent
 )
 # Every messages.create on this client gets the approved text as `system`, the release's model and its settings.
-client = instrument(anthropic.Anthropic(), ap, slot="support.triage")
+# The worker can call either model it declares, so whichever the release pins is the one sent.
+client = instrument(anthropic.Anthropic(), ap, slot="support.triage", model_for=lambda release, _caller: release)
 signal.signal(signal.SIGTERM, lambda *_: ap.stop())
 
 
@@ -40,9 +41,10 @@ def handle(ticket: dict) -> dict:
     """One queue message: returns the classification and the run_ref to keep beside the ticket."""
     with ap.run(subject=ticket["customer_id"], variables={"team": ticket["team"], "ticket": ticket["text"]}) as run:
         # A Freeze or a slot with nothing to serve is a passthrough: the worker's own model runs, and it says so.
-        placed = run.place("support.triage")
         message = client.messages.create(model="claude-sonnet-5", max_tokens=256, messages=[{"role": "user", "content": ticket["text"]}])
-        return {"classification": message.content[0].text, "run_ref": run.run_ref, "served": placed.kind}
+        # What the call ran on: "approved" (the release's text and model), or "passthrough" (a Freeze, nothing promoted, a decline).
+        served = run.place("support.triage").kind
+        return {"classification": message.content[0].text, "run_ref": run.run_ref, "served": served}
 
 
 def on_agent_accepted(run_ref: str, accepted: bool, minutes_to_accept: int) -> None:

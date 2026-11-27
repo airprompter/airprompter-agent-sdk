@@ -53,6 +53,7 @@ from airprompter_agent.core import output_text_of
 from airprompter_agent.runtime import AgentRuntime, AppliedInference, Approved, Attribution, ModelResolver, Passthrough, Placement, RunInput, RunSession, UsageNormalized, classify_error, classify_result, normalize_usage
 from airprompter_agent.runtime.adapter import (
     ADAPTER_EVENTS,
+    AcquiredRun,
     ApplyPlacement,
     ClientMethod,
     InstrumentRuntime,
@@ -85,6 +86,7 @@ def _find_run(ap: Any, run_ref: str) -> Optional[RunSession]:
 
 __all__ = [
     "ADAPTER_EVENTS",
+    "AcquiredRun",
     "AgentRuntime",
     "AppliedInference",
     "ApplyPlacement",

@@ -354,7 +354,7 @@ The framework is an extra (`[openai]`, `[anthropic]`, `[litellm]`): nothing else
 | --- | --- | --- |
 | `openai` (`OpenAI` / `AsyncOpenAI`) | `airprompter_agent.frameworks.openai` | `openai = instrument(OpenAI(), ap, slot="support.reply")` |
 | `anthropic` (`Anthropic` / `AsyncAnthropic`) | `airprompter_agent.frameworks.anthropic` | `anthropic = instrument(Anthropic(), ap, slot="support.reply")` |
-| LiteLLM | `airprompter_agent.frameworks.litellm` | `litellm.callbacks = [AirPrompterLiteLLMCallback(ap)]`, and on the call `metadata=litellm_metadata((run, slot))`, `**litellm_params(placed)` |
+| LiteLLM | `airprompter_agent.frameworks.litellm` | inside `ap.run`: `measure_call(run, slot, lambda: litellm.completion(**litellm_params(placed), ...))`; outside: `litellm.callbacks = [AirPrompterLiteLLMCallback(ap)]` with `metadata=litellm_metadata(rendered)` |
 
 ```python
 from openai import OpenAI
@@ -396,8 +396,12 @@ runs.
 **LiteLLM** has no client object, so the adapter is a callback, and your call site places the text and passes
 `**litellm_params(placed)` (the release's model and settings). The callback reads only `metadata["airprompter"]`: the
 slot's tag and a signed run reference, which is the authority (a reference that does not verify, or names no entry for
-that tag, files nothing). The call is recorded into the live run that reference names, whichever thread LiteLLM logs it
-on (a sync `stream=True` call is logged on a worker thread without your context); with no live run it is a one-call row.
+that tag, files nothing; a call sent under another model is not counted). LiteLLM logs after the call returns, often
+after the run has ended, so inside `ap.run` measure the call where you make it:
+`measure_call(run, slot, lambda: litellm.completion(messages=messages, **litellm_params(placed)), model=placed.model)`.
+With `metadata=litellm_metadata((run, slot))` instead, a record that reaches the live run (on any thread) is recorded
+into it, and one that arrives after the run ended is dropped with one `adapter_late_record` log, never counted twice.
+Use one or the other for a call, not both. Outside any run, `metadata=litellm_metadata(rendered)` files a one-call row.
 
 **Coming from an earlier candidate?** The wrapped clients, the explicit helpers, the old integrations package and the
 match on rendered text are gone; the [CHANGELOG](../CHANGELOG.md) entry for this release maps each one to its adapter.

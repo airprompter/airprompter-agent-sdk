@@ -10,14 +10,25 @@ a callback, and the call site puts the release's model and settings on the call 
     with ap.run(subject=user_id) as run:
         placed = run.place("support.reply")
         if placed.kind == "approved":
-            litellm.completion(messages=[{"role": "system", "content": placed.instructions}, *messages], metadata=litellm_metadata((run, "support.reply")), **litellm_params(placed))
+            messages = [{"role": "system", "content": placed.instructions}, *messages]
+            # Inside a run, measure at the call: LiteLLM logs after the call returns, often after the run has ended.
+            measure_call(run, "support.reply", lambda: litellm.completion(messages=messages, **litellm_params(placed)), model=placed.model)
 
 The callback attributes a call only from ``metadata["airprompter"]``, which carries the slot's ``tag`` and a signed
 ``runRef``. The reference is the authority: the entry whose tag matches is read, and a reference that does not verify
-is dropped. Nothing is matched by text. The call is recorded into the live run the reference names, found by a lookup
-that never opens, extends or revives a run, so it lands on its run whichever thread LiteLLM logs on (a sync
-``stream=True`` call logs on a worker thread without the caller's context, litellm 1.111). With no such run (the run
-ended, or it lives in another process), it is filed as a one-call row through ``ap.report``.
+is dropped. Nothing is matched by text, and a call sent under another model than the entry's is not counted.
+
+LiteLLM 1.111 runs its logger after the call returns: a sync call on a thread pool, an async one on a logging worker,
+and a sync ``stream=True`` call without the caller's context. So the callback finds the run by the reference, through a
+lookup that never opens, extends or revives one:
+
+- ``metadata=litellm_metadata((run, slot))`` marks the call as the run's. Live, it is recorded into the run; ended
+  before the logger fired, it is dropped with one ``adapter_late_record`` log, never counted twice. Measure in-run
+  calls with ``measure_call`` (above) to keep every one.
+- ``metadata=litellm_metadata(rendered)`` (or a workflow step), for a call outside any run: a one-call row through
+  ``ap.report``. A live run the reference names takes it instead.
+
+Use one of ``measure_call`` and run metadata for a call, not both.
 
 The class derives from ``litellm.integrations.custom_logger.CustomLogger`` when LiteLLM is installed and from ``object``
 otherwise, so it imports (and tests) without the library.
@@ -55,7 +66,8 @@ def litellm_metadata(target: Union[Any, tuple[RunSession, str]], *, model: Optio
     the tag, the signed run reference, and the model when given. Read ``run.run_ref`` here, at the call: it grows."""
     if isinstance(target, tuple):
         run, slot = target
-        fields: dict[str, Any] = {"tag": slot, "runRef": run.run_ref}
+        # ``run``: the call is this run's, so a record the logger delivers after the run ended is dropped, not re-counted.
+        fields: dict[str, Any] = {"tag": slot, "runRef": run.run_ref, "run": True}
     else:
         step = getattr(target, "step_id", None)
         fields = {"tag": step.split("#")[0], "step": step, "runRef": target.run_ref} if step else {"tag": target.tag, "runRef": target.run_ref}
@@ -93,12 +105,20 @@ class AirPrompterLiteLLMCallback(_Base):
     def __init__(self, ap: LiteLLMRuntime):
         super().__init__()
         self._ap = ap
+        self._said: set[tuple[str, str]] = set()
+
+    def _log(self, event: str, **fields: Any) -> None:
+        # A customer logger that raises never reaches LiteLLM.
+        try:
+            self._ap.log({"event": event, "adapter": "litellm", **fields})
+        except Exception:  # noqa: BLE001
+            pass
 
     def _observe(self, kwargs: Mapping[str, Any], response_obj: Any, start_time: Any, end_time: Any, error: Any) -> None:
         try:
             self._record(kwargs, response_obj, start_time, end_time, error)
         except Exception as failure:  # noqa: BLE001 — a callback never fails the customer's call
-            self._ap.log({"event": ADAPTER_EVENTS["tap_failed"], "adapter": "litellm", "reason": str(failure)})
+            self._log(ADAPTER_EVENTS["tap_failed"], method="completion", reason=str(failure))
 
     def _record(self, kwargs: Mapping[str, Any], response_obj: Any, start_time: Any, end_time: Any, error: Any) -> None:
         fields = _metadata(kwargs)
@@ -110,7 +130,14 @@ class AirPrompterLiteLLMCallback(_Base):
         if entry is None:
             return
         slot = str(entry["tag"])
-        model = str(entry.get("model") or kwargs.get("model") or "unknown")
+        model = str(entry.get("model") or "unknown")
+        sent = kwargs.get("model")
+        if isinstance(sent, str) and sent != model and not sent.endswith("/" + model):
+            # Another model's numbers never count against this version.
+            if (slot, sent) not in self._said:
+                self._said.add((slot, sent))
+                self._log(ADAPTER_EVENTS["model_unresolved"], slot=slot, method="completion", model=model)
+            return
         step = fields.get("step") if isinstance(fields.get("step"), str) else None
         latency = _latency_ms(start_time, end_time)
         usage = normalize_usage(response_obj) if error is None else None
@@ -118,8 +145,15 @@ class AirPrompterLiteLLMCallback(_Base):
         # The run this call belongs to is the live run its signed reference names, whatever context the logger runs in
         # (an open run in the logger's context that the reference does not name is another request's). Never a new one.
         run = _find_run(self._ap, fields["runRef"])
+        if run is not None and not self._serves(run, entry):
+            # A run resumed under the same id, or re-pinned, now serves another version: this call is not its.
+            run = None
         if run is not None:
             run.record_model_call(slot, model=model, latency_ms=latency, step=step, usage=usage, error_class=error_class, output_text=output_text_of(response_obj) if error is None else None)
+            return
+        if fields.get("run") is True:
+            # The run this call belonged to ended before LiteLLM logged it: counted once, in that run, or not at all.
+            self._log(ADAPTER_EVENTS["late_record"], slot=slot, method="completion")
             return
         cohort = {"artifact_id": entry.get("artifactId"), "audience_ids": tuple(entry["audienceIds"]) if entry.get("audienceIds") is not None else None, "run_minute": entry.get("runMinute"), "step": step}
         if usage is None:
@@ -137,6 +171,11 @@ class AirPrompterLiteLLMCallback(_Base):
             usage_source=usage.source,
             **cohort,
         )
+
+    def _serves(self, run: RunSession, entry: Mapping[str, Any]) -> bool:
+        """Whether the run still serves the version, arm and artifact the call's reference names for its slot."""
+        current = next((e for e in self._ap.explain(run.run_ref) or () if e.get("tag") == entry.get("tag")), None)
+        return current is not None and all(current.get(key) == entry.get(key) for key in ("versionId", "arm", "artifactId"))
 
     # LiteLLM's CustomLogger hooks (sync and async).
     def log_success_event(self, kwargs: Mapping[str, Any], response_obj: Any, start_time: Any, end_time: Any) -> None:

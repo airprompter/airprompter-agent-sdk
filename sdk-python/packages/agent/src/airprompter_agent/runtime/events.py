@@ -30,6 +30,8 @@ ADAPTER_EVENTS = MappingProxyType(
         "tap_failed": "adapter_tap_failed",
         #: Reading the ``ap.attribute`` scope failed: the call passed through unobserved.
         "attribution_failed": "adapter_attribution_failed",
+        #: A call's record arrived after its run ended (a logger that runs late, as LiteLLM's does): dropped, never counted twice.
+        "late_record": "adapter_late_record",
     }
 )
 

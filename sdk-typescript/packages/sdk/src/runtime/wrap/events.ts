@@ -28,6 +28,8 @@ export const ADAPTER_EVENTS = {
   tapFailed: "adapter_tap_failed",
   /** Reading the `ap.attribute` scope failed: the call passed through unobserved. */
   attributionFailed: "adapter_attribution_failed",
+  /** A call's record arrived after its run ended (a logger that runs late, as LiteLLM's does): dropped, never counted twice. */
+  lateRecord: "adapter_late_record",
 } as const;
 
 export type AdapterEvent = (typeof ADAPTER_EVENTS)[keyof typeof ADAPTER_EVENTS];

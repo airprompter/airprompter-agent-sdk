@@ -8,13 +8,14 @@ Example::
     from airprompter_agent.runtime.adapter import acquire_run, begin_measure, choose_model, measure_call, settings_for
 """
 
-from .adapt import MappedSettings, Measure, acquire_run, apply_settings, begin_measure, choose_model, measure_call, measure_call_async, settings_for
+from .adapt import AcquiredRun, MappedSettings, Measure, acquire_run, apply_settings, begin_measure, choose_model, measure_call, measure_call_async, settings_for
 from .events import ADAPTER_EVENTS
 from .instrument import ApplyPlacement, InstrumentRuntime, instrument_client
 from .proxy import ClientMethod, Pending, StreamAccumulator, read_field
 
 __all__ = [
     "ADAPTER_EVENTS",
+    "AcquiredRun",
     "ApplyPlacement",
     "ClientMethod",
     "InstrumentRuntime",

@@ -582,7 +582,6 @@ class AirPrompterAgent:
         self._run_ref_keys = [self._run_ref_key, *[run_ref_key_from(secret, agent_id, target) for secret in options.get("run_ref_previous_secrets") or ()]]
         if not run_ref_secret:
             self._log({"event": "run_ref_key_store_scoped"})
-        # T33: the last renders by text hash, so a wrapped client can tell which slot a call is.
         #: The application's variable sources (``start(variables=...)``, ``ap.variables.provide()``).
         self.variables = VariableSourceRegistry(options.get("variables"))
         # A source stricter than the prompt's declaration is said once per slot and name for the life of the process.

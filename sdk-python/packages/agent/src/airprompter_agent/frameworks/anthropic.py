@@ -24,7 +24,7 @@ from typing import Any, Callable, Mapping, Optional
 from .contract import Approved, ClientMethod, InstrumentRuntime, apply_settings, instrument_client, read_field
 
 
-class MessagesAccumulator:
+class _MessagesAccumulator:
     """Messages events folded into one message: usage from ``message_start`` and ``message_delta``, text deltas, the stop reason."""
 
     def __init__(self) -> None:
@@ -67,10 +67,12 @@ class MessagesAccumulator:
 
 #: The Anthropic client's model-call methods. Anything else on the client is its own.
 ANTHROPIC_METHODS = (
-    ClientMethod(("messages", "create"), "messages", MessagesAccumulator),
-    ClientMethod(("messages", "stream"), "messages", MessagesAccumulator, helper=True),
-    ClientMethod(("beta", "messages", "create"), "messages", MessagesAccumulator),
-    ClientMethod(("beta", "messages", "stream"), "messages", MessagesAccumulator, helper=True),
+    ClientMethod(("messages", "create"), "messages", _MessagesAccumulator),
+    ClientMethod(("messages", "stream"), "messages", _MessagesAccumulator, helper=True),
+    ClientMethod(("beta", "messages", "create"), "messages", _MessagesAccumulator),
+    ClientMethod(("beta", "messages", "stream"), "messages", _MessagesAccumulator, helper=True),
+    # The raw response is the caller's to parse: placed, and measured for latency only.
+    ClientMethod(("messages", "with_raw_response", "create"), "messages", _MessagesAccumulator),
 )
 
 
@@ -87,4 +89,4 @@ def instrument(client: Any, ap: InstrumentRuntime, *, slot: Optional[str] = None
     return instrument_client(client, ap, adapter="anthropic", methods=ANTHROPIC_METHODS, apply=apply_placement, slot=slot, model_for=model_for, now=now)
 
 
-__all__ = ["ANTHROPIC_METHODS", "MessagesAccumulator", "apply_placement", "instrument"]
+__all__ = ["ANTHROPIC_METHODS", "apply_placement", "instrument"]

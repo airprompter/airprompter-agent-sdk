@@ -14,6 +14,7 @@ Example::
 
 from __future__ import annotations
 
+import functools
 import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Protocol, Sequence
@@ -94,8 +95,13 @@ class _Proxy:
             def call(*args: Any, **kwargs: Any) -> Any:
                 return intercept(method, value, args, kwargs, dotted)
 
-            call.__name__ = getattr(value, "__name__", name)
-            call.__doc__ = getattr(value, "__doc__", None)
+            try:
+                functools.update_wrapper(call, value)
+            except (AttributeError, TypeError):
+                call.__name__ = getattr(value, "__name__", name)
+            # Libraries that route on it (instructor's is_async) still see an async client's method as async.
+            if is_async(value) and hasattr(inspect, "markcoroutinefunction"):
+                inspect.markcoroutinefunction(call)
             return call
         is_prefix = any(len(entry) > len(path) and entry[: len(path)] == path for entry in methods)
         if is_prefix and not callable(value) and not isinstance(value, (str, bytes, int, float, bool)):
@@ -131,9 +137,11 @@ class _Proxy:
 
 
 def is_async(method: Callable[..., Any]) -> bool:
-    """Whether a client method answers a coroutine. Decorators that wrap an ``async def`` are seen through."""
+    """Whether a client method answers a coroutine: an ``async def``, or a plain decorator over one (``functools.wraps``
+    without marking, as the ``openai`` and ``anthropic`` clients' own decorators are). A sync facade that wraps an
+    ``async def`` and runs it to completion would read as async; no provider client does that."""
     try:
-        return inspect.iscoroutinefunction(inspect.unwrap(method)) or inspect.iscoroutinefunction(method)
+        return inspect.iscoroutinefunction(method) or inspect.iscoroutinefunction(inspect.unwrap(method))
     except Exception:  # noqa: BLE001
         return False
 
@@ -222,7 +230,16 @@ class _Forwarding:
 
 class _TappedStream(_Forwarding):
     def __iter__(self) -> Any:
-        return self
+        # A generator, so a consumer that breaks out of the loop settles with what was seen, as the TypeScript tap does.
+        try:
+            while True:
+                try:
+                    chunk = self.__next__()
+                except StopIteration:
+                    return
+                yield chunk
+        finally:
+            self._ap_settle()
 
     def __next__(self) -> Any:
         inner = object.__getattribute__(self, "_ap_inner")
@@ -260,8 +277,17 @@ class _TappedStream(_Forwarding):
 
 
 class _TappedAsyncStream(_Forwarding):
-    def __aiter__(self) -> Any:
-        return self
+    async def __aiter__(self) -> Any:
+        # An async generator, so a consumer that breaks out of the loop settles with what was seen.
+        try:
+            while True:
+                try:
+                    chunk = await self.__anext__()
+                except StopAsyncIteration:
+                    return
+                yield chunk
+        finally:
+            self._ap_settle()
 
     async def __anext__(self) -> Any:
         inner = object.__getattribute__(self, "_ap_inner")
@@ -342,6 +368,11 @@ class _TappedHelper(_Forwarding):
         for event in object.__getattribute__(self, "_ap_inner"):
             object.__getattribute__(self, "_ap_acc").push(event)
             yield event
+
+    def __next__(self) -> Any:
+        event = next(object.__getattribute__(self, "_ap_inner"))
+        object.__getattribute__(self, "_ap_acc").push(event)
+        return event
 
     async def __aiter__(self) -> Any:
         async for event in object.__getattribute__(self, "_ap_inner"):

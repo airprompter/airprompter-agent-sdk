@@ -105,16 +105,42 @@ def test_measure_call_records_usage_finish_and_checks_and_reraises_and_begin_mea
     assert (by_tag["checked"]["errorClass"], by_tag["checked"]["tokens"], by_tag["checked"]["checks"]) == ("truncated", {"input": 10, "output": 4}, {"passed": 0, "failed": 1})
     assert (by_tag["failing"]["errorClass"], by_tag["failing"]["usageSource"]) == ("provider_timeout", "unavailable")
     assert (by_tag["no.settings"]["tokens"]["input"], by_tag["no.settings"]["modelCalls"]) == (7, 1)
+    recorded: list = []
+
+    class Recorder:
+        def record_model_call(self, slot, **fields):
+            recorded.append((slot, fields))
+
+    timed = begin_measure(Recorder(), "s", model="gpt-5", now=lambda: clock[0])  # type: ignore[arg-type]
+    clock[0] += 40
+    timed.settle({"usage": {"input_tokens": 1, "output_tokens": 1}})
+    assert recorded[0][1]["latency_ms"] == 40, "the clock given as now, not the wall clock"
+    assert "tools_observed" not in recorded[0][1], "passed only when set, as the RunSession Protocol does not declare it"
     assert by_tag["with.settings"]["modelCalls"] == 1
 
 
-def test_acquire_run_and_the_event_vocabulary(state_dir):
+def test_acquire_run_and_the_event_vocabulary_matches_typescript(state_dir):
+    import os
+    import re
+
     ap, rows = agent(state_dir)
     with ap.run() as run:
-        assert acquire_run(ap) == (run, False)
+        acquired = acquire_run(ap)
+        assert (acquired.run, acquired.owned) == (run, False) and tuple(acquired) == (run, False), "TypeScript's { run, owned }, and a pair"
     opened, owned = acquire_run(ap)
     assert owned
     opened.end()
-    assert set(ADAPTER_EVENTS) == {"unattributed", "stream_helper_unmeasured", "model_unresolved", "placement_failed", "inference_overridden", "inference_unsupported", "tap_failed", "attribution_failed"}
-    assert ADAPTER_EVENTS["unattributed"] == "adapter_unattributed", "the same names as TypeScript's ADAPTER_EVENTS"
+    events_ts = os.path.join(os.path.dirname(__file__), "..", "..", "sdk-typescript", "packages", "sdk", "src", "runtime", "wrap", "events.ts")
+    with open(events_ts, encoding="utf-8") as f:
+        ts_values = sorted(re.findall(r':\s*"((?:adapter_|model_)[a-z_]+)"', f.read()))
+    assert sorted(ADAPTER_EVENTS.values()) == ts_values, "every event name the same in both SDKs"
     rows()
+
+
+def test_the_contract_and_each_adapter_import_with_no_framework_installed():
+    import subprocess
+    import sys
+
+    probe = "import sys\nfor name in ('openai', 'anthropic', 'litellm'):\n    sys.modules[name] = None\nimport airprompter_agent.frameworks.contract, airprompter_agent.frameworks.openai, airprompter_agent.frameworks.anthropic, airprompter_agent.frameworks.litellm\nprint('ok')\n"
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert result.returncode == 0 and result.stdout.strip() == "ok", result.stderr

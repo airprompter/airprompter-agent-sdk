@@ -70,8 +70,8 @@ def test_litellm_callback_preserves_authenticated_audience_dimensions(agent):
     run_ref = mint_run_ref(RunRefFacts("agt_1", "prod", new_run_id(), [entry]), agent._run_ref_key)
     metadata = {"airprompter": {"tag": "support.triage", "versionId": "untrusted", "runRef": run_ref}}
     start = dt.datetime(2026, 9, 12, 14, 3, 10)
-    AirPrompterLiteLLMCallback(agent).log_success_event({"model": "gpt-5-mini", "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
-    assert agent.feedback(run_ref, rating=5, model="gpt-5-mini")
+    AirPrompterLiteLLMCallback(agent).log_success_event({"model": "gpt-5", "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
+    assert agent.feedback(run_ref, rating=5, model="gpt-5")
     windows = _windows(agent)
     assert all((window["artifactId"], window["tag"], window["versionId"], window["arm"]) == ("prm_targeted", "support.triage", "ver_targeted", "candidate") for window in windows), "the signed reference is the authority, not the metadata"
     assert next(window for window in windows if window["count"] == 1)["model"] == "gpt-5", "the row names the release's model"
@@ -115,7 +115,7 @@ def test_litellm_callback_reports_a_workflow_step_under_the_slot_tag():
         step = ap.workflow("docs.flow").steps[0]
         metadata = litellm_metadata(step)
         start = dt.datetime(2026, 9, 12, 14, 3, 10)
-        AirPrompterLiteLLMCallback(ap).log_success_event({"model": "gpt-5", "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
+        AirPrompterLiteLLMCallback(ap).log_success_event({"model": step.model, "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
         ap.spool.close_windows(ap._now_ms())
         rows = ap.drain_memory_sink()
         assert [(row["tag"], row["count"]) for row in rows if row["type"] == "window"] == [("docs.flow", 1)]
@@ -132,7 +132,7 @@ def test_inside_an_open_run_the_call_is_recorded_into_it(agent):
         placed = run.place("support.triage")
         assert placed.kind == "approved"
         metadata = litellm_metadata((run, "support.triage"))
-        assert set(metadata["airprompter"]) == {"tag", "runRef"}
+        assert set(metadata["airprompter"]) == {"tag", "runRef", "run"}, "content-free; marked as the run's"
         for _ in range(2):
             callback.log_success_event({"model": "gpt-5", "litellm_params": {"metadata": litellm_metadata((run, "support.triage"))}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
     windows = _windows(agent)
@@ -143,3 +143,68 @@ def test_litellm_params_are_the_release_model_and_settings():
     placed = Approved(slot="s", instructions="x", model="gpt-5", settings={"temperatureMilli": 200, "maxOutputTokens": 800, "stopSequences": ["END"]})
     assert litellm_params(placed) == {"model": "gpt-5", "temperature": 0.2, "max_completion_tokens": 800, "stop": ["END"]}
     assert litellm_params(Passthrough(slot="s", reason="no_slot")) == {}
+
+
+def _success(callback, metadata, model="gpt-5"):
+    start = dt.datetime(2026, 9, 12, 14, 3, 10)
+    callback.log_success_event({"model": model, "litellm_params": {"metadata": metadata}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
+
+
+def test_a_logger_thread_without_the_callers_context_records_into_the_run_the_reference_names(agent):
+    import threading
+
+    callback = AirPrompterLiteLLMCallback(agent)
+    with agent.run(variables={"team": "Billing", "ticket": "refund"}) as a:
+        a.place("support.triage")
+        metadata = litellm_metadata((a, "support.triage"))
+        # A plain thread: no copied context, as LiteLLM's logging pool gives.
+        worker = threading.Thread(target=_success, args=(callback, metadata))
+        worker.start()
+        worker.join()
+        with agent.run(subject="other") as b:
+            b.place("support.reply")
+            _success(callback, metadata)  # inside run B, but the reference names A
+    windows = _windows(agent)
+    by_tag = {w["tag"]: w for w in windows}
+    assert (by_tag["support.triage"]["count"], by_tag["support.triage"]["modelCalls"]) == (1, 2), "both calls on A, the run the reference names"
+    assert by_tag.get("support.reply", {}).get("modelCalls", 0) == 0, "run B is untouched"
+
+
+def test_a_late_record_for_an_ended_run_is_dropped_with_one_log_never_counted_twice(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    logged: list = []
+    callback._ap = type("Spy", (), {"__getattr__": lambda self, name: getattr(agent, name), "log": lambda self, event: logged.append(event)})()
+    with agent.run(variables={"team": "Billing", "ticket": "refund"}) as run:
+        run.place("support.triage")
+        metadata = litellm_metadata((run, "support.triage"))
+    _success(callback, metadata)  # LiteLLM logged it after the block ended
+    windows = _windows(agent)
+    assert [(w["tag"], w["count"], w.get("modelCalls")) for w in windows] == [("support.triage", 1, 0)], "the run counted once; the late call is not a second row"
+    assert [e["event"] for e in logged] == ["adapter_late_record"]
+
+
+def test_a_call_sent_under_another_model_is_not_counted_against_the_version(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    rendered = agent.prompt("support.triage").render(team="Billing", ticket="refund")
+    _success(callback, litellm_metadata(rendered), model="gpt-5-mini")
+    _success(callback, litellm_metadata(rendered), model="openai/gpt-5")
+    windows = _windows(agent)
+    assert [(w["tag"], w["model"], w["count"]) for w in windows] == [("support.triage", "gpt-5", 1)], "only the call on the release's model"
+
+
+def test_a_run_resumed_under_the_same_id_on_another_version_does_not_take_an_older_call(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    with agent.run(variables={"team": "Billing", "ticket": "refund"}) as run:
+        run.place("support.triage")
+        metadata = litellm_metadata((run, "support.triage"))
+        ref = run.run_ref
+    entry = agent.explain(ref)[0]
+    forged_entry = {**entry, "versionId": "ver_other"}
+    stale = {"airprompter": {"tag": "support.triage", "runRef": mint_run_ref(RunRefFacts("agt_1", "prod", agent._runs._host.parse_run_ref(ref).run_id, [forged_entry]), agent._run_ref_key), "run": True}}
+    resumed = agent.open_run(resume=ref, variables={"team": "Billing", "ticket": "refund"})
+    resumed.place("support.triage")
+    _success(callback, stale)
+    resumed.end()
+    windows = _windows(agent)
+    assert sum(w.get("modelCalls", 0) for w in windows) == 0, "the resumed run serves another version than the call's reference"
+    assert metadata["airprompter"]["run"] is True

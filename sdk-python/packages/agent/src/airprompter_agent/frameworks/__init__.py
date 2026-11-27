@@ -1,6 +1,7 @@
 """``airprompter_agent.frameworks``: one adapter per framework, each on the one contract in
-``airprompter_agent.frameworks.contract``. Import the adapter you use; this package imports none of them, and no adapter
-imports its framework until you call it, so each framework stays an optional extra.
+``airprompter_agent.frameworks.contract``. Import the adapter you use: this package imports none of them, and an
+adapter imports only its own framework, guarded (``litellm``'s base class when it is installed), so each framework
+stays an optional extra.
 
 Example::
 

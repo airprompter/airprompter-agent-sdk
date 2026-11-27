@@ -28,6 +28,7 @@ Example::
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 from typing import Any, Callable, Mapping, Optional, Protocol, Sequence
 
@@ -112,7 +113,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
                 once(ADAPTER_EVENTS["model_unresolved"], slot=slot, method=name, model=placement.model)
                 run.decline(slot, "model_unresolved")  # type: ignore[arg-type]
                 return None
-            return apply(kwargs, Approved(slot=placement.slot, instructions=placement.instructions, model=model, settings=placement.settings), method.kind), placement.model
+            return apply(kwargs, dataclasses.replace(placement, model=model), method.kind), placement.model
         except Exception as error:  # noqa: BLE001
             log(ADAPTER_EVENTS["placement_failed"], slot=slot, method=name, reason=str(error))
             # The slot pinned a version this call will not serve: decline it, so no row or feedback names that version.
@@ -149,13 +150,14 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
         return placed_kwargs(run, placement, method, kwargs, name)
 
     def slot_call(method: ClientMethod, original: Callable[..., Any], args: tuple, kwargs: dict, name: str) -> Any:
+        if is_async(original):
+            # The run is found when the coroutine runs, so one created and never awaited opens nothing.
+            return _async_slot_call(method, original, args, kwargs, name)
         try:
             run, owned = acquire_run(ap)
         except Exception as error:  # noqa: BLE001
             log(ADAPTER_EVENTS["placement_failed"], slot=slot, method=name, reason=str(error))
             return original(*args, **kwargs)
-        if is_async(original):
-            return _async_slot_call(run, owned, method, original, args, kwargs, name)
         send = place(run, method, args, kwargs, name)
         pending = pending_for(run, owned, send)
         try:
@@ -165,8 +167,19 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
             raise
         return _tapped(out, method, pending, name)
 
-    async def _async_slot_call(run: RunSession, owned: bool, method: ClientMethod, original: Callable[..., Any], args: tuple, kwargs: dict, name: str) -> Any:
-        send = await place_async(run, method, args, kwargs, name)
+    async def _async_slot_call(method: ClientMethod, original: Callable[..., Any], args: tuple, kwargs: dict, name: str) -> Any:
+        try:
+            run, owned = acquire_run(ap)
+        except Exception as error:  # noqa: BLE001
+            log(ADAPTER_EVENTS["placement_failed"], slot=slot, method=name, reason=str(error))
+            return await original(*args, **kwargs)
+        try:
+            send = await place_async(run, method, args, kwargs, name)
+        except BaseException:
+            # Cancelled while placing: a run this call opened ends here rather than at the idle sweep.
+            if owned:
+                run.end()
+            raise
         pending = pending_for(run, owned, send)
         try:
             out = await original(*args, **(send[0] if send is not None else kwargs))
@@ -209,10 +222,17 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
                     kwargs = applied.params
             except Exception as error:  # noqa: BLE001
                 log(ADAPTER_EVENTS["placement_failed"], slot=attribution.tag, method=name, reason=str(error))
+                # Whatever went out, it was not placed by the release: not this version's numbers.
+                unresolved = True
         # Another model's numbers must not count against this version: the call goes out as written, unobserved.
         if unresolved:
             return original(*args, **kwargs)
-        pending = ap.begin_observation(attribution, _model_of(kwargs) or attribution.model)
+        try:
+            # Under the release's id, as every adapter measures, whatever id ``model_for`` sent the call under.
+            pending = ap.begin_observation(attribution, attribution.model)
+        except Exception as error:  # noqa: BLE001
+            log(ADAPTER_EVENTS["attribution_failed"], slot=attribution.tag, method=name, reason=str(error))
+            return original(*args, **kwargs)
         try:
             out = original(*args, **kwargs)
         except BaseException as error:

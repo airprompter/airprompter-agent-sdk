@@ -165,8 +165,8 @@ class RunRegistry:
 
     def _find_live(self, run_ref: Any) -> Optional[Session]:
         """Internal (AIR-2231, the adapter contract only): the live run a verified reference names, or None. Lookup only:
-        it never opens, extends, resumes or revives a run, and an unknown, ended, idle-expired or badly signed reference
-        answers None. The reference verifies only under this agent's own key, so it cannot name another agent's or
+        it never opens, extends, resumes or revives a run, and an unknown, ended, parked, idle-expired or badly signed
+        reference answers None. The reference verifies only under this agent's own key, so it cannot name another agent's or
         another process's run: those are not in this registry."""
         if not isinstance(run_ref, str):
             return None
@@ -175,7 +175,7 @@ class RunRegistry:
             return None
         with self._lock:
             session = self._live.get(facts.run_id)
-        if session is None or session.is_ended or session.idle(self._host.now()):
+        if session is None or session.is_ended or getattr(session, "_parked", False) or session.idle(self._host.now()):
             return None
         return session
 

@@ -42,7 +42,7 @@ SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-red
 PACKAGES = ["agent", *SATELLITES]
 SRC = os.path.join(SDK_PY, "packages", "agent", "src", "airprompter_agent")
 #: Rule 4 of section 3.2: the facade's line count after AIR-2231's deletions. A change that grows it moves this on purpose.
-AGENT_PY_LINES = 2513
+AGENT_PY_LINES = 2516
 #: Each layer's public list, sorted. A public name is a promise: change this on purpose.
 LAYER_ALL = {
     "core": ["AGENT_ID", "APBUNDLE_INFO", "ASSIGNMENT_MODULUS", "AUDIENCE_LIMITS", "Assignment", "AssignmentError", "BundleError", "BundleRelease", "BundleReleaseRefused", "CHECK_BOUNDS", "CanonicalJsonError", "ClockPort", "Delimiters", "DistributionKey", "ERROR_CLASSES", "FsPort", "GOLDEN_SET_FORMAT", "GOLDEN_SET_VERSION", "GoldenCaseResult", "GoldenInvocation", "GoldenInvoke", "GoldenReport", "GoldenSetError", "JUDGE_RUBRICS", "JudgeResult", "JudgeRubric", "LATENCY_BUCKET_EDGES_MS", "LoadedRelease", "MissingVariableError", "NormalizedFeedback", "OS_FS", "Observation", "OsFs", "PROTECTION_CRITERIA", "PROTOCOL_VERSION", "RAMP_MAX_STEPS", "RAMP_MIN_STEP_MS", "RUN_REF_MAX_ENTRIES", "RUN_REF_MAX_TOKEN_LENGTH", "RUN_REF_READ_MAX_ENTRIES", "RUN_REF_READ_MAX_TOKEN_LENGTH", "ReleaseReader", "ReleaseSlot", "RunDimensions", "RunRefFacts", "RunTotals", "SDK_VERSION", "SLOT_TAG", "STEP_BOUNDS", "STEP_STATUSES", "SUPPORTED_CAPABILITIES", "SUPPORTED_PROTOCOL_MAJORS", "SYSTEM_CLOCK", "SpoolRow", "StepError", "StepTotals", "SyncClient", "SystemClock", "TARGET_SLUG", "UNDEFINED", "USAGE_SOURCES", "UnknownVariableError", "UploadOutcome", "UploadSegment", "UploadSink", "Verdict", "WINDOW_STATUSES", "X25519KeyPair", "arm_for_bucket", "assign_arm", "bucket_from_hash", "bundle_payload_bytes", "canonical_bytes", "canonical_json", "capabilities_implemented", "captured_audience_ids", "carried_payloads", "check_refusal", "checks_refusals", "copy_audience_tags", "count_of", "create_encrypted_bundle", "create_plaintext_bundle", "default_of", "distribution_key_id", "effective_arms", "epoch_minute", "estimate_tokens", "evaluate_check", "evaluate_checks", "frozen_experiment", "fs_failure_code", "fs_or_default", "generate_p256_jwk", "generate_x25519_key_pair", "golden_reports_meet", "instant", "judge_prompt", "judge_signals_of", "key_thumbprint", "latency_bucket_index", "manifest_has_golden", "matches_audience", "mint_run_ref", "minute_of", "new_run_id", "normalize_feedback", "open_bundle", "optional_payloads", "ordered_steps", "output_text_of", "parse_golden_set", "parse_judge_reply", "parse_run_ref", "pass_bps_of", "pattern_refusal", "placeholders_of", "project_checks", "public_jwk_of", "ramp_weights_at", "referenced_payloads", "release_digest", "release_digest_input", "render_template", "rubric_from_prompt", "run_golden_set", "run_ref_key_from", "servable_experiments", "servable_overrides", "servable_slots", "sha256_prefixed", "sign_bytes", "sink_status", "slot_hashes", "step_name", "subject_hash", "trusted_root_from_pinned_key", "utf16_length", "valid_audience_ids", "valid_audience_label", "valid_audience_manifest", "valid_audience_minute", "valid_audience_selector", "valid_step_name", "validate_arms", "validate_json_schema", "validate_ramp", "value_at_path", "verify_bytes", "verify_manifest", "verify_root_metadata", "x25519_private_key_from_raw", "x25519_public_key_from_raw", "xml_delimiters"],
@@ -274,7 +274,9 @@ def test_adapters_import_only_the_contract_and_their_framework_and_nothing_below
     assert unlisted.returncode == 1 and "frameworks/_lint_probe has no entry in ADAPTERS" in unlisted.stderr
     # Only new files are planted, never an edit to a real one: the probe sits in a folder named after a listed adapter,
     # which the lint reads as that adapter's own files.
-    os.makedirs(os.path.join(frameworks, "openai"), exist_ok=False)
+    folder = os.path.join(frameworks, "openai")
+    existed = os.path.isdir(folder)
+    os.makedirs(folder, exist_ok=True)
     try:
         probe = os.path.join(frameworks, "openai", "_lint_probe.py")
         for source, message in [
@@ -282,6 +284,9 @@ def test_adapters_import_only_the_contract_and_their_framework_and_nothing_below
             ("from ..anthropic import instrument\nPROBE = instrument\n", "not airprompter_agent.frameworks.anthropic"),
             ("import anthropic\nPROBE = anthropic\n", "anthropic is not in frameworks/openai's allowlist"),
             ("from airprompter_agent.runtime.adapter import acquire_run\nPROBE = acquire_run\n", "runtime.adapter is the adapters' internal module"),
+            ("import importlib\nPROBE = importlib.import_module('airprompter_agent.runtime')\n", "not airprompter_agent.runtime"),
+            ("PROBE = __import__('anthropic')\n", "anthropic is not in frameworks/openai's allowlist"),
+            ("import importlib\nNAME = 'x'\nPROBE = importlib.import_module(NAME)\n", "a dynamic import of a computed name cannot be checked"),
         ]:
             result = planted(probe, source)
             assert result.returncode == 1, source
@@ -289,7 +294,22 @@ def test_adapters_import_only_the_contract_and_their_framework_and_nothing_below
         ok = planted(probe, "import typing\nimport openai\nfrom ..contract import choose_model\nPROBE = (typing, openai, choose_model)\n")
         assert ok.returncode == 0, ok.stderr
     finally:
-        shutil.rmtree(os.path.join(frameworks, "openai"), ignore_errors=True)
+        if existed:
+            os.unlink(probe) if os.path.exists(probe) else None
+        else:
+            shutil.rmtree(folder, ignore_errors=True)
+    sub = planted(os.path.join(SRC, "_lint_probe.py"), "from airprompter_agent.runtime import adapter\nPROBE = adapter\n")
+    assert "airprompter_agent.runtime.adapter is the adapters' internal module" in sub.stderr, "a submodule named in from-import is seen"
+    init = os.path.join(frameworks, "__init__.py")
+    with open(init, encoding="utf-8") as f:
+        original_init = f.read()
+    try:
+        with open(init, "a", encoding="utf-8") as f:
+            f.write("\nfrom . import openai  # noqa\n")
+        assert "frameworks/__init__ imports the standard library only" in lint().stderr
+    finally:
+        with open(init, "w", encoding="utf-8") as f:
+            f.write(original_init)
     runtime_framework = planted(os.path.join(SRC, "runtime", "_lint_probe.py"), "import openai\nPROBE = openai\n")
     assert runtime_framework.returncode == 1 and "runtime imports the framework package openai" in runtime_framework.stderr
     agent_framework = planted(os.path.join(SRC, "_lint_probe.py"), "from langchain_core.messages import SystemMessage\nPROBE = SystemMessage\n")

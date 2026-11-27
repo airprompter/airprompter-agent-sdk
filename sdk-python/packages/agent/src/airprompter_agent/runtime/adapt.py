@@ -18,7 +18,7 @@ from __future__ import annotations
 import inspect
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Mapping, Optional, TypeVar, Union
+from typing import Any, Awaitable, Callable, Mapping, NamedTuple, Optional, TypeVar, Union
 
 from airprompter_agent.core import output_text_of
 from airprompter_agent.core._util import now_ms
@@ -30,13 +30,20 @@ from .run import AgentRuntime, RunInput, RunSession
 T = TypeVar("T")
 
 
-def acquire_run(ap: AgentRuntime, input: Optional[RunInput] = None) -> tuple[RunSession, bool]:
-    """Rule 3 of the contract: ``(run, owned)`` — the run this hook is inside, else one opened (get-or-create with
-    ``resume``). End it only if ``owned``."""
+class AcquiredRun(NamedTuple):
+    """What ``acquire_run`` answers: ``.run`` and ``.owned`` (TypeScript's ``{ run, owned }``), and unpacks as a pair."""
+
+    run: RunSession
+    owned: bool
+
+
+def acquire_run(ap: AgentRuntime, input: Optional[RunInput] = None) -> AcquiredRun:
+    """Rule 3 of the contract: the run this hook is inside, else one opened (get-or-create with ``resume``). End it only
+    if ``owned``."""
     current = ap.current_run()
     if current is not None:
-        return current, False
-    return (ap.open_run(input) if input is not None else ap.open_run()), True
+        return AcquiredRun(current, False)
+    return AcquiredRun(ap.open_run(input) if input is not None else ap.open_run(), True)
 
 
 def choose_model(*, release_model_id: str, caller_model: Any, caller_model_id: Optional[str], model_for: Optional[Callable[[str, Any], Any]] = None, resolve: Optional[Callable[[str], Any]] = None) -> Any:
@@ -129,7 +136,10 @@ class Measure:
             self._settled = True
         try:
             latency = max(0.0, self._now() - self._started)
-            base: dict[str, Any] = {"model": self._model, "latency_ms": latency, "step": self._step, "tools_observed": self._tools_observed}
+            base: dict[str, Any] = {"model": self._model, "latency_ms": latency, "step": self._step}
+            if self._tools_observed:
+                # Only when set: a session written to the RunSession Protocol need not take it.
+                base["tools_observed"] = True
             if error is not None:
                 self._run.record_model_call(self._slot, **base, error_class=classify_error(error))
             else:
@@ -179,4 +189,4 @@ async def measure_call_async(run: RunSession, slot: str, call: Callable[[], Unio
     return result  # type: ignore[return-value]
 
 
-__all__ = ["MappedSettings", "Measure", "acquire_run", "apply_settings", "begin_measure", "choose_model", "measure_call", "measure_call_async", "settings_for"]
+__all__ = ["AcquiredRun", "MappedSettings", "Measure", "acquire_run", "apply_settings", "begin_measure", "choose_model", "measure_call", "measure_call_async", "settings_for"]

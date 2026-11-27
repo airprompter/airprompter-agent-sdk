@@ -88,14 +88,15 @@ export class RunRegistry {
 
   /**
    * @internal AIR-2231, the adapter contract only: the live run a verified reference names, or undefined. Lookup only: it
-   * never opens, extends, resumes or revives a run, and an unknown, ended, idle-expired or badly signed reference answers
-   * undefined. The reference verifies only under this agent's own key, so it cannot name another agent's run.
+   * never opens, extends, resumes or revives a run, and an unknown, ended, parked, idle-expired or badly signed reference answers
+   * undefined. The reference verifies only under this agent's own key, so it cannot name another agent's run. Kept in step
+   * with the Python twin (`_find_live`, which LiteLLM's late logger needs); `stripInternal` keeps it out of the `.d.ts`.
    */
   findLive(runRef: unknown): RunSession | undefined {
     if (typeof runRef !== "string") return undefined;
     const runId = this.host.parseRunRef(runRef)?.runId;
     const session = runId === undefined ? undefined : this.live.get(runId);
-    if (!session || session.isEnded || session.idle(this.host.now())) return undefined;
+    if (!session || session.isEnded || (session as unknown as { parked: boolean }).parked || session.idle(this.host.now())) return undefined;
     return session;
   }
 

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -60,16 +61,24 @@ def is_framework_package(module: str) -> bool:
 
 
 def adapter_of(relative: Path) -> str | None:
-    """``frameworks/<name>.py`` or ``frameworks/<name>/…`` → name; the package's own ``__init__`` is not an adapter."""
-    if relative.parts[0] != "frameworks" or len(relative.parts) < 2 or relative.parts[1] == "__init__.py":
+    """``frameworks/<name>.py`` or ``frameworks/<name>/…`` → name; the package's own ``__init__`` is ``"__init__"``,
+    which may import the standard library only."""
+    if relative.parts[0] != "frameworks" or len(relative.parts) < 2:
         return None
+    if relative.parts[1] == "__init__.py":
+        return "__init__"
     return relative.parts[1][:-3] if len(relative.parts) == 2 else relative.parts[1]
 
 
 def lint_adapter(name: str, shown: Path, found: list[tuple[int, str]], offenders: list[str]) -> None:
+    if name == "__init__":
+        for line, module in found:
+            if module is DYNAMIC or module.split(".")[0] not in STDLIB:
+                offenders.append(f"{shown}:{line}: frameworks/__init__ imports the standard library only, so importing one adapter loads no other ({module if module is not DYNAMIC else 'a computed import'})")
+        return
     if name == "contract":
         for line, module in found:
-            if module.split(".")[0] in STDLIB or module in ("airprompter_agent.core", "airprompter_agent.runtime", ADAPTER_MODULE):
+            if module is DYNAMIC or module.split(".")[0] in STDLIB or module in ("airprompter_agent.core", "airprompter_agent.runtime", ADAPTER_MODULE):
                 continue
             offenders.append(f"{shown}:{line}: frameworks/contract imports only the core and runtime packages and {ADAPTER_MODULE} ({module})")
         return
@@ -79,8 +88,10 @@ def lint_adapter(name: str, shown: Path, found: list[tuple[int, str]], offenders
         return
     own = f"airprompter_agent.frameworks.{name}"
     for line, module in found:
+        if module is DYNAMIC:
+            continue  # reported below, for every file
         head = module.split(".")[0]
-        if module == CONTRACT or module == own or module.startswith(own + ".") or head in STDLIB:
+        if module == CONTRACT or module == own or module.startswith(own + ".") or head in STDLIB or module == "airprompter_agent.frameworks":
             continue
         if head == PACKAGE:
             offenders.append(f"{shown}:{line}: an adapter imports only the contract, its own folder and its framework, not {module}")
@@ -114,13 +125,41 @@ def absolute_of(node: ast.ImportFrom, path_parts: tuple[str, ...]) -> str:
     return ".".join([*base, *([node.module] if node.module else [])])
 
 
+SRC_ROOT = ROOT / "agent" / "src"
+DYNAMIC = object()
+
+
+def is_module(name: str) -> bool:
+    """Whether a dotted name is a module or package of ours on disk (so ``from pkg import sub`` names ``pkg.sub``)."""
+    *parents, leaf = name.split(".")
+    folder = SRC_ROOT.joinpath(*parents)
+    # Exact case: a case-insensitive filesystem would read ``runtime.Attribution`` as ``runtime/attribution.py``.
+    names = set(os.listdir(folder)) if folder.is_dir() else set()
+    return f"{leaf}.py" in names or (leaf in names and (folder / leaf / "__init__.py").is_file())
+
+
 def imported_modules(tree: ast.AST, package: tuple[str, ...]) -> list[tuple[int, str]]:
+    """Every module a file names: ``import x``, ``from x import y`` (and ``x.y`` when ``y`` is itself a module), and
+    ``importlib.import_module("x")`` / ``__import__("x")``. A dynamic import of a computed name is reported as such."""
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            found.append((node.lineno, absolute_of(node, package)))
+            base = absolute_of(node, package)
+            found.append((node.lineno, base))
+            for alias in node.names:
+                if alias.name != "*" and base.split(".")[0] == PACKAGE and is_module(f"{base}.{alias.name}"):
+                    found.append((node.lineno, f"{base}.{alias.name}"))
         elif isinstance(node, ast.Import):
             found.extend((node.lineno, alias.name) for alias in node.names)
+        elif isinstance(node, ast.Call):
+            callee = node.func
+            name = callee.attr if isinstance(callee, ast.Attribute) else callee.id if isinstance(callee, ast.Name) else None
+            if name in ("import_module", "__import__"):
+                argument = node.args[0] if node.args else None
+                if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                    found.append((node.lineno, argument.value))
+                else:
+                    found.append((node.lineno, DYNAMIC))  # type: ignore[arg-type]
     return found
 
 
@@ -139,7 +178,10 @@ def main() -> int:
         if adapter is not None:
             lint_adapter(adapter, shown, found, offenders)
         for line, module in found:
-            if module == ADAPTER_MODULE and adapter != "contract" and layer != "runtime":
+            if module is DYNAMIC:
+                offenders.append(f"{shown}:{line}: a dynamic import of a computed name cannot be checked; name the module")
+                continue
+            if module == ADAPTER_MODULE and adapter != "contract":
                 offenders.append(f"{shown}:{line}: {ADAPTER_MODULE} is the adapters' internal module; only frameworks/contract imports it")
                 continue
             if layer != "frameworks" and is_framework_package(module):

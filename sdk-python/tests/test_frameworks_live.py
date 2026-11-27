@@ -119,7 +119,7 @@ def test_openai_sync_client(state_dir):
     plain = client.chat.completions.create(model="gpt-5", messages=messages)
     assert plain.choices[0].message.content == "Regards, us"
     raw = client.chat.completions.with_raw_response.create(model="gpt-5", messages=messages)
-    assert raw.parse().choices[0].message.content == "Regards, us", "with_raw_response is the client's own (not observed)"
+    assert raw.parse().choices[0].message.content == "Regards, us", "the raw response is the caller's to parse"
     streamed = ""
     with client.chat.completions.create(model="gpt-5", messages=messages, stream=True, stream_options={"include_usage": True}) as stream:
         for chunk in stream:
@@ -132,13 +132,15 @@ def test_openai_sync_client(state_dir):
     assert responses.output_text == "No signature"
     assert len(seen) == 5
     assert seen[0][1]["messages"][0] == {"role": "system", "content": "Triage this ticket."}, "the approved text reached the wire"
+    assert seen[1][1]["messages"][0] == {"role": "system", "content": "Triage this ticket."}, "with_raw_response is placed too"
     assert seen[3][1]["messages"][0] == {"role": "system", "content": "the caller's own prompt"}, "the .stream() helper passed through"
     assert seen[4][1]["instructions"] == "Triage this ticket."
     rows = windows()
     assert [(r["tag"], r["model"], r["status"], r.get("errorClass"), r["count"], r["tokens"], r.get("checks")) for r in rows] == [
         ("support.triage", "gpt-5", "error", "truncated", 1, {"input": 10, "cachedInput": 2, "output": 4}, {"passed": 1, "failed": 0}),
         ("support.triage", "gpt-5", "ok", None, 2, {"input": 19, "cachedInput": 2, "output": 7}, {"passed": 1, "failed": 1}),
-    ]
+        ("support.triage", "gpt-5", "ok", None, 1, {"input": 0, "output": 0}, None),
+    ], "the raw response is measured for latency only (the row with no usage)"
 
 
 def test_openai_async_client(state_dir):
@@ -277,9 +279,15 @@ def test_litellm_every_call_shape_inside_a_run_is_that_run_and_a_forged_or_stale
                 return run.run_ref
 
         ended_ref = asyncio.run(one_run())
-        # The run has ended: its reference now names no live run, so a late call is a one-call row, never a revived run.
+        # As real code does: leave the run straight after the call. LiteLLM logs after the call returns, so the record may
+        # land after the run ended: then it is dropped with one log, never counted as a second run.
+        with ap.run(subject="u2") as run:
+            placed = run.place("support.triage")
+            litellm.completion(messages=[{"role": "user", "content": "quick"}], mock_response="Regards", metadata=litellm_metadata((run, "support.triage")), **litellm_params(placed))
+        hooked()
+        # The run has ended: a late call marked as its own revives nothing and is not a row.
         open_before = ap._runs.open_runs
-        for _ in litellm.completion(model="gpt-5", messages=[{"role": "user", "content": "late"}], mock_response="Regards", stream=True, metadata={"airprompter": {"tag": "support.triage", "runRef": ended_ref}}):
+        for _ in litellm.completion(model="gpt-5", messages=[{"role": "user", "content": "late"}], mock_response="Regards", stream=True, metadata={"airprompter": {"tag": "support.triage", "runRef": ended_ref, "run": True}}):
             pass
         hooked()
         assert ap._runs.open_runs == open_before, "the lookup opened nothing"
@@ -290,5 +298,8 @@ def test_litellm_every_call_shape_inside_a_run_is_that_run_and_a_forged_or_stale
     finally:
         litellm.callbacks = []
     rows = windows()
-    # The run: one count, four model calls; the late sync stream after it ended: its own one-call row. The forged call: nothing.
-    assert [(r["tag"], r["model"], r["count"], r["modelCalls"], r["agentRun"]) for r in rows] == [("support.triage", "gpt-5", 2, 5, 2)], rows
+    # Two runs, counted once each: the first with its four calls; the second with its one call if the logger beat the end
+    # of the block, else none. The late call and the forged one are no row.
+    assert {(r["tag"], r["model"]) for r in rows} == {("support.triage", "gpt-5")}, rows
+    assert (sum(r["count"] for r in rows), sum(r["agentRun"] for r in rows)) == (2, 2), rows
+    assert sum(r["modelCalls"] for r in rows) in (4, 5), rows

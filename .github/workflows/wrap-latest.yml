@@ -9,7 +9,9 @@ name: Wrappers against the latest provider SDKs
 # — nothing reaches a provider. A red run here is the early warning that a
 # supported range must move. CI proper runs the same suites on the versions
 # the workspace pins (`ai` is a pinned devDependency; `openai` and
-# `@anthropic-ai/sdk` arrive with the LangChain ones), or skips them.
+# `@anthropic-ai/sdk` arrive with the LangChain ones), or skips them. The
+# framework examples (examples/) run the same way, on each framework's
+# newest release, and once more as published.
 
 on:
   schedule:
@@ -43,6 +45,33 @@ jobs:
       - name: Wrapper suites against the real clients
         run: WRAP_LIVE=1 node --import tsx --test test/frameworks/live.test.ts test/frameworks/openai.test.ts test/frameworks/anthropic.test.ts test/frameworks/aiSdk.test.ts
         working-directory: sdk-typescript
+
+  examples:
+    # The framework examples (examples/ci/run.mjs) against the same fake provider, twice: with each framework package
+    # at its newest release in place of its pin, so a framework change that breaks a copied example shows up here; and
+    # exactly as a developer copies one (the pins from npm, the newest released CLI), which skips with a warning while
+    # the pin is not on npm yet.
+    name: Examples (latest framework releases, and as published)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g npm@11.21.2
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: sdk-typescript
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: cli
+      - name: Each example against the newest framework releases
+        run: node examples/ci/run.mjs --latest
+      - name: Each example as a developer copies it (its pins from npm, the newest released CLI)
+        # Its own result whatever --latest found.
+        if: ${{ !cancelled() }}
+        run: node examples/ci/run.mjs --published
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   python:
     name: Python wrappers (latest openai, anthropic, litellm)

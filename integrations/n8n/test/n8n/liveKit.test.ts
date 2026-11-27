@@ -160,3 +160,28 @@ test("--prepare-nodes-dir: refuses --no-build, a folder that is not empty, and a
   assert.match(none.json.error, /no commit to record/);
   assert.ok(!existsSync(join(dir, "new")), "the target was not created");
 });
+
+test("--prepare-nodes-dir refuses an untracked build input: it would be packed under a clean commit", (t) => {
+  // A repository of its own with the kit at integrations/n8n, committed, then an untracked src/ file.
+  const repo = scratch(t);
+  const home = join(repo, "integrations", "n8n");
+  mkdirSync(join(home, "scripts"), { recursive: true });
+  mkdirSync(join(home, "src"), { recursive: true });
+  cpSync(KIT, join(home, "scripts", "live-n8n.mjs"));
+  writeFileSync(join(home, "package.json"), JSON.stringify({ name: "n8n-nodes-airprompter", version: "0.0.0" }));
+  writeFileSync(join(home, "src", "a.ts"), "export const a = 1;\n");
+  const git = (...args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo, encoding: "utf8" });
+  git("init", "--quiet");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "kit");
+  writeFileSync(join(home, "src", "untracked.ts"), "export const b = 2;\n");
+  const untracked = run(["--prepare-nodes-dir", join(repo, "out")], {}, join(home, "scripts", "live-n8n.mjs"));
+  assert.equal(untracked.status, 2);
+  assert.match(untracked.json.error, /changes not committed/);
+  // An untracked file outside the build inputs (a run's output) is not a change to the package.
+  rmSync(join(home, "src", "untracked.ts"));
+  writeFileSync(join(home, "live-n8n.json"), "{}");
+  // A different pin is the next refusal after the dirty check, so reaching it proves the tree counted as clean.
+  const output = run(["--prepare-nodes-dir", join(repo, "out")], { AIRPROMPTER_KIT_COMMIT: "c0ffee0000000000000000000000000000000001" }, join(home, "scripts", "live-n8n.mjs"));
+  assert.match(output.json.error, /is not this checkout's commit/, "got past the dirty check to the next refusal");
+});

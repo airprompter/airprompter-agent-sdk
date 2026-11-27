@@ -127,6 +127,8 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
+/** What `npm run build` and `npm pack` read: anything here that is not committed changes the package. */
+const BUILD_INPUTS = ["src", "nodes", "credentials", "scripts/copy-icons.mjs", "package.json", "package-lock.json", "tsconfig.json", "README.md", "LICENSE"];
 const git = (gitArgs) => execFileSync("git", gitArgs, { cwd: PACKAGE_DIR, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 /**
  * This checkout's own commit, or null: only when this folder is tracked as `integrations/n8n` of its repository, so a
@@ -136,8 +138,11 @@ function checkoutCommit() {
   try {
     if (resolve(git(["rev-parse", "--show-toplevel"]), "integrations", "n8n") !== PACKAGE_DIR) return null;
     git(["ls-files", "--error-unmatch", "package.json"]);
-    // Untracked files (a run's own output) do not change what is packed; modified tracked ones do.
-    return { commit: git(["rev-parse", "HEAD"]), dirty: git(["status", "--porcelain", "--untracked-files=no", "--", "."]) !== "" };
+    // Dirty: a modified tracked file anywhere here, or an untracked file among the build's inputs (an untracked .ts
+    // under src/ would be compiled into the package). Untracked files elsewhere, such as a run's own output, are not.
+    const modified = git(["status", "--porcelain", "--untracked-files=no", "--", "."]);
+    const untrackedInputs = git(["status", "--porcelain", "--untracked-files=all", "--", ...BUILD_INPUTS]);
+    return { commit: git(["rev-parse", "HEAD"]), dirty: modified !== "" || untrackedInputs !== "" };
   } catch {
     return null;
   }
@@ -256,7 +261,7 @@ try {
     // Offline means no npm at all: npx would fetch n8n from the registry.
     if (!n8nBin) throw new Error("--nodes-dir runs offline and needs N8N_BIN (a pre-installed n8n), not npx");
     const pinned = process.env.AIRPROMPTER_KIT_COMMIT?.trim();
-    if (pinned && !/^[0-9a-f]{40}$/.test(pinned)) throw new Error(`AIRPROMPTER_KIT_COMMIT must be a full 40-character commit sha, not ${JSON.stringify(pinned)}`);
+    if (pinned && !FULL_SHA.test(pinned)) throw new Error(`AIRPROMPTER_KIT_COMMIT must be a full 40-character commit sha, not ${JSON.stringify(pinned)}`);
     const source = existsSync(preinstalled) ? realpathSync(preinstalled) : resolve(preinstalled);
     if (!existsSync(join(source, KIT_MANIFEST))) throw new Error(`${source} has no ${KIT_MANIFEST}: make it with --prepare-nodes-dir`);
     installedIn(source);

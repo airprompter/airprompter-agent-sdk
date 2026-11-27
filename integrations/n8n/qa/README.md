@@ -65,7 +65,7 @@ AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n.mjs --prepare-nodes-di
   - If both exist, they must agree.
   - A tree with uncommitted changes to tracked files under `integrations/n8n` is refused. Untracked files are
     ignored.
-  - `AIRPROMPTER_KIT_COMMIT` must be the full 40-character sha.
+  - `AIRPROMPTER_KIT_COMMIT` must be the full 40-character sha, lowercase, as `git rev-parse` prints it.
   - `--no-build` is refused: prepare always builds.
 - **Install n8n with Node 24's own npm** (`PATH=/opt/node24/bin:$PATH npm i n8n@2.49.8 --prefix /opt/n8n`), so its
   native add-ons are built for Node 24.
@@ -94,6 +94,8 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=â€
   - **The copy:** the prepared folder is copied into the run's fresh user folder, and n8n runs with
     `npm_config_offline=true`.
   - **`N8N_BIN` is required:** without it, the run exits 2 rather than reach the registry through `npx`.
+  - **The folder can also come from `AIRPROMPTER_KIT_NODES_DIR`**, which means the same as `--nodes-dir`. The old
+    name `N8N_NODES_DIR`, or a blank value, exits 2 rather than fall back to npm.
 - **`scripts/` and `qa/workflows/` are read from the checkout the script runs from.** Bake that checkout into the
   image from the same commit, in the same layer as the prepare step.
 - **The `nodes.prepared` check compares the copy with the prepared folder:**

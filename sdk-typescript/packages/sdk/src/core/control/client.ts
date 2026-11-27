@@ -19,8 +19,9 @@ import type { EdgePointer, Manifest } from "../protocol/types.js";
 
 /**
  * Any WHATWG-compatible fetch: the host's own (a userland undici, a patched fetch) is welcome. A body is always a string
- * or a Uint8Array of known length, and the SDK sends only end-to-end headers (authorization, user-agent, content-type,
- * if-none-match), never framing headers (content-length, host, transfer-encoding, connection…): the fetch derives them.
+ * or a Uint8Array of known length, and the SDK sends only end-to-end headers (such as authorization, user-agent,
+ * content-type, if-none-match, plus any you configure, e.g. OTLP exporter headers), never framing headers
+ * (content-length, host, transfer-encoding, connection…): the fetch derives them.
  */
 export type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string>; redirect?: "follow"; body?: string | Uint8Array; signal?: AbortSignal }) => Promise<{
   status: number;

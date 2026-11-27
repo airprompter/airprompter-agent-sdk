@@ -278,5 +278,5 @@ test("no source in any TypeScript package, or the CLI, sets a header the HTTP cl
   for (const pkg of readdirSync(packages)) walk(join(packages, pkg, "src"));
   walk(join(root, "cli", "src"));
   assert.ok(scanned > 50, `scanned ${scanned} files`);
-  assert.deepEqual(offenders, [], "fetch / the HTTP client frames the request; a host's own dispatcher may refuse a caller-set framing header");
+  assert.deepEqual(offenders, [], "fetch / the HTTP client frames the request; a host's own dispatcher may refuse a caller-set framing header (a list that strips them trips this guard too: adjust the detector, don't add the header)");
 });

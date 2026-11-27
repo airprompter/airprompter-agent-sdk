@@ -27,7 +27,7 @@ _INDEX_WRITE = re.compile(r"headers\w*\[\s*" + _NAME + r"\s*\]\s*=(?!=)", re.IGN
 # The hyphenated names mean nothing but a header, so anywhere as a quoted key or a ``(name, value)`` pair: a headers
 # dict held in another variable, ``dict(**{…})``, a list of tuples.
 _HYPHENATED = "|".join(re.escape(n) for n in CLIENT_OWNED if "-" in n)
-_ANYWHERE = re.compile(r"[\"'](" + _HYPHENATED + r")[\"']\s*:|[\[(]\s*[\"'](" + _HYPHENATED + r")[\"']\s*,", re.IGNORECASE)
+_ANYWHERE = re.compile(r"[\"'](" + _HYPHENATED + r")[\"']\s*:|(?:\[|[\[,]\s*\()\s*[\"'](" + _HYPHENATED + r")[\"']\s*,", re.IGNORECASE)
 
 
 def client_owned_headers_set(source: str) -> list[str]:
@@ -91,6 +91,7 @@ def test_the_detector_finds_the_fixed_line_and_the_other_ways_to_set_a_client_ow
     assert client_owned_headers_set('headers["Transfer-Encoding"] = "chunked"\nrequest_headers.update({"keep-alive": "1"})') == ["keep-alive", "transfer-encoding"]
     assert client_owned_headers_set('framing = {"Content-Length": n}\nhttp.post(u, headers=dict(**framing))\npairs = [("transfer-encoding", "chunked")]') == ["content-length", "transfer-encoding"]
     assert client_owned_headers_set('report = {"host": {"os": "linux"}, "connection": 1}\npolicy = ["content-length-range", 0, 1048576]') == [], "a heartbeat's host field and an S3 policy condition are not headers"
+    assert client_owned_headers_set('n = int(response.headers.get("content-length", "0"))\nheaders.pop("transfer-encoding", None)\nif name in ("content-length", "keep-alive"): pass') == [], "reading or stripping a header is not setting one"
 
 
 def test_no_source_in_any_python_package_sets_a_header_the_http_client_owns():
@@ -101,4 +102,4 @@ def test_no_source_in_any_python_package_sets_a_header_the_http_client_owns():
         scanned += 1
         offenders += [f"{path.relative_to(packages)}: {name}" for name in client_owned_headers_set(path.read_text("utf-8"))]
     assert scanned > 30, f"scanned {scanned} files"
-    assert offenders == [], "httpx frames the request; a host's own HTTP stack may refuse a caller-set framing header"
+    assert offenders == [], "httpx frames the request; a host's own HTTP stack may refuse a caller-set framing header (a list that strips them trips this guard too: adjust the detector, don't add the header)"

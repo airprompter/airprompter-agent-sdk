@@ -72,13 +72,15 @@ test("the README quick start type-checks against the SDK, as written", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const configPath = join(here, "..", "tsconfig.json");
   const config = ts.parseJsonConfigFileContent(ts.readConfigFile(configPath, ts.sys.readFile).config, ts.sys, dirname(configPath));
-  const virtual = join(here, "readme-quick-start.virtual.ts");
+  // TypeScript names files with forward slashes on every platform (D:/a/… on Windows).
+  const virtual = join(here, "readme-quick-start.virtual.ts").replace(/\\/g, "/");
+  const isVirtual = (name: string) => name.replace(/\\/g, "/") === virtual;
   const source = `${quickStart()}\n${APP_DECLARATIONS}`;
   const host = ts.createCompilerHost(config.options);
   const getSourceFile = host.getSourceFile.bind(host);
-  host.getSourceFile = (name, version, ...rest) => (name === virtual ? ts.createSourceFile(name, source, version) : getSourceFile(name, version, ...rest));
+  host.getSourceFile = (name, version, ...rest) => (isVirtual(name) ? ts.createSourceFile(name, source, version) : getSourceFile(name, version, ...rest));
   const fileExists = host.fileExists.bind(host);
-  host.fileExists = (name) => name === virtual || fileExists(name);
+  host.fileExists = (name) => isVirtual(name) || fileExists(name);
   // The repository compiles with exactOptionalPropertyTypes; a customer project, like the TypeScript default, does not.
   const program = ts.createProgram({ rootNames: [virtual], options: { ...config.options, noEmit: true, exactOptionalPropertyTypes: false }, host });
   const diagnostics = ts.getPreEmitDiagnostics(program, program.getSourceFile(virtual)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));

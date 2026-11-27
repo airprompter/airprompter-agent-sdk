@@ -118,7 +118,7 @@ export interface StartOptions {
    * (`https://api.airprompter.com/roots/prod/root.json`, `https://api.airprompter.dev/roots/dev/root.json`); any other
    * pinned root has no default: a syncing runtime refuses to start without one (with a vendored bundle or datastore it
    * logs `root_url_missing`). What it serves is trusted only if it verifies against the pinned key; the URL is read
-   * with its ETag, and a user:password in `baseUrl` is never echoed into a message.
+   * with its ETag. The start refusal and `root_url_missing` name `baseUrl` back without its user:password.
    */
   sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string };
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */

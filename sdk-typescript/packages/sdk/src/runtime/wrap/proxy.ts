@@ -13,12 +13,13 @@
  * @example
  * ```ts
  * const client = proxyClient(new OpenAI(), [{ path: ["chat", "completions", "create"], kind: "chat", accumulate: chatAccumulator }], (method, original, args) => {
- *   const final = deferred();
- *   void final.promise.then((result) => console.log(method.kind, result));
- *   return tapResult(original(...args), method, final); // the same object back, watched
+ *   const pending = { settle: (result: unknown) => console.log(method.kind, result), fail: (error: unknown) => console.error(error) };
+ *   return tapResult(original(...args), method, pending); // the same object back, watched
  * });
  * ```
  */
+
+import type { RequestKind } from "./inference.js";
 
 /** Folds a stream's chunks into one result the observe path reads (usage, finish reason, output text). */
 export interface StreamAccumulator {
@@ -26,11 +27,17 @@ export interface StreamAccumulator {
   final(): unknown;
 }
 
+/** A measurement whose clock started at the call: it settles once, with the folded result or the error. */
+export interface Pending {
+  settle(result: unknown): void;
+  fail(error: unknown): void;
+}
+
 /** One intercepted method: its path on the client, the request shape it takes, and how its stream folds. */
 export interface ClientMethod {
   path: readonly string[];
-  /** The request shape, for the settings table (`inference.ts`): `chat`, `responses` or `messages`. */
-  kind: "chat" | "responses" | "messages";
+  /** The request shape, for the settings table (`inference.ts`). */
+  kind: RequestKind;
   accumulate: () => StreamAccumulator;
   /** A `.stream()` helper: it answers a stream object synchronously, so nothing can be awaited before it. */
   helper?: boolean;
@@ -41,27 +48,25 @@ export type ClientMethods = readonly ClientMethod[];
 /** Called for every intercepted method instead of the original. `original` is bound to its owner. */
 export type Intercept = (method: ClientMethod, original: (...args: unknown[]) => unknown, args: unknown[], name: string) => unknown;
 
-export interface Deferred {
+/** A `Pending` that is also a promise of its outcome, for code that awaits it (`ap.observe`). Settles once. */
+export interface Deferred extends Pending {
   promise: Promise<unknown>;
-  resolve: (value: unknown) => void;
-  reject: (error: unknown) => void;
 }
 
 export function deferred(): Deferred {
   let settled = false;
   const d = {} as Deferred;
   d.promise = new Promise<unknown>((resolve, reject) => {
-    d.resolve = (value) => {
+    d.settle = (value) => {
       if (!settled) (settled = true), resolve(value);
     };
-    d.reject = (error) => {
+    d.fail = (error) => {
       if (!settled) (settled = true), reject(error);
     };
   });
   return d;
 }
 
-const noop = () => {};
 const obj = (value: unknown): Record<string, unknown> | null => (typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null);
 const isThenable = (value: unknown): value is PromiseLike<unknown> => typeof (obj(value) as { then?: unknown } | null)?.then === "function" || (typeof value === "function" && typeof (value as { then?: unknown }).then === "function");
 const isAsyncIterable = (value: unknown): value is AsyncIterable<unknown> => obj(value) !== null && typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function";
@@ -96,20 +101,20 @@ function proxyAt(target: object, path: readonly string[], methods: ClientMethods
 }
 
 /** The response, a stream, or a stream helper, handed back watched: `final` settles with a provider-shaped result. */
-export function tapResult(out: unknown, method: ClientMethod, final: Deferred): unknown {
+export function tapResult(out: unknown, method: ClientMethod, final: Pending): unknown {
   if (isThenable(out)) return tapThenable(out, method, final);
   const helper = finalMethodOf(out);
   if (helper) {
     // The helper consumes on its own and exposes the accumulated result; waiting on it changes nothing the customer sees.
     try {
-      helper().then((value) => final.resolve(value), (error) => final.reject(error));
+      helper().then((value) => final.settle(value), (error) => final.fail(error));
     } catch (error) {
-      final.reject(error);
+      final.fail(error);
     }
     return out;
   }
   if (isAsyncIterable(out)) return tapStream(out, method, final);
-  final.resolve(out);
+  final.settle(out);
   return out;
 }
 
@@ -125,43 +130,50 @@ function finalMethodOf(value: unknown): (() => Promise<unknown>) | null {
 }
 
 /** What a resolved value becomes: a stream comes back tapped, anything else settles `final`. */
-export function settleValue(value: unknown, method: ClientMethod, final: Deferred): unknown {
+export function settleValue(value: unknown, method: ClientMethod, final: Pending): unknown {
   if (isAsyncIterable(value)) return tapStream(value, method, final);
-  final.resolve(value);
+  final.settle(value);
   return value;
 }
 
 /** `withResponse()` resolves `{ data, response }`: the data is what is watched. */
-export function settleWithResponse(result: unknown, method: ClientMethod, final: Deferred): unknown {
+export function settleWithResponse(result: unknown, method: ClientMethod, final: Pending): unknown {
   const record = obj(result);
   if (!record) return settleValue(result, method, final);
   return { ...record, data: settleValue(record.data, method, final) };
 }
 
-/** An `APIPromise` keeps its own surface; only what resolves through `then` and `withResponse` is looked at. */
-function tapThenable(promise: PromiseLike<unknown>, method: ClientMethod, final: Deferred): unknown {
+/**
+ * An `APIPromise` keeps its own surface. Only what resolves through `then` and `withResponse` is looked at, and only
+ * once the caller asks for it: parsing the body eagerly would leave `asResponse()` a response already read.
+ */
+function tapThenable(promise: PromiseLike<unknown>, method: ClientMethod, final: Pending): unknown {
   const onError = (error: unknown): never => {
-    final.reject(error);
+    final.fail(error);
     throw error;
   };
-  const tapped = Promise.resolve(promise).then((value) => settleValue(value, method, final), onError);
-  tapped.catch(noop); // the customer's own handlers still see the rejection; this one only keeps it from going unhandled
+  let tapped: Promise<unknown> | undefined;
+  const value = () => (tapped ??= Promise.resolve(promise).then((resolved) => settleValue(resolved, method, final), onError));
   return new Proxy(promise as object, {
     get(target, prop) {
-      if (prop === "then") return tapped.then.bind(tapped);
-      if (prop === "catch") return tapped.catch.bind(tapped);
-      if (prop === "finally") return tapped.finally.bind(tapped);
-      const value = Reflect.get(target, prop, target);
-      if (prop === "withResponse" && typeof value === "function") {
-        return () => (value as () => Promise<unknown>).call(target).then((result) => settleWithResponse(result, method, final), onError);
+      if (prop === "then") return (...args: Parameters<Promise<unknown>["then"]>) => value().then(...args);
+      if (prop === "catch") return (...args: Parameters<Promise<unknown>["catch"]>) => value().catch(...args);
+      if (prop === "finally") return (...args: Parameters<Promise<unknown>["finally"]>) => value().finally(...args);
+      const member = Reflect.get(target, prop, target);
+      if (prop === "withResponse" && typeof member === "function") {
+        return () => (member as () => Promise<unknown>).call(target).then((result) => settleWithResponse(result, method, final), onError);
       }
-      return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      if (prop === "asResponse" && typeof member === "function") {
+        // The raw response: its body is the caller's to read, so only the latency is measured.
+        return () => (member as () => Promise<unknown>).call(target).then((response) => (final.settle(undefined), response), onError);
+      }
+      return typeof member === "function" ? (member as (...args: unknown[]) => unknown).bind(target) : member;
     },
   });
 }
 
 /** The same stream object with its iteration observed: every chunk passes through; the folded result settles at the end. */
-export function tapStream(stream: AsyncIterable<unknown>, method: ClientMethod, final: Deferred): unknown {
+export function tapStream(stream: AsyncIterable<unknown>, method: ClientMethod, final: Pending): unknown {
   const accumulator = method.accumulate();
   async function* iterate(): AsyncGenerator<unknown> {
     try {
@@ -173,13 +185,13 @@ export function tapStream(stream: AsyncIterable<unknown>, method: ClientMethod, 
         }
         yield chunk;
       }
-      final.resolve(accumulator.final());
+      final.settle(accumulator.final());
     } catch (error) {
-      final.reject(error);
+      final.fail(error);
       throw error;
     } finally {
       // A consumer that stopped early: report what was seen (usually no usage, so `unavailable`).
-      final.resolve(accumulator.final());
+      final.settle(accumulator.final());
     }
   }
   return new Proxy(stream as object, {

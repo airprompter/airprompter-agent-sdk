@@ -7,7 +7,9 @@ name: Wrappers against the latest provider SDKs
 # `@anthropic-ai/sdk`, `ai`, `openai` (Python), `anthropic` and `litellm`
 # with recorded responses served through each client's own transport option
 # — nothing reaches a provider. A red run here is the early warning that a
-# supported range must move; CI proper pins nothing and never installs them.
+# supported range must move. CI proper runs the same suites on the versions
+# the workspace pins (`ai` is a pinned devDependency; `openai` and
+# `@anthropic-ai/sdk` arrive with the LangChain ones), or skips them.
 
 on:
   schedule:

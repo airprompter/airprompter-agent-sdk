@@ -61,7 +61,9 @@ test("ai hands wrapGenerate and the model the exact object transformParams retur
   assert.equal(seen.length, 2);
   assert.equal(seen[0], seen[1], "wrapGenerate's params are transformParams' result");
   assert.equal(calls[0], seen[0], "doGenerate received it too");
-  await rows();
+  assert.deepEqual(calls[0]!.prompt[0], { role: "system", content: "Reply politely." }, "the object carries the placement");
+  const out = await rows();
+  assert.deepEqual(out.map((r) => [r.tag, r.modelCalls, r.status]), [["support.reply", 1, "ok"]], "the WeakMap path measured the call");
 });
 
 test("the approved text and sealed settings reach the model; no run open, a generate and a stream are one run row each", async () => {
@@ -74,7 +76,7 @@ test("the approved text and sealed settings reach the model; no run open, a gene
   assert.deepEqual(calls[0]!.prompt[0], { role: "system", content: "Reply politely." });
   assert.equal(calls[0]!.prompt.filter((m) => m.role === "system").length, 1, "the caller's system message was replaced");
   assert.deepEqual([calls[0]!.temperature, calls[0]!.maxOutputTokens], [0.2, 800]);
-  assert.deepEqual(events.find((e) => e.event === "wrap_inference_overridden")?.parameters, ["temperature"], "the call site's temperature was replaced and said once");
+  assert.deepEqual(events.find((e) => e.event === "adapter_inference_overridden")?.parameters, ["temperature"], "the call site's temperature was replaced and said once");
   const streamed = streamText({ model: wrapped, prompt: "hi" });
   assert.equal(await streamed.text, "streamed answer");
   const out = byKey(await rows());

@@ -23,7 +23,7 @@
  * ```
  */
 
-import { chooseModel, deferred, measureCall, settingsFor, type AgentRuntime, type Deferred, type ModelResolver, type RunSession, type SettingsKeys } from "./contract.js";
+import { ADAPTER_EVENTS, acquireRun, beginMeasure, chooseModel, measureCall, settingsFor, type AgentRuntime, type ModelResolver, type Pending, type RunSession, type SettingsKeys } from "./contract.js";
 
 /** The AI SDK's language model, structurally: enough to call it and name it. */
 export interface LanguageModelLike {
@@ -41,11 +41,13 @@ export interface AiSdkMiddleware {
   wrapStream(options: { doStream: () => PromiseLike<unknown>; params: unknown; model: LanguageModelLike }): Promise<unknown>;
 }
 
-export interface AirPrompterMiddlewareOptions {
+export interface AiSdkMiddlewareOptions {
   /** The slot this model's calls run on. */
   slot: string;
-  /** Builds the release's model when its id is not the wrapped model's. The manifest names no provider, so nothing else can. */
-  modelFor?: ModelResolver<LanguageModelLike>;
+  /** Builds the release's model when its id is not the wrapped model's; undefined declines. The manifest names no provider, so nothing else can. */
+  modelFor?: ModelResolver<LanguageModelLike | undefined>;
+  /** The agent's clock for latencies, so a recorded run replays the same. Defaults to `Date.now`. */
+  now?: () => number;
   /** One version stamp: `"v1"` / `"v2"` (AI SDK 4 / 5) or `"v3"` / `"v4"` (AI SDK 6 / 7). Unset carries `v2` and `v4`, which every release accepts. */
   version?: "v1" | "v2" | "v3" | "v4";
 }
@@ -97,7 +99,7 @@ interface Placed {
   model: string;
 }
 
-export function airprompterMiddleware(ap: AgentRuntime, options: AirPrompterMiddlewareOptions): AiSdkMiddleware {
+export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddlewareOptions): AiSdkMiddleware {
   const { slot } = options;
   // `ai` hands the object `transformParams` returned to `wrapGenerate` and `wrapStream` as `params` (a test pins it).
   const placements = new WeakMap<object, Placed>();
@@ -105,32 +107,38 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AirPrompterMidd
   const stamps: Pick<AiSdkMiddleware, "middlewareVersion" | "specificationVersion"> =
     options.version === "v1" || options.version === "v2" ? { middlewareVersion: options.version } : options.version === "v3" || options.version === "v4" ? { specificationVersion: options.version } : { middlewareVersion: "v2", specificationVersion: "v4" };
 
-  const settle = (placed: Placed, measured: Promise<unknown>) => void measured.catch(() => {}).finally(() => placed.owned && placed.run.end());
+  const log = (event: string, fields: Record<string, unknown>) => ap.log({ event, adapter: "ai-sdk", slot, ...fields });
+  const measure = (placed: Placed) => ({ model: placed.model, onSettled: () => placed.owned && placed.run.end(), ...(options.now ? { now: options.now } : {}) });
 
   return {
     ...stamps,
-    async transformParams({ params, model }) {
+    async transformParams({ type, params, model }) {
       const record = obj(params);
       if (!record) return params;
-      const current = ap.currentRun();
-      const run = current ?? ap.openRun();
-      const owned = current === undefined;
+      let acquired: { run: RunSession; owned: boolean };
+      try {
+        acquired = acquireRun(ap);
+      } catch (error) {
+        log(ADAPTER_EVENTS.placementFailed, { method: type, reason: (error as Error).message });
+        return params;
+      }
+      const { run, owned } = acquired;
       const passthrough = () => (owned && run.end(), params);
       try {
         const placed = await run.place(slot);
-        if (placed.kind === "passthrough") return passthrough();
-        const chosen = chooseModel<LanguageModelLike | undefined>({ releaseModelId: placed.model, callerModel: model, callerModelId: model?.modelId, ...(options.modelFor ? { modelFor: options.modelFor as ModelResolver<LanguageModelLike | undefined> } : {}) });
+        if (placed.kind !== "approved") return passthrough();
+        const chosen = chooseModel<LanguageModelLike | undefined>({ releaseModelId: placed.model, callerModel: model, callerModelId: model?.modelId, ...(options.modelFor ? { modelFor: options.modelFor } : {}) });
+        // A string would be an id to build a model from, and the manifest names no provider: only a model object serves.
         if (typeof chosen !== "object" || chosen === null) {
-          if (!unresolved.has(placed.model)) (unresolved.add(placed.model), ap.log({ event: "model_unresolved", slot, model: placed.model }));
+          if (!unresolved.has(placed.model)) (unresolved.add(placed.model), log(ADAPTER_EVENTS.modelUnresolved, { method: type, model: placed.model }));
           run.decline(slot, "model_unresolved");
           return passthrough();
         }
         // AI SDK 4's call options carry `mode` and `inputFormat`; later contracts carry neither.
         const v1 = options.version === "v1" || (options.version === undefined && ("mode" in record || "inputFormat" in record));
-        const { values, unsupported } = settingsFor(placed.settings, v1 ? V1_KEYS : KEYS);
-        if (unsupported.length > 0) ap.log({ event: "wrap_inference_unsupported", method: "ai-sdk", tag: slot, settings: unsupported });
-        const overridden = Object.keys(values).filter((key) => record[key] !== undefined && record[key] !== null && JSON.stringify(record[key]) !== JSON.stringify(values[key]));
-        if (overridden.length > 0) ap.log({ event: "wrap_inference_overridden", method: "ai-sdk", tag: slot, parameters: overridden });
+        const { values, unsupported, overridden } = settingsFor(placed.settings, v1 ? V1_KEYS : KEYS, record);
+        if (unsupported.length > 0) log(ADAPTER_EVENTS.inferenceUnsupported, { method: type, settings: unsupported.map((setting) => ({ setting, reason: "shape" })) });
+        if (overridden.length > 0) log(ADAPTER_EVENTS.inferenceOverridden, { method: type, parameters: overridden });
         const prompt = Array.isArray(record.prompt) ? [...(record.prompt as unknown[])] : [];
         const system = { role: "system", content: placed.instructions };
         if (obj(prompt[0])?.role === "system") prompt[0] = system;
@@ -139,7 +147,7 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AirPrompterMidd
         placements.set(out, { run, owned, caller: model, chosen, model: placed.model });
         return out;
       } catch (error) {
-        ap.log({ event: "wrap_placement_failed", method: "ai-sdk", reason: (error as Error).message });
+        log(ADAPTER_EVENTS.placementFailed, { method: type, reason: (error as Error).message });
         return passthrough();
       }
     },
@@ -147,44 +155,41 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AirPrompterMidd
       const placed = obj(params) ? placements.get(params as object) : undefined;
       if (!placed) return doGenerate();
       const call = () => (placed.chosen === placed.caller ? doGenerate() : placed.chosen.doGenerate!(params));
-      const measured = measureCall(placed.run, slot, call, { model: placed.model, read: generateResultShape });
-      settle(placed, measured);
-      return measured;
+      return measureCall(placed.run, slot, call, { ...measure(placed), read: generateResultShape });
     },
     async wrapStream({ doStream, params }) {
       const placed = obj(params) ? placements.get(params as object) : undefined;
       if (!placed) return doStream();
-      const final = deferred();
-      settle(placed, measureCall(placed.run, slot, () => final.promise, { model: placed.model }));
+      const measurement = beginMeasure(placed.run, slot, measure(placed));
       let result: unknown;
       try {
         result = await (placed.chosen === placed.caller ? doStream() : placed.chosen.doStream!(params));
       } catch (error) {
-        final.reject(error);
+        measurement.fail(error);
         throw error;
       }
       const record = obj(result);
       const source = record?.stream;
       if (!(source instanceof ReadableStream)) {
-        final.resolve(undefined);
+        measurement.settle(undefined);
         return result;
       }
-      return { ...record, stream: tapReadable(source, final) };
+      return { ...record, stream: tapReadable(source, measurement) };
     },
   };
 }
 
 /** Every part passes through; the `finish` part's reason and usage, and the text deltas, settle the measurement. */
-function tapReadable(source: ReadableStream<unknown>, final: Deferred): ReadableStream<unknown> {
+function tapReadable(source: ReadableStream<unknown>, final: Pending): ReadableStream<unknown> {
   const reader = source.getReader();
   let text = "";
   let finish: unknown;
   let usage: unknown;
   let errored: unknown;
   const done = () => {
-    if (errored !== undefined) final.reject(errored);
-    else if (finish === "error" || obj(finish)?.unified === "error") final.reject(new Error("stream finished with an error"));
-    else final.resolve(shape(finish, text, usage));
+    if (errored !== undefined) final.fail(errored);
+    else if (finish === "error" || obj(finish)?.unified === "error") final.fail(new Error("stream finished with an error"));
+    else final.settle(shape(finish, text, usage));
   };
   return new ReadableStream<unknown>({
     async pull(controller) {
@@ -192,7 +197,7 @@ function tapReadable(source: ReadableStream<unknown>, final: Deferred): Readable
       try {
         step = await reader.read();
       } catch (error) {
-        final.reject(error);
+        final.fail(error);
         controller.error(error);
         return;
       }

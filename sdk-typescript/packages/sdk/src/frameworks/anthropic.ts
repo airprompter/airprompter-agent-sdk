@@ -23,9 +23,7 @@
  * ```
  */
 
-import { applySettings, instrumentClient, type ClientMethods, type InstrumentRuntime, type ModelResolver, type Placement, type StreamAccumulator } from "./contract.js";
-
-type Approved = Extract<Placement, { kind: "approved" }>;
+import { applySettings, instrumentClient, type ApprovedPlacement, type ClientMethods, type InstrumentRuntime, type ModelResolver, type StreamAccumulator } from "./contract.js";
 
 const obj = (value: unknown): Record<string, unknown> | null => (typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null);
 const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
@@ -73,8 +71,11 @@ export const ANTHROPIC_METHODS: ClientMethods = [
   { path: ["beta", "messages", "stream"], kind: "messages", accumulate: messagesAccumulator, helper: true },
 ];
 
-/** A copy of `params` with the approved instructions as `system`, the placement's model and its sealed settings. `params` is never mutated. */
-export function applyPlacement(params: Record<string, unknown>, placement: Approved): Record<string, unknown> {
+/**
+ * A copy of `params` with the approved instructions as `system`, the placement's model and its sealed settings. A
+ * caller's own `system` blocks, with any `cache_control`, are replaced whole. `params` is never mutated.
+ */
+export function applyPlacement(params: Record<string, unknown>, placement: ApprovedPlacement): Record<string, unknown> {
   return applySettings("messages", { ...params, model: placement.model, system: placement.instructions }, placement.settings).params;
 }
 
@@ -83,9 +84,11 @@ export interface InstrumentOptions {
   slot?: string;
   /** Maps the release's model id onto the one this client sends (a Bedrock or Vertex id, a gateway alias). Undefined declines. */
   modelFor?: ModelResolver<string | undefined>;
+  /** The agent's clock for latencies, so a recorded run replays the same. Defaults to `Date.now`. */
+  now?: () => number;
 }
 
-/** `client` with its model calls placed and measured. Instrumenting twice is once. */
+/** `client` with its model calls placed and measured. Instrumenting twice is once: the first slot stays. */
 export function instrument<T extends object>(client: T, ap: InstrumentRuntime, options: InstrumentOptions = {}): T {
-  return instrumentClient(client, ap, { methods: ANTHROPIC_METHODS, apply: (params, placement) => applyPlacement(params, placement), ...(options.slot !== undefined ? { slot: options.slot } : {}), ...(options.modelFor ? { modelFor: options.modelFor } : {}) });
+  return instrumentClient(client, ap, { adapter: "anthropic", methods: ANTHROPIC_METHODS, apply: (params, placement) => applyPlacement(params, placement), ...(options.slot !== undefined ? { slot: options.slot } : {}), ...(options.modelFor ? { modelFor: options.modelFor } : {}), ...(options.now ? { now: options.now } : {}) });
 }

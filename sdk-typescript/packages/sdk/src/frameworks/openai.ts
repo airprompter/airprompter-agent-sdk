@@ -23,9 +23,7 @@
  * ```
  */
 
-import { applySettings, instrumentClient, type ClientMethods, type InstrumentRuntime, type ModelResolver, type Placement, type StreamAccumulator } from "./contract.js";
-
-type Approved = Extract<Placement, { kind: "approved" }>;
+import { applySettings, instrumentClient, type ApprovedPlacement, type ClientMethods, type InstrumentRuntime, type ModelResolver, type StreamAccumulator } from "./contract.js";
 
 const obj = (value: unknown): Record<string, unknown> | null => (typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null);
 const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
@@ -81,7 +79,7 @@ const SYSTEM_ROLES = new Set(["system", "developer"]);
  * settings. Chat Completions replaces a leading `system` or `developer` message or prepends one; Responses sets
  * `instructions`. `params` is never mutated.
  */
-export function applyPlacement(params: Record<string, unknown>, placement: Approved, kind: "chat" | "responses" | "messages" = "chat"): Record<string, unknown> {
+export function applyPlacement(params: Record<string, unknown>, placement: ApprovedPlacement, kind: "chat" | "responses" | "messages" = "chat"): Record<string, unknown> {
   const out: Record<string, unknown> = { ...params, model: placement.model };
   if (kind === "responses") {
     out.instructions = placement.instructions;
@@ -103,9 +101,11 @@ export interface InstrumentOptions {
   slot?: string;
   /** Maps the release's model id onto the one this client sends (an Azure deployment, a gateway alias). Undefined declines. */
   modelFor?: ModelResolver<string | undefined>;
+  /** The agent's clock for latencies, so a recorded run replays the same. Defaults to `Date.now`. */
+  now?: () => number;
 }
 
-/** `client` with its model calls placed and measured. Instrumenting twice is once. */
+/** `client` with its model calls placed and measured. Instrumenting twice is once: the first slot stays. */
 export function instrument<T extends object>(client: T, ap: InstrumentRuntime, options: InstrumentOptions = {}): T {
-  return instrumentClient(client, ap, { methods: OPENAI_METHODS, apply: applyPlacement, ...(options.slot !== undefined ? { slot: options.slot } : {}), ...(options.modelFor ? { modelFor: options.modelFor } : {}) });
+  return instrumentClient(client, ap, { adapter: "openai", methods: OPENAI_METHODS, apply: applyPlacement, ...(options.slot !== undefined ? { slot: options.slot } : {}), ...(options.modelFor ? { modelFor: options.modelFor } : {}), ...(options.now ? { now: options.now } : {}) });
 }

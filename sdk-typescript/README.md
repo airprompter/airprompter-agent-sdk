@@ -22,15 +22,15 @@ npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.4 @airprompter/datastor
 
 Pin every package exactly. An unpinned datastore installs 0.6.0, which brings
 the old split packages in beside this one. npm's default range,
-`^1.0.0-rc.4`, also matches later candidates, which may still change the
-adapter subpaths.
+`^1.0.0-rc.4`, also matches later candidates, and a later candidate removes
+`ap.wrap` (see *Coming from `ap.wrap`?* below).
 
 | Import | Use it when |
 | --- | --- |
 | `@airprompter/agent-sdk` | `AirPrompterAgent` and its option and result types. Everything else is reached through a subpath. |
 | `@airprompter/agent-sdk/core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane HTTP client, the port interfaces. Nothing here opens a file, a socket or a timer at import. |
 | `@airprompter/agent-sdk/sync` | Your CI pulls and verifies releases (`syncOnce`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). |
-| `@airprompter/agent-sdk/runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `/core` + `ReleaseResolver`); the run session, `observeCall`, and what the framework adapters share (`instrumentClient`, `chooseModel`, `settingsFor`, `measureCall`; read them through `/frameworks/contract`). |
+| `@airprompter/agent-sdk/runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `/core` + `ReleaseResolver`); the run session, `observeCall`, and the `ap.attribute` scope. What the framework adapters share is on `/frameworks/contract`, not here. |
 | `@airprompter/agent-sdk/telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
 | `@airprompter/agent-sdk/testing` | The kit a customer's CI imports: `FakeControlPlane`, `MemoryFs`, `FakeClock`. Never loaded by the runtime. |
 | `@airprompter/agent-sdk/frameworks/openai`, `/frameworks/anthropic`, `/frameworks/ai-sdk` | The OpenAI and Anthropic clients and the Vercel AI SDK as adapters: the approved text, model and settings go on every call, measured into the run ([Use with your framework](#use-with-your-framework)). Their frameworks are optional peers, and these subpaths import nothing of them at run time. |
@@ -389,11 +389,13 @@ What every adapter does:
   model is called (temperature, top-p, the output cap, stop sequences,
   reasoning effort) and the release seals them with the text, integers on
   the wire (`temperatureMilli` 200 is 0.2). They land on the framework's own
-  parameter names; a call site that wrote a different value is told once
-  (`wrap_inference_overridden`), never failed; a setting the call cannot
-  carry is reported, not sent (`wrap_inference_unsupported`: a stop sequence
-  on Responses, a reasoning effort on Messages, top-p beside temperature or
-  either beside `thinking` on Messages).
+  parameter names; a call site that wrote a different value is told
+  (`adapter_inference_overridden`), never failed; a setting the call cannot
+  carry is reported, not sent (`adapter_inference_unsupported`: a stop
+  sequence on Responses, a reasoning effort on Messages, top-p beside
+  temperature or either beside `thinking` on Messages). On Messages the
+  approved text replaces `system` whole, so your own `system` blocks and their
+  `cache_control` do not go out.
 - **When nothing can be served,** your own prompt and model run, untouched,
   and nothing is measured: nothing promoted, a staged release waiting for an
   unlock, a disable, or a slot that is not in the release.
@@ -408,12 +410,27 @@ What every adapter does:
 The direct clients (`openai`, `@anthropic-ai/sdk`) have two more rules. With
 a slot, stream with `create({ stream: true })`: the `.stream()` helpers
 answer synchronously, so they cannot wait for the placement and pass through
-unmeasured (one `wrap_stream_helper_unmeasured` log). Without a slot, the
+unmeasured (one `adapter_stream_helper_unmeasured` log). Without a slot, the
 client only measures, inside `ap.attribute(rendered, fn)` where you placed
-the text yourself: the scope's model and settings go on the call and it is
+the text yourself: a call to the release's model (or naming none) gets that
+model and the sealed settings; a call to another model with no `modelFor`
+keeps its own model and settings (`model_unresolved`, once); either way it is
 observed against that render. A call with neither a slot nor a scope passes
-through unobserved (one `wrap_unattributed` log per method). Nothing guesses
-which prompt a call belongs to from its text.
+through unobserved (one `adapter_unattributed` log per method). Nothing
+guesses which prompt a call belongs to from its text. Instrumenting a client
+twice is once: the first slot stays.
+
+Every adapter logs the same events (`ADAPTER_EVENTS` on
+`/frameworks/contract`), each with `adapter`, `slot` and `method`. Pass the
+agent's clock as `now` to an adapter when you replay recorded runs.
+
+**Coming from `ap.wrap`?** It is gone, with `ap.aiSdkMiddleware` and the
+match on rendered text. `ap.wrap(new OpenAI())` becomes
+`instrument(new OpenAI(), ap, { slot })` from
+`@airprompter/agent-sdk/frameworks/openai` (or `/anthropic`), and
+`ap.aiSdkMiddleware()` becomes `airprompterMiddleware(ap, { slot })` from
+`/frameworks/ai-sdk`. To keep placing the text yourself, leave out `slot` and
+call inside `ap.attribute(rendered, fn)`.
 
 Tested against clients shaped like the real ones and the real `ai` in CI,
 and against the latest `openai`, `@anthropic-ai/sdk` and `ai` releases
@@ -421,8 +438,9 @@ weekly (`.github/workflows/wrap-latest.yml`, `npm run test:wrap-live`); the
 supported ranges are the package's `peerDependencies`.
 
 **Writing an adapter.** `@airprompter/agent-sdk/frameworks/contract` is the
-contract every adapter here follows: `chooseModel`, `settingsFor`,
-`measureCall` and the run types. It is public so a third-party adapter can
+contract every adapter here follows: `acquireRun`, `chooseModel`,
+`settingsFor`, `measureCall` / `beginMeasure`, `ADAPTER_EVENTS` and the run
+types. It is public so a third-party adapter can
 read it, but it is outside the 1.0 promise: a minor release may change it
 while the LangChain and OpenAI Agents adapters prove its shapes. See
 [CONTRIBUTING.md › Adding a framework adapter](../CONTRIBUTING.md#adding-a-framework-adapter).
@@ -498,7 +516,7 @@ ap.explain(answer.runRef);                                   // which version, a
 | `packages/sdk/src/sync/store/` | `SlotStore`: two slots, stage → fsync → activate, AAD `agentId target generation contentHash` per payload, anti-rollback counter outside the slots, DEK wrapped by a `KeyProvider` (file key default; custom / KMS via `customKeyProvider`) |
 | `packages/sdk/src/sync/sync/`, `apply/` | `syncOnce` (root → pointer → manifest → only the changed payloads → verify → stage → policy), `pullToDatastore`, the apply policy's update windows |
 | `packages/sdk/src/runtime/release/` | `ReleaseResolver`: which slot a subject gets under which arm (the plan walked on this host's clock, a retreat honoured), the rendered text with its run reference — over any `LoadedRelease` |
-| `packages/sdk/src/runtime/wrap/`, `observe.ts` | What the adapters share: the client proxy and stream taps (`proxy.ts`), placement and measurement for a direct client (`instrument.ts`), `chooseModel` / `settingsFor` / `measureCall` (`adapt.ts`), the `ap.attribute` scope (`attribution.ts`), the settings table (`inference.ts`); `observeCall` (usage off the provider's answer, the closed error set) |
+| `packages/sdk/src/runtime/wrap/`, `adapter/`, `observe.ts` | What the adapters share, behind the internal barrel `runtime/adapter/` that only `frameworks/contract` imports: the client proxy and stream taps (`proxy.ts`), placement and measurement for a direct client (`instrument.ts`), `acquireRun` / `chooseModel` / `settingsFor` / `measureCall` / `beginMeasure` (`adapt.ts`), the log events (`events.ts`); the `ap.attribute` scope (`attribution.ts`) and the settings table (`inference.ts`) are on `/runtime`; `observeCall` (usage off the provider's answer, the closed error set) |
 | `packages/sdk/src/frameworks/` | The adapters, one file each, translation only: `contract.ts` (re-exports what they may use), `openai.ts`, `anthropic.ts`, `ai-sdk.ts`, `langchain.ts`; `steps/` (the no-code automation core) |
 | `packages/sdk/src/telemetry/spool/`, `uploader.ts` | Minute windows per dimension set, segment naming and rotation (`SegmentPlanner`), `DirectorySink` (0600, `.open` until fsync + rename, crash recovery, a manifest per closed segment) and `MemorySink`; `SpoolUploader` (grant, budget, quarantine, manifests, the marker); `spool/manifest.ts` (the daemon's `daemon.json` and the segment manifest) |
 

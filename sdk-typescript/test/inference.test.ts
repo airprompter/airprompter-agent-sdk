@@ -80,7 +80,7 @@ test("0.3.2: a workflow step carries its own settings — in the release digest,
   assert.equal(calls[0]!.max_completion_tokens, 1200);
   await ap.attribute(flow.steps[1]!, () => openai.chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "system", content: flow.steps[1]!.text }] }));
   assert.equal(calls[1]!.temperature, 1, "a step without settings leaves the call alone");
-  assert.equal(events.filter((e) => e.event === "wrap_unattributed").length, 0);
+  assert.equal(events.filter((e) => e.event === "adapter_unattributed").length, 0);
 
   // A golden-set invocation is made as production makes the call: the slot's settings ride it.
   const seen: unknown[] = [];

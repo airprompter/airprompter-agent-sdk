@@ -80,24 +80,28 @@ call cost. It never renders, mints a run reference, writes a row or reads a
 release. The rules are in the header of
 `sdk-typescript/packages/sdk/src/frameworks/contract.ts`. A new adapter needs:
 
-- `sdk-typescript/packages/sdk/src/frameworks/<name>.ts`, with a header and an
-  `@example`, 100 to 300 lines (`npm run size` fails past 300).
-- Imports of `./contract.js` and the framework only, with an entry in
-  `ADAPTERS` in `sdk-typescript/scripts/lint-imports.mjs` and in
-  `sdk-python/tools/lint_imports.py`.
+- `sdk-typescript/packages/sdk/src/frameworks/<name>.ts` (or a folder
+  `frameworks/<name>/`), with a header and an `@example`, up to 300 lines in
+  all (`npm run size` fails past 300).
+- Imports of the contract, its own folder and the framework only, with an
+  entry in `ADAPTERS` in `sdk-typescript/scripts/lint-imports.mjs` and in
+  `sdk-python/tools/lint_imports.py`. Log with `ADAPTER_EVENTS`, and take a
+  `now` option for the agent's clock.
 - `exports["./frameworks/<name>"]` and `typesVersions` in
   `sdk-typescript/packages/sdk/package.json`, the framework as an optional
   peer (`peerDependenciesMeta`), and `airprompter.sizeBudgetBytes` for the
   subpath.
 - The subpath in `SUBPATHS` in `sdk-typescript/test/packageShape.test.ts`,
-  and in `SDK_SUBPATHS` in `sdk-typescript/scripts/install-alone.mjs` (it must
-  import with no peer installed, or name the peer it is missing).
+  and in `SDK_SUBPATHS` in `sdk-typescript/scripts/install-alone.mjs`: it
+  imports with no peer installed. (LangChain, until AIR-2234, instead names
+  the peer it is missing.)
 - The Python module `airprompter_agent/frameworks/<name>.py`, its
   `pyproject.toml` extra, and `sdk-python/tests/test_package_shape.py`.
 - `conformance/frameworks/fixtures/<name>/` with every required fixture kind
   (AIR-2233).
-- A matrix entry in `.github/workflows/wrap-latest.yml`, so the latest
-  framework release runs the tests weekly.
+- The framework in `.github/workflows/wrap-latest.yml`: its `npm i --no-save
+  <framework>@latest` (or `pip install --upgrade`) line and its test files in
+  the run step, so the latest framework release runs the tests weekly.
 - A section in the SDK READMEs (*Use with your framework*).
 - The framework's section in prompt-haven's public `frameworks.mdx`
   (AIR-2239).

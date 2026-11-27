@@ -18,8 +18,8 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { createPlaintextBundle } from "../packages/sdk/src/core/bundle/apbundle.js";
@@ -104,27 +104,32 @@ test("the direction is core → sync, runtime, telemetry → agent, frameworks �
   assert.equal(platformOk.status, 0, `the Steps subpath is allowed: ${platformOk.stderr}`);
 });
 
-test("adapters (AIR-2231): an adapter imports only ./contract.js and its framework; the layers below import no framework; the contract imports two barrels", () => {
+test("adapters (AIR-2231): an adapter imports only the contract, its own folder and its framework; the layers below import no framework; the contract imports three barrels and is the only one to reach runtime/adapter", () => {
   const src = join(root, "packages", "sdk", "src");
   const unlisted = planted(join(src, "frameworks", "_lintProbe.ts"), 'import { chooseModel } from "./contract.js";\nexport const probe = typeof chooseModel;\n');
   assert.equal(unlisted.status, 1, "an adapter with no allowlist entry fails");
   assert.match(unlisted.stderr, /frameworks\/_lintProbe\.ts has no entry in ADAPTERS/);
-  const openai = join(src, "frameworks", "openai.ts");
-  const original = readFileSync(openai, "utf8");
+  // Only new files are planted, so nothing another test imports is ever edited. A folder `frameworks/openai/` is the openai adapter too.
+  const probe = join(src, "frameworks", "openai", "_lintProbe.ts");
+  mkdirSync(dirname(probe), { recursive: true });
   try {
-    for (const [line, message] of [
-      ['import { normalizeUsage } from "../runtime/index.js";', /openai\.ts:\d+: an adapter imports only \.\/contract\.js and its framework, not \.\.\/runtime\/index\.js/],
-      ['import { airprompterMiddleware } from "./ai-sdk.js";', /an adapter imports only \.\/contract\.js and its framework, not \.\/ai-sdk\.js/],
-      ['import Anthropic from "@anthropic-ai/sdk";', /@anthropic-ai\/sdk is not in frameworks\/openai's allowlist/],
+    for (const [source, message] of [
+      ['import { normalizeUsage } from "../../runtime/index.js";\nexport const probe = normalizeUsage;\n', /openai[\\/]_lintProbe\.ts:\d+: an adapter imports only the contract, its own folder and its framework, not \.\.\/\.\.\/runtime\/index\.js/],
+      ['import { airprompterMiddleware } from "../ai-sdk.js";\nexport const probe = airprompterMiddleware;\n', /an adapter imports only the contract, its own folder and its framework, not \.\.\/ai-sdk\.js/],
+      ['import Anthropic from "@anthropic-ai/sdk";\nexport const probe = Anthropic;\n', /@anthropic-ai\/sdk is not in frameworks\/openai's allowlist/],
+      ['import { acquireRun } from "../../runtime/adapter/index.js";\nexport const probe = acquireRun;\n', /an adapter imports only the contract/],
     ] as const) {
-      writeFileSync(openai, `${original}\n${line}\n`);
-      const result = lint();
-      assert.equal(result.status, 1, line);
+      const result = planted(probe, source);
+      assert.equal(result.status, 1, source);
       assert.match(result.stderr, message);
     }
+    const ok = planted(probe, 'import { chooseModel } from "../contract.js";\nimport type OpenAI from "openai";\nexport type Probe = OpenAI;\nexport const probe = chooseModel;\n');
+    assert.equal(ok.status, 0, `a folder adapter may import the contract and its framework: ${ok.stderr}`);
   } finally {
-    writeFileSync(openai, original);
+    rmSync(dirname(probe), { recursive: true, force: true });
   }
+  const barrel = planted(join(src, "_lintProbe.ts"), 'import { acquireRun } from "./runtime/adapter/index.js";\nexport const probe = acquireRun;\n');
+  assert.match(barrel.stderr, /runtime\/adapter is the adapters' internal barrel; only frameworks\/contract\.ts imports it/);
   const runtimeFramework = planted(join(src, "runtime", "_lintProbe.ts"), 'import OpenAI from "openai";\nexport const probe = typeof OpenAI;\n');
   assert.equal(runtimeFramework.status, 1, "the runtime imports no framework package");
   assert.match(runtimeFramework.stderr, /runtime imports the framework package openai/);
@@ -132,13 +137,12 @@ test("adapters (AIR-2231): an adapter imports only ./contract.js and its framewo
   assert.match(agentFramework.stderr, /agent imports the framework package langchain/);
   const runTelemetry = planted(join(src, "runtime", "run", "_lintProbe.ts"), 'import { SpoolWriter } from "../../telemetry/index.js";\nexport const probe = typeof SpoolWriter;\n');
   assert.match(runTelemetry.stderr, /runtime \(layer 1\) may not import telemetry/, "runtime/run imports neither telemetry nor sync");
-  const contract = join(src, "frameworks", "contract.ts");
-  const contractSource = readFileSync(contract, "utf8");
+  const contractFolder = join(src, "frameworks", "contract", "_lintProbe.ts");
+  mkdirSync(dirname(contractFolder), { recursive: true });
   try {
-    writeFileSync(contract, `${contractSource}\nexport { SpoolWriter } from "../telemetry/index.js";\n`);
-    assert.match(lint().stderr, /frameworks\/contract imports only the runtime and core barrels/);
+    assert.match(planted(contractFolder, 'export { SpoolWriter } from "../../telemetry/index.js";\n').stderr, /frameworks\/contract imports only the runtime, core and runtime\/adapter barrels/);
   } finally {
-    writeFileSync(contract, contractSource);
+    rmSync(dirname(contractFolder), { recursive: true, force: true });
   }
 });
 
@@ -146,7 +150,20 @@ test("rule 4: agent.ts is pinned at its line count, and no adapter file passes 3
   assert.equal(readFileSync(join(root, "packages", "sdk", "src", "agent.ts"), "utf8").trimEnd().split("\n").length, AGENT_TS_LINES, "agent.ts grew or shrank: move AGENT_TS_LINES on purpose");
   for (const entry of readdirSync(join(root, "packages", "sdk", "src", "frameworks"))) {
     if (!entry.endsWith(".ts")) continue;
-    assert.ok(readFileSync(join(root, "packages", "sdk", "src", "frameworks", entry), "utf8").split("\n").length <= 300, `frameworks/${entry} is over 300 lines`);
+    assert.ok(readFileSync(join(root, "packages", "sdk", "src", "frameworks", entry), "utf8").trimEnd().split("\n").length <= 300, `frameworks/${entry} is over 300 lines`);
+  }
+  // A folder adapter is counted whole: plant one past the cap and the size check fails.
+  ensureBuilt(); // first: a build with the probe in place would carry it into dist
+  const folder = join(root, "packages", "sdk", "src", "frameworks", "_sizeProbe");
+  mkdirSync(folder, { recursive: true });
+  try {
+    writeFileSync(join(folder, "a.ts"), "export const a = 1;\n".repeat(160));
+    writeFileSync(join(folder, "b.ts"), "export const b = 1;\n".repeat(160));
+    const size = spawnSync(process.execPath, [join(root, "scripts", "size-budget.mjs")], { encoding: "utf8" });
+    assert.equal(size.status, 1);
+    assert.match(size.stderr, /src\/frameworks\/_sizeProbe: 320 lines, over 300/);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
   }
 });
 

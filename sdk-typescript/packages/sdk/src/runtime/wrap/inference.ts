@@ -23,7 +23,7 @@
 import type { SlotInference } from "../../core/index.js";
 
 /** The request shape a direct client call takes: OpenAI chat, OpenAI Responses, Anthropic Messages. */
-export type StreamKind = "chat" | "responses" | "messages";
+export type RequestKind = "chat" | "responses" | "messages";
 
 /** The settings in one order, so every log line and every SDK names them alike. */
 export const INFERENCE_KEYS = ["temperatureMilli", "topPBps", "maxOutputTokens", "stopSequences", "reasoningEffort"] as const satisfies readonly (keyof SlotInference)[];
@@ -35,13 +35,13 @@ export const temperatureOf = (inference: SlotInference): number | undefined => (
 export const topPOf = (inference: SlotInference): number | undefined => (unset(inference.topPBps) ? undefined : inference.topPBps / 10000);
 
 /** The provider parameter each setting lands on, per request shape; `null` when the shape has no such parameter. */
-const PARAMETER: Record<StreamKind, Record<keyof SlotInference, string | null>> = {
+const PARAMETER: Record<RequestKind, Record<keyof SlotInference, string | null>> = {
   chat: { temperatureMilli: "temperature", topPBps: "top_p", maxOutputTokens: "max_completion_tokens", stopSequences: "stop", reasoningEffort: "reasoning_effort" },
   responses: { temperatureMilli: "temperature", topPBps: "top_p", maxOutputTokens: "max_output_tokens", stopSequences: null, reasoningEffort: "reasoning" },
   messages: { temperatureMilli: "temperature", topPBps: "top_p", maxOutputTokens: "max_tokens", stopSequences: "stop_sequences", reasoningEffort: null },
 };
 
-function valueFor(key: keyof SlotInference, inference: Readonly<SlotInference>, kind: StreamKind): unknown {
+function valueFor(key: keyof SlotInference, inference: Readonly<SlotInference>, kind: RequestKind): unknown {
   switch (key) {
     case "temperatureMilli": return temperatureOf(inference);
     case "topPBps": return topPOf(inference);
@@ -77,7 +77,7 @@ const same = (left: unknown, right: unknown): boolean => {
 };
 
 /** A copy of `params` with the slot's settings applied; the original object is never mutated. */
-export function applyInference(kind: StreamKind, params: Record<string, unknown>, inference: Readonly<SlotInference>): AppliedInference {
+export function applyInference(kind: RequestKind, params: Record<string, unknown>, inference: Readonly<SlotInference>): AppliedInference {
   const out: Record<string, unknown> = { ...params };
   const overridden: string[] = [];
   const unsupported: AppliedInference["unsupported"] = [];

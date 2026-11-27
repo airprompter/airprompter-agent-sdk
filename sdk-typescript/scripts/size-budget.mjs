@@ -3,8 +3,9 @@
 // its budget (`airprompter.sizeBudgetBytes`: a number for a satellite, one
 // entry per `exports` key for the SDK): the bytes of the .js under dist/esm and
 // dist/cjs that belong to it. An export with no budget fails, so a new adapter
-// cannot arrive without one. An adapter file (`src/frameworks/<name>.ts`) over
-// 300 lines fails too: an adapter is translation only (CONTRIBUTING.md).
+// cannot arrive without one. An adapter (`src/frameworks/<name>.ts`, or the
+// files of a folder `src/frameworks/<name>/` together) over 300 lines fails
+// too: an adapter is translation only (CONTRIBUTING.md). Steps is not an adapter.
 // Exit 1 over budget; `--json` prints the numbers.
 //
 //   $ npm run size                              # from sdk-typescript/, after npm run build
@@ -70,9 +71,12 @@ for (const name of SATELLITES) {
 const ADAPTER_MAX_LINES = 300;
 const frameworks = join(sdkDir, "src", "frameworks");
 const longAdapters = [];
+const linesOf = (path) => readFileSync(path, "utf8").trimEnd().split("\n").length;
+const tsUnder = (dir) => readdirSync(dir).flatMap((entry) => (statSync(join(dir, entry)).isDirectory() ? tsUnder(join(dir, entry)).map((file) => join(entry, file)) : entry.endsWith(".ts") ? [entry] : []));
 for (const entry of readdirSync(frameworks)) {
-  if (!entry.endsWith(".ts")) continue;
-  const lines = readFileSync(join(frameworks, entry), "utf8").split("\n").length;
+  const path = join(frameworks, entry);
+  if (entry === "steps") continue;
+  const lines = statSync(path).isDirectory() ? tsUnder(path).reduce((total, file) => total + linesOf(join(path, file)), 0) : entry.endsWith(".ts") ? linesOf(path) : 0;
   if (lines > ADAPTER_MAX_LINES) longAdapters.push(`src/frameworks/${entry}: ${lines} lines, over ${ADAPTER_MAX_LINES}`);
 }
 if (longAdapters.length > 0) {

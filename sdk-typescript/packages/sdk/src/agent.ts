@@ -49,7 +49,7 @@ import { observeCall, type ObserveOptions } from "./runtime/index.js";
 import { ReleaseResolver, disabledFrom, newSubject, type Rendered } from "./runtime/index.js";
 import { DEFAULT_RUN_IDLE_TIMEOUT_MS, RunRegistry, classifyError, type AgentRuntime, type RunInput, type RunSession } from "./runtime/index.js";
 import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, unsourced, type FillPlan, type FilledRender, type RenderValues, type VariableSourceInput } from "./runtime/index.js";
-import { currentAttribution, withAttribution, type Attribution, type InstrumentRuntime } from "./runtime/index.js";
+import { currentAttribution, withAttribution, type Attribution } from "./runtime/index.js";
 import { evaluateChecks, outputTextOf, type CheckOutcome } from "./core/index.js";
 import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "./core/index.js";
 import { JUDGE_RUBRICS, judgePrompt, judgeSignalsOf, parseJudgeReply, rubricFromPrompt, type JudgeResult, type JudgeRubric } from "./core/index.js";
@@ -490,7 +490,7 @@ export function isAgentStartError(error: unknown): error is AgentStartError {
   return errorNamed<AgentStartError["code"]>(error, "AgentStartError");
 }
 
-export class AirPrompterAgent implements AgentRuntime, InstrumentRuntime {
+export class AirPrompterAgent implements AgentRuntime {
   private active: LoadedSlot | null = null;
   private source: ReleaseSource = "store";
   private lastSyncMs: number | null = null;

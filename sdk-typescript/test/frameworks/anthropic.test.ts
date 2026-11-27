@@ -44,7 +44,7 @@ test("a stream from create({ stream: true }) is measured from message_start and 
   const helper = { model: "claude-haiku-4-5", max_tokens: 100, messages: [] };
   assert.equal((await anthropic.messages.stream(helper).finalMessage()).content[0]!.text, "helper reply");
   assert.equal(client.calls[1], helper);
-  assert.equal(events.filter((e) => e.event === "wrap_stream_helper_unmeasured").length, 1);
+  assert.equal(events.filter((e) => e.event === "adapter_stream_helper_unmeasured").length, 1);
   const out = byKey(await rows());
   assert.deepEqual(out.map((r) => [r.status, r.errorClass, r.count, r.tokens]), [["error", "truncated", 1, { input: 40, cachedInput: 8, output: 12 }]]);
 });

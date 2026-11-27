@@ -16,11 +16,14 @@
 //
 // Framework adapters (AIR-2231, the rules of section 3.2):
 //
-//   1. `frameworks/<name>.ts` imports only `./contract.js` and the packages in
-//      its ADAPTERS entry below. `frameworks/contract.ts` imports the runtime
-//      and core barrels only, and no package. A framework file with no entry
-//      fails. `langchain` is exempt from the contract-only rule until AIR-2234
-//      moves it onto the contract.
+//   1. An adapter, `frameworks/<name>.ts` or a folder `frameworks/<name>/`,
+//      imports only the contract (`./contract.js`, `../contract.js` from a
+//      folder), its own folder's files, and the packages in its ADAPTERS entry
+//      below. `frameworks/contract.ts` imports the runtime and core barrels and
+//      the adapters' internal barrel `runtime/adapter/index.js` (which nothing
+//      else may import), and no package. A framework with no entry fails.
+//      `langchain` is exempt from the contract-only rule until AIR-2234 moves
+//      it onto the contract; `steps/` is its own layer.
 //   2. core, sync, runtime, telemetry and the agent import no framework
 //      package (FRAMEWORK_PACKAGES).
 //   3. `runtime/run/` imports neither telemetry nor sync: held by the layer
@@ -105,19 +108,21 @@ const insideSdk = (path) => !posix(relative(sdkSrc, path)).startsWith("..");
 const offenders = [];
 const edges = [];
 
-/** `frameworks/<name>.ts` → name; the Steps folder and anything deeper is not an adapter file. */
+/** `frameworks/<name>.ts` or `frameworks/<name>/…` → name; the Steps folder is its own layer. */
 function adapterOf(file) {
   const rel = posix(relative(sdkSrc, file));
-  const m = /^frameworks\/([^/]+)\.ts$/.exec(rel);
-  return m ? m[1] : null;
+  const m = /^frameworks\/([^/]+?)(\.ts$|\/)/.exec(rel);
+  return m && m[1] !== "steps" ? m[1] : null;
 }
+/** The adapters' internal barrel: `frameworks/contract.ts` alone imports it. */
+const ADAPTER_BARREL = "runtime/adapter/index";
 
 function lintAdapter(file, name) {
   const shown = relative(root, file);
   if (name === "contract") {
     for (const { spec, line } of specifiersOf(file)) {
       const target = spec.startsWith(".") ? posix(relative(sdkSrc, resolve(dirname(file), spec))).replace(/\.(js|ts)$/, "") : null;
-      if (target !== "runtime/index" && target !== "core/index") offenders.push(`${shown}:${line}: frameworks/contract imports only the runtime and core barrels (${spec})`);
+      if (target !== "runtime/index" && target !== "core/index" && target !== ADAPTER_BARREL) offenders.push(`${shown}:${line}: frameworks/contract imports only the runtime, core and runtime/adapter barrels (${spec})`);
     }
     return true;
   }
@@ -127,9 +132,13 @@ function lintAdapter(file, name) {
     return false;
   }
   if (CONTRACT_EXEMPT.has(name)) return false;
+  const home = join(sdkSrc, "frameworks", name);
   for (const { spec, line } of specifiersOf(file)) {
     if (spec.startsWith(".")) {
-      if (spec !== "./contract.js") offenders.push(`${shown}:${line}: an adapter imports only ./contract.js and its framework, not ${spec}`);
+      const target = resolve(dirname(file), spec).replace(/\.(js|ts)$/, "");
+      const contract = target === join(sdkSrc, "frameworks", "contract");
+      const ownFolder = !posix(relative(home, target)).startsWith("..");
+      if (!contract && !ownFolder) offenders.push(`${shown}:${line}: an adapter imports only the contract, its own folder and its framework, not ${spec}`);
       continue;
     }
     if (!allowed.some((pattern) => matches(spec, pattern))) offenders.push(`${shown}:${line}: ${spec} is not in frameworks/${name}'s allowlist (${allowed.join(", ")})`);
@@ -172,6 +181,10 @@ function lintSdkFile(file) {
     edges.push([layer, into]);
     const rel = posix(relative(sdkSrc, target)).replace(/\.(js|ts)$/, "");
     const barrel = rel === barrelOf(into) || (rel === "core/testing/index" && posix(relative(sdkSrc, file)) === "testing.ts");
+    if (rel === ADAPTER_BARREL && into !== layer) {
+      offenders.push(`${shown}:${line}: runtime/adapter is the adapters' internal barrel; only frameworks/contract.ts imports it`);
+      continue;
+    }
     if (!barrel) {
       offenders.push(`${shown}:${line}: reaches into ${into} by path (${spec}); import ${into}'s barrel`);
       continue;

@@ -101,7 +101,7 @@ test("a stream consumed inside ap.run is measured to its end; a .stream() helper
   const helperParams = { model: "gpt-5", messages: [{ role: "user", content: "hi" }] };
   for (let i = 0; i < 2; i += 1) for await (const _ of openai.chat.completions.stream(helperParams)) void _;
   assert.deepEqual(client.calls.slice(1), [helperParams, helperParams], "the helper's params are untouched");
-  assert.equal(events.filter((e) => e.event === "wrap_stream_helper_unmeasured").length, 1);
+  assert.equal(events.filter((e) => e.event === "adapter_stream_helper_unmeasured").length, 1);
   const out = await rows();
   assert.equal(out.length, 1);
   assert.deepEqual([out[0]!.status, out[0]!.errorClass, out[0]!.tokens, out[0]!.checks], ["error", "truncated", { input: 100, cachedInput: 20, output: 30 }, { passed: 0, failed: 1 }]);
@@ -141,10 +141,10 @@ test("nothing the adapter does fails the call: a run whose place throws sends th
   const completion = (await instrument(client, runtime, { slot: "s" }).chat.completions.create(params)) as ReturnType<typeof chatCompletion>;
   assert.equal(completion.choices[0]!.message.content, "answer 1 refund guaranteed");
   assert.equal(client.calls[0], params);
-  assert.deepEqual(log.map((e) => e.event), ["wrap_placement_failed"]);
+  assert.deepEqual(log.map((e) => e.event), ["adapter_placement_failed"]);
 });
 
-test("no slot and no scope: untouched, unobserved, one log per method; inside ap.attribute the scope's model and settings go on the call", async () => {
+test("no slot and no scope: untouched, unobserved, one log per method; inside ap.attribute the sealed settings go on a call to the release's model, and a call to another model keeps its own", async () => {
   const events: Record<string, unknown>[] = [];
   const { ap, rows } = await startAgent((plane) => [{ ...plane.slot({ tag: "support.reply", text: "Reply politely.", model: "gpt-5" }), inference: { temperatureMilli: 200, maxOutputTokens: 800 } }], events);
   const client = new FakeOpenAI();
@@ -153,17 +153,43 @@ test("no slot and no scope: untouched, unobserved, one log per method; inside ap
   await openai.chat.completions.create(params);
   await openai.chat.completions.create(params);
   assert.deepEqual(client.calls, [params, params]);
-  assert.equal(events.filter((e) => e.event === "wrap_unattributed").length, 1);
+  assert.deepEqual(events.filter((e) => e.event === "adapter_unattributed").map((e) => [e.adapter, e.method]), [["openai", "chat.completions.create"]]);
   const rendered = ap.prompt("support.reply").render({});
   await ap.attribute(rendered, async () => {
     await Promise.resolve();
-    await openai.chat.completions.create({ model: "gpt-4o", temperature: 1, messages: [{ role: "user", content: `${rendered.text} Today is Friday.` }] });
+    await openai.chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "user", content: `${rendered.text} Today is Friday.` }] });
+    await openai.chat.completions.create({ messages: [{ role: "user", content: rendered.text }] });
+    // An Azure deployment name: replacing it would send the call nowhere, so it keeps its model and its own settings.
+    await openai.chat.completions.create({ model: "my-azure-deployment", temperature: 1, messages: [{ role: "user", content: rendered.text }] });
   });
-  const scoped = client.calls[2] as Params;
-  assert.deepEqual([scoped.model, scoped.temperature, scoped.max_completion_tokens], ["gpt-5", 0.2, 800], "the release's model and sealed settings");
-  assert.equal(events.filter((e) => e.event === "wrap_model_overridden").length, 1);
+  const [scoped, unnamed, azure] = client.calls.slice(2) as Params[];
+  assert.deepEqual([scoped!.model, scoped!.temperature, scoped!.max_completion_tokens], ["gpt-5", 0.2, 800], "the release's model gets the sealed settings");
+  assert.deepEqual([unnamed!.model, unnamed!.temperature], ["gpt-5", 0.2], "a call that names no model gets the release's");
+  assert.deepEqual([azure!.model, azure!.temperature, "max_completion_tokens" in azure!], ["my-azure-deployment", 1, false], "another model is never replaced");
+  assert.equal(events.filter((e) => e.event === "model_unresolved").length, 1);
+  assert.deepEqual(events.find((e) => e.event === "adapter_inference_overridden")?.parameters, ["temperature"]);
+  const out = byKey(await rows());
+  assert.deepEqual(out.map((r) => [r.tag, r.model, r.count]), [["support.reply", "gpt-5", 2], ["support.reply", "my-azure-deployment", 1]], "every scoped call is observed, under the model it ran on");
+});
+
+test("asResponse() on a slot-bound call hands back a response nobody has read, and the call is still measured", async () => {
+  const { ap, rows } = await startAgent(supportSlots);
+  let bodyRead = 0;
+  const response = { status: 200, json: async () => (bodyRead += 1, chatCompletion("raw")) };
+  const client = { chat: { completions: { create: (_params: Record<string, unknown>) => Object.assign(Promise.resolve().then(() => { bodyRead += 1; return chatCompletion("parsed"); }), { asResponse: async () => response }) } } };
+  // A promise whose `then` reads the body, as `APIPromise` does: only `asResponse()` is called here, so it is never read.
+  const lazy = { chat: { completions: { create: (params: Record<string, unknown>) => {
+    const parsed = { then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) => client.chat.completions.create(params).then(resolve, reject), asResponse: async () => response };
+    return parsed;
+  } } } };
+  const openai = instrument(lazy, ap, { slot: "support.reply" });
+  const raw = await (openai.chat.completions.create({ messages: [] }) as unknown as { asResponse(): Promise<typeof response> }).asResponse();
+  assert.equal(raw, response);
+  assert.equal(bodyRead, 0, "the body is the caller's to read");
+  assert.equal(((await raw.json()) as ReturnType<typeof chatCompletion>).choices[0]!.message.content, "raw");
+  await settled();
   const out = await rows();
-  assert.deepEqual(out.map((r) => [r.tag, r.model, r.count]), [["support.reply", "gpt-5", 1]]);
+  assert.deepEqual(out.map((r) => [r.tag, r.count, r.usageSource]), [["support.reply", 1, "unavailable"]], "measured: latency only");
 });
 
 test("applyPlacement: a developer message keeps its role; settings land as floats; a copy", () => {

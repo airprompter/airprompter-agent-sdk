@@ -393,15 +393,30 @@ method). Nothing guesses which prompt a call belongs to from its text. Every ada
 (`ADAPTER_EVENTS`), each with `adapter`, `slot` and `method`; pass the agent's clock as `now` when you replay recorded
 runs.
 
-**LiteLLM** has no client object, so the adapter is a callback, and your call site places the text and passes
-`**litellm_params(placed)` (the release's model and settings). The callback reads only `metadata["airprompter"]`: the
-slot's tag and a signed run reference, which is the authority (a reference that does not verify, or names no entry for
-that tag, files nothing; a call sent under another model is not counted). LiteLLM logs after the call returns, often
-after the run has ended, so inside `ap.run` measure the call where you make it:
-`measure_call(run, slot, lambda: litellm.completion(messages=messages, **litellm_params(placed)), model=placed.model)`.
-With `metadata=litellm_metadata((run, slot))` instead, a record that reaches the live run (on any thread) is recorded
-into it, and one that arrives after the run ended is dropped with one `adapter_late_record` log, never counted twice.
-Use one or the other for a call, not both. Outside any run, `metadata=litellm_metadata(rendered)` files a one-call row.
+**LiteLLM: the callback cannot measure a call made inside `ap.run`.** LiteLLM logs a call after it returns (on a
+thread pool, or a logging worker for async calls), usually after the run has ended, and an ended run takes no more
+records. Inside a run, measure the call where you make it:
+
+```python
+from airprompter_agent.frameworks.contract import measure_call
+from airprompter_agent.frameworks.litellm import litellm_params
+
+with ap.run(subject=user_id) as run:
+    placed = run.place("support.reply")
+    if placed.kind == "approved":
+        messages = [{"role": "system", "content": placed.instructions}, *history]
+        reply = measure_call(run, "support.reply", lambda: litellm.completion(messages=messages, **litellm_params(placed)), model=placed.model)
+    else:
+        reply = litellm.completion(model=own_model, messages=history)  # nothing to serve: your own prompt and model
+```
+
+(`litellm_params(placed)` is the release's model and sealed settings.) The callback, `litellm.callbacks = [AirPrompterLiteLLMCallback(ap)]`, is for calls made
+outside any run, with `metadata=litellm_metadata(rendered)`: each is a one-call row. It reads only
+`metadata["airprompter"]`: the slot's tag and a signed run reference, which is the authority (a reference that does
+not verify, or names no entry for that tag, files nothing; a call sent under another model is not counted). If you do
+pass `metadata=litellm_metadata((run, slot))` inside a run, a record that reaches the live run is recorded into it and
+one that arrives after the run ended is dropped with one `adapter_late_record` log: the run is counted once, and that
+call's tokens and latency are not measured. Use `measure_call` or the run's metadata for a call, never both.
 
 **Coming from an earlier candidate?** The wrapped clients, the explicit helpers, the old integrations package and the
 match on rendered text are gone; the [CHANGELOG](../CHANGELOG.md) entry for this release maps each one to its adapter.

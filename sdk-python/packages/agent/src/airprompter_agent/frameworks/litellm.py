@@ -1,5 +1,7 @@
-"""LiteLLM as an adapter. LiteLLM has no client object: it is module functions and a callback list, so the adapter is
-a callback, and the call site puts the release's model and settings on the call itself.
+"""LiteLLM as an adapter. The callback cannot measure a call made inside ``ap.run``: LiteLLM logs after the call returns,
+usually after the run ended. Inside a run, measure the call where you make it with ``measure_call`` (below). LiteLLM has
+no client object: it is module functions and a callback list, so the adapter is a callback for calls outside any run,
+and the call site puts the release's model and settings on the call itself (``litellm_params``).
 
 ::
 

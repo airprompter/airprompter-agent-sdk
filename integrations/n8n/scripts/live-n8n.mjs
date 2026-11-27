@@ -225,7 +225,7 @@ try {
     }
   };
   runBatch(["apQaGetReport001", "apQaUnreported01"]);
-  runBatch(["apQaStoredCopy01"], { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${offlinePreload}`.trim() });
+  runBatch(["apQaStoredCopy01"], { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require "${offlinePreload}"`.trim() });
 
   const counted = results.get("apQaGetReport001");
   const served = counted.ok ? counted.output("Get Prompt")[0] : undefined;

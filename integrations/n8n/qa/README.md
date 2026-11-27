@@ -19,7 +19,8 @@ The QA test adds what the script cannot see: the agent's Metrics show exactly on
 
 ## What it needs
 
-- **Node 22.19 or later, and npm.** The node itself runs on Node 20; the test dependencies (undici 8) need 22.19. It needs network access to `api.airprompter.dev` and `registry.npmjs.org`.
+- **Node 24 or later, and npm.** n8n 2.49.8 itself requires Node 24. The package runs on any Node that n8n
+  supports. It needs network access to `api.airprompter.dev` and `registry.npmjs.org`.
 - **n8n 2.49.8.** Install it once and point `N8N_BIN` at it, so a run does not download n8n:
   `npm i n8n@2.49.8` in a cache folder, then `N8N_BIN=<that folder>/node_modules/.bin/n8n`. Without `N8N_BIN`, the
   script uses `npx --yes n8n@2.49.8`. The `n8n.version` check fails on any other version, unless you pass
@@ -96,6 +97,10 @@ Check ids, which are stable: `n8n.version`, `workflow.get_and_report`, `get_prom
    - **What the count proves:** the Get Prompt with no Report Run and the stored-copy Get Prompt (`notCounted`)
      must not add runs. The count stays 1.
    - In the console, this is **Agents › the agent › Metrics**, environment Development, slot `triage`.
+
+**Stopping it:** the script waits on n8n synchronously, so on a timeout, kill its whole process group, not just the
+script. Otherwise the n8n step in progress runs to its end, and a Report Run may still be recorded. Read Metrics
+before running it again.
 
 **Test timeout:** about 25 minutes. That is about 2 for the script, up to 20 for Metrics, and headroom. Each n8n
 call inside the script is limited to 10 minutes.

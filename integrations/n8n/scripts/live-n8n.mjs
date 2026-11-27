@@ -128,7 +128,8 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 /** What `npm run build` and `npm pack` read: anything here that is not committed changes the package. */
-const BUILD_INPUTS = ["src", "nodes", "credentials", "scripts/copy-icons.mjs", "package.json", "package-lock.json", "tsconfig.json", "README.md", "LICENSE"];
+// npm packs root README*, LICENSE* and LICENCE* files whatever `files` says, so any of those names counts too.
+const BUILD_INPUTS = ["src", "nodes", "credentials", "scripts/copy-icons.mjs", "package.json", "package-lock.json", "tsconfig.json", ":(glob)README*", ":(glob)LICENSE*", ":(glob)LICENCE*"];
 const git = (gitArgs) => execFileSync("git", gitArgs, { cwd: PACKAGE_DIR, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 /**
  * This checkout's own commit, or null: only when this folder is tracked as `integrations/n8n` of its repository, so a

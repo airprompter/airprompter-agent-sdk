@@ -178,8 +178,11 @@ test("--prepare-nodes-dir refuses an untracked build input: it would be packed u
   const untracked = run(["--prepare-nodes-dir", join(repo, "out")], {}, join(home, "scripts", "live-n8n.mjs"));
   assert.equal(untracked.status, 2);
   assert.match(untracked.json.error, /changes not committed/);
-  // An untracked file outside the build inputs (a run's output) is not a change to the package.
   rmSync(join(home, "src", "untracked.ts"));
+  writeFileSync(join(home, "LICENCE"), "npm packs this whatever files says");
+  assert.match(run(["--prepare-nodes-dir", join(repo, "out")], {}, join(home, "scripts", "live-n8n.mjs")).json.error, /changes not committed/, "an untracked LICENCE would be packed too");
+  rmSync(join(home, "LICENCE"));
+  // An untracked file outside the build inputs (a run's output) is not a change to the package.
   writeFileSync(join(home, "live-n8n.json"), "{}");
   // A different pin is the next refusal after the dirty check, so reaching it proves the tree counted as clean.
   const output = run(["--prepare-nodes-dir", join(repo, "out")], { AIRPROMPTER_KIT_COMMIT: "c0ffee0000000000000000000000000000000001" }, join(home, "scripts", "live-n8n.mjs"));

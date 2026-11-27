@@ -1,6 +1,6 @@
 /**
  * Protocol 0.3.1 / 0.3.2: the slot's (and a workflow step's) inference
- * settings, applied by `applyInference` and the AI SDK middleware, and
+ * settings, applied by `applyInference` (the AI SDK's in `frameworks/aiSdk.test.ts`), and
  * carried by golden-set invocations.
  */
 import assert from "node:assert/strict";
@@ -12,7 +12,7 @@ import test from "node:test";
 import { AirPrompterAgent } from "../packages/sdk/src/agent.js";
 import { publicJwkOf } from "../packages/sdk/src/core/protocol/trust.js";
 import { applyInference } from "../packages/sdk/src/runtime/wrap/inference.js";
-import { applyAiSdkInference } from "../packages/sdk/src/runtime/wrap/aiSdk.js";
+import { instrument } from "../packages/sdk/src/frameworks/openai.js";
 import { inferenceDigestInput, releaseDigest } from "../packages/sdk/src/core/protocol/trust.js";
 import { GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, runGoldenSet, type GoldenSet } from "../packages/sdk/src/core/golden/index.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
@@ -22,13 +22,7 @@ const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as con
 const tempDir = () => mkdtempSync(join(tmpdir(), "ap-inference-"));
 const full: SlotInference = { temperatureMilli: 200, topPBps: 9000, maxOutputTokens: 800, stopSequences: ["\n\nHuman:"], reasoningEffort: "low" };
 
-test("applyInference: a call to another model is skipped whole; a JSON null is unset; a value the wrapper cannot compare is replaced without a report; the order of reports is the settings' order", () => {
-  const skipped = applyInference("chat", { model: "gpt-5-mini", temperature: 1 }, full, { model: "gpt-5" });
-  assert.equal(skipped.skipped, "model_mismatch");
-  assert.deepEqual(skipped.params, { model: "gpt-5-mini", temperature: 1 });
-  assert.equal(applyInference("chat", { model: "gpt-5" }, full, { model: "gpt-5" }).skipped, undefined);
-  assert.equal(applyInference("chat", {}, full, { model: "gpt-5" }).skipped, undefined, "a call that names no model gets the settings");
-
+test("applyInference: a JSON null is unset; a value the wrapper cannot compare is replaced without a report; the order of reports is the settings' order", () => {
   const nulls = applyInference("chat", {}, { temperatureMilli: null, topPBps: 9000 } as unknown as SlotInference);
   assert.deepEqual(nulls.params, { top_p: 0.9 }, "a null key is absent, not temperature 0");
 
@@ -60,23 +54,7 @@ test("applyInference: Messages takes one sampling parameter and none beside thin
   assert.deepEqual(applyInference("responses", {}, { reasoningEffort: "medium" }).params, { reasoning: { effort: "medium" } });
 });
 
-test("the AI SDK middleware applies the settings through transformParams under the same rules", () => {
-  const applied = applyAiSdkInference({ temperature: 1, maxOutputTokens: 5 }, full, { model: "gpt-5", modelId: "gpt-5" });
-  assert.deepEqual(applied.params, { temperature: 0.2, topP: 0.9, maxOutputTokens: 800, stopSequences: ["\n\nHuman:"] });
-  assert.deepEqual(applied.overridden, ["temperature", "maxOutputTokens"]);
-  assert.deepEqual(applied.unsupported, [{ setting: "reasoningEffort", reason: "shape" }]);
-  assert.equal(applyAiSdkInference({ temperature: 1 }, full, { model: "gpt-5", modelId: "gpt-5-mini" }).skipped, "model_mismatch");
-  // AI SDK 4 (middleware v1) names the cap maxTokens; the release's cap lands there and the call site's is reported.
-  const v1 = applyAiSdkInference({ maxTokens: 5 }, { maxOutputTokens: 800 }, { model: "gpt-5", modelId: "gpt-5", version: "v1" });
-  assert.deepEqual(v1.params, { maxTokens: 800 });
-  assert.deepEqual(v1.overridden, ["maxTokens"]);
-  // Unnamed version: AI SDK 4's call options carry `mode` / `inputFormat`, and say so.
-  const detected = applyAiSdkInference({ mode: { type: "regular" }, inputFormat: "messages", prompt: [] }, { maxOutputTokens: 800 }, { model: "gpt-5", modelId: "gpt-5" });
-  assert.deepEqual(detected.params, { mode: { type: "regular" }, inputFormat: "messages", prompt: [], maxTokens: 800 });
-  assert.deepEqual(applyAiSdkInference({ prompt: [] }, { maxOutputTokens: 800 }, { model: "gpt-5", modelId: "gpt-5" }).params, { prompt: [], maxOutputTokens: 800 }, "AI SDK 5+ call options");
-});
-
-test("0.3.2: a workflow step carries its own settings — in the release digest, on the rendered step, on a wrapped call for that step; a golden invocation carries the slot's", async () => {
+test("0.3.2: a workflow step carries its own settings — in the release digest, on the rendered step, on an instrumented call for that step; a golden invocation carries the slot's", async () => {
   const events: Record<string, unknown>[] = [];
   const stateDir = tempDir();
   const plane = new FakeControlPlane(scope);
@@ -96,14 +74,13 @@ test("0.3.2: a workflow step carries its own settings — in the release digest,
 
   const calls: Record<string, unknown>[] = [];
   const client = { chat: { completions: { create: async (params: Record<string, unknown>) => { calls.push(params); return { choices: [{ finish_reason: "stop", message: { role: "assistant", content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }; } } } };
-  await ap.wrap(client).chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "system", content: flow.steps[0]!.text }] });
-  assert.equal(calls[0]!.temperature, 0, "the step's own temperature");
+  const openai = instrument(client, ap);
+  await ap.attribute(flow.steps[0]!, () => openai.chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "system", content: flow.steps[0]!.text }] }));
+  assert.equal(calls[0]!.temperature, 0, "attribute() on a workflow step carries the step's own temperature");
   assert.equal(calls[0]!.max_completion_tokens, 1200);
-  await ap.wrap(client).chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "system", content: flow.steps[1]!.text }] });
+  await ap.attribute(flow.steps[1]!, () => openai.chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "system", content: flow.steps[1]!.text }] }));
   assert.equal(calls[1]!.temperature, 1, "a step without settings leaves the call alone");
-  await ap.attribute(flow.steps[0]!, () => ap.wrap(client).chat.completions.create({ model: "gpt-5", temperature: 1, messages: [{ role: "user", content: "unseen" }] }));
-  assert.equal(calls[2]!.temperature, 0, "attribute() on a workflow step carries the step's settings");
-  assert.equal(events.filter((e) => e.event === "wrap_unattributed").length, 0);
+  assert.equal(events.filter((e) => e.event === "adapter_unattributed").length, 0);
 
   // A golden-set invocation is made as production makes the call: the slot's settings ride it.
   const seen: unknown[] = [];

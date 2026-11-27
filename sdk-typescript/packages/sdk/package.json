@@ -1,7 +1,7 @@
 {
   "name": "@airprompter/agent-sdk",
   "version": "1.0.0-rc.4",
-  "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. One package: the agent at the root, its parts behind the subpaths /core, /sync, /runtime and /telemetry, the CI kit at /testing, framework adapters under /frameworks (/frameworks/steps: no-code automation steps, the core of the Zapier and n8n integrations).",
+  "description": "Run prompts and workflows approved in AirPrompter on your own systems: signed pull-only updates, an encrypted restart-safe slot store, offline operation, content-free telemetry. One package: the agent at the root, its parts behind the subpaths /core, /sync, /runtime and /telemetry, the CI kit at /testing, framework adapters under /frameworks on the contract at /frameworks/contract (/frameworks/openai, /frameworks/anthropic, /frameworks/ai-sdk, /frameworks/langchain; /frameworks/steps: no-code automation steps, the core of the Zapier and n8n integrations).",
   "keywords": [
     "airprompter",
     "prompts",
@@ -61,6 +61,26 @@
       "import": "./dist/esm/testing.js",
       "require": "./dist/cjs/testing.js"
     },
+    "./frameworks/contract": {
+      "types": "./dist/esm/frameworks/contract.d.ts",
+      "import": "./dist/esm/frameworks/contract.js",
+      "require": "./dist/cjs/frameworks/contract.js"
+    },
+    "./frameworks/openai": {
+      "types": "./dist/esm/frameworks/openai.d.ts",
+      "import": "./dist/esm/frameworks/openai.js",
+      "require": "./dist/cjs/frameworks/openai.js"
+    },
+    "./frameworks/anthropic": {
+      "types": "./dist/esm/frameworks/anthropic.d.ts",
+      "import": "./dist/esm/frameworks/anthropic.js",
+      "require": "./dist/cjs/frameworks/anthropic.js"
+    },
+    "./frameworks/ai-sdk": {
+      "types": "./dist/esm/frameworks/ai-sdk.d.ts",
+      "import": "./dist/esm/frameworks/ai-sdk.js",
+      "require": "./dist/cjs/frameworks/ai-sdk.js"
+    },
     "./frameworks/langchain": {
       "types": "./dist/esm/frameworks/langchain.d.ts",
       "import": "./dist/esm/frameworks/langchain.js",
@@ -89,6 +109,18 @@
       "testing": [
         "dist/esm/testing.d.ts"
       ],
+      "frameworks/contract": [
+        "dist/esm/frameworks/contract.d.ts"
+      ],
+      "frameworks/openai": [
+        "dist/esm/frameworks/openai.d.ts"
+      ],
+      "frameworks/anthropic": [
+        "dist/esm/frameworks/anthropic.d.ts"
+      ],
+      "frameworks/ai-sdk": [
+        "dist/esm/frameworks/ai-sdk.d.ts"
+      ],
       "frameworks/langchain": [
         "dist/esm/frameworks/langchain.d.ts"
       ],
@@ -114,6 +146,10 @@
       "./runtime": 242000,
       "./telemetry": 187000,
       "./testing": 85000,
+      "./frameworks/contract": 10000,
+      "./frameworks/openai": 14000,
+      "./frameworks/anthropic": 12000,
+      "./frameworks/ai-sdk": 30000,
       "./frameworks/langchain": 30000,
       "./frameworks/steps": 100000
     }

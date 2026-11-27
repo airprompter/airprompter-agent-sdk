@@ -25,6 +25,9 @@ const argv = process.argv.slice(2);
 const sdkVersion = argv.find((arg, i) => !arg.startsWith("--") && argv[i - 1] !== "--registry");
 const apply = argv.includes("--apply");
 const registry = argv.includes("--registry") ? argv[argv.indexOf("--registry") + 1] : null;
+const skipWithoutToken = argv.includes("--skip-without-token");
+// Tests point this at a repository of their own; it is where the release tags are read.
+const repoRoot = process.env.FORK_SYNC_REPO_ROOT || REPO_ROOT;
 const token = process.env.FORK_SYNC_TOKEN?.trim() || "";
 const log = (line) => process.stderr.write(`[compat-tags] ${line}\n`);
 
@@ -40,7 +43,7 @@ if (registry !== null && registry !== "npm" && registry !== "pypi") {
 
 const show = (tag, path) => {
   try {
-    return execFileSync("git", ["show", `refs/tags/${tag}:${path}`], { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+    return execFileSync("git", ["show", `refs/tags/${tag}:${path}`], { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
   } catch {
     return null;
   }
@@ -50,7 +53,18 @@ const pep440 = (tag) => tag.replace(/-rc\.(\d+)$/, "rc$1").replace(/-beta\.(\d+)
 const readAtTag = (tag, path) => show(tag, path) ?? show(pep440(tag), path);
 const forkTagsCache = new Map();
 const forkTags = (repo) => {
-  if (!forkTagsCache.has(repo)) forkTagsCache.set(repo, lsRemoteTags(gitUrl(repo, token)));
+  if (!forkTagsCache.has(repo)) {
+    let tags;
+    try {
+      tags = lsRemoteTags(gitUrl(repo, token));
+    } catch (error) {
+      // Without the token a private mirror cannot be read: plan it as not synced (blocking) rather than crash.
+      if (token) throw error;
+      log(`${repo}: ${error.message}`);
+      tags = new Map();
+    }
+    forkTagsCache.set(repo, tags);
+  }
   return forkTagsCache.get(repo);
 };
 
@@ -65,6 +79,15 @@ for (const entry of plan) {
 
 // A token is needed only when there is something to create (the Python leg plans nothing today).
 const toCreate = plan.flatMap((entry) => entry.tags.filter((tag) => tag.state === "create"));
+if (apply && !token && skipWithoutToken) {
+  // The release run before the owner has added the token: a good release must not look broken. Only the secret's
+  // absence is tested, never its value. The plan above is read-only.
+  const planned = toCreate.map((tag) => tag.tag).filter((tag, i, all) => all.indexOf(tag) === i);
+  const command = `node scripts/forks/compat-tags.mjs ${sdkVersion}${registry ? ` --registry ${registry}` : ""} --apply`;
+  process.stdout.write(`::notice title=No compat tags for ${sdkVersion}::FORK_SYNC_TOKEN is not set, so no compat tags were created for ${sdkVersion}${planned.length ? ` (planned: ${planned.join(", ")} on ${toCreate.length} fork(s))` : ""}. Once the token exists (forks/README.md › Owner setup), re-run this job, or run: git fetch --tags && FORK_SYNC_TOKEN=… ${command}\n`);
+  process.stdout.write(`${JSON.stringify({ sdkVersion, apply, skipped: "FORK_SYNC_TOKEN is not set", planned: toCreate.length, plan })}\n`);
+  process.exit(0);
+}
 if (apply && toCreate.length > 0 && !token) {
   log(`--apply has ${toCreate.length} tag(s) to create and needs FORK_SYNC_TOKEN (Contents: write on those forks).`);
   process.exit(2);

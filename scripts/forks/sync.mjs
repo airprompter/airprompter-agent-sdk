@@ -22,10 +22,11 @@
  *   $ FORK_SYNC_TOKEN=… node scripts/forks/sync.mjs                    # sync every repository
  *   $ node scripts/forks/sync.mjs --dry-run                            # plan only; no token: public forks only
  *   $ FORK_SYNC_TOKEN=… node scripts/forks/sync.mjs --only airprompter/langgraphjs
+ *   $ node scripts/forks/sync.mjs --skip-without-token --report sync-report.json   # the scheduled run: no token, a notice, exit 0
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,12 +35,21 @@ import { github, gitUrl, loadManifest, lsRemoteTags, planTagSync, tagGate } from
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
 const only = argv.includes("--only") ? argv[argv.indexOf("--only") + 1] : null;
+const reportPath = argv.includes("--report") ? argv[argv.indexOf("--report") + 1] : null;
+const skipWithoutToken = argv.includes("--skip-without-token");
 const token = process.env.FORK_SYNC_TOKEN?.trim() || "";
 const BATCH = 200;
 const log = (line) => process.stderr.write(`[sync-forks] ${line}\n`);
 
 if (!dryRun && !token) {
-  log("FORK_SYNC_TOKEN is not set. It needs Contents: write and Workflows: write on every repository in forks/forks.json.");
+  const why = "FORK_SYNC_TOKEN is not set, so no fork was synced. It needs Contents: write and Workflows: write on every repository in forks/forks.json (forks/README.md › Owner setup).";
+  if (skipWithoutToken) {
+    // The scheduled run: waiting on the owner's token is not a failure. Only the secret's absence is tested, never its value.
+    process.stdout.write(`::notice title=Fork sync is waiting on FORK_SYNC_TOKEN::${why}\n`);
+    if (reportPath) writeFileSync(reportPath, `${JSON.stringify({ dryRun, ok: true, skipped: "FORK_SYNC_TOKEN is not set", reports: [] })}\n`);
+    process.exit(0);
+  }
+  log(why);
   process.exit(2);
 }
 
@@ -139,5 +149,7 @@ for (const fork of forks) {
 }
 
 const failed = reports.filter((report) => report.problem);
-process.stdout.write(`${JSON.stringify({ dryRun, ok: failed.length === 0, reports })}\n`);
+const json = `${JSON.stringify({ dryRun, ok: failed.length === 0, reports })}\n`;
+if (reportPath) writeFileSync(reportPath, json);
+else process.stdout.write(json);
 process.exitCode = failed.length === 0 ? 0 : 1;

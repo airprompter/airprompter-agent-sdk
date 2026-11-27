@@ -6,8 +6,8 @@ name: Sync the agent SDK forks
 # is listed under acknowledgedTagChanges. compat/* tags (one per tested SDK version) are never touched.
 #
 # Needs the FORK_SYNC_TOKEN secret: a token with Contents: write and Workflows: write on every repository listed
-# (Workflows, because a fast-forward can carry upstream's own .github/workflows changes). Without it the run fails
-# at the first step and says so.
+# (Workflows, because a fast-forward can carry upstream's own .github/workflows changes). Without it, the scheduled
+# run skips with a notice and stays green; a run started by hand fails and says why.
 
 on:
   schedule:
@@ -45,11 +45,14 @@ jobs:
           FORK_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
           ONLY: ${{ inputs.only }}
           DRY_RUN: ${{ inputs.dry_run }}
+          EVENT: ${{ github.event_name }}
         run: |
-          args=()
+          args=(--report sync-report.json)
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
-          node scripts/forks/sync.mjs "${args[@]}" > sync-report.json
+          # Until the owner adds the token, the daily run is a notice, not a red run; a person who asks gets the error.
+          if [ "$EVENT" = "schedule" ]; then args+=(--skip-without-token); fi
+          node scripts/forks/sync.mjs "${args[@]}"
       - name: Keep the report
         if: always()
         uses: actions/upload-artifact@v4

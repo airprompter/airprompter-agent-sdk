@@ -33,8 +33,11 @@ Actions stay off. It runs [`scripts/forks/sync.mjs`](../scripts/forks/sync.mjs),
 
 Try it without a token: `node scripts/forks/sync.mjs --dry-run` plans the public forks and pushes nothing.
 
-**Owner setup, once, before merging.** Until this is done, the daily run fails every night at its "Sync" step,
-and GitHub emails whoever last edited the cron line.
+**Owner setup, once.** Until this is done, nothing is synced or tagged, and nothing goes red:
+- the daily run posts a notice, "Fork sync is waiting on FORK_SYNC_TOKEN", and stays green;
+- an SDK release's `compat-tags` job posts a notice with the command to create its tags later.
+
+A sync started by hand fails and says why.
 
 1. Allow fine-grained tokens on the `airprompter` org. If the org requires approval, an org owner approves the
    token.

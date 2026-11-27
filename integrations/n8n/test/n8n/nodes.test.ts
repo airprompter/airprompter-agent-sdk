@@ -51,6 +51,11 @@ test("the credential declares the fields the nodes read, and its test verifies t
     const unpinned = await node.methods.credentialTest.airPrompterAgentApiTest.call({} as never, { id: "c", name: "c", type: "airPrompterAgentApi", data: { ...credentialsFor(h.plane, server.baseUrl), rootKey: "", hostedEnvironment: "staging" } } as never);
     assert.equal(unpinned.status, "Error");
     assert.match(unpinned.message, /root key is pinned/i);
+    // The credential text says Production needs the key in this version: true while the SDK it depends on (1.0.0-rc.4)
+    // pins only Dev. When the SDK pins Production, this fails: update the Root Public Key description and README.
+    const prodUnpinned = await node.methods.credentialTest.airPrompterAgentApiTest.call({} as never, { id: "c", name: "c", type: "airPrompterAgentApi", data: { ...credentialsFor(h.plane, server.baseUrl), rootKey: "", hostedEnvironment: "prod" } } as never);
+    assert.equal(prodUnpinned.status, "Error");
+    assert.match(prodUnpinned.message, /root key is pinned for the prod/i);
   } finally {
     await server.close();
   }

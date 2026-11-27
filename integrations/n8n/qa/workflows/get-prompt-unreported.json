@@ -9,10 +9,10 @@
     {
       "id": "6f3b2c61-0012-4a53-9d0e-3a5c1f0b0012",
       "name": "Get Prompt",
-      "type": "CUSTOM.airPrompter",
+      "type": "n8n-nodes-airprompter.airPrompter",
       "typeVersion": 1,
       "position": [220, 0],
-      "credentials": { "airPrompterAgentApi": { "id": "apQaCredOnline01", "name": "AirPrompter QA (online)" } },
+      "credentials": { "airPrompterAgentApi": { "id": "apQaCredential01", "name": "AirPrompter QA" } },
       "parameters": {
         "operation": "getPrompt",
         "slot": "triage",

@@ -413,9 +413,10 @@ answer synchronously, so they cannot wait for the placement and pass through
 unmeasured (one `adapter_stream_helper_unmeasured` log). Without a slot, the
 client only measures, inside `ap.attribute(rendered, fn)` where you placed
 the text yourself: a call to the release's model (or naming none) gets that
-model and the sealed settings; a call to another model with no `modelFor`
-keeps its own model and settings (`model_unresolved`, once); either way it is
-observed against that render. A call with neither a slot nor a scope passes
+model and the sealed settings, and is observed against that render; a call
+to another model with no `modelFor` goes out unchanged and is not observed
+(`model_unresolved`, once), so another model's numbers never count against
+the version. A call with neither a slot nor a scope passes
 through unobserved (one `adapter_unattributed` log per method). Nothing
 guesses which prompt a call belongs to from its text. Instrumenting a client
 twice is once: the first slot stays.
@@ -430,7 +431,8 @@ match on rendered text. `ap.wrap(new OpenAI())` becomes
 `@airprompter/agent-sdk/frameworks/openai` (or `/anthropic`), and
 `ap.aiSdkMiddleware()` becomes `airprompterMiddleware(ap, { slot })` from
 `/frameworks/ai-sdk`. To keep placing the text yourself, leave out `slot` and
-call inside `ap.attribute(rendered, fn)`.
+call inside `ap.attribute(rendered, fn)`. An Azure deployment or a gateway
+alias whose id is not the release's needs `modelFor`, or nothing is measured.
 
 Tested against clients shaped like the real ones and the real `ai` in CI,
 and against the latest `openai`, `@anthropic-ai/sdk` and `ai` releases

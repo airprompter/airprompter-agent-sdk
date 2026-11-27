@@ -16,7 +16,7 @@ export const ADAPTER_EVENTS = {
   unattributed: "adapter_unattributed",
   /** A `.stream()` helper on a slot-bound client passed through unmeasured. Once per method. */
   streamHelperUnmeasured: "adapter_stream_helper_unmeasured",
-  /** The release's model could not be served: the slot declined for the run. Once per method and model. */
+  /** The release's model could not be served: the slot declined for the run. Once per method and model. Not `adapter_`: it is the decline's own reason, and LangChain logs it too. */
   modelUnresolved: "model_unresolved",
   /** Placement threw: the caller's request went out unchanged. */
   placementFailed: "adapter_placement_failed",

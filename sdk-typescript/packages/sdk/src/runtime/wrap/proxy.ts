@@ -203,14 +203,14 @@ export function tapStream(stream: AsyncIterable<unknown>, method: ClientMethod, 
       if (prop === "tee" && typeof value === "function") {
         return () => ((value as () => unknown[]).call(target) as AsyncIterable<unknown>[]).map((branch) => tapStream(branch, method, final));
       }
-      if (prop === "toReadableStream" && typeof value === "function") return () => readableOf(iterate());
+      if (prop === "toReadableStream" && typeof value === "function") return () => readableOf(iterate(), target);
       return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
     },
   });
 }
 
 /** What the provider streams' `toReadableStream()` produces: one JSON line per chunk, as bytes. */
-function readableOf(iterator: AsyncGenerator<unknown>): ReadableStream<Uint8Array> {
+function readableOf(iterator: AsyncGenerator<unknown>, stream: object): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -223,6 +223,8 @@ function readableOf(iterator: AsyncGenerator<unknown>): ReadableStream<Uint8Arra
       }
     },
     async cancel() {
+      // As the provider's own does: a client that went away aborts the request now, not at the next chunk.
+      (stream as { controller?: { abort?: () => void } }).controller?.abort?.();
       await iterator.return(undefined);
     },
   });

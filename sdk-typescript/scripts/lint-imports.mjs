@@ -104,6 +104,10 @@ function parse(file) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
       const spec = literal(node.moduleSpecifier);
       if (spec !== null) out.push({ spec, line: lineOf(node) });
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      // `import("../x.js").T` in a type position: types only, but past the barrel all the same.
+      const spec = literal(node.argument.literal);
+      if (spec !== null) out.push({ spec, line: lineOf(node) });
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       const spec = literal(node.moduleReference.expression);
       if (spec !== null) out.push({ spec, line: lineOf(node) });

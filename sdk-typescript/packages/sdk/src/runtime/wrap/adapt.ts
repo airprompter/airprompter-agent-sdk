@@ -79,7 +79,7 @@ function valueOf(key: keyof SlotInference, settings: Readonly<SlotInference>): u
 export interface MappedSettings {
   /** The settings under the framework's names, floats where the wire holds integers. */
   values: Record<string, unknown>;
-  /** Settings this framework has no name for: not sent, to be logged. */
+  /** Settings this framework has no name for: not sent. Log them as `{ setting, reason: "shape" }`, as `applySettings` reports. */
   unsupported: Array<keyof SlotInference>;
   /** Names the caller had set to another value: the release's replaced them. Empty without `caller`. */
   overridden: string[];

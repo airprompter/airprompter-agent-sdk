@@ -123,9 +123,9 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
     run.decline(slot, "model_unresolved");
   };
   /** The model a placed call runs on, or undefined when the slot declined. Settled at the call when `transformParams` saw no model. */
-  const modelOfCall = (placed: Placed, model: LanguageModelLike, method: string): LanguageModelLike | undefined => {
+  const modelOfCall = (placed: Placed, model: LanguageModelLike | undefined, method: string): LanguageModelLike | undefined => {
     if (placed.chosen) return placed.chosen;
-    if (model.modelId === placed.model) return (placed.chosen = model);
+    if (model && model.modelId === placed.model) return (placed.chosen = model);
     decline(placed.run, placed.model, method);
     return undefined;
   };
@@ -189,7 +189,7 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
       const chosen = modelOfCall(placed, model, "generate");
       if (!chosen) {
         if (placed.owned) placed.run.end();
-        return model.doGenerate!(placed.original);
+        return model?.doGenerate ? model.doGenerate(placed.original) : doGenerate();
       }
       const call = () => (chosen === placed.caller || chosen === model ? doGenerate() : chosen.doGenerate!(params));
       return measureCall(placed.run, slot, call, { ...measure(placed), read: generateResultShape });
@@ -200,7 +200,7 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
       const chosen = modelOfCall(placed, model, "stream");
       if (!chosen) {
         if (placed.owned) placed.run.end();
-        return model.doStream!(placed.original);
+        return model?.doStream ? model.doStream(placed.original) : doStream();
       }
       const measurement = beginMeasure(placed.run, slot, measure(placed));
       let result: unknown;

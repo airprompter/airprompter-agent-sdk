@@ -16,10 +16,10 @@ that. We never change the forks' code. Shipping a patch from one would be a new 
 [`sync-forks.yml`](../.github/workflows/sync-forks.yml) runs daily at 05:41 UTC and on demand. The forks' own
 Actions stay off. It runs [`scripts/forks/sync.mjs`](../scripts/forks/sync.mjs), which does the following:
 
-- **Default branch, fast-forward only.** A fork is first compared with upstream. If ours has a commit upstream
-  lacks, the run reports it and does not sync, because `merge-upstream` would write a merge commit. Otherwise
-  `merge-upstream` fast-forwards it. A mirror is fetched from upstream and pushed without force. A branch that
-  cannot fast-forward is reported.
+- **Default branch, fast-forward only.** Upstream's branch and ours are fetched, and upstream's is pushed without
+  force. This works the same way for forks and mirrors. A branch that has diverged is refused and reported, never
+  merged. GitHub's `merge-upstream` is not used because it would write a merge commit. A private mirror that has
+  turned public is not pushed to.
 - **Tags.** Every upstream tag we lack is added. Ours are never overwritten or deleted:
   - When upstream moves a tag or deletes one, the run reports it and keeps ours.
   - That repository gets no new tags until someone checks the change and acknowledges it under
@@ -69,7 +69,7 @@ Open the run summary, or the `fork-sync-report` artifact, which lists both commi
   - **A release tag that now names different code, or was deleted:** tell the owner before acknowledging it, and
     check whether a `compat/*` tag on that fork names the old commit. Ours stays as it was either way.
   - After the PR merges, run the workflow with `only: airprompter/<repo>`.
-- **"ours is ahead of upstream" or HTTP 409 on the default branch.** Our branch has a commit upstream lacks, or
+- **"not a fast-forward" on the default branch.** Our branch has a commit upstream lacks, or
   upstream rewrote its history. Do not force-push: the forks' code never changes without an owner decision.
 - **HTTP 401 or 403, or "Repository not found".** `FORK_SYNC_TOKEN` has expired or is missing that repository. See
   Owner setup.
@@ -123,6 +123,10 @@ The other ten repositories get no `compat/1.0.0-rc.4` tag:
 - **`vercel-ai`, `openai-agents-js` and `mastra`:** the release did not install `ai`, `@openai/agents` or
   `@mastra/core`.
 - **The seven Python repositories:** no tested version is pinned for them.
+
+When a Python package gets `testedVersionFrom`, check its `tag` pattern against prerelease versions too. PyPI
+writes `0.24.0a7`, but upstreams tag `v0.24.0-alpha.7`, and litellm tags `v1.112.0-rc.1`, `-stable` and
+`-nightly`. The pattern may need a version form of its own.
 
 ### How a Python version gets certified
 

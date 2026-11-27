@@ -19,7 +19,7 @@ test("ls-remote: an annotated tag is compared by the commit it names", () => {
 });
 
 test("a sync adds missing tags, reports moved and deleted ones, and leaves compat/* alone", () => {
-  const upstream = new Map([["v1", A], ["v2", C], ["v3", B], ["compat/9.9.9", C]]);
+  const upstream = new Map([["v1", A], ["v2", C], ["v3", B], ["compat/9.9.9", C], ["compat", C]]);
   const ours = new Map([["v1", A], ["v2", B], ["v0", A], ["compat/1.0.0", A]]);
   assert.deepEqual(planTagSync(upstream, ours), { add: ["v3"], moved: [{ tag: "v2", ours: B, upstream: C }], deletedUpstream: ["v0"] });
 });
@@ -86,6 +86,7 @@ test("compat tags: one per fork on the tested commit, per package when a monorep
       { repo: "airprompter/untested", packages: [{ registry: "npm", name: "absent", tag: "v{version}", testedVersionFrom: "lock" }, { registry: "pypi", name: "py", tag: "v{version}" }] },
       { repo: "airprompter/unsynced", packages: [{ registry: "npm", name: "one", tag: "v{version}", testedVersionFrom: "lock" }] },
       { repo: "airprompter/folder", packages: [{ registry: "npm", name: "one", tag: "v{version}", testedVersionFrom: "lock" }] },
+      { repo: "airprompter/partial", packages: [{ registry: "npm", name: "one", tag: "one@{version}", testedVersionFrom: "lock" }, { registry: "npm", name: "two", tag: "two@{version}", testedVersionFrom: "lock" }] },
     ],
   };
   const tags = {
@@ -96,6 +97,7 @@ test("compat tags: one per fork on the tested commit, per package when a monorep
     "airprompter/untested": new Map(),
     "airprompter/unsynced": new Map(),
     "airprompter/folder": new Map([["v1.0.0", A], ["compat/1.2.3/one", A]]),
+    "airprompter/partial": new Map([["one@1.0.0", A]]),
   };
   const reads = [];
   const plan = planCompatTags(manifest, "1.2.3", { readAtTag: (tag, path) => (reads.push(`${tag}:${path}`), lock), forkTags: (repo) => tags[repo] });
@@ -111,4 +113,6 @@ test("compat tags: one per fork on the tested commit, per package when a monorep
   assert.match(by.unsynced.skipped[0].reason, /sync the fork first/);
   assert.equal(by.unsynced.skipped[0].missingOnFork, true, "compat-tags fails on it rather than skipping quietly");
   assert.deepEqual(by.folder.tags.map((t) => t.state), ["conflict"], "compat/X cannot be created beside compat/X/<package>");
+  assert.deepEqual(by.partial.tags, [], "no partial compat/X while one tested package is not on the fork yet");
+  assert.equal(by.partial.skipped[0].blocking, true);
 });

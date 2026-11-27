@@ -45,9 +45,9 @@ const show = (tag, path) => {
     return null;
   }
 };
-// A Python release tag may carry the PEP 440 form (sdk-python/v1.0.0rc4) instead of 1.0.0-rc.4: try both.
+// A release tag may carry the PEP 440 form (v1.0.0rc4) instead of 1.0.0-rc.4 (release.yml accepts both): try both.
 const pep440 = (tag) => tag.replace(/-rc\.(\d+)$/, "rc$1").replace(/-beta\.(\d+)$/, "b$1").replace(/-alpha\.(\d+)$/, "a$1");
-const readAtTag = (tag, path) => show(tag, path) ?? (tag.startsWith("sdk-python/") ? show(pep440(tag), path) : null);
+const readAtTag = (tag, path) => show(tag, path) ?? show(pep440(tag), path);
 const forkTagsCache = new Map();
 const forkTags = (repo) => {
   if (!forkTagsCache.has(repo)) forkTagsCache.set(repo, lsRemoteTags(gitUrl(repo, token)));
@@ -70,13 +70,20 @@ if (apply && toCreate.length > 0 && !token) {
   process.exit(2);
 }
 const created = [];
+let failure = null;
 if (apply && conflicts.length === 0) {
-  for (const entry of plan) {
-    for (const tag of entry.tags.filter((t) => t.state === "create")) {
-      await github("POST", `/repos/${entry.repo}/git/refs`, token, { ref: `refs/tags/${tag.tag}`, sha: tag.commit });
-      created.push(`${entry.repo} ${tag.tag}`);
-      log(`created ${entry.repo} ${tag.tag}`);
+  try {
+    for (const entry of plan) {
+      for (const tag of entry.tags.filter((t) => t.state === "create")) {
+        await github("POST", `/repos/${entry.repo}/git/refs`, token, { ref: `refs/tags/${tag.tag}`, sha: tag.commit });
+        created.push(`${entry.repo} ${tag.tag}`);
+        log(`created ${entry.repo} ${tag.tag}`);
+      }
     }
+  } catch (error) {
+    // Report what was created before the failure; a re-run shows those as "present".
+    failure = error.message;
+    log(`stopped: ${failure}`);
   }
 }
 
@@ -87,9 +94,9 @@ if (process.env.GITHUB_STEP_SUMMARY) {
   ]);
   appendFileSync(process.env.GITHUB_STEP_SUMMARY, [`## compat tags for SDK ${sdkVersion}${apply ? "" : " (plan)"}`, "", "| Fork | Tag | Tested | Commit | State |", "|---|---|---|---|---|", ...rows, ""].join("\n"));
 }
-process.stdout.write(`${JSON.stringify({ sdkVersion, apply, conflicts, created, plan })}\n`);
+process.stdout.write(`${JSON.stringify({ sdkVersion, apply, conflicts, created, failure, plan })}\n`);
 if (conflicts.length > 0) log(`${conflicts.length} compat tag(s) already exist on another commit; nothing was created. Compat tags are never moved.`);
 // A tested version whose upstream tag our fork does not hold yet would silently get no compat tag: fail instead.
-const unsynced = plan.flatMap((entry) => entry.skipped.filter((skip) => skip.missingOnFork).map((skip) => `${entry.repo} (${skip.package} ${skip.version})`));
-if (unsynced.length > 0) log(`${unsynced.length} tested version(s) have no upstream tag on our fork yet: ${unsynced.join(", ")}. Run "Sync the agent SDK forks" with only=<repo> (forks/README.md › When the sync fails), then re-run this. Tags already created show as "present".`);
-process.exitCode = conflicts.length > 0 || unsynced.length > 0 ? 1 : 0;
+const blocked = plan.flatMap((entry) => entry.skipped.filter((skip) => skip.blocking).map((skip) => `${entry.repo} (${skip.package}${skip.version ? ` ${skip.version}` : ""}: ${skip.reason})`));
+if (blocked.length > 0) log(`${blocked.length} tested package(s) could not be tagged: ${blocked.join("; ")}. For "sync the fork first", run "Sync the agent SDK forks" with only=<repo> (forks/README.md › When the sync fails), then re-run this. Tags already created show as "present".`);
+process.exitCode = conflicts.length > 0 || blocked.length > 0 || failure ? 1 : 0;

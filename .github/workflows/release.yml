@@ -43,7 +43,8 @@
 # After the npm or pypi job publishes, `compat-tags` tags each agent SDK fork at the version this release tested,
 # as compat/<version> (AIR-2314, forks/README.md). It reads the tested versions from the release tag itself, never
 # moves a compat tag, and needs the FORK_SYNC_TOKEN secret. A failure there does not undo the publish: fix the
-# cause and re-run that job.
+# cause and re-run that job. "sync the fork first" means the release tested a version newer than the last fork
+# sync: run the "Sync the agent SDK forks" workflow for that repository, then re-run the job.
 #
 # Tags are pushed by hand or by tag-release.yml, which then dispatches this
 # workflow on the tag (a GITHUB_TOKEN tag push starts no workflow); the publish
@@ -288,7 +289,7 @@ jobs:
           # A release tagged from a commit older than the fork tooling has nothing to run.
           if [ ! -f scripts/forks/compat-tags.mjs ]; then echo "::notice::scripts/forks is not in this release's commit; no compat tags."; exit 0; fi
           case "$GITHUB_REF_NAME" in
-            sdk-typescript/v*) registry=npm; version="${GITHUB_REF_NAME#sdk-typescript/v}" ;;
+            sdk-typescript/v*) registry=npm; version=$(printf '%s' "${GITHUB_REF_NAME#sdk-typescript/v}" | sed -E -e 's/^([0-9.]+)rc([0-9]+)$/\1-rc.\2/' -e 's/^([0-9.]+)b([0-9]+)$/\1-beta.\2/' -e 's/^([0-9.]+)a([0-9]+)$/\1-alpha.\2/') ;;
             sdk-python/v*) registry=pypi; version=$(printf '%s' "${GITHUB_REF_NAME#sdk-python/v}" | sed -E -e 's/^([0-9.]+)rc([0-9]+)$/\1-rc.\2/' -e 's/^([0-9.]+)b([0-9]+)$/\1-beta.\2/' -e 's/^([0-9.]+)a([0-9]+)$/\1-alpha.\2/') ;;
             *) echo "not an SDK release tag: $GITHUB_REF_NAME"; exit 1 ;;
           esac

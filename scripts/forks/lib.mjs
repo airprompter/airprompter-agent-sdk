@@ -27,7 +27,7 @@ export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..
 export const COMPAT_PREFIX = "compat/";
 
 /** `forks/forks.json`, checked enough that a typo fails loudly instead of syncing the wrong repository. */
-export function loadManifest(path = join(REPO_ROOT, "forks", "forks.json")) {
+export function loadManifest(path = process.env.FORK_SYNC_MANIFEST || join(REPO_ROOT, "forks", "forks.json")) {
   const manifest = JSON.parse(readFileSync(path, "utf8"));
   if (!Array.isArray(manifest.forks) || manifest.forks.length === 0) throw new Error(`${path}: no forks listed`);
   const seen = new Set();
@@ -82,7 +82,8 @@ export function planTagSync(upstream, ours, ignoreTags = []) {
   const moved = [];
   const deletedUpstream = [];
   for (const [tag, sha] of upstream) {
-    if (tag.startsWith(COMPAT_PREFIX) || ignored.has(tag)) continue;
+    // `compat` alone would clash with our compat/* refs (a ref cannot also be a folder).
+    if (tag.startsWith(COMPAT_PREFIX) || tag === "compat" || ignored.has(tag)) continue;
     const mine = ours.get(tag);
     if (mine === undefined) add.push(tag);
     else if (mine !== sha) moved.push({ tag, ours: mine, upstream: sha });
@@ -138,7 +139,7 @@ export function planCompatTags(manifest, sdkVersion, { readAtTag, forkTags, regi
       const releaseTag = sdkReleaseTag(pkg.registry, sdkVersion);
       const file = readAtTag(releaseTag, pkg.testedVersionFrom);
       if (file === null) {
-        skipped.push({ package: pkg.name, reason: `${pkg.testedVersionFrom} not found at ${releaseTag}` });
+        skipped.push({ package: pkg.name, blocking: true, reason: `${pkg.testedVersionFrom} not found at ${releaseTag}` });
         continue;
       }
       const version = pkg.registry === "npm" ? npmLockVersion(file, pkg.name) : null;
@@ -150,13 +151,15 @@ export function planCompatTags(manifest, sdkVersion, { readAtTag, forkTags, regi
       ours ??= forkTags(fork.repo);
       const commit = ours.get(upstreamTag);
       if (!commit) {
-        skipped.push({ package: pkg.name, version, missingOnFork: true, reason: `${fork.repo} has no tag ${upstreamTag}: sync the fork first` });
+        skipped.push({ package: pkg.name, version, missingOnFork: true, blocking: true, reason: `${fork.repo} has no tag ${upstreamTag}: sync the fork first` });
         continue;
       }
       resolved.push({ package: pkg.name, version, upstreamTag, commit });
     }
+    // A fork with a blocked package gets no tag yet: a partial compat/X now could clash with compat/X/<package> later.
+    const blocked = skipped.some((skip) => skip.blocking);
     const commits = new Set(resolved.map((entry) => entry.commit));
-    const tags = commits.size <= 1
+    const tags = blocked ? [] : commits.size <= 1
       ? resolved.length ? [{ tag: `${COMPAT_PREFIX}${sdkVersion}`, commit: resolved[0].commit, covers: resolved }] : []
       : resolved.map((entry) => ({ tag: `${COMPAT_PREFIX}${sdkVersion}/${entry.package}`, commit: entry.commit, covers: [entry] }));
     for (const tag of tags) {
@@ -184,6 +187,8 @@ export function lsRemoteTags(url) {
 
 /** An https URL for a repository, with the token when one is given (for pushes and private mirrors). */
 export function gitUrl(repo, token) {
+  // Tests point this at local bare repositories (FORK_SYNC_GIT_BASE=/tmp/x → /tmp/x/<owner>/<name>.git).
+  if (process.env.FORK_SYNC_GIT_BASE) return `${process.env.FORK_SYNC_GIT_BASE}/${repo}.git`;
   return token ? `https://x-access-token:${token}@github.com/${repo}.git` : `https://github.com/${repo}.git`;
 }
 

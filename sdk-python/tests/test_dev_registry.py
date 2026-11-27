@@ -26,24 +26,45 @@ def _node_available() -> bool:
 
 
 def _wait(check, label, timeout=20.0):
-    start = time.time()
+    """Poll ``check`` until it holds or the deadline passes; ``label`` may be a callable, read only on a timeout."""
+    deadline = time.monotonic() + timeout
     while not check():
-        if time.time() - start > timeout:
-            raise AssertionError(f"timed out waiting for {label}")
+        if time.monotonic() > deadline:
+            raise AssertionError(f"timed out waiting for {label() if callable(label) else label}")
         time.sleep(0.05)
 
 
 class DevServer:
-    def __init__(self, directory: str):
-        self.process = subprocess.Popen(["node", "--import", "tsx", CLI_MAIN, "dev", directory, "--port", "0", "--json"], cwd=TS_DIR, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    """``airprompter dev`` with its event log (stderr, one JSON line each) in a file: read on a failure, and never a pipe
+    nobody drains."""
+
+    def __init__(self, directory: str, log_path: str):
+        self.directory = directory
+        self.log_path = log_path
+        self._log = open(log_path, "w", encoding="utf-8")
+        self.process = subprocess.Popen(["node", "--import", "tsx", CLI_MAIN, "dev", directory, "--port", "0", "--json"], cwd=TS_DIR, stdout=subprocess.PIPE, stderr=self._log, text=True)
         line = self.process.stdout.readline()
         if not line:
-            raise AssertionError(f"airprompter dev did not start: {self.process.stderr.read()}")
+            self.process.wait(timeout=10)
+            raise AssertionError(f"airprompter dev did not start: {self.log()}")
         self.facts = json.loads(line)
+
+    def log(self) -> str:
+        with open(self.log_path, encoding="utf-8") as f:
+            return " | ".join(line.strip() for line in f if line.strip())
+
+    def promoted(self) -> int:
+        """The generation the server has promoted: the counter it writes after each promotion, before it logs it."""
+        try:
+            with open(os.path.join(self.directory, ".airprompter-dev", "generation"), encoding="utf-8") as f:
+                return int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            return 0
 
     def stop(self) -> None:
         self.process.terminate()
         self.process.wait(timeout=10)
+        self._log.close()
 
 
 @pytest.mark.skipif(not _node_available(), reason="node + sdk-typescript/node_modules (npm ci) needed to run airprompter dev from source")
@@ -53,7 +74,7 @@ def test_python_sdk_syncs_from_airprompter_dev_and_honours_unlock_required_local
     os.makedirs(os.path.join(prompts, "support"))
     with open(os.path.join(prompts, "support", "triage.md"), "w", encoding="utf-8") as f:
         f.write("---\nmodel: claude-sonnet-5\nvariables: ticket!, customer?\n---\nTriage {{ticket}} from {{customer}}.\n")
-    server = DevServer(prompts)
+    server = DevServer(prompts, os.path.join(work, "dev.log"))
     try:
         facts = server.facts
         with open(facts["root"], encoding="utf-8") as f:
@@ -76,15 +97,18 @@ def test_python_sdk_syncs_from_airprompter_dev_and_honours_unlock_required_local
             rendered = ap.prompt("support.triage").render(ticket="T-1", customer="Ada")
             assert "Triage T-1 from <customer>Ada</customer>" in rendered.text, "the same fencing as production"
             assert rendered.model == "claude-sonnet-5"
-            # A save is a generation the runtime follows within a poll.
+            # A save is a generation the runtime follows within a poll. Two steps, each waited on as state: the server sees
+            # the save through fs.watch (AIR-2268) and promotes it, then the runtime's next poll picks it up.
             with open(os.path.join(prompts, "support", "triage.md"), "w", encoding="utf-8") as f:
                 f.write("---\nvariables: ticket!\n---\nTriage {{ticket}} carefully.\n")
-            _wait(lambda: ap.generation == 2, "generation 2")
+            _wait(lambda: server.promoted() >= 2, lambda: f"the server to promote generation 2 (dev: {server.log()})")
+            _wait(lambda: ap.generation == 2, lambda: f"the runtime on generation 2 (status: {ap.status()}; dev: {server.log()})")
             assert ap.prompt("support.triage").render(ticket="T-2").text == "Triage T-2 carefully."
             # release.json turns unlock_required on: generation 3 is staged and waits for the unlock.
             with open(os.path.join(prompts, "release.json"), "w", encoding="utf-8") as f:
                 json.dump({"applyPolicy": "unlock_required"}, f)
-            _wait(lambda: ap.status().staged_generation == 3, "generation 3 staged")
+            _wait(lambda: server.promoted() >= 3, lambda: f"the server to promote generation 3 (dev: {server.log()})")
+            _wait(lambda: ap.status().staged_generation == 3, lambda: f"generation 3 staged (status: {ap.status()}; dev: {server.log()})")
             assert ap.generation == 2
             assert ap.status().apply_state == "awaiting_unlock"
             unlocked = ap.unlock()

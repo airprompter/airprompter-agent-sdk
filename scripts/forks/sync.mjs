@@ -29,7 +29,7 @@ import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { github, gitUrl, loadManifest, lsRemoteTags, planTagSync } from "./lib.mjs";
+import { github, gitUrl, loadManifest, lsRemoteTags, planTagSync, tagGate } from "./lib.mjs";
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
@@ -51,10 +51,16 @@ async function syncBranch(fork, work) {
   if (dryRun) return { status: "skipped (dry run)" };
   if (fork.kind === "fork") {
     try {
+      // merge-upstream writes a merge commit when our branch has commits upstream lacks. We never change the forks'
+      // code, so a fork that is ahead is reported, not merged.
+      const upstreamOwner = fork.upstream.split("/")[0];
+      const compare = await github("GET", `/repos/${fork.repo}/compare/${upstreamOwner}:${encodeURIComponent(fork.branch)}...${encodeURIComponent(fork.branch)}`, token);
+      if (compare.ahead_by > 0) return { status: "not synced: ours is ahead of upstream", problem: true, message: `${fork.repo} ${fork.branch} has ${compare.ahead_by} commit(s) upstream lacks (forks/README.md › When the sync fails)` };
       const result = await github("POST", `/repos/${fork.repo}/merge-upstream`, token, { branch: fork.branch });
+      if (result.merge_type === "merge") return { status: "merged, NOT a fast-forward", problem: true, message: result.message };
       return { status: result.merge_type === "none" ? "up to date" : result.merge_type, message: result.message };
     } catch (error) {
-      // 409: the fork's branch has commits upstream does not, so it cannot fast-forward. We never change the forks' code.
+      // 409: upstream rewrote its history, or the branches conflict.
       return { status: "failed", problem: true, message: redact(error.message) };
     }
   }
@@ -86,14 +92,13 @@ async function syncOne(fork) {
     git(work, ["remote", "add", "ours", gitUrl(fork.repo, token)]);
     report.branch = await syncBranch(fork, work);
     const plan = planTagSync(lsRemoteTags(gitUrl(fork.upstream)), lsRemoteTags(gitUrl(fork.repo, token)));
-    const acknowledged = new Set(fork.acknowledgedTagChanges ?? []);
-    const open = [...plan.moved.map((entry) => entry.tag), ...plan.deletedUpstream].filter((tag) => !acknowledged.has(tag));
+    const { open, push } = tagGate(plan, fork.acknowledgedTagChanges);
     report.tags = { toAdd: plan.add.length, moved: plan.moved, deletedUpstream: plan.deletedUpstream, unacknowledged: open, added: 0 };
     if (open.length > 0) {
-      report.tags.stopped = `upstream moved or deleted ${open.length} tag(s); ours are kept and no tags were added. Check them, then list them under acknowledgedTagChanges for ${fork.repo}.`;
-    } else if (plan.add.length > 0 && !dryRun) {
-      pushTags(work, plan.add);
-      report.tags.added = plan.add.length;
+      report.tags.stopped = `paused: upstream moved or deleted ${open.join(", ")}. Ours are kept; no tags were added. To accept, add ${JSON.stringify(open)} to acknowledgedTagChanges for ${fork.repo} in forks/forks.json (forks/README.md › When the sync fails).`;
+    } else if (push.length > 0 && !dryRun) {
+      pushTags(work, push);
+      report.tags.added = push.length;
     }
     report.problem = Boolean(report.branch?.problem || open.length > 0);
     return report;
@@ -120,7 +125,7 @@ for (const fork of forks) {
 
 const failed = reports.filter((report) => report.problem);
 if (process.env.GITHUB_STEP_SUMMARY) {
-  const rows = reports.map((r) => `| ${r.repo} | ${r.branch?.status ?? "-"} | ${r.tags ? (dryRun ? r.tags.toAdd : r.tags.added) : "-"} | ${r.tags?.moved.map((m) => m.tag).join(", ") || "-"} | ${r.tags?.deletedUpstream.join(", ") || "-"} | ${r.error ?? r.tags?.stopped ?? r.branch?.message ?? ""} |`);
+  const rows = reports.map((r) => `| ${r.repo} | ${r.branch?.status ?? "-"} | ${r.tags ? (dryRun ? r.tags.toAdd : r.tags.added) : "-"} | ${r.tags?.moved.map((m) => `${m.tag} (${m.ours.slice(0, 7)}→${m.upstream.slice(0, 7)})`).join(", ") || "-"} | ${r.tags?.deletedUpstream.join(", ") || "-"} | ${r.error ?? r.tags?.stopped ?? r.branch?.message ?? ""} |`);
   appendFileSync(process.env.GITHUB_STEP_SUMMARY, [`## Fork sync${dryRun ? " (dry run)" : ""}`, "", "| Repository | Default branch | Tags added | Moved upstream | Deleted upstream | Note |", "|---|---|---|---|---|---|", ...rows, ""].join("\n"));
 }
 process.stdout.write(`${JSON.stringify({ dryRun, ok: failed.length === 0, reports })}\n`);

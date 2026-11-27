@@ -28,10 +28,48 @@ Actions stay off. It runs [`scripts/forks/sync.mjs`](../scripts/forks/sync.mjs),
 
 Try it without a token: `node scripts/forks/sync.mjs --dry-run` plans the public forks and pushes nothing.
 
-**Owner setup, once.** Add the repository secret `FORK_SYNC_TOKEN` to `airprompter/airprompter-agent-sdk`. Use a
-fine-grained token on the `airprompter` org with **Contents: read and write** and **Workflows: read and write** on
-the fourteen repositories above. Workflows access is needed because a fast-forward can bring upstream's own
-`.github/workflows` changes. Until the secret exists, the scheduled run fails at its first step and says so.
+**Owner setup, once, before merging.** Until this is done, the daily run fails every night at its "Sync" step,
+and GitHub emails whoever last edited the cron line.
+
+1. Allow fine-grained tokens on the `airprompter` org. If the org requires approval, an org owner approves the
+   token.
+2. Create a fine-grained token:
+   - **Resource owner:** `airprompter`.
+   - **Repositories:** "Only select repositories", then all fourteen above, including the private `mastra` and
+     `litellm`.
+   - **Permissions:** **Contents: read and write** and **Workflows: read and write**. Metadata: read is added
+     automatically. Workflows access is needed because a fast-forward can bring upstream's own
+     `.github/workflows` changes.
+
+   The person who creates it needs write access to all fourteen.
+3. Give it an expiry, up to 366 days, and set a reminder to rotate it. The token belongs to that person: if they
+   leave the org, the sync and the compat tagging stop.
+4. Add it as the repository secret `FORK_SYNC_TOKEN` on `airprompter/airprompter-agent-sdk`.
+5. Check it:
+   1. Run **Sync the agent SDK forks** with `dry_run` on.
+   2. Run it for real with `only: airprompter/vercel-ai`. That is the largest first run: 1,856 tags, in batches of
+      200.
+   3. Run it with no `only`.
+
+## When the sync fails
+
+Open the run summary, or the `fork-sync-report` artifact, which lists both commits for each moved tag.
+
+- **Moved or deleted upstream.** That repository is paused: it gets no new tags until someone decides. Compare
+  `https://github.com/<upstream>/compare/<ours>...<theirs>`.
+  - **A floating pointer** (a nightly, `*-bleeding`, `latest`) or the same release re-tagged: acknowledge it. In a
+    PR, add the tag to that repository's `acknowledgedTagChanges`, with a line in `$acknowledgedTagChanges` saying
+    what you saw and when.
+  - **A release tag that now names different code, or was deleted:** tell the owner before acknowledging it, and
+    check whether a `compat/*` tag on that fork names the old commit. Ours stays as it was either way.
+  - After the PR merges, run the workflow with `only: airprompter/<repo>`.
+- **"ours is ahead of upstream" or HTTP 409 on the default branch.** Our branch has a commit upstream lacks, or
+  upstream rewrote its history. Do not force-push: the forks' code never changes without an owner decision.
+- **HTTP 401 or 403, or "Repository not found".** `FORK_SYNC_TOKEN` has expired or is missing that repository. See
+  Owner setup.
+- **compat-tags: "no upstream tag on our fork yet".** The release tested a version newer than the last sync. Run
+  the sync for that repository, then re-run the release's `compat-tags` job. Tags it already created show as
+  `present`.
 
 ## A tagged copy of each tested version
 
@@ -48,7 +86,8 @@ that release tested, as `compat/<sdk version>`:
   `langchain@1.6.1` or `v7.50.0`. If a monorepo released its tested packages from different commits, each package
   gets `compat/<sdk version>/<package>` instead.
 - **Tags are lightweight and never move.** If a compat tag already exists on another commit, the run fails and
-  creates nothing.
+  creates nothing. It also fails when a tested version's upstream tag has not reached our fork yet, rather than
+  skipping it quietly.
 
 To see the plan for a release, with no token needed:
 
@@ -65,11 +104,30 @@ node scripts/forks/compat-tags.mjs 1.0.0-rc.4
 | `airprompter/openai-node` | `compat/1.0.0-rc.4` | `openai` 7.50.0 | `42563fe08083ed7af6feba046063e3100fa7ef50` |
 | `airprompter/anthropic-sdk-typescript` | `compat/1.0.0-rc.4` | `@anthropic-ai/sdk` 0.129.0 | `bf2058689f845dfb10e59bd9ebeb5cb4e9318a9d` |
 
+rc.4 has already shipped, so no release run will create these. Once the secret exists, create them with:
+
+```bash
+git fetch --tags
+FORK_SYNC_TOKEN=… node scripts/forks/compat-tags.mjs 1.0.0-rc.4 --registry npm --apply
+```
+
 The other ten repositories get no `compat/1.0.0-rc.4` tag:
 
 - **`vercel-ai`, `openai-agents-js` and `mastra`:** the release did not install `ai`, `@openai/agents` or
   `@mastra/core`.
 - **The seven Python repositories:** no tested version is pinned for them.
+
+### How a Python version gets certified
+
+This needs a follow-up ticket, and these steps happen in order:
+
+1. Commit the pinned integration versions, for example `sdk-python/tested-integrations.txt` with `openai==…`.
+2. Have Python CI install those versions and run the wrapper and adapter tests against them.
+3. Add a reader for that file in `scripts/forks/lib.mjs`.
+4. Set `testedVersionFrom` on the Python packages.
+
+Until the reader exists, `forks.json` refuses a Python `testedVersionFrom`, because a missing reader would wrongly
+read as "not tested".
 
 ## Adding a framework
 
@@ -79,4 +137,8 @@ When a new framework joins the epic, take these steps in one PR:
    issues, the wiki and projects, and point the description at upstream.
 2. Add the repository to `forks.json`, with `packages`, the upstream's tag pattern and `testedVersionFrom`.
 3. Add the repository to `FORK_SYNC_TOKEN`'s repository list.
-4. Extend the count in `scripts/forks/lib.test.mjs`.
+4. Add the name to the manifest test in `scripts/forks/lib.test.mjs`.
+5. Run `node scripts/forks/sync.mjs --dry-run --only airprompter/<new>`, and acknowledge any floating tags in the
+   same PR.
+
+A Python package gets no `testedVersionFrom` yet (see above).

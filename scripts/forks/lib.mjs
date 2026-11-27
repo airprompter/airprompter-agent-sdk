@@ -38,7 +38,12 @@ export function loadManifest(path = join(REPO_ROOT, "forks", "forks.json")) {
     if (fork.kind !== "fork" && fork.kind !== "private-mirror") throw new Error(`${path}: ${fork.repo} kind must be fork or private-mirror`);
     if (seen.has(fork.repo)) throw new Error(`${path}: ${fork.repo} is listed twice`);
     seen.add(fork.repo);
-    for (const pkg of fork.packages ?? []) if (!pkg.tag?.includes("{version}")) throw new Error(`${path}: ${fork.repo} ${pkg.name} has a tag without {version}`);
+    for (const pkg of fork.packages ?? []) {
+      if (pkg.registry !== "npm" && pkg.registry !== "pypi") throw new Error(`${path}: ${fork.repo} ${pkg.name} registry must be npm or pypi`);
+      if (!pkg.tag?.includes("{version}")) throw new Error(`${path}: ${fork.repo} ${pkg.name} has a tag without {version}`);
+      // Only npm lockfiles have a reader. A Python one would read as "not tested", which is false (forks/README.md).
+      if (pkg.registry === "pypi" && pkg.testedVersionFrom) throw new Error(`${path}: ${fork.repo} ${pkg.name}: no reader for a Python testedVersionFrom yet (forks/README.md › How a Python version gets certified)`);
+    }
   }
   return manifest;
 }
@@ -78,6 +83,16 @@ export function planTagSync(upstream, ours) {
   }
   for (const tag of ours.keys()) if (!tag.startsWith(COMPAT_PREFIX) && !upstream.has(tag)) deletedUpstream.push(tag);
   return { add: add.sort(), moved: moved.sort((a, b) => a.tag.localeCompare(b.tag)), deletedUpstream: deletedUpstream.sort() };
+}
+
+/**
+ * The ticket's rule: while a moved or deleted upstream tag is not acknowledged, the repository gets no new tags.
+ * `open` is what still needs a person; `push` is what the sync may add.
+ */
+export function tagGate(plan, acknowledged = []) {
+  const ack = new Set(acknowledged);
+  const open = [...plan.moved.map((entry) => entry.tag), ...plan.deletedUpstream].filter((tag) => !ack.has(tag));
+  return { open, push: open.length > 0 ? [] : plan.add };
 }
 
 /** The version of `name` an npm lockfile (v2/v3) installed at the top level, or null. */
@@ -125,7 +140,7 @@ export function planCompatTags(manifest, sdkVersion, { readAtTag, forkTags, regi
       ours ??= forkTags(fork.repo);
       const commit = ours.get(upstreamTag);
       if (!commit) {
-        skipped.push({ package: pkg.name, version, reason: `${fork.repo} has no tag ${upstreamTag}: sync the fork first` });
+        skipped.push({ package: pkg.name, version, missingOnFork: true, reason: `${fork.repo} has no tag ${upstreamTag}: sync the fork first` });
         continue;
       }
       resolved.push({ package: pkg.name, version, upstreamTag, commit });

@@ -86,4 +86,7 @@ if (process.env.GITHUB_STEP_SUMMARY) {
 }
 process.stdout.write(`${JSON.stringify({ sdkVersion, apply, conflicts, created, plan })}\n`);
 if (conflicts.length > 0) log(`${conflicts.length} compat tag(s) already exist on another commit; nothing was created. Compat tags are never moved.`);
-process.exitCode = conflicts.length > 0 ? 1 : 0;
+// A tested version whose upstream tag our fork does not hold yet would silently get no compat tag: fail instead.
+const unsynced = plan.flatMap((entry) => entry.skipped.filter((skip) => skip.missingOnFork).map((skip) => `${entry.repo} (${skip.package} ${skip.version})`));
+if (unsynced.length > 0) log(`${unsynced.length} tested version(s) have no upstream tag on our fork yet: ${unsynced.join(", ")}. Run "Sync the agent SDK forks" with only=<repo> (forks/README.md › When the sync fails), then re-run this. Tags already created show as "present".`);
+process.exitCode = conflicts.length > 0 || unsynced.length > 0 ? 1 : 0;

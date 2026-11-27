@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { loadManifest, npmLockVersion, parseLsRemote, planCompatTags, planTagSync, sdkReleaseTag } from "./lib.mjs";
+import { loadManifest, npmLockVersion, parseLsRemote, planCompatTags, planTagSync, sdkReleaseTag, tagGate } from "./lib.mjs";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -22,6 +22,14 @@ test("a sync adds missing tags, reports moved and deleted ones, and leaves compa
   const upstream = new Map([["v1", A], ["v2", C], ["v3", B], ["compat/9.9.9", C]]);
   const ours = new Map([["v1", A], ["v2", B], ["v0", A], ["compat/1.0.0", A]]);
   assert.deepEqual(planTagSync(upstream, ours), { add: ["v3"], moved: [{ tag: "v2", ours: B, upstream: C }], deletedUpstream: ["v0"] });
+});
+
+test("an unacknowledged move or deletion upstream stops every new tag for that repository", () => {
+  const moved = { add: ["v3"], moved: [{ tag: "v2", ours: A, upstream: B }], deletedUpstream: [] };
+  assert.deepEqual(tagGate(moved), { open: ["v2"], push: [] });
+  assert.deepEqual(tagGate(moved, ["v2"]), { open: [], push: ["v3"] });
+  assert.deepEqual(tagGate({ add: ["v3"], moved: [], deletedUpstream: ["v0"] }), { open: ["v0"], push: [] });
+  assert.deepEqual(tagGate({ add: ["v3"], moved: [], deletedUpstream: [] }), { open: [], push: ["v3"] });
 });
 
 test("the manifest lists the twelve forks and two private mirrors of AIR-2314", () => {
@@ -41,8 +49,10 @@ test("the manifest refuses a repository outside the org, a duplicate, and a tag 
   const ok = { repo: "airprompter/x", upstream: "up/x", kind: "fork", branch: "main" };
   assert.throws(() => loadManifest(write([{ ...ok, repo: "someone/x" }])), /not in the airprompter org/);
   assert.throws(() => loadManifest(write([ok, ok])), /listed twice/);
-  assert.throws(() => loadManifest(write([{ ...ok, packages: [{ name: "x", tag: "v1" }] }])), /without \{version\}/);
+  assert.throws(() => loadManifest(write([{ ...ok, packages: [{ registry: "npm", name: "x", tag: "v1" }] }])), /without \{version\}/);
   assert.throws(() => loadManifest(write([{ ...ok, kind: "public-mirror" }])), /kind must be/);
+  assert.throws(() => loadManifest(write([{ ...ok, packages: [{ registry: "cargo", name: "x", tag: "v{version}" }] }])), /npm or pypi/);
+  assert.throws(() => loadManifest(write([{ ...ok, packages: [{ registry: "pypi", name: "x", tag: "v{version}", testedVersionFrom: "x.txt" }] }])), /no reader for a Python/);
 });
 
 test("lockfile versions and release tags", () => {
@@ -86,4 +96,5 @@ test("compat tags: one per fork on the tested commit, per package when a monorep
   assert.match(by.untested.skipped[0].reason, /did not test it/);
   assert.match(by.untested.skipped[1].reason, /nothing certifies it/);
   assert.match(by.unsynced.skipped[0].reason, /sync the fork first/);
+  assert.equal(by.unsynced.skipped[0].missingOnFork, true, "compat-tags fails on it rather than skipping quietly");
 });

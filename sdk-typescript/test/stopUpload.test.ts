@@ -244,7 +244,7 @@ test("a start whose root does not name the manifest's signing key logs what to c
     baseUrl: "https://api.dev.test",
     stateDir,
     root: { pinned: strangerRoot as never, hostedEnvironment: "prod" },
-    sync: { mode: "on_invoke" },
+    sync: { mode: "on_invoke", rootUrl: "https://edge.test/roots/prod/root.json" },
     fetch: p.fetch(),
     now: () => T0,
     logger: (e) => void events.push(e),

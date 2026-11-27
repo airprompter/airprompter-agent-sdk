@@ -85,20 +85,15 @@ test("the client verifies through HOSTED_ROOTS with no root passed in: a manifes
   plane.grantBaseUrl = "https://bucket.test";
   plane.promote([plane.slot({ tag: "support.triage", text: "Triage: {{ticket}}", versionId: "ver_1", variables: [{ name: "ticket", required: true, trust: "end_user" }] })]);
   const kv = new MemoryKvStore();
-  const client = () => createAutomationClient({ agentId: "agt_steps", updateKey: plane.apiKey, baseUrl: "https://api.test", hostedEnvironment: "dev", environment: "prod", datastore: kvAutomationDatastore(kv), fetch: plane.fetch() });
+  const client = (root?: P256PublicJwk) => createAutomationClient({ agentId: "agt_steps", updateKey: plane.apiKey, baseUrl: "https://api.test", hostedEnvironment: "dev", environment: "prod", datastore: kvAutomationDatastore(kv), fetch: plane.fetch(), ...(root ? { root } : {}) });
 
   // The real pinned dev root did not sign this plane's root document: refused, nothing stored.
   await assert.rejects(client().getPrompt({ slot: "support.triage", variables: { ticket: "x" } }), (error: unknown) => isAutomationError(error));
   assert.deepEqual((await kv.list("")).filter((key) => key.includes("/releases/")), []);
 
-  // The same plane with its root pinned (as a release of this package would pin it): verified and served.
-  const pinned = HOSTED_ROOTS.dev;
-  HOSTED_ROOTS.dev = publicJwkOf(plane.rootKey);
-  try {
-    const result = await client().getPrompt({ slot: "support.triage", variables: { ticket: "x" } });
-    assert.equal(result.versionId, "ver_1");
-    assert.equal(result.servedFrom, "network");
-  } finally {
-    HOSTED_ROOTS.dev = pinned!;
-  }
+  // The same plane with its own root pinned (HOSTED_ROOTS is frozen, so the pin is passed the way a local registry's is): verified and served.
+  assert.ok(Object.isFrozen(HOSTED_ROOTS));
+  const result = await client(publicJwkOf(plane.rootKey)).getPrompt({ slot: "support.triage", variables: { ticket: "x" } });
+  assert.equal(result.versionId, "ver_1");
+  assert.equal(result.servedFrom, "network");
 });

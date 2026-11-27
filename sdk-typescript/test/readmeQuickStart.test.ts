@@ -1,36 +1,50 @@
 /**
- * The README's quick start, run as written against the fake control plane: it must reach an approved, verified render,
- * so the docs cannot drift from the code. The block is read out of `README.md` on every run.
+ * The README's quick start, run as written against the fake control plane: it must type-check against the SDK and
+ * reach an approved, verified render, so the docs cannot drift from the code. The block is read out of `README.md` on
+ * every run, and it is the section's only code block.
  *
  * Three things in it cannot run verbatim, and each is replaced by exact text, once: the two id placeholders (`"org_…"`,
  * `"agt_…"`) and AirPrompter's production root key, because the fake cannot sign as AirPrompter. The key is first
- * checked to BE the production root (`HOSTED_ROOTS.prod`), and the fake's key then stands in for it in that table, so
- * the default the README relies on (root.json from `https://api.airprompter.com/roots/prod/root.json`) is the path
- * taken. The start options the block builds reach `AirPrompterAgent.start` unchanged; the test adds only where the
- * process runs: the fake's `fetch`, a temporary `stateDir`, a memory spool and a logger.
+ * checked to BE the production root (`HOSTED_ROOTS.prod`), and the fake's key is then recognised as the hosted prod
+ * root (`withHostedRootsForTests`), so the default the README relies on (root.json from
+ * `https://api.airprompter.com/roots/prod/root.json`) is the path taken. The start options the block builds reach
+ * `AirPrompterAgent.start` unchanged; the test adds only where the process runs (the fake's `fetch`, a temporary
+ * `stateDir`, a memory spool, a logger), and the block may set none of those itself. `openai` and `userMessage` are
+ * the application's own, declared for the type check and faked for the run.
  */
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 import { AirPrompterAgent, type StartOptions } from "../packages/sdk/src/agent.js";
 import { HOSTED_ROOTS, publicJwkOf } from "../packages/sdk/src/core/index.js";
+import { withHostedRootsForTests } from "../packages/sdk/src/core/protocol/hostedRoots.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
 const README = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 const IMPORT = 'import { AirPrompterAgent } from "@airprompter/agent-sdk";';
 const ROOT_LITERAL = /root: \{ pinned: (\{[^{}]*\}) \}/;
 const PROD_ROOT = HOSTED_ROOTS.prod!;
+const PROD_URL = "https://api.airprompter.com/roots/prod/root.json";
+/** What the application supplies around the block: its OpenAI client and the user's message. */
+const APP_DECLARATIONS = `
+declare const openai: { chat: { completions: { create(request: { model: string; messages: Array<{ role: "system" | "user" | "assistant"; content: string }> }): Promise<{ usage?: { prompt_tokens: number; completion_tokens: number } }> } } };
+declare const userMessage: string;
+export {};
+`;
 
-/** The first ```ts block under "## Quick start". */
+/** The only code block under "## Quick start", a ts one. */
 function quickStart(): string {
-  const section = README.split("\n## Quick start\n")[1];
+  const section = README.split("\n## Quick start\n")[1]?.split(/\n#{2,} /)[0]; // up to the next heading of any level
   assert.ok(section, "README.md has a Quick start section");
-  const block = /^```ts\n([\s\S]*?)\n```$/m.exec(section.split("\n## ")[0]!);
-  assert.ok(block, "the Quick start has a ts block");
+  assert.equal(section.match(/^```/gm)?.length, 2, "the Quick start has exactly one code block");
+  const block = /^```ts\n([\s\S]*?)\n```$/m.exec(section);
+  assert.ok(block, "the Quick start's block is ts");
   return block[1]!;
 }
 
@@ -39,13 +53,35 @@ function once(text: string, find: string, replace: string): string {
   return text.replace(find, () => replace);
 }
 
-test("the README quick start pins AirPrompter's production root, and starts with nothing else to configure", () => {
-  const code = quickStart();
+function shownRoot(code: string): P256Literal {
   const literal = ROOT_LITERAL.exec(code);
   assert.ok(literal, "the quick start pins a root key inline");
-  assert.deepEqual(new Function(`return (${literal[1]});`)(), PROD_ROOT, "the key shown is HOSTED_ROOTS.prod, byte for byte");
-  assert.doesNotMatch(code, /rootUrl|hostedEnvironment|baseUrl/, "the hosted default is what the quick start relies on");
+  return { text: literal[1]!, value: new Function(`return (${literal[1]});`)() };
+}
+type P256Literal = { text: string; value: unknown };
+
+test("the README quick start pins AirPrompter's production root and configures nothing else about trust or sync endpoints", () => {
+  const code = quickStart();
+  assert.deepEqual(shownRoot(code).value, PROD_ROOT, "the key shown is HOSTED_ROOTS.prod, byte for byte");
+  assert.doesNotMatch(code, /rootUrl|hostedEnvironment|baseUrl|edgePointerUrl/, "the hosted defaults are what the quick start relies on");
   assert.doesNotMatch(code, /…\/|<token>/, "no URL placeholder a reader would have to fill");
+});
+
+test("the README quick start type-checks against the SDK, as written", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const configPath = join(here, "..", "tsconfig.json");
+  const config = ts.parseJsonConfigFileContent(ts.readConfigFile(configPath, ts.sys.readFile).config, ts.sys, dirname(configPath));
+  const virtual = join(here, "readme-quick-start.virtual.ts");
+  const source = `${quickStart()}\n${APP_DECLARATIONS}`;
+  const host = ts.createCompilerHost(config.options);
+  const getSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (name, version, ...rest) => (name === virtual ? ts.createSourceFile(name, source, version) : getSourceFile(name, version, ...rest));
+  const fileExists = host.fileExists.bind(host);
+  host.fileExists = (name) => name === virtual || fileExists(name);
+  // The repository compiles with exactOptionalPropertyTypes; a customer project, like the TypeScript default, does not.
+  const program = ts.createProgram({ rootNames: [virtual], options: { ...config.options, noEmit: true, exactOptionalPropertyTypes: false }, host });
+  const diagnostics = ts.getPreEmitDiagnostics(program, program.getSourceFile(virtual)).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
+  assert.deepEqual(diagnostics, []);
 });
 
 test("the README quick start, run as written, serves the approved release, verified through the default root URL", async () => {
@@ -60,21 +96,24 @@ test("the README quick start, run as written, serves the approved release, verif
     }),
   ]);
   const code = quickStart();
-  const literal = ROOT_LITERAL.exec(code)![1]!;
+  const root = shownRoot(code);
+  assert.deepEqual(root.value, PROD_ROOT, "the key the run stands the fake in for is AirPrompter's production root");
   let body = once(code, IMPORT, "");
   assert.doesNotMatch(body, /^\s*import\b/m, "the block imports only the agent");
   body = once(body, '"org_…"', JSON.stringify(plane.scope.organizationId));
   body = once(body, '"agt_…"', JSON.stringify(plane.scope.agentId));
-  body = once(body, literal, JSON.stringify(publicJwkOf(plane.rootKey)));
+  body = once(body, root.text, JSON.stringify(publicJwkOf(plane.rootKey)));
 
   const stateDir = mkdtempSync(join(tmpdir(), "ap-readme-"));
   const events: Array<Record<string, unknown>> = [];
   const calls: Array<{ model: string; messages: Array<{ role: string; content: string }> }> = [];
   let asWritten: StartOptions | null = null;
+  const added = { fetch: plane.fetch(), stateDir, telemetry: { sink: "memory" as const }, logger: (event: Record<string, unknown>) => void events.push(event) };
   const agentAsImported = {
     start: (options: StartOptions) => {
       asWritten = options;
-      return AirPrompterAgent.start({ ...options, fetch: plane.fetch(), stateDir, telemetry: { sink: "memory" }, logger: (event) => void events.push(event) });
+      for (const key of Object.keys(added)) assert.ok(!(key in options), `the quick start sets ${key}, which this test supplies`);
+      return AirPrompterAgent.start({ ...options, ...added });
     },
   };
   const openai = {
@@ -87,13 +126,12 @@ test("the README quick start, run as written, serves the approved release, verif
       },
     },
   };
-  // The fake's root stands in for AirPrompter's production root, so the agent takes the hosted default.
-  HOSTED_ROOTS.prod = publicJwkOf(plane.rootKey);
   let ap: AirPrompterAgent | null = null;
   try {
     const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<{ ap: AirPrompterAgent; r: { text: string; versionId: string; generation: number; model: string } }>;
     const run = new AsyncFunction("AirPrompterAgent", "process", "openai", "userMessage", `${body}\nreturn { ap, r };`);
-    const out = await run(agentAsImported, { env: { AIRPROMPTER_AGENT_KEY: plane.apiKey } }, openai, "Where is my refund?");
+    // The fake's root is recognised as AirPrompter's prod root, so the agent takes the hosted default.
+    const out = await withHostedRootsForTests({ ...HOSTED_ROOTS, prod: publicJwkOf(plane.rootKey) }, () => run(agentAsImported, { env: { AIRPROMPTER_AGENT_KEY: plane.apiKey } }, openai, "Where is my refund?"));
     ap = out.ap;
     assert.ok(asWritten, "the block started the agent");
     assert.equal((asWritten as StartOptions).sync?.rootUrl, undefined, "no root URL was given: the default carried it");
@@ -108,12 +146,10 @@ test("the README quick start, run as written, serves the approved release, verif
     assert.equal(ap.status().generation, 1);
 
     // The signing keys came from the hosted root URL, and only from there.
-    assert.ok(plane.requests.includes("https://api.airprompter.com/roots/prod/root.json"), plane.requests.join("\n"));
-    assert.deepEqual(plane.requests.filter((url) => url.endsWith("/root.json")).filter((url, i, all) => all.indexOf(url) === i), ["https://api.airprompter.com/roots/prod/root.json"]);
-    assert.ok(events.some((e) => e.event === "root_url_default" && e.environment === "prod" && e.rootUrl === "https://api.airprompter.com/roots/prod/root.json"));
+    assert.deepEqual([...new Set(plane.requests.filter((url) => url.endsWith("/root.json")))], [PROD_URL]);
+    assert.ok(events.some((e) => e.event === "root_url_default" && e.environment === "prod" && e.rootUrl === PROD_URL));
     assert.ok(!events.some((e) => e.reason === "unknown_signing_key"), "every manifest verified");
   } finally {
-    HOSTED_ROOTS.prod = PROD_ROOT;
     await ap?.stop();
     rmSync(stateDir, { recursive: true, force: true });
   }

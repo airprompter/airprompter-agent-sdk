@@ -50,7 +50,7 @@ from airprompter_agent.sync import UpdateWindow, parse_window, window_state
 from airprompter_agent.core import DistributionKey, bundle_payload_bytes, open_bundle
 from airprompter_agent.core import ramp_weights_at, servable_experiments, servable_slots
 from airprompter_agent.core import SUPPORTED_CAPABILITIES
-from airprompter_agent.core import AGENT_ID, TARGET_SLUG, key_thumbprint, root_url_for, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
+from airprompter_agent.core import AGENT_ID, TARGET_SLUG, hosted_environment_of_root, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
 from airprompter_agent.runtime import Attribution, attribution_scope, current_attribution
 from airprompter_agent.core import copy_audience_tags, valid_audience_label
 from airprompter_agent.core import RunRefFacts, mint_run_ref, parse_run_ref, run_ref_key_from
@@ -107,6 +107,41 @@ class SyncOptions:
 #: The environment variable that names the spool folder when ``telemetry.spool_dir`` does not (``protocol/daemon.md``).
 SPOOL_DIR_ENV = "AIRPROMPTER_SPOOL_DIR"
 
+
+#: Where each hosted environment's API serves its root document (``GET <api>/roots/<environment>/root.json``).
+_HOSTED_ROOT_URLS = {"dev": "https://api.airprompter.dev/roots/dev/root.json", "prod": "https://api.airprompter.com/roots/prod/root.json"}
+
+
+def _hosted_environment(root: Mapping[str, Any]) -> str:
+    """The hosted environment a pinned root is scoped to: ``root["hosted_environment"]``, default ``prod``."""
+    named = root.get("hosted_environment")
+    return named if named is not None else "prod"
+
+
+def _root_url_for(root: Mapping[str, Any], sync: SyncOptions, *, api_key: Optional[str], base_url: Optional[str], vendored: bool) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Where this runtime reads its root document (the signing keys under the pinned root), decided at start before
+    anything opens: ``(url, default_for, missing)``. An explicit ``sync.root_url`` wins. A runtime that never syncs, or
+    holds a full root document, needs none. A pin that is AirPrompter's root for the environment named reads that
+    environment's. Any other pin has no default: a syncing runtime refuses to start, unless a vendored bundle or the
+    datastore hands it the keys (then ``missing`` says so). The URL only says where to look: what it serves is used only
+    if it verifies against the pin."""
+    if sync.root_url:
+        return (sync.root_url, None, None)
+    if "pinned" not in root or not api_key or sync.mode == "offline":
+        return (None, None, None)
+    environment = _hosted_environment(root)
+    named = hosted_environment_of_root(root["pinned"])
+    url = _HOSTED_ROOT_URLS.get(environment) if named == environment else None
+    if url:
+        return (url, environment, None)
+    if named is not None:
+        default = " (the default)" if root.get("hosted_environment") is None else ""
+        raise AgentStartError("invalid_options", f'root["pinned"] is AirPrompter\'s {named} root, but root["hosted_environment"] is "{environment}"{default}. Add "hosted_environment": "{named}" to root, or pin the {environment} root.')
+    service = f" For the service at {base_url} that is usually {base_url.rstrip('/')}/roots/{environment}/root.json." if base_url else ""
+    missing = f'root["pinned"] is not one of AirPrompter\'s hosted roots, so the SDK cannot know where its root document is, and without it this runtime cannot learn the keys that sign your releases. Add sync={{"root_url": "https://<your service>/roots/{environment}/root.json"}}, the root document of the service that signs them.{service}'
+    if vendored:
+        return (None, None, f"{missing} Until then only the keys this host's bundle or datastore carries verify: a release signed after a key rotation is refused.")
+    raise AgentStartError("invalid_options", missing)
 
 @dataclass
 class StagedRelease:
@@ -604,6 +639,7 @@ class AirPrompterAgent:
         self._client: Optional[SyncClient] = None
         #: Where the root document is read: sync.root_url, else the hosted default for the pinned root, else nowhere. Set once, at start.
         self._root_url: Optional[str] = None
+        self._root_etag: Optional[str] = None
         if options.get("api_key") and self._sync_options.mode != "offline":
             self._client = SyncClient(base_url=options.get("base_url") or "https://api.airprompter.com", agent_id=options["agent_id"], target=options["target"], api_key=options["api_key"], transport=options.get("transport"), user_agent=_USER_AGENT)
 
@@ -697,13 +733,10 @@ class AirPrompterAgent:
             "run_idle_timeout_ms": run_idle_timeout_ms,
         }
         # Where the signing keys are learned, before anything opens: a syncing runtime that could never verify refuses here.
-        pinned_key = root.get("pinned") if isinstance(root, Mapping) else None
-        root_url = root_url_for(root_url=sync_options.root_url, pinned=pinned_key, hosted_environment=root.get("hosted_environment") if pinned_key is not None else None, syncs=bool(api_key) and sync_options.mode != "offline")
-        if isinstance(root_url, str):
-            raise AgentStartError("invalid_options", root_url)
+        root_url, default_for, missing = _root_url_for(root, sync_options, api_key=api_key, base_url=base_url, vendored=vendored_bundle is not None or datastore is not None)
         resolved_state_dir = state_dir or default_state_dir()
         # The root is scoped to the HOSTED environment (the public service is "prod"), never to this app's target.
-        pinned_root = trusted_root_from_pinned_key(purpose="platform", environment=root.get("hosted_environment", "prod"), pinned_root=root["pinned"]) if "pinned" in root else root
+        pinned_root = trusted_root_from_pinned_key(purpose="platform", environment=_hosted_environment(root), pinned_root=root["pinned"]) if "pinned" in root else root
         provider = key_provider or file_key(os.path.join(SlotStore.path(state_dir=resolved_state_dir, agent_id=agent_id, target=target), "store.key"))
         try:
             # S8: store.json records who wrote it — this SDK by default.
@@ -719,9 +752,11 @@ class AirPrompterAgent:
         # S6: the instance id is the PROCESS's, never the store's — N workers on one host are N instances in the fleet view, and
         # their same-minute windows keep distinct keys at ingest (the store's own id stays store.json's identity).
         agent = cls(options, store, trusted, cls.new_instance_id(), _spool_placement(options, store.dir, now() if now else now_ms()), store.instance_id)
-        agent._root_url, default_for = root_url
+        agent._root_url = root_url
         if default_for:
-            agent._log({"event": "root_url_default", "environment": default_for, "rootUrl": agent._root_url})
+            agent._log({"event": "root_url_default", "environment": default_for, "rootUrl": root_url})
+        if missing:
+            agent._log({"event": "root_url_missing", "hint": missing})
         agent._boot()
         return agent
 
@@ -1236,7 +1271,7 @@ class AirPrompterAgent:
         default = "" if self._sync_options.root_url else ", the default for that root"
         return " ".join([
             f"The manifest is signed by a key the trusted root does not name (root keys: {keys}).",
-            (f"Check that root[\"pinned\"] is AirPrompter's root for the service at {service}, and that root[\"hosted_environment\"] (\"{root.get('hosted_environment', 'prod')}\") is that service's environment: a dev service needs the dev root and hosted_environment \"dev\"."
+            (f"Check that root[\"pinned\"] is AirPrompter's root for the service at {service}, and that root[\"hosted_environment\"] (\"{_hosted_environment(root)}\") is that service's environment: a dev service needs the dev root and hosted_environment \"dev\"."
              if pinned else f"Check that the root document passed as root belongs to the service at {service}."),
             (f"sync.root_url ({root_url}{default}) must serve that same environment's root.json." if root_url else "Pass sync.root_url (the edge's roots/{environment}/root.json) so a signing-key rotation under the pinned root is picked up."),
             "Then check that the agent key belongs to that environment.",
@@ -1592,11 +1627,15 @@ class AirPrompterAgent:
 
     def _fetch_root(self, url: str) -> Optional[dict[str, Any]]:
         try:
+            # Conditional: an unchanged root is one 304, and the trusted root stays as it is.
+            headers = {"user-agent": _USER_AGENT, **({"if-none-match": self._root_etag} if self._root_etag else {})}
             with httpx.Client(transport=self._o.get("transport"), timeout=30.0) as http:
-                response = http.get(url, headers={"user-agent": _USER_AGENT})
+                response = http.get(url, headers=headers)
             if response.status_code != 200:
                 return None
-            return json.loads(response.text)
+            root = json.loads(response.text)
+            self._root_etag = response.headers.get("etag")
+            return root
         except Exception:  # noqa: BLE001
             return None
 

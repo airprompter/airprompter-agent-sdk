@@ -3,11 +3,11 @@ so the docs cannot drift from the code. The block is read out of ``README.md`` o
 
 Three things in it cannot run verbatim, and each is replaced by exact text, once: the two id placeholders (``"org_…"``,
 ``"agt_…"``) and AirPrompter's production root key, because the fake cannot sign as AirPrompter. The key is first
-checked to BE the production root (``HOSTED_ROOTS["prod"]``), and the fake's key then stands in for it in that table,
-so the default the README relies on (root.json from ``https://api.airprompter.com/roots/prod/root.json``) is the path
+checked to BE the production root (``HOSTED_ROOTS["prod"]``), and the fake's key is then recognised as the hosted prod
+root (``hosted_roots.RECOGNISED``), so the default the README relies on (root.json from ``https://api.airprompter.com/roots/prod/root.json``) is the path
 taken. The start options the block builds reach ``AirPrompterAgent.start`` unchanged; the test adds only where the
-process runs: the fake's transport, a temporary ``state_dir``, a memory spool and a logger. ``openai`` is the fake
-client the adapter tests use, since the provider is the application's own.
+process runs (the fake's transport, a temporary ``state_dir``, a memory spool, a logger), and the block may set none of
+those itself. ``openai`` is the fake client the adapter tests use, since the provider is the application's own.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import types
 
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.core import HOSTED_ROOTS
+from airprompter_agent.core.protocol import hosted_roots
 from airprompter_agent.core.protocol.trust import public_jwk_of
 
 from .control_plane import FakeControlPlane
@@ -33,7 +34,8 @@ PROD_URL = "https://api.airprompter.com/roots/prod/root.json"
 def quick_start() -> str:
     with open(README, encoding="utf-8") as f:
         text = f.read()
-    section = text.split("\n## Quick start\n")[1].split("\n## ")[0]
+    section = re.split(r"\n#{2,} ", text.split("\n## Quick start\n")[1])[0]  # up to the next heading of any level
+    assert len(re.findall(r"^```", section, re.M)) == 2, "the Quick start has exactly one code block"
     block = re.search(r"^```python\n(.*?)\n```$", section, re.S | re.M)
     assert block, "the Quick start has a python block"
     return block.group(1)
@@ -48,8 +50,8 @@ def test_the_quick_start_pins_airprompters_production_root_and_needs_nothing_els
     code = quick_start()
     literal = ROOT_LITERAL.search(code)
     assert literal, "the quick start pins a root key inline"
-    assert ast.literal_eval(literal.group(1)) == HOSTED_ROOTS["prod"], "the key shown is HOSTED_ROOTS['prod'], byte for byte"
-    assert not re.search(r"root_url|hosted_environment|base_url", code), "the hosted default is what the quick start relies on"
+    assert ast.literal_eval(literal.group(1)) == dict(HOSTED_ROOTS["prod"]), "the key shown is HOSTED_ROOTS['prod'], byte for byte"
+    assert not re.search(r"root_url|hosted_environment|base_url|edge_pointer_url", code), "the hosted defaults are what the quick start relies on"
     assert not re.search(r"…/|<token>", code), "no URL placeholder a reader would have to fill"
 
 
@@ -62,15 +64,21 @@ def test_the_quick_start_run_as_written_serves_the_approved_release_through_the_
     code = quick_start()
     code = once(code, '"org_…"', repr(plane.scope["organizationId"]))
     code = once(code, '"agt_…"', repr(plane.scope["agentId"]))
-    code = once(code, ROOT_LITERAL.search(code).group(1), repr(public_jwk_of(plane.root_key)))
+    shown = ROOT_LITERAL.search(code).group(1)
+    assert ast.literal_eval(shown) == dict(HOSTED_ROOTS["prod"]), "the key the run stands the fake in for is AirPrompter's production root"
+    code = once(code, shown, repr(public_jwk_of(plane.root_key)))
 
     events: list = []
     as_written: dict = {}
     real_start = AirPrompterAgent.start
 
+    added = {"transport": plane.transport(), "state_dir": str(tmp_path / "state"), "telemetry": {"sink": "memory"}, "logger": events.append}
+
     def start(**options):
         as_written.update(options)
-        return real_start(**options, transport=plane.transport(), state_dir=str(tmp_path / "state"), telemetry={"sink": "memory"}, logger=events.append)
+        for key in added:
+            assert key not in options, f"the quick start sets {key}, which this test supplies"
+        return real_start(**options, **added)
 
     clients: list = []
 
@@ -81,8 +89,8 @@ def test_the_quick_start_run_as_written_serves_the_approved_release_through_the_
     monkeypatch.setattr(AirPrompterAgent, "start", staticmethod(start))
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=make_client))
     monkeypatch.setenv("AIRPROMPTER_AGENT_KEY", plane.api_key)
-    # The fake's root stands in for AirPrompter's production root, so the agent takes the hosted default.
-    monkeypatch.setitem(HOSTED_ROOTS, "prod", public_jwk_of(plane.root_key))
+    # The fake's root is recognised as AirPrompter's prod root, so the agent takes the hosted default.
+    monkeypatch.setattr(hosted_roots, "RECOGNISED", {**HOSTED_ROOTS, "prod": public_jwk_of(plane.root_key)})
     namespace: dict = {"user_message": "Where is my refund?", "user_id": "user-42"}
     try:
         exec(compile(code, README, "exec"), namespace)  # noqa: S102 — the README's own block

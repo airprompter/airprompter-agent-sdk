@@ -117,19 +117,24 @@ fake control plane, so it is the code that works.
 only if it verifies under that key. The key alone does not name the signing
 keys under it, so the agent reads the root document too, and for
 AirPrompter's own roots it knows where: production (above, key id
-`044af6e8…1793`) at `https://api.airprompter.com/roots/prod/root.json`, and
-AirPrompter's dev deployment (key id `86267aa3…df91`, with
+`044af6e83353a2ea3758cc3feb3b1b7031c82bda5d6cd9287ba7730363e11793`) at
+`https://api.airprompter.com/roots/prod/root.json`, and AirPrompter's dev
+deployment (key id
+`86267aa3dc49005a0c1474d5c9c06bd7e1d0e835da715a864c1eca706545df91`, with
 `"hosted_environment": "dev"`) at
-`https://api.airprompter.dev/roots/dev/root.json`. Both keys are
-`HOSTED_ROOTS` in `airprompter_agent.core`. `hosted_environment` names
-AirPrompter's deployment, never your app's `target`. Any other root (the
-local registry `airprompter dev` prints, or your own service) has no
-default: add `sync={"root_url": "https://<your service>/roots/<env>/root.json"}`.
-A start that would sync without one raises `AgentStartError`
+`https://api.airprompter.dev/roots/dev/root.json`. Copy the key into your
+source, as above; `HOSTED_ROOTS` in `airprompter_agent.core` holds the same
+keys, for comparison. `hosted_environment` names AirPrompter's deployment,
+never your app's `target`. Any other root (the local registry
+`airprompter dev` prints, or your own service) has no default: add
+`sync={"root_url": "https://<your service>/roots/<env>/root.json"}`. A
+start that would sync without one raises `AgentStartError`
 (`invalid_options`) saying so, rather than start and never verify a
-release. An explicit `root_url` always wins. A runtime that never syncs (no
-`api_key`, `sync.mode` `"offline"`, a vendored bundle or datastore runtime
-holding only the distribution key) needs no root URL.
+release; with a vendored bundle or a datastore it starts and logs
+`root_url_missing`, since only the keys they carry verify. An explicit
+`root_url` always wins. A runtime that never syncs (no `api_key`, or
+`sync.mode` `"offline"`) needs no root URL. The document is read with its
+ETag, so an unchanged root costs one 304.
 
 `render()` never touches AirPrompter's network. A variable declared `end_user` is
 fenced (`<ticket>…</ticket>`) so the model sees where untrusted input

@@ -261,7 +261,7 @@ test("a stranded host with an unobtainable payload tries once, then returns to t
   await (await start(plane, dir)).stop();
   plane.payloads.delete(future.contentHash);
   await gaining(async () => {
-    const ap = await start(plane, dir, { sync: { mode: "resident", pollSeconds: 3600, edgePointerUrl: "https://edge.test/g/token/generation.json" } });
+    const ap = await start(plane, dir, { sync: { mode: "resident", pollSeconds: 3600, edgePointerUrl: "https://edge.test/g/token/generation.json", rootUrl: "https://edge.test/roots/prod/root.json" } });
     try {
       await ap.syncNow();
       assert.equal(ap.generation, 1);
@@ -487,7 +487,7 @@ test("a failed golden set on a first release runs once and then sees 304s; a hos
     rmSync(dir, { recursive: true, force: true });
   }
   const empty = new FakeControlPlane(scope);
-  const idle = await start(empty, tempDir(), { sync: { mode: "resident", pollSeconds: 3600, edgePointerUrl: "https://edge.test/g/token/generation.json" } });
+  const idle = await start(empty, tempDir(), { sync: { mode: "resident", pollSeconds: 3600, edgePointerUrl: "https://edge.test/g/token/generation.json", rootUrl: "https://edge.test/roots/prod/root.json" } });
   empty.requests.length = 0;
   await idle.syncNow();
   assert.equal(empty.requests.some((url) => url.endsWith("/generation.json")), true, "nothing active, nothing stored: the pointer still answers");

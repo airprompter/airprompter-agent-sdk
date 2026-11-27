@@ -61,5 +61,5 @@ jobs:
       - name: Report what was tested
         run: python -m pip show openai anthropic litellm httpx httpx2 2>/dev/null | grep -E '^(Name|Version)'
       - name: Wrapper suites against the real clients
-        run: WRAP_LIVE=1 python -m pytest -rs tests/test_wrap_live.py tests/test_wrap.py
+        run: WRAP_LIVE=1 python -m pytest -rs tests/test_frameworks_live.py tests/test_frameworks_direct.py tests/test_litellm.py
         working-directory: sdk-python

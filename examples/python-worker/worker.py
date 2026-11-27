@@ -1,7 +1,8 @@
 """A queue worker on the Python SDK: one resident runtime per process, the
-approved `support.triage` prompt rendered per ticket with the ticket text
-fenced as end-user input, the Anthropic call observed (latency, usage,
-error class — never text), feedback filed later against the run_ref.
+approved `support.triage` prompt placed on the Anthropic call per ticket, with
+the ticket text fenced as end-user input, the call measured into the run
+(latency, usage, error class — never text), feedback filed later against the
+run_ref.
 
 Usage::
 
@@ -17,8 +18,8 @@ import signal
 
 import anthropic
 
-from airprompter_agent import AirPrompterAgent, RenderRefusedError
-from airprompter_agent.integrations.anthropic import messages_create
+from airprompter_agent import AirPrompterAgent
+from airprompter_agent.frameworks.anthropic import instrument
 
 ap = AirPrompterAgent.start(
     organization_id=os.environ["AIRPROMPTER_ORG_ID"],
@@ -30,19 +31,18 @@ ap = AirPrompterAgent.start(
     apply={"window": "02:00-04:00 Europe/Berlin"},  # releases staged under unlock_required go live on their own at night
     models=["claude-sonnet-5", "claude-haiku-4-5"],  # what this worker can call; promotion refuses a slot whose model is absent
 )
-client = anthropic.Anthropic()
+# Every messages.create on this client gets the approved text as `system`, the release's model and its settings.
+client = instrument(anthropic.Anthropic(), ap, slot="support.triage")
 signal.signal(signal.SIGTERM, lambda *_: ap.stop())
 
 
 def handle(ticket: dict) -> dict:
     """One queue message: returns the classification and the run_ref to keep beside the ticket."""
-    try:
-        rendered = ap.prompt("support.triage", subject=ticket["customer_id"]).render(team=ticket["team"], ticket=ticket["text"])
-    except RenderRefusedError as refused:
-        # A Freeze from the console: the worker parks the message and says why.
-        return {"parked": refused.reason}
-    message = messages_create(ap, rendered, client, messages=[{"role": "user", "content": ticket["text"]}], max_tokens=256)
-    return {"classification": message.content[0].text, "run_ref": rendered.run_ref, "version": rendered.version_id, "arm": rendered.arm}
+    with ap.run(subject=ticket["customer_id"], variables={"team": ticket["team"], "ticket": ticket["text"]}) as run:
+        # A Freeze or a slot with nothing to serve is a passthrough: the worker's own model runs, and it says so.
+        placed = run.place("support.triage")
+        message = client.messages.create(model="claude-sonnet-5", max_tokens=256, messages=[{"role": "user", "content": ticket["text"]}])
+        return {"classification": message.content[0].text, "run_ref": run.run_ref, "served": placed.kind}
 
 
 def on_agent_accepted(run_ref: str, accepted: bool, minutes_to_accept: int) -> None:

@@ -8,6 +8,9 @@
 4. The distributions carry one version with ``airprompter-agent`` exact-pinned, the lockstep check says so, and
    ``SDK_VERSION`` is that version. No removed distribution or module name is left under ``sdk-python/``.
 5. Each layer's ``__all__`` is exactly what is pinned here, so a name reaches a layer's public list on purpose.
+6. Framework adapters (AIR-2231): an adapter imports only the contract, its own folder and its framework; the layers
+   below import no framework; only the contract reaches ``runtime.adapter``; ``agent.py`` is pinned at its line count and
+   no adapter passes 300 lines.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -37,11 +41,13 @@ NOW = "2026-09-13T00:00:00Z"
 SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"]
 PACKAGES = ["agent", *SATELLITES]
 SRC = os.path.join(SDK_PY, "packages", "agent", "src", "airprompter_agent")
+#: Rule 4 of section 3.2: the facade's line count after AIR-2231's deletions. A change that grows it moves this on purpose.
+AGENT_PY_LINES = 2513
 #: Each layer's public list, sorted. A public name is a promise: change this on purpose.
 LAYER_ALL = {
     "core": ["AGENT_ID", "APBUNDLE_INFO", "ASSIGNMENT_MODULUS", "AUDIENCE_LIMITS", "Assignment", "AssignmentError", "BundleError", "BundleRelease", "BundleReleaseRefused", "CHECK_BOUNDS", "CanonicalJsonError", "ClockPort", "Delimiters", "DistributionKey", "ERROR_CLASSES", "FsPort", "GOLDEN_SET_FORMAT", "GOLDEN_SET_VERSION", "GoldenCaseResult", "GoldenInvocation", "GoldenInvoke", "GoldenReport", "GoldenSetError", "JUDGE_RUBRICS", "JudgeResult", "JudgeRubric", "LATENCY_BUCKET_EDGES_MS", "LoadedRelease", "MissingVariableError", "NormalizedFeedback", "OS_FS", "Observation", "OsFs", "PROTECTION_CRITERIA", "PROTOCOL_VERSION", "RAMP_MAX_STEPS", "RAMP_MIN_STEP_MS", "RUN_REF_MAX_ENTRIES", "RUN_REF_MAX_TOKEN_LENGTH", "RUN_REF_READ_MAX_ENTRIES", "RUN_REF_READ_MAX_TOKEN_LENGTH", "ReleaseReader", "ReleaseSlot", "RunDimensions", "RunRefFacts", "RunTotals", "SDK_VERSION", "SLOT_TAG", "STEP_BOUNDS", "STEP_STATUSES", "SUPPORTED_CAPABILITIES", "SUPPORTED_PROTOCOL_MAJORS", "SYSTEM_CLOCK", "SpoolRow", "StepError", "StepTotals", "SyncClient", "SystemClock", "TARGET_SLUG", "UNDEFINED", "USAGE_SOURCES", "UnknownVariableError", "UploadOutcome", "UploadSegment", "UploadSink", "Verdict", "WINDOW_STATUSES", "X25519KeyPair", "arm_for_bucket", "assign_arm", "bucket_from_hash", "bundle_payload_bytes", "canonical_bytes", "canonical_json", "capabilities_implemented", "captured_audience_ids", "carried_payloads", "check_refusal", "checks_refusals", "copy_audience_tags", "count_of", "create_encrypted_bundle", "create_plaintext_bundle", "default_of", "distribution_key_id", "effective_arms", "epoch_minute", "estimate_tokens", "evaluate_check", "evaluate_checks", "frozen_experiment", "fs_failure_code", "fs_or_default", "generate_p256_jwk", "generate_x25519_key_pair", "golden_reports_meet", "instant", "judge_prompt", "judge_signals_of", "key_thumbprint", "latency_bucket_index", "manifest_has_golden", "matches_audience", "mint_run_ref", "minute_of", "new_run_id", "normalize_feedback", "open_bundle", "optional_payloads", "ordered_steps", "output_text_of", "parse_golden_set", "parse_judge_reply", "parse_run_ref", "pass_bps_of", "pattern_refusal", "placeholders_of", "project_checks", "public_jwk_of", "ramp_weights_at", "referenced_payloads", "release_digest", "release_digest_input", "render_template", "rubric_from_prompt", "run_golden_set", "run_ref_key_from", "servable_experiments", "servable_overrides", "servable_slots", "sha256_prefixed", "sign_bytes", "sink_status", "slot_hashes", "step_name", "subject_hash", "trusted_root_from_pinned_key", "utf16_length", "valid_audience_ids", "valid_audience_label", "valid_audience_manifest", "valid_audience_minute", "valid_audience_selector", "valid_step_name", "validate_arms", "validate_json_schema", "validate_ramp", "value_at_path", "verify_bytes", "verify_manifest", "verify_root_metadata", "x25519_private_key_from_raw", "x25519_public_key_from_raw", "xml_delimiters"],
     "sync": ["DATASTORE_FORMAT", "DEFAULT_MAX_POINTER_AGE_MS", "DatastoreKeys", "DatastoreRecordError", "DatastoreRollbackResult", "FileKvStore", "HydrationPlan", "KeyProvider", "KvEntry", "KvReleaseDatastore", "KvStore", "KvStoreReport", "LoadedSlot", "MemoryKvStore", "MemoryReleaseDatastore", "PayloadDecryptError", "PullBundleResult", "PullEdgeState", "PullToDatastoreResult", "ReleaseControl", "ReleaseDatastore", "ReleaseKey", "SlotStore", "StoreError", "StoreHooks", "StoredReleaseRow", "SyncPassOutput", "UpdateWindow", "WindowState", "check_kv_store", "clear_datastore_rollback", "custom_key_provider", "datastore_keys", "decode_datastore_record", "decrypt_payload", "encode_datastore_record", "encode_key_segment", "encrypt_payload", "file_key", "generation_of_release_key", "is_known_time_zone", "jittered_delay_ms", "kms", "kv_release_datastore", "next_pull_delay_ms", "os_keystore", "parse_window", "payload_aad", "prune_datastore", "pull_bundle", "pull_to_datastore", "required_models_missing", "resolve_hydration", "rollback_datastore", "rollout_of", "sync_once", "unwrap_with_raw_key", "validate_window", "vault", "window_state", "wrap_with_raw_key"],
-    "runtime": ["AgentRuntime", "AppliedInference", "Approved", "Attribution", "DEFAULT_RUN_IDLE_TIMEOUT_MS", "DEFAULT_SOURCE_MAX_BYTES", "DEFAULT_SOURCE_TIMEOUT_SECONDS", "Disabled", "FillPlan", "Filled", "FilledRender", "INFERENCE_KEYS", "MAX_OPEN_RUNS", "ModelResolver", "ObserveTarget", "Passthrough", "PendingObservation", "Placement", "RegisteredSource", "ReleaseResolver", "RenderRegistry", "RenderValues", "Rendered", "ResolveOutcome", "Run", "RunHost", "RunInput", "RunRecorder", "RunRegistry", "RunScope", "RunSession", "UsageNormalized", "VariableSource", "VariableSourceContext", "VariableSourceError", "VariableSourceInput", "VariableSourceRegistry", "VariableSourceRequiredError", "WRAPPED_METHODS", "Workflow", "WorkflowStep", "WrapHooks", "apply_inference", "attribution_scope", "classify_error", "classify_result", "copy_inference", "current_attribution", "disabled_from", "fill_async", "fill_sync", "is_variable_source_error", "is_variable_source_required_error", "new_subject", "normalize_usage", "observe_call", "observe_call_async", "plan_fill", "request_texts", "supplied", "temperature_of", "top_p_of", "unsourced", "wrap_client"],
+    "runtime": ["AgentRuntime", "AppliedInference", "Approved", "Attribution", "DEFAULT_RUN_IDLE_TIMEOUT_MS", "DEFAULT_SOURCE_MAX_BYTES", "DEFAULT_SOURCE_TIMEOUT_SECONDS", "Disabled", "FillPlan", "Filled", "FilledRender", "INFERENCE_KEYS", "MAX_OPEN_RUNS", "ModelResolver", "ObserveTarget", "Passthrough", "PendingObservation", "Placement", "RegisteredSource", "ReleaseResolver", "RenderValues", "Rendered", "ResolveOutcome", "Run", "RunHost", "RunInput", "RunRecorder", "RunRegistry", "RunScope", "RunSession", "UsageNormalized", "VariableSource", "VariableSourceContext", "VariableSourceError", "VariableSourceInput", "VariableSourceRegistry", "VariableSourceRequiredError", "Workflow", "WorkflowStep", "apply_inference", "attribution_scope", "classify_error", "classify_result", "copy_inference", "current_attribution", "disabled_from", "fill_async", "fill_sync", "is_variable_source_error", "is_variable_source_required_error", "new_subject", "normalize_usage", "observe_call", "observe_call_async", "plan_fill", "supplied", "temperature_of", "top_p_of", "unsourced"],
     "telemetry": ["AirPrompterUploadSink", "DAEMON_DISCOVERY_FILE", "DAEMON_DISCOVERY_FORMAT", "DAEMON_DISCOVERY_MAX_AGE_MS", "DAEMON_DISCOVERY_REFRESH_MS", "DirectorySink", "ERROR_CLASSES", "GrantDecision", "HOST_SPOOL_BUDGET_BYTES", "LATENCY_BUCKET_EDGES_MS", "MANIFEST_GRACE_MS", "MANIFEST_NAME", "MANIFEST_SUFFIX", "MemorySink", "Observation", "PassResult", "RunDimensions", "RunTotals", "SEGMENT_MAX_BYTES", "SERVERLESS_BUFFER_BYTES", "SPOOL_MANIFEST_FORMAT", "SegmentPlanner", "SpoolRow", "SpoolSink", "SpoolUploader", "SpoolWriter", "StepTotals", "UploadGrant", "WriterIdentity", "backoff_delay_ms", "daemon_discovery_path", "epoch_minute", "inspect_segment", "latency_bucket_index", "manifest_name_of", "minute_of", "post_segment", "read_daemon_discovery", "read_segment_manifest", "remove_daemon_discovery", "segment_name", "segment_name_of_manifest", "sha256_hex", "validate_spool_row", "write_daemon_discovery", "write_segment_manifest"],
 }
 
@@ -71,7 +77,7 @@ def test_direction_is_pinned_and_a_planted_upward_or_deep_import_fails_the_lint(
     clean = lint("--json")
     assert clean.returncode == 0, clean.stderr
     edges = json.loads(clean.stdout[: clean.stdout.rindex("}") + 1])["edges"]
-    assert edges == ["agent-otel→core", "agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "datastore-postgres→core", "datastore-postgres→sync", "datastore-redis→core", "datastore-redis→sync", "datastore-s3→core", "datastore-s3→sync", "runtime→core", "sync→core", "telemetry→core"]
+    assert edges == ["agent-otel→core", "agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "datastore-postgres→core", "datastore-postgres→sync", "datastore-redis→core", "datastore-redis→sync", "datastore-s3→core", "datastore-s3→sync", "frameworks→core", "frameworks→runtime", "runtime→core", "sync→core", "telemetry→core"]
     upward = planted(os.path.join(SRC, "telemetry", "_lint_probe.py"), "from airprompter_agent.sync import SlotStore\nPROBE = SlotStore\n")
     assert upward.returncode == 1
     assert "telemetry (layer 1) may not import sync (layer 1)" in upward.stderr
@@ -260,3 +266,54 @@ def test_no_removed_name_is_left_under_sdk_python():
                     if removed.search(f.read()):
                         offenders.append(os.path.relpath(os.path.join(folder, name), SDK_PY))
     assert offenders == []
+
+
+def test_adapters_import_only_the_contract_and_their_framework_and_nothing_below_imports_a_framework():
+    frameworks = os.path.join(SRC, "frameworks")
+    unlisted = planted(os.path.join(frameworks, "_lint_probe.py"), "from .contract import choose_model\nPROBE = choose_model\n")
+    assert unlisted.returncode == 1 and "frameworks/_lint_probe has no entry in ADAPTERS" in unlisted.stderr
+    # Only new files are planted, never an edit to a real one: the probe sits in a folder named after a listed adapter,
+    # which the lint reads as that adapter's own files.
+    os.makedirs(os.path.join(frameworks, "openai"), exist_ok=False)
+    try:
+        probe = os.path.join(frameworks, "openai", "_lint_probe.py")
+        for source, message in [
+            ("from airprompter_agent.runtime import normalize_usage\nPROBE = normalize_usage\n", "an adapter imports only the contract, its own folder and its framework, not airprompter_agent.runtime"),
+            ("from ..anthropic import instrument\nPROBE = instrument\n", "not airprompter_agent.frameworks.anthropic"),
+            ("import anthropic\nPROBE = anthropic\n", "anthropic is not in frameworks/openai's allowlist"),
+            ("from airprompter_agent.runtime.adapter import acquire_run\nPROBE = acquire_run\n", "runtime.adapter is the adapters' internal module"),
+        ]:
+            result = planted(probe, source)
+            assert result.returncode == 1, source
+            assert message in result.stderr, result.stderr
+        ok = planted(probe, "import typing\nimport openai\nfrom ..contract import choose_model\nPROBE = (typing, openai, choose_model)\n")
+        assert ok.returncode == 0, ok.stderr
+    finally:
+        shutil.rmtree(os.path.join(frameworks, "openai"), ignore_errors=True)
+    runtime_framework = planted(os.path.join(SRC, "runtime", "_lint_probe.py"), "import openai\nPROBE = openai\n")
+    assert runtime_framework.returncode == 1 and "runtime imports the framework package openai" in runtime_framework.stderr
+    agent_framework = planted(os.path.join(SRC, "_lint_probe.py"), "from langchain_core.messages import SystemMessage\nPROBE = SystemMessage\n")
+    assert "agent imports the framework package langchain_core.messages" in agent_framework.stderr
+    run_telemetry = planted(os.path.join(SRC, "runtime", "run", "_lint_probe.py"), "from airprompter_agent.telemetry import SpoolWriter\nPROBE = SpoolWriter\n")
+    assert "runtime (layer 1) may not import telemetry (layer 1)" in run_telemetry.stderr, "runtime/run imports neither telemetry nor sync"
+    contract_folder = os.path.join(frameworks, "contract")
+    os.makedirs(contract_folder, exist_ok=False)
+    try:
+        bad = planted(os.path.join(contract_folder, "_lint_probe.py"), "from airprompter_agent.telemetry import SpoolWriter\nPROBE = SpoolWriter\n")
+        assert "frameworks/contract imports only the core and runtime packages" in bad.stderr
+    finally:
+        shutil.rmtree(contract_folder, ignore_errors=True)
+
+
+def test_agent_py_is_pinned_and_no_adapter_passes_300_lines():
+    with open(os.path.join(SRC, "agent.py"), encoding="utf-8") as f:
+        assert len(f.read().rstrip().split("\n")) == AGENT_PY_LINES, "agent.py grew or shrank: move AGENT_PY_LINES on purpose"
+    frameworks = os.path.join(SRC, "frameworks")
+    for entry in sorted(os.listdir(frameworks)):
+        path = os.path.join(frameworks, entry)
+        files = [os.path.join(dirpath, name) for dirpath, _, names in os.walk(path) for name in names if name.endswith(".py")] if os.path.isdir(path) else ([path] if entry.endswith(".py") else [])
+        lines = 0
+        for file in files:
+            with open(file, encoding="utf-8") as f:
+                lines += len(f.read().rstrip().split("\n"))
+        assert lines <= 300, f"frameworks/{entry}: {lines} lines, over 300"

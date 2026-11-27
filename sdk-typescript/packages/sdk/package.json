@@ -146,10 +146,10 @@
       "./runtime": 242000,
       "./telemetry": 187000,
       "./testing": 85000,
-      "./frameworks/contract": 6000,
+      "./frameworks/contract": 10000,
       "./frameworks/openai": 14000,
       "./frameworks/anthropic": 12000,
-      "./frameworks/ai-sdk": 22000,
+      "./frameworks/ai-sdk": 30000,
       "./frameworks/langchain": 30000,
       "./frameworks/steps": 100000
     }

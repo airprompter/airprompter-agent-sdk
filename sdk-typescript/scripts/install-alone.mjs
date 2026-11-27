@@ -32,7 +32,7 @@ const SDK_SUBPATHS = {
   "@airprompter/agent-sdk": ["AirPrompterAgent", "isAgentStartError"],
   "@airprompter/agent-sdk/core": ["verifyManifest", "BundleRelease", "assignArm"],
   "@airprompter/agent-sdk/sync": ["SlotStore", "syncOnce", "fileKey"],
-  "@airprompter/agent-sdk/runtime": ["ReleaseResolver", "instrumentClient"],
+  "@airprompter/agent-sdk/runtime": ["ReleaseResolver", "observeCall"],
   "@airprompter/agent-sdk/telemetry": ["SpoolWriter", "DirectorySink", "SpoolUploader"],
   "@airprompter/agent-sdk/testing": ["FakeControlPlane", "MemoryFs"],
   // The contract and the direct-client and AI SDK adapters: no peer is needed to import them.

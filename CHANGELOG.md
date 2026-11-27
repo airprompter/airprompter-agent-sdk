@@ -10,6 +10,9 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### CLI release checksums name the bare file (AIR-2268)
+- **Each CLI asset's `.sha256` is one line, `<hex>  <asset>`**, so `shasum -a 256 -c airprompter-linux-x64.sha256` (or `sha256sum -c`) works in the folder the asset was downloaded to. It used to name `dist/<asset>`, the path on the build runner, and the check failed with "No such file". `cli/scripts/checksum.mjs` writes it the same way on every platform; `cli/test/checksum.test.ts` checks the format and runs the platform's own checker on it, and the release job checks each `.sha256` beside its asset before uploading. The verify action reads only the digest, so it is unaffected.
+
 ### Steps: the hosted prod root is pinned (AIR-2214)
 - **`HOSTED_ROOTS.prod` is AirPrompter's production root** (key id `044af6e8…1793`), exactly as the root ceremony of 2026-11-27 wrote it (`infrastructure/trust/agent-root/prod/root-public.jwk.json` in the service repository). A Steps client pointed at the production service needs no `root` any more and no longer reports `root_not_pinned`. A test checks the real prod root document (`fixtures/hosted-prod-root.json`) against the pinned key, and refuses a document signed by any other root, including dev's. Zapier and n8n get it when they move to the release that carries it.
 

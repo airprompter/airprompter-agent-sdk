@@ -47,6 +47,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           EVENT: ${{ github.event_name }}
         run: |
+          : > sync-report.json # an artifact even if the sync crashes before writing its report
           args=(--report sync-report.json)
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi

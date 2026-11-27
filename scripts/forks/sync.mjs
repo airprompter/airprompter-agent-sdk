@@ -37,6 +37,11 @@ const dryRun = argv.includes("--dry-run");
 const only = argv.includes("--only") ? argv[argv.indexOf("--only") + 1] : null;
 const reportPath = argv.includes("--report") ? argv[argv.indexOf("--report") + 1] : null;
 const skipWithoutToken = argv.includes("--skip-without-token");
+// `--only` comes from a workflow input: a value that is not airprompter/<repo> (say, a flag typed there) is refused.
+if (argv.includes("--only") && !/^airprompter\/[A-Za-z0-9._-]+$/.test(only ?? "")) {
+  process.stderr.write(`[sync-forks] --only must be airprompter/<repo>, not ${JSON.stringify(only)}\n`);
+  process.exit(2);
+}
 const token = process.env.FORK_SYNC_TOKEN?.trim() || "";
 const BATCH = 200;
 const log = (line) => process.stderr.write(`[sync-forks] ${line}\n`);

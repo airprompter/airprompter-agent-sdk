@@ -169,3 +169,9 @@ test("without FORK_SYNC_TOKEN: the release's compat-tags step is a notice naming
   const strict = spawnSync("node", [COMPAT, "9.9.9", "--registry", "npm", "--apply"], { encoding: "utf8", env });
   assert.equal(strict.status, 2, "without the flag, a missing token with tags to create is an error");
 });
+
+test("--only accepts airprompter/<repo> only, so a flag typed into the workflow input cannot change the run", () => {
+  const result = spawnSync("node", [SYNC, "--only", "--skip-without-token"], { encoding: "utf8", env: { ...process.env, FORK_SYNC_TOKEN: "" } });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /--only must be airprompter\/<repo>/);
+});

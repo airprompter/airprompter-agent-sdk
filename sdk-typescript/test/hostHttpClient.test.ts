@@ -47,9 +47,11 @@ assert.ok(original[0], "Node's own dispatcher is in place");
 const restoreDispatcher = () => SLOTS.forEach((slot, i) => (slots[slot] = original[i]));
 const undici7 = await import("undici");
 const [major, minor] = process.versions.node.split(".").map(Number) as [number, number];
-// undici 8 needs Node >= 22.19 (CI runs 22 latest); on an older Node only the 7.x cases run.
-const undici8 = major > 22 || (major === 22 && minor >= 19) ? await import("undici-v8") : null;
+// undici 8 needs Node >= 22.19 (CI runs 22 latest); on an older Node its cases are reported as skipped.
+const undici8Runs = major > 22 || (major === 22 && minor >= 19);
+const undici8 = undici8Runs ? await import("undici-v8") : null;
 restoreDispatcher();
+const versionOf = (pkg: string) => (JSON.parse(readFileSync(new URL(`../node_modules/${pkg}/package.json`, import.meta.url), "utf8")) as { version: string }).version;
 
 type Undici = typeof undici7;
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
@@ -116,8 +118,9 @@ function assertFramedByFetch(seen: Array<{ url: string; headers: IncomingHttpHea
   }
 }
 
-const dispatchers: Array<{ name: string; undici: Undici }> = [{ name: "undici 7.30.2", undici: undici7 }];
-if (undici8) dispatchers.push({ name: "undici 8.12.4", undici: undici8 as unknown as Undici });
+const dispatchers: Array<{ name: string; undici: Undici }> = [{ name: `undici ${versionOf("undici")}`, undici: undici7 }];
+if (undici8) dispatchers.push({ name: `undici ${versionOf("undici-v8")}`, undici: undici8 as unknown as Undici });
+else test(`undici ${versionOf("undici-v8")} as the global dispatcher`, { skip: `needs Node >= 22.19, this is ${process.versions.node}` }, () => undefined);
 
 for (const { name, undici } of dispatchers) {
   test(`${name} as the global dispatcher: postSegment over globalThis.fetch lands the segment`, async (t) => {
@@ -204,6 +207,9 @@ for (const { name, undici } of dispatchers) {
 
 test("every case put the original global dispatcher back, and Node's fetch works on it", async () => {
   SLOTS.forEach((slot, i) => assert.equal(slots[slot], original[i]));
+  // A later undici that adds a slot (`.3`) would leak past this restore: fail loudly so SLOTS gets it.
+  const present = Object.getOwnPropertySymbols(globalThis).filter((s) => s.description?.startsWith("undici.globalDispatcher."));
+  assert.deepEqual(present.filter((s) => !(SLOTS as readonly symbol[]).includes(s)), [], "every dispatcher slot is one this test restores");
   const plane = new FakeControlPlane(scope);
   const http = await bridge(plane);
   try {
@@ -219,6 +225,7 @@ test("every case put the original global dispatcher back, and Node's fetch works
 
 const CLIENT_OWNED = ["content-length", "host", "transfer-encoding", "connection", "keep-alive", "expect", "te", "trailer", "upgrade", "proxy-connection"];
 const NAME = `["'\`]?(${CLIENT_OWNED.map((n) => n.replace("-", "\\-")).join("|")})["'\`]?`;
+const HYPHENATED = CLIENT_OWNED.filter((n) => n.includes("-")).map((n) => n.replace("-", "\\-")).join("|");
 
 /** Every client-owned header a source sets: a key in a headers literal, or a `.set` / `.append` / `setHeader` / index write by name. */
 function clientOwnedHeadersSet(source: string): string[] {
@@ -236,7 +243,10 @@ function clientOwnedHeadersSet(source: string): string[] {
   }
   for (const call of source.matchAll(new RegExp(`(?:headers\\w*\\.(?:set|append)|setHeader)\\(\\s*${NAME}\\s*,`, "gi"))) found.push(call[1]!.toLowerCase());
   for (const write of source.matchAll(new RegExp(`headers\\w*\\[\\s*${NAME}\\s*\\]\\s*=(?!=)`, "gi"))) found.push(write[1]!.toLowerCase());
-  return found;
+  // The hyphenated names mean nothing but a header, so anywhere as a quoted key or a `[name, value]` pair: a headers
+  // object held in another variable, a spread constant, `new Headers([[…]])`.
+  for (const any of source.matchAll(new RegExp(`(?:["'\`](${HYPHENATED})["'\`]\\s*:|\\[\\s*["'\`](${HYPHENATED})["'\`]\\s*,)`, "gi"))) found.push((any[1] ?? any[2])!.toLowerCase());
+  return [...new Set(found)];
 }
 
 test("the detector finds the line that broke n8n, and the other ways to set a client-owned header", () => {
@@ -244,12 +254,13 @@ test("the detector finds the line that broke n8n, and the other ways to set a cl
   assert.deepEqual(clientOwnedHeadersSet('await input.fetch(grant.url, { method: "POST", headers: { "content-type": `multipart/form-data; boundary=${boundary}`, "content-length": String(body.length) }, body });'), ["content-length"]);
   assert.deepEqual(clientOwnedHeadersSet('new Headers({ Host: "api.test", Connection: "close" })'), ["host", "connection"]);
   assert.deepEqual(clientOwnedHeadersSet('headers.set("Transfer-Encoding", "chunked"); request.setHeader("Expect", "100-continue"); headers["keep-alive"] = "1";'), ["transfer-encoding", "expect", "keep-alive"]);
-  assert.deepEqual(clientOwnedHeadersSet('const body = { host: { os: "linux" }, connection: 1 }; map.set("host", 1);'), [], "a heartbeat's host field is not a header");
+  assert.deepEqual(clientOwnedHeadersSet('const framing = { "Content-Length": n }; fetch(u, { headers: { ...framing } }); new Headers([["transfer-encoding", "chunked"]]);'), ["content-length", "transfer-encoding"]);
+  assert.deepEqual(clientOwnedHeadersSet('const body = { host: { os: "linux" }, connection: 1 }; map.set("host", 1); ["content-length-range", 0, 1048576];'), [], "a heartbeat's host field and an S3 policy condition are not headers");
   assert.deepEqual(clientOwnedHeadersSet(fixed), [], "the uploader sets none");
 });
 
-test("no source in any TypeScript package sets a header the HTTP client owns", () => {
-  const root = fileURLToPath(new URL("../packages/", import.meta.url));
+test("no source in any TypeScript package, or the CLI, sets a header the HTTP client owns", () => {
+  const root = fileURLToPath(new URL("../../", import.meta.url));
   const offenders: string[] = [];
   let scanned = 0;
   const walk = (dir: string): void => {
@@ -263,7 +274,9 @@ test("no source in any TypeScript package sets a header the HTTP client owns", (
       }
     }
   };
-  for (const pkg of readdirSync(root)) walk(join(root, pkg, "src"));
+  const packages = join(root, "sdk-typescript", "packages");
+  for (const pkg of readdirSync(packages)) walk(join(packages, pkg, "src"));
+  walk(join(root, "cli", "src"));
   assert.ok(scanned > 50, `scanned ${scanned} files`);
   assert.deepEqual(offenders, [], "fetch / the HTTP client frames the request; a host's own dispatcher may refuse a caller-set framing header");
 });

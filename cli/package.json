@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/cli",
-  "version": "1.0.0-rc.4",
+  "version": "1.0.0-rc.5",
   "description": "airprompter — pull, verify, apply, status, diff and keygen for AirPrompter agent releases; shipped as signed single-file executables.",
   "license": "BSD-3-Clause",
   "private": true,

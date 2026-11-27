@@ -14,6 +14,21 @@
 //                                          (Decision L, AIR-2231/AIR-2405); tests exempt
 //   binary   cli/src                       imports any source, by path
 //
+// Framework adapters (AIR-2231, the rules of section 3.2):
+//
+//   1. An adapter, `frameworks/<name>.ts` or a folder `frameworks/<name>/`,
+//      imports only the contract (`./contract.js`, `../contract.js` from a
+//      folder), its own folder's files, and the packages in its ADAPTERS entry
+//      below. `frameworks/contract.ts` imports the runtime and core barrels and
+//      the adapters' internal barrel `runtime/adapter/index.js` (which nothing
+//      else may import), and no package. A framework with no entry fails.
+//      `langchain` is exempt from the contract-only rule until AIR-2234 moves
+//      it onto the contract; `steps/` is its own layer.
+//   2. core, sync, runtime, telemetry and the agent import no framework
+//      package (FRAMEWORK_PACKAGES).
+//   3. `runtime/run/` imports neither telemetry nor sync: held by the layer
+//      rule, since runtime may import neither.
+//
 // A file reaches another layer only through that layer's barrel
 // (`../core/index.js`; the agent's is the root `index.js`, Steps' is
 // `frameworks/steps/index.js`), never a deeper path, so what a layer exports
@@ -30,6 +45,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
+
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "..");
 const sdkSrc = join(root, "packages", "sdk", "src");
@@ -39,6 +56,22 @@ const barrelOf = (layer) => (layer === "agent" ? "index" : layer === "steps" ? "
 const STEPS_SPEC = "@airprompter/agent-sdk/frameworks/steps";
 const SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-redis"];
 const SUBPATH = /^@airprompter\/agent-sdk\/(core|sync|runtime|telemetry)$/;
+/** Rule 1: each adapter's own packages. An adapter ticket adds its entry; `*` matches one scoped name. */
+const ADAPTERS = {
+  openai: ["openai"],
+  anthropic: ["@anthropic-ai/sdk"],
+  "ai-sdk": ["ai", "@ai-sdk/*"],
+  langchain: ["langchain", "langchain/*", "@langchain/*", "zod"],
+};
+/** Not on the contract yet (AIR-2234): may still reach the runtime and core barrels. */
+const CONTRACT_EXEMPT = new Set(["langchain"]);
+/** Rule 2: no layer below the adapters imports any of these. */
+const FRAMEWORK_PACKAGES = ["openai", "openai/*", "@anthropic-ai/*", "ai", "ai/*", "@ai-sdk/*", "langchain", "langchain/*", "@langchain/*", "@openai/agents", "@openai/agents*", "@mastra/*"];
+const matches = (spec, pattern) => {
+  if (pattern.endsWith("/*")) return spec.startsWith(pattern.slice(0, -1));
+  if (pattern.endsWith("*")) return spec.startsWith(pattern.slice(0, -1));
+  return spec === pattern;
+};
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -49,16 +82,43 @@ function walk(dir, out = []) {
   return out;
 }
 
-const SPECIFIER = /(?:^|\n)\s*(?:import|export)\b[^;]*?\bfrom\s+"([^"]+)"|\bimport\s*\(\s*"([^"]+)"\s*\)/g;
-
+/**
+ * Every module a file names, with its line, read from the TypeScript AST rather than by pattern, so no quoting or
+ * layout gets past it: `import … from`, a bare `import "x"`, `export … from`, `import x = require("x")`, `require("x")`
+ * and `import("x")`. A dynamic `import()` or `require()` whose argument is not a string literal is itself an offence:
+ * what it loads cannot be checked.
+ */
+const parsed = new Map();
 function specifiersOf(file) {
+  if (!parsed.has(file)) parsed.set(file, parse(file));
+  return parsed.get(file);
+}
+
+function parse(file) {
   const text = readFileSync(file, "utf8");
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
   const out = [];
-  for (const m of text.matchAll(SPECIFIER)) {
-    const spec = m[1] ?? m[2];
-    const line = text.slice(0, m.index).split("\n").length;
-    out.push({ spec, line: line + (m[0].startsWith("\n") ? 1 : 0) });
-  }
+  const lineOf = (node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+  const literal = (node) => (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : null);
+  const visit = (node) => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
+      const spec = literal(node.moduleSpecifier);
+      if (spec !== null) out.push({ spec, line: lineOf(node) });
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      // `import("../x.js").T` in a type position: types only, but past the barrel all the same.
+      const spec = literal(node.argument.literal);
+      if (spec !== null) out.push({ spec, line: lineOf(node) });
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      const spec = literal(node.moduleReference.expression);
+      if (spec !== null) out.push({ spec, line: lineOf(node) });
+    } else if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
+      const spec = literal(node.arguments[0]);
+      if (spec !== null) out.push({ spec, line: lineOf(node) });
+      else offenders.push(`${relative(root, file)}:${lineOf(node)}: a dynamic import of a computed specifier cannot be checked; name the module`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
   return out;
 }
 
@@ -77,6 +137,44 @@ const insideSdk = (path) => !posix(relative(sdkSrc, path)).startsWith("..");
 const offenders = [];
 const edges = [];
 
+/** `frameworks/<name>.ts` or `frameworks/<name>/…` → name; the Steps folder is its own layer. */
+function adapterOf(file) {
+  const rel = posix(relative(sdkSrc, file));
+  const m = /^frameworks\/([^/]+?)(\.ts$|\/)/.exec(rel);
+  return m && m[1] !== "steps" ? m[1] : null;
+}
+/** The adapters' internal barrel: `frameworks/contract.ts` alone imports it. */
+const ADAPTER_BARREL = "runtime/adapter/index";
+
+function lintAdapter(file, name) {
+  const shown = relative(root, file);
+  if (name === "contract") {
+    for (const { spec, line } of specifiersOf(file)) {
+      const target = spec.startsWith(".") ? posix(relative(sdkSrc, resolve(dirname(file), spec))).replace(/\.(js|ts)$/, "") : null;
+      if (target !== "runtime/index" && target !== "core/index" && target !== ADAPTER_BARREL) offenders.push(`${shown}:${line}: frameworks/contract imports only the runtime, core and runtime/adapter barrels (${spec})`);
+    }
+    return true;
+  }
+  const allowed = ADAPTERS[name];
+  if (!allowed) {
+    offenders.push(`${shown}: frameworks/${name}.ts has no entry in ADAPTERS (scripts/lint-imports.mjs) or in tools/lint_imports.py; see CONTRIBUTING.md › Adding a framework adapter`);
+    return false;
+  }
+  if (CONTRACT_EXEMPT.has(name)) return false;
+  const home = join(sdkSrc, "frameworks", name);
+  for (const { spec, line } of specifiersOf(file)) {
+    if (spec.startsWith(".")) {
+      const target = resolve(dirname(file), spec).replace(/\.(js|ts)$/, "");
+      const contract = target === join(sdkSrc, "frameworks", "contract");
+      const ownFolder = !posix(relative(home, target)).startsWith("..");
+      if (!contract && !ownFolder) offenders.push(`${shown}:${line}: an adapter imports only the contract, its own folder and its framework, not ${spec}`);
+      continue;
+    }
+    if (!allowed.some((pattern) => matches(spec, pattern))) offenders.push(`${shown}:${line}: ${spec} is not in frameworks/${name}'s allowlist (${allowed.join(", ")})`);
+  }
+  return true;
+}
+
 function lintSdkFile(file) {
   const shown = relative(root, file);
   const layer = layerOf(file);
@@ -84,7 +182,19 @@ function lintSdkFile(file) {
     offenders.push(`${shown}: packages/sdk/src/${layer} is not a layer; add it to LAYER or move the file`);
     return;
   }
+  const adapter = adapterOf(file);
+  if (adapter && lintAdapter(file, adapter)) {
+    for (const { spec } of specifiersOf(file)) if (spec.startsWith(".")) {
+      const into = layerOf(resolve(dirname(file), spec));
+      if (into !== layer) edges.push([layer, into]);
+    }
+    return;
+  }
   for (const { spec, line } of specifiersOf(file)) {
+    if (!spec.startsWith(".") && layer !== "frameworks" && layer !== "steps" && FRAMEWORK_PACKAGES.some((pattern) => matches(spec, pattern))) {
+      offenders.push(`${shown}:${line}: ${layer} imports the framework package ${spec}; only frameworks/<name> may`);
+      continue;
+    }
     if (spec.startsWith("@airprompter/")) {
       offenders.push(`${shown}:${line}: the package imports ${spec} by name; use a relative path through the layer's barrel`);
       continue;
@@ -100,6 +210,10 @@ function lintSdkFile(file) {
     edges.push([layer, into]);
     const rel = posix(relative(sdkSrc, target)).replace(/\.(js|ts)$/, "");
     const barrel = rel === barrelOf(into) || (rel === "core/testing/index" && posix(relative(sdkSrc, file)) === "testing.ts");
+    if (rel === ADAPTER_BARREL && into !== layer) {
+      offenders.push(`${shown}:${line}: runtime/adapter is the adapters' internal barrel; only frameworks/contract.ts imports it`);
+      continue;
+    }
     if (!barrel) {
       offenders.push(`${shown}:${line}: reaches into ${into} by path (${spec}); import ${into}'s barrel`);
       continue;

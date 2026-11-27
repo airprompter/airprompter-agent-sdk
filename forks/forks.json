@@ -1,0 +1,111 @@
+{
+  "$comment": "The agent SDK forks and mirrors in the airprompter org (AIR-2314). scripts/forks/sync.mjs keeps them tracked; scripts/forks/compat-tags.mjs tags the version each SDK release tested. `tag` is the upstream's own tag for one package version, `{version}` filled in. `testedVersionFrom` names the file that pins the tested version at an SDK release tag; a package without one is not certified by any release yet. Never make a mirror public.",
+  "forks": [
+    {
+      "repo": "airprompter/langchainjs",
+      "upstream": "langchain-ai/langchainjs",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [
+        { "registry": "npm", "name": "langchain", "tag": "langchain@{version}", "testedVersionFrom": "sdk-typescript/package-lock.json" },
+        { "registry": "npm", "name": "@langchain/core", "tag": "@langchain/core@{version}", "testedVersionFrom": "sdk-typescript/package-lock.json" }
+      ]
+    },
+    {
+      "repo": "airprompter/langgraphjs",
+      "upstream": "langchain-ai/langgraphjs",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "npm", "name": "@langchain/langgraph", "tag": "@langchain/langgraph@{version}", "testedVersionFrom": "sdk-typescript/package-lock.json" }]
+    },
+    {
+      "repo": "airprompter/openai-node",
+      "upstream": "openai/openai-node",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "npm", "name": "openai", "tag": "v{version}", "testedVersionFrom": "sdk-typescript/package-lock.json" }]
+    },
+    {
+      "repo": "airprompter/anthropic-sdk-typescript",
+      "upstream": "anthropics/anthropic-sdk-typescript",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "npm", "name": "@anthropic-ai/sdk", "tag": "sdk-v{version}", "testedVersionFrom": "sdk-typescript/package-lock.json" }]
+    },
+    {
+      "repo": "airprompter/vercel-ai",
+      "upstream": "vercel/ai",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "npm", "name": "ai", "tag": "ai@{version}", "testedVersionFrom": "sdk-typescript/package-lock.json" }]
+    },
+    {
+      "repo": "airprompter/openai-agents-js",
+      "upstream": "openai/openai-agents-js",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "npm", "name": "@openai/agents", "tag": "@openai/agents@{version}", "testedVersionFrom": "sdk-typescript/package-lock.json" }]
+    },
+    {
+      "repo": "airprompter/langchain",
+      "upstream": "langchain-ai/langchain",
+      "kind": "fork",
+      "branch": "master",
+      "packages": [
+        { "registry": "pypi", "name": "langchain", "tag": "langchain=={version}" },
+        { "registry": "pypi", "name": "langchain-core", "tag": "langchain-core=={version}" }
+      ]
+    },
+    {
+      "repo": "airprompter/langgraph",
+      "upstream": "langchain-ai/langgraph",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "pypi", "name": "langgraph", "tag": "{version}" }]
+    },
+    {
+      "repo": "airprompter/openai-agents-python",
+      "upstream": "openai/openai-agents-python",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "pypi", "name": "openai-agents", "tag": "v{version}" }]
+    },
+    {
+      "repo": "airprompter/pydantic-ai",
+      "upstream": "pydantic/pydantic-ai",
+      "kind": "fork",
+      "branch": "main",
+      "ignoreTags": ["clai2-bleeding"],
+      "$ignoreTags": "clai2-bleeding is upstream's floating pre-release pointer, moved on every build (first seen moved 2026-11-27). Ours stays at the 2026-11-05 copy and is not compared.",
+      "packages": [{ "registry": "pypi", "name": "pydantic-ai", "tag": "v{version}" }]
+    },
+    {
+      "repo": "airprompter/openai-python",
+      "upstream": "openai/openai-python",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "pypi", "name": "openai", "tag": "v{version}" }]
+    },
+    {
+      "repo": "airprompter/anthropic-sdk-python",
+      "upstream": "anthropics/anthropic-sdk-python",
+      "kind": "fork",
+      "branch": "main",
+      "packages": [{ "registry": "pypi", "name": "anthropic", "tag": "v{version}" }]
+    },
+    {
+      "repo": "airprompter/mastra",
+      "upstream": "mastra-ai/mastra",
+      "kind": "private-mirror",
+      "branch": "main",
+      "packages": [{ "registry": "npm", "name": "@mastra/core", "tag": "@mastra/core@{version}", "testedVersionFrom": "sdk-typescript/package-lock.json" }]
+    },
+    {
+      "repo": "airprompter/litellm",
+      "upstream": "BerriAI/litellm",
+      "kind": "private-mirror",
+      "branch": "main",
+      "packages": [{ "registry": "pypi", "name": "litellm", "tag": "v{version}" }]
+    }
+  ]
+}

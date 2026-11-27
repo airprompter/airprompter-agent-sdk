@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-sdk-workspace",
-  "version": "1.0.0-rc.4",
+  "version": "1.0.0-rc.5",
   "private": true,
   "description": "Workspace for the AirPrompter agent SDK: @airprompter/agent-sdk, @airprompter/agent-otel and the three @airprompter/datastore-* adapters. One version, released in lockstep.",
   "license": "BSD-3-Clause",
@@ -17,7 +17,7 @@
     "lint:imports": "node scripts/lint-imports.mjs",
     "test": "npm run lint:imports && node --import tsx --test \"test/**/*.test.ts\"",
     "size": "node scripts/size-budget.mjs",
-    "test:wrap-live": "WRAP_LIVE=1 node --import tsx --test test/wrapLive.test.ts",
+    "test:wrap-live": "WRAP_LIVE=1 node --import tsx --test test/frameworks/live.test.ts",
     "version:lockstep": "node scripts/version-lockstep.mjs"
   },
   "devDependencies": {
@@ -28,6 +28,7 @@
     "@langchain/openai": "1.8.0",
     "@types/node": "^22.16.5",
     "@types/pg": "^8.23.1",
+    "ai": "7.0.162",
     "ajv": "8.17.1",
     "ajv-formats": "3.0.1",
     "ioredis": "^5.11.1",

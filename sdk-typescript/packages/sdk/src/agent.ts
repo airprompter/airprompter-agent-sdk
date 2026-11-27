@@ -49,9 +49,7 @@ import { observeCall, type ObserveOptions } from "./runtime/index.js";
 import { ReleaseResolver, disabledFrom, newSubject, type Rendered } from "./runtime/index.js";
 import { DEFAULT_RUN_IDLE_TIMEOUT_MS, RunRegistry, classifyError, type AgentRuntime, type RunInput, type RunSession } from "./runtime/index.js";
 import { VariableSourceRegistry, fillAsync, fillSync, isVariableSourceError, planFill, unsourced, type FillPlan, type FilledRender, type RenderValues, type VariableSourceInput } from "./runtime/index.js";
-import { RenderRegistry, currentAttribution, requestTexts, withAttribution, type Attribution } from "./runtime/index.js";
-import { wrapClient, type WrapHooks } from "./runtime/index.js";
-import { aiSdkMiddleware, type AiSdkMiddleware, type AiSdkMiddlewareOptions } from "./runtime/index.js";
+import { currentAttribution, withAttribution, type Attribution } from "./runtime/index.js";
 import { evaluateChecks, outputTextOf, type CheckOutcome } from "./core/index.js";
 import { goldenReportsMeet, parseGoldenSet, runGoldenSet, type GoldenInvoke, type GoldenReport } from "./core/index.js";
 import { JUDGE_RUBRICS, judgePrompt, judgeSignalsOf, parseJudgeReply, rubricFromPrompt, type JudgeResult, type JudgeRubric } from "./core/index.js";
@@ -562,8 +560,6 @@ export class AirPrompterAgent implements AgentRuntime {
   /** Bounded, names-only registration; active keys are kept ahead of recent stale names. */
   private readonly audienceTagKeys = new Set<string>();
   private readonly audiencePromptLabels = new Map<string,string>();
-  /** T33: the last renders by text hash, so a wrapped client can tell which slot a call is. */
-  private readonly renders = new RenderRegistry();
   /** The application's variable sources (`start({ variables })`, `ap.variables.provide()`). */
   readonly variables: VariableSourceRegistry;
   private readonly runs: RunRegistry;
@@ -1883,7 +1879,6 @@ export class AirPrompterAgent implements AgentRuntime {
     };
     const finish = (prepared: ReturnType<typeof prepare>, filled: FilledRender): Rendered => {
       const rendered = this.renderObserved(() => prepared.resolver.render(prepared.resolved, filled.values, { fenced: filled.fenced, text: prepared.text }), { tag, artifactId: prepared.resolved.slot.artifactId, versionId: prepared.resolved.slot.versionId, arm: prepared.resolved.arm, model: prepared.resolved.slot.model, ...(prepared.resolved.audienceIds ? {audienceIds: prepared.resolved.audienceIds} : {}), ...(prepared.resolved.runMinute ? {runMinute: prepared.resolved.runMinute} : {}) });
-      this.renders.register(rendered.text, { ...(rendered.audienceIds ? {audienceIds: rendered.audienceIds} : {}), runMinute: rendered.runMinute!, artifactId: rendered.artifactId, tag, versionId: rendered.versionId, arm: rendered.arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) });
       this.sayStricter(tag, prepared.resolved.slot, filled);
       // The run's reference, which names every slot the run used, replaces the one-slot ref.
       return prepared.run && !prepared.run.isEnded ? { ...rendered, runRef: prepared.run.runRef } : rendered;
@@ -1949,7 +1944,6 @@ export class AirPrompterAgent implements AgentRuntime {
     // Inside a run the workflow slot pins through the run, so every step stays on one arm. Each step keeps its own ref.
     const { resolved } = this.runs.resolveThrough(tag, options.subject ?? newSubject(), undefined, (subject, runTags) => this.resolveSlot(tag, subject, runTags ? copyAudienceTags({ ...this.audienceTags, ...runTags }) : undefined), { entry: false });
     const workflow = this.resolver().workflow(resolved);
-    for (const step of workflow.steps) this.renders.register(step.text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag, step: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
     /** Render one workflow step with the workflow's variable rules. */
     const resolver = this.resolver();
     const row = { tag, artifactId: resolved.slot.artifactId, versionId: resolved.slot.versionId, arm: workflow.arm, model: workflow.model, ...(resolved.audienceIds ? { audienceIds: resolved.audienceIds } : {}), ...(resolved.runMinute ? { runMinute: resolved.runMinute } : {}) };
@@ -1959,7 +1953,6 @@ export class AirPrompterAgent implements AgentRuntime {
       const plan = planFill({ tag: step.stepId, variables: resolved.slot.variables, text: step.text, values, registry: this.variables });
       const filled = await this.fillObserved(plan, { tag: step.stepId, subject: options.subject, versionId: step.versionId, arm: workflow.arm }, row);
       const text = this.renderObserved(() => resolver.renderText({ tag: step.stepId, text: step.text, variables: resolved.slot.variables, values: filled.values, fenced: filled.fenced }), row);
-      this.renders.register(text, { ...(step.audienceIds ? {audienceIds: step.audienceIds} : {}), runMinute: step.runMinute!, artifactId: step.artifactId, tag, step: step.stepId, versionId: step.versionId, arm: workflow.arm, model: workflow.model, ...(step.inference ? { inference: step.inference } : {}) });
       this.sayStricter(step.stepId, resolved.slot, filled);
       return text;
     };
@@ -2053,14 +2046,9 @@ export class AirPrompterAgent implements AgentRuntime {
     return this.slotOn(payload, tag, arm)?.outputChecks ?? [];
   }
 
-  // ------------------------------------------------------------------ T33: wrapped clients
+  // ------------------------------------------------------------------ the direct path's scope
 
-  /** Observe supported provider methods using explicit or rendered-text attribution. */
-  wrap<T extends object>(client: T): T {
-    return wrapClient(client, this.wrapHooks());
-  }
-
-  /** Run `fn` with every wrapped call inside it (across awaits) attributed to `rendered`, whatever text it carries. */
+  /** Run `fn` with every instrumented call inside it (across awaits) attributed to `rendered`: the caller placed the text. */
   attribute<T>(rendered: Pick<Rendered, "tag" | "artifactId" | "versionId" | "arm" | "model" | "inference" | "audienceIds" | "runMinute"> | (Pick<Rendered, "artifactId" | "versionId" | "model" | "inference"> & { stepId: string; arm?: string; runRef?: string }), fn: () => T): T {
     // A workflow step attributes under the slot tag with its step id in `step`; its arm is the one its run reference
     // carries (the workflow's), unless the caller names one.
@@ -2071,22 +2059,9 @@ export class AirPrompterAgent implements AgentRuntime {
     return withAttribution({ ...(cohort?.audienceIds ? {audienceIds: cohort.audienceIds} : {}), runMinute: cohort?.runMinute!, artifactId: entry?.artifactId ?? rendered.artifactId, tag, ...("stepId" in rendered ? { step: rendered.stepId } : {}), versionId: rendered.versionId, arm, model: rendered.model, ...(rendered.inference ? { inference: rendered.inference } : {}) }, fn);
   }
 
-  /** A Vercel AI SDK middleware for `wrapLanguageModel({ model, middleware: ap.aiSdkMiddleware() })`. */
-  aiSdkMiddleware(options: AiSdkMiddlewareOptions = {}): AiSdkMiddleware {
-    return aiSdkMiddleware(this.wrapHooks(), options);
-  }
-
-  /** The render a request's parameters name: an explicit scope first, else a message whose text is a recent render. */
-  attributionFor(params: unknown): Attribution | undefined {
-    return currentAttribution() ?? this.renders.match(requestTexts(params));
-  }
-
-  private wrapHooks(): WrapHooks {
-    return {
-      attribute: (params) => this.attributionFor(params),
-      observe: (target, call, options) => this.observe(target, call, options),
-      log: (event) => this.log(event),
-    };
+  /** The attribution an enclosing `attribute()` scope set, if any: how an instrumented client with no slot finds its render. */
+  currentAttribution(): Attribution | undefined {
+    return currentAttribution();
   }
 
   /** Run active or staged golden sets and record pass counts. */
@@ -2395,7 +2370,7 @@ export class AirPrompterAgent implements AgentRuntime {
       // The uploader first: a pass in flight cannot see a segment closed after it began.
       const uploader = this.uploader;
       if (uploader) await wait(uploader.stop());
-      // T33: an observation settled by a wrapped client's stream helper lands a few microtasks after the customer's own
+      // an observation settled by an instrumented client's stream helper lands a few microtasks after the customer's own
       // await; one turn of the event loop lets everything in flight reach the spool before the windows close.
       await new Promise<void>((resolve) => setImmediate(resolve));
       this.runs.endAll();

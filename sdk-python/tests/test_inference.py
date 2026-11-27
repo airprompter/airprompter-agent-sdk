@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from airprompter_agent import apply_inference as exported_apply_inference
-from airprompter_agent.integrations.litellm import litellm_inference
+from airprompter_agent.frameworks.openai import instrument
 from airprompter_agent.core.golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, run_golden_set
 from airprompter_agent.core.protocol.trust import inference_digest_input, release_digest
 from airprompter_agent.runtime.inference import apply_inference
@@ -28,12 +28,8 @@ def state_dir():
 FULL = {"temperatureMilli": 200, "topPBps": 9000, "maxOutputTokens": 800, "stopSequences": ["\n\nHuman:"], "reasoningEffort": "low"}
 
 
-def test_apply_inference_model_mismatch_null_keys_and_uncomparable_values():
+def test_apply_inference_null_keys_and_uncomparable_values():
     assert exported_apply_inference is apply_inference
-    skipped = apply_inference("chat", {"model": "gpt-5-mini", "temperature": 1}, FULL, model="gpt-5")
-    assert skipped.skipped == "model_mismatch" and skipped.params == {"model": "gpt-5-mini", "temperature": 1}
-    assert apply_inference("chat", {"model": "gpt-5"}, FULL, model="gpt-5").skipped is None
-    assert apply_inference("chat", {}, FULL, model="gpt-5").skipped is None, "a call that names no model gets the settings"
 
     assert apply_inference("chat", {}, {"temperatureMilli": None, "topPBps": 9000}).params == {"top_p": 0.9}, "a null key is absent, not temperature 0"
 
@@ -60,11 +56,6 @@ def test_apply_inference_messages_and_responses_rules():
     replaced = apply_inference("responses", {"reasoning": {"effort": "high", "summary": "auto"}}, {"reasoningEffort": "low"})
     assert replaced.params == {"reasoning": {"effort": "low", "summary": "auto"}} and replaced.overridden == ["reasoning.effort"]
     assert apply_inference("responses", {}, {"reasoningEffort": "medium"}).params == {"reasoning": {"effort": "medium"}}
-
-
-def test_litellm_inference_keyword_arguments():
-    assert litellm_inference(SimpleNamespace(inference=None)) == {}
-    assert litellm_inference(SimpleNamespace(inference=FULL)) == {"temperature": 0.2, "top_p": 0.9, "max_completion_tokens": 800, "stop": ["\n\nHuman:"], "reasoning_effort": "low"}
 
 
 def test_workflow_step_settings_and_golden_invocation(state_dir):
@@ -96,14 +87,13 @@ def test_workflow_step_settings_and_golden_invocation(state_dir):
         return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(role="assistant", content="ok"))], usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1))
 
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    ap.wrap(client).chat.completions.create(model="gpt-5", temperature=1, messages=[{"role": "system", "content": flow.steps[0].text}])
-    assert calls[0]["temperature"] == 0 and calls[0]["max_completion_tokens"] == 1200, "the step's own settings"
-    ap.wrap(client).chat.completions.create(model="gpt-5", temperature=1, messages=[{"role": "system", "content": flow.steps[1].text}])
-    assert calls[1]["temperature"] == 1, "a step without settings leaves the call alone"
-
+    openai = instrument(client, ap)
     with ap.attribute(flow.steps[0]):
-        ap.wrap(client).chat.completions.create(model="gpt-5", temperature=1, messages=[{"role": "user", "content": "unseen"}])
-    assert calls[2]["temperature"] == 0, "attribute() on a workflow step carries the step's settings"
+        openai.chat.completions.create(model="gpt-5", temperature=1, messages=[{"role": "system", "content": flow.steps[0].text}])
+    assert calls[0]["temperature"] == 0 and calls[0]["max_completion_tokens"] == 1200, "attribute() on a workflow step carries the step's own settings"
+    with ap.attribute(flow.steps[1]):
+        openai.chat.completions.create(model="gpt-5", temperature=1, messages=[{"role": "system", "content": flow.steps[1].text}])
+    assert calls[1]["temperature"] == 1, "a step without settings leaves the call alone"
 
     seen: list = []
     golden_set = {"format": GOLDEN_SET_FORMAT, "version": GOLDEN_SET_VERSION, "setId": "gs_1", "minPassBps": 10000, "cases": [{"caseId": "c1", "variables": {"name": "Ada"}, "expect": []}]}

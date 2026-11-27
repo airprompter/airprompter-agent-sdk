@@ -190,7 +190,7 @@ def _observation(target: ObserveTarget, model: str, started: float, now: Callabl
 
 
 class PendingObservation:
-    """T33: an observation whose clock started when a wrapped client was called and that settles later — when the
+    """An observation whose clock started when an instrumented client was called and that settles later — when the
     response arrives, when a stream has gone by, or when a stream helper's context closes. Settles once; never raises."""
 
     def __init__(self, target: ObserveTarget, record: Callable[[Observation], None], *, model: Optional[str] = None, now: Optional[Callable[[], float]] = None, evaluate: Optional[Callable[[Any, "UsageNormalized"], Optional[Mapping[str, int]]]] = None):

@@ -6,7 +6,7 @@ document that does not verify against the pin is refused exactly as before, and 
 does not stop the pass.
 
 The fake cannot sign as AirPrompter, so a test that needs a hosted root has the fake's key recognised as one
-(``hosted_roots.RECOGNISED``, through ``monkeypatch``). The real table is checked on its own, against the ceremonies'
+(``hosted_roots._RECOGNISED``, through ``monkeypatch``). The real table is checked on its own, against the ceremonies'
 documents.
 """
 
@@ -38,7 +38,7 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "..", "..", "sdk-typescript",
 
 
 def as_hosted(monkeypatch: pytest.MonkeyPatch, environment: str, key: dict) -> None:
-    monkeypatch.setattr(hosted_roots, "RECOGNISED", {**HOSTED_ROOTS, environment: key})
+    monkeypatch.setattr(hosted_roots, "_RECOGNISED", {**HOSTED_ROOTS, environment: key})
 
 
 def promoted(scope: dict = SCOPE, hosted_environment: Optional[str] = None) -> FakeControlPlane:
@@ -109,7 +109,7 @@ def test_a_custom_pinned_root_with_no_root_url_fails_fast_before_the_store_opens
     assert plane.requests == [], "nothing was fetched"
     # The environment named is the one in the path; a base_url is named back as the likely answer.
     assert 'sync={"root_url": "https://<your service>/roots/staging/root.json"}' in refusal(plane, str(tmp_path / "b"), root={"pinned": public_jwk_of(plane.root_key), "hosted_environment": "staging"})
-    assert refusal(plane, str(tmp_path / "c"), base_url="http://127.0.0.1:4180/").endswith("For the service at http://127.0.0.1:4180/ that is usually http://127.0.0.1:4180/roots/prod/root.json.")
+    assert refusal(plane, str(tmp_path / "c"), base_url="http://127.0.0.1:4180/").endswith("For the service at http://127.0.0.1:4180 that is usually http://127.0.0.1:4180/roots/prod/root.json.")
 
 
 def test_a_runtime_that_never_syncs_needs_no_root_url(tmp_path):
@@ -253,3 +253,28 @@ def test_the_root_document_is_read_conditionally(tmp_path, monkeypatch):
         assert ap.prompt("support.reply").render().version_id == "ver_reply_1"
     finally:
         ap.stop()
+
+
+def test_a_refused_root_document_keeps_no_etag(tmp_path, monkeypatch):
+    plane = promoted()
+    as_hosted(monkeypatch, "prod", public_jwk_of(plane.root_key))
+    seen: list = []
+    clock = {"ms": datetime(2028, 6, 1, tzinfo=timezone.utc).timestamp() * 1000}  # past the fake root's expiry
+    events: list = []
+    ap = start(plane, str(tmp_path), events, transport=hijacked(plane, lambda: plane.root, seen), now=lambda: clock["ms"], sync=SyncOptions(mode="on_invoke"))
+    try:
+        assert any(e.get("reason") == "root_expired" for e in events), events
+        clock["ms"] = datetime.now(timezone.utc).timestamp() * 1000
+        ap.sync_now()
+        assert "if-none-match" not in seen[1], "the refused document is read again in full"
+        assert ap.prompt("support.reply").render().version_id == "ver_reply_1"
+        ap.sync_now()
+        assert seen[2].get("if-none-match") == '"root-1"', "an accepted document is read conditionally"
+    finally:
+        ap.stop()
+
+
+def test_the_refusal_names_a_base_url_back_without_credentials(tmp_path):
+    message = refusal(promoted(), str(tmp_path), base_url="https://ops:s3cret@registry.internal.test/")
+    assert "s3cret" not in message and "ops:" not in message
+    assert message.endswith("that is usually https://registry.internal.test/roots/prod/root.json.")

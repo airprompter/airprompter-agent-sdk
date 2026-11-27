@@ -116,8 +116,9 @@ export interface StartOptions {
    * How this process syncs releases. `rootUrl` is where the root document (the signing keys under the pinned root) is
    * read. With `root.pinned` set to one of AirPrompter's hosted roots it defaults to that environment's
    * (`https://api.airprompter.com/roots/prod/root.json`, `https://api.airprompter.dev/roots/dev/root.json`); any other
-   * pinned root has no default, and a runtime that syncs refuses to start without one. What it serves is trusted only
-   * if it verifies against the pinned key.
+   * pinned root has no default: a syncing runtime refuses to start without one (with a vendored bundle or datastore it
+   * logs `root_url_missing`). What it serves is trusted only if it verifies against the pinned key; the URL is read
+   * with its ETag, and a user:password in `baseUrl` is never echoed into a message.
    */
   sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string };
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */
@@ -577,9 +578,10 @@ export class AirPrompterAgent implements AgentRuntime {
   private readonly sink: SpoolSink;
   private readonly directorySink: DirectorySink | null;
   private readonly client: SyncClient | null;
-  /** Where the root document is read: `sync.rootUrl`, else the hosted default for the pinned root, else nowhere. Set once, at start. */
   private rootUrl: string | null = null;
+  /** The ETag of the last ACCEPTED root document only. */
   private rootEtag: string | null = null;
+  private rootFetched: { root: RootMetadata; etag: string | null } | null = null;
 
   private constructor(
     private readonly options: StartOptions,
@@ -658,7 +660,6 @@ export class AirPrompterAgent implements AgentRuntime {
     if (typeof options.agentId !== "string" || !AGENT_ID.test(options.agentId)) {
       throw new AgentStartError("invalid_options", "options.agentId must be an agent id: a letter or digit, then up to 127 letters, digits, dots, underscores, colons or hyphens");
     }
-    // Where the signing keys are learned, before anything opens: a syncing runtime that could never verify refuses here.
     const rootUrl = rootUrlFor(options);
     const stateDir = options.stateDir ?? defaultStateDir();
     const pinnedRoot = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.root.hostedEnvironment ?? "prod", pinnedRoot: options.root.pinned }) : options.root;
@@ -1373,6 +1374,8 @@ export class AirPrompterAgent implements AgentRuntime {
       this.etag = result.etag;
       this.strandedTried = result.strandedTried;
       this.edgeEtag = result.edgeEtag;
+      if (this.rootFetched) this.rootEtag = result.trustedRoot === this.rootFetched.root ? this.rootFetched.etag : null;
+      this.rootFetched = null;
       this.trustedRoot = result.trustedRoot;
       this.lastSyncMs = this.nowMs();
       this.lastSyncOutcome = result.outcome;
@@ -1746,11 +1749,10 @@ export class AirPrompterAgent implements AgentRuntime {
 
   private async fetchRoot(url: string): Promise<RootMetadata | null> {
     try {
-      // Conditional: an unchanged root is one 304, and the trusted root stays as it is.
       const response = await this.fetchImpl(url, { headers: { "user-agent": `${SDK_NAME}/${SDK_VERSION}`, ...(this.rootEtag ? { "if-none-match": this.rootEtag } : {}) } });
       if (response.status !== 200) return null;
       const root = JSON.parse(await response.text()) as RootMetadata;
-      this.rootEtag = response.headers.get("etag");
+      this.rootFetched = { root, etag: response.headers.get("etag") };
       return root;
     } catch {
       return null;
@@ -2463,16 +2465,9 @@ function samePath(a: string, b: string): boolean {
   return resolvePath(a) === resolvePath(b) || real(a) === real(b);
 }
 
-/** Where each hosted environment's API serves its root document (`GET <api>/roots/<environment>/root.json`). */
 const HOSTED_ROOT_URLS: Readonly<Partial<Record<HostedEnvironment, string>>> = { dev: "https://api.airprompter.dev/roots/dev/root.json", prod: "https://api.airprompter.com/roots/prod/root.json" };
 
-/**
- * Where this runtime reads its root document (the signing keys under the pinned root), decided at start before anything
- * opens. An explicit `sync.rootUrl` wins. A runtime that never syncs, or holds a full root document, needs none. A pin
- * that is AirPrompter's root for the environment named reads that environment's. Any other pin has no default: a
- * syncing runtime refuses to start, unless a vendored bundle or the datastore hands it the keys (then it says so).
- * The URL only says where to look: what it serves is used only if it verifies against the pin.
- */
+/** Where the root document is read (see `sync.rootUrl`); only ever where to look, never what is trusted. */
 function rootUrlFor(options: StartOptions): { url: string | null; defaultFor?: HostedEnvironment; missing?: string } {
   if (options.sync?.rootUrl) return { url: options.sync.rootUrl };
   if (!("pinned" in options.root) || !options.apiKey || options.sync?.mode === "offline") return { url: null };
@@ -2481,7 +2476,8 @@ function rootUrlFor(options: StartOptions): { url: string | null; defaultFor?: H
   const url = named === environment ? HOSTED_ROOT_URLS[named] : undefined;
   if (url) return { url, defaultFor: environment };
   if (named !== null) throw new AgentStartError("invalid_options", `root.pinned is AirPrompter's ${named} root, but root.hostedEnvironment is "${environment}"${options.root.hostedEnvironment === undefined ? " (the default)" : ""}. Add hostedEnvironment: "${named}" to root, or pin the ${environment} root.`);
-  const service = options.baseUrl ? ` For the service at ${options.baseUrl} that is usually ${options.baseUrl.replace(/\/+$/, "")}/roots/${environment}/root.json.` : "";
+  const base = options.baseUrl?.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, "$1").replace(/\/+$/, "");
+  const service = base ? ` For the service at ${base} that is usually ${base}/roots/${environment}/root.json.` : "";
   const missing = `root.pinned is not one of AirPrompter's hosted roots, so the SDK cannot know where its root document is, and without it this runtime cannot learn the keys that sign your releases. Add sync: { rootUrl: "https://<your service>/roots/${environment}/root.json" }, the root document of the service that signs them.${service}`;
   if (options.vendoredBundle || options.datastore) return { url: null, missing: `${missing} Until then only the keys this host's bundle or datastore carries verify: a release signed after a key rotation is refused.` };
   throw new AgentStartError("invalid_options", missing);

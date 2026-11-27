@@ -137,7 +137,9 @@ def _root_url_for(root: Mapping[str, Any], sync: SyncOptions, *, api_key: Option
     if named is not None:
         default = " (the default)" if root.get("hosted_environment") is None else ""
         raise AgentStartError("invalid_options", f'root["pinned"] is AirPrompter\'s {named} root, but root["hosted_environment"] is "{environment}"{default}. Add "hosted_environment": "{named}" to root, or pin the {environment} root.')
-    service = f" For the service at {base_url} that is usually {base_url.rstrip('/')}/roots/{environment}/root.json." if base_url else ""
+    # Named back without any user:password the caller put in it: this sentence reaches logs.
+    base = re.sub(r"^([a-z][a-z0-9+.-]*://)[^/@]*@", r"\1", base_url, flags=re.I).rstrip("/") if base_url else ""
+    service = f" For the service at {base} that is usually {base}/roots/{environment}/root.json." if base else ""
     missing = f'root["pinned"] is not one of AirPrompter\'s hosted roots, so the SDK cannot know where its root document is, and without it this runtime cannot learn the keys that sign your releases. Add sync={{"root_url": "https://<your service>/roots/{environment}/root.json"}}, the root document of the service that signs them.{service}'
     if vendored:
         return (None, None, f"{missing} Until then only the keys this host's bundle or datastore carries verify: a release signed after a key rotation is refused.")
@@ -639,7 +641,9 @@ class AirPrompterAgent:
         self._client: Optional[SyncClient] = None
         #: Where the root document is read: sync.root_url, else the hosted default for the pinned root, else nowhere. Set once, at start.
         self._root_url: Optional[str] = None
+        #: The ETag of the root document last ACCEPTED: a refused one is read again in full on the next pass, never 304'd away.
         self._root_etag: Optional[str] = None
+        self._root_fetched: Optional[tuple[Any, Optional[str]]] = None
         if options.get("api_key") and self._sync_options.mode != "offline":
             self._client = SyncClient(base_url=options.get("base_url") or "https://api.airprompter.com", agent_id=options["agent_id"], target=options["target"], api_key=options["api_key"], transport=options.get("transport"), user_agent=_USER_AGENT)
 
@@ -1447,6 +1451,9 @@ class AirPrompterAgent:
                 self._etag = result.etag
                 self._stranded_tried = result.stranded_tried
                 self._edge_etag = result.edge_etag
+                if self._root_fetched is not None:
+                    self._root_etag = self._root_fetched[1] if result.trusted_root is self._root_fetched[0] else None
+                    self._root_fetched = None
                 self._trusted_root = result.trusted_root
                 self._last_sync_ms = self._now_ms()
                 self._last_sync_outcome = result.outcome
@@ -1634,7 +1641,7 @@ class AirPrompterAgent:
             if response.status_code != 200:
                 return None
             root = json.loads(response.text)
-            self._root_etag = response.headers.get("etag")
+            self._root_fetched = (root, response.headers.get("etag"))
             return root
         except Exception:  # noqa: BLE001
             return None

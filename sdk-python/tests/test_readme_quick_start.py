@@ -4,7 +4,7 @@ so the docs cannot drift from the code. The block is read out of ``README.md`` o
 Three things in it cannot run verbatim, and each is replaced by exact text, once: the two id placeholders (``"org_…"``,
 ``"agt_…"``) and AirPrompter's production root key, because the fake cannot sign as AirPrompter. The key is first
 checked to BE the production root (``HOSTED_ROOTS["prod"]``), and the fake's key is then recognised as the hosted prod
-root (``hosted_roots.RECOGNISED``), so the default the README relies on (root.json from ``https://api.airprompter.com/roots/prod/root.json``) is the path
+root (``hosted_roots._RECOGNISED``), so the default the README relies on (root.json from ``https://api.airprompter.com/roots/prod/root.json``) is the path
 taken. The start options the block builds reach ``AirPrompterAgent.start`` unchanged; the test adds only where the
 process runs (the fake's transport, a temporary ``state_dir``, a memory spool, a logger), and the block may set none of
 those itself. ``openai`` is the fake client the adapter tests use, since the provider is the application's own.
@@ -90,7 +90,7 @@ def test_the_quick_start_run_as_written_serves_the_approved_release_through_the_
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=make_client))
     monkeypatch.setenv("AIRPROMPTER_AGENT_KEY", plane.api_key)
     # The fake's root is recognised as AirPrompter's prod root, so the agent takes the hosted default.
-    monkeypatch.setattr(hosted_roots, "RECOGNISED", {**HOSTED_ROOTS, "prod": public_jwk_of(plane.root_key)})
+    monkeypatch.setattr(hosted_roots, "_RECOGNISED", {**HOSTED_ROOTS, "prod": public_jwk_of(plane.root_key)})
     namespace: dict = {"user_message": "Where is my refund?", "user_id": "user-42"}
     try:
         exec(compile(code, README, "exec"), namespace)  # noqa: S102 — the README's own block

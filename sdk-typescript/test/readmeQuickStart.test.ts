@@ -26,7 +26,8 @@ import { HOSTED_ROOTS, publicJwkOf } from "../packages/sdk/src/core/index.js";
 import { withHostedRootsForTests } from "../packages/sdk/src/core/protocol/hostedRoots.js";
 import { FakeControlPlane } from "./helpers/controlPlane.js";
 
-const README = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+// A Windows checkout may carry CRLF line ends.
+const README = readFileSync(new URL("../README.md", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const IMPORT = 'import { AirPrompterAgent } from "@airprompter/agent-sdk";';
 const ROOT_LITERAL = /root: \{ pinned: (\{[^{}]*\}) \}/;
 const PROD_ROOT = HOSTED_ROOTS.prod!;
@@ -129,7 +130,9 @@ test("the README quick start, run as written, serves the approved release, verif
   let ap: AirPrompterAgent | null = null;
   try {
     const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<{ ap: AirPrompterAgent; r: { text: string; versionId: string; generation: number; model: string } }>;
-    const run = new AsyncFunction("AirPrompterAgent", "process", "openai", "userMessage", `${body}\nreturn { ap, r };`);
+    // Types stripped first, so TypeScript-only syntax the type check accepts runs too.
+    const js = ts.transpileModule(body, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText.replace(/^export \{\};\s*$/m, "");
+    const run = new AsyncFunction("AirPrompterAgent", "process", "openai", "userMessage", `${js}\nreturn { ap, r };`);
     // The fake's root is recognised as AirPrompter's prod root, so the agent takes the hosted default.
     const out = await withHostedRootsForTests({ ...HOSTED_ROOTS, prod: publicJwkOf(plane.rootKey) }, () => run(agentAsImported, { env: { AIRPROMPTER_AGENT_KEY: plane.apiKey } }, openai, "Where is my refund?"));
     ap = out.ap;

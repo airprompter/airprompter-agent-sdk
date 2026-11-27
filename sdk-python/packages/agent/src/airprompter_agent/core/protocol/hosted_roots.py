@@ -27,7 +27,7 @@ HOSTED_ROOTS: Mapping[str, Mapping[str, str]] = MappingProxyType({
 
 #: What ``hosted_environment_of_root`` recognises. The repository's tests replace this module attribute (a fake control
 #: plane cannot sign as AirPrompter); that changes which pins count as AirPrompter's, never what a pinned agent trusts.
-RECOGNISED: Mapping[str, Mapping[str, str]] = HOSTED_ROOTS
+_RECOGNISED: Mapping[str, Mapping[str, str]] = HOSTED_ROOTS
 
 
 def hosted_environment_of_root(pinned: Mapping[str, Any]) -> Optional[str]:
@@ -36,7 +36,7 @@ def hosted_environment_of_root(pinned: Mapping[str, Any]) -> Optional[str]:
         key_id = key_thumbprint(pinned)
     except Exception:  # noqa: BLE001 — a malformed key is simply not a hosted one
         return None
-    for environment, key in RECOGNISED.items():
+    for environment, key in _RECOGNISED.items():
         if key_thumbprint(key) == key_id:
             return environment
     return None

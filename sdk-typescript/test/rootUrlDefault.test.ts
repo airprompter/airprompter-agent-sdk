@@ -113,7 +113,7 @@ test("a custom pinned root with no rootUrl fails fast at start, before the store
   rmSync(stateDir, { recursive: true, force: true });
   // The environment named is the one in the path; a baseUrl is named back as the likely answer.
   assert.match(await refusal(options(plane, { root: { pinned: publicJwkOf(plane.rootKey), hostedEnvironment: "staging" } })), /Add sync: \{ rootUrl: "https:\/\/<your service>\/roots\/staging\/root\.json" \}/);
-  assert.match(await refusal(options(plane, { baseUrl: "http://127.0.0.1:4180/" })), /For the service at http:\/\/127\.0\.0\.1:4180\/ that is usually http:\/\/127\.0\.0\.1:4180\/roots\/prod\/root\.json\.$/);
+  assert.match(await refusal(options(plane, { baseUrl: "http://127.0.0.1:4180/" })), /For the service at http:\/\/127\.0\.0\.1:4180 that is usually http:\/\/127\.0\.0\.1:4180\/roots\/prod\/root\.json\.$/);
 });
 
 test("a runtime that never syncs needs no rootUrl: no apiKey, sync.mode offline, or a full root document", async () => {
@@ -267,4 +267,32 @@ test("the root document is read conditionally: the ETag goes back, and a 304 kee
       await ap.stop();
     }
   });
+});
+
+test("a refused root document keeps no ETag: after a clock fix the next read is in full, and the release arrives", async () => {
+  const plane = promoted();
+  const seen: Array<Record<string, string>> = [];
+  let clock = Date.parse("2028-06-01T00:00:00.000Z"); // past the fake root's expiry: refused as root_expired
+  const events: Array<Record<string, unknown>> = [];
+  await asHosted("prod", publicJwkOf(plane.rootKey), async () => {
+    const ap = await AirPrompterAgent.start(options(plane, { sync: { mode: "on_invoke" }, now: () => clock, fetch: hijacked(plane, () => plane.root, seen) }, events));
+    try {
+      assert.ok(events.some((e) => e.reason === "root_expired"), JSON.stringify(events.map((e) => [e.event, e.reason])));
+      clock = Date.now();
+      await ap.syncNow();
+      assert.equal(seen[1]!["if-none-match"], undefined, "the refused document is read again in full");
+      assert.equal(ap.prompt("support.reply").render({}).versionId, "ver_reply_1");
+      await ap.syncNow();
+      assert.equal(seen[2]!["if-none-match"], '"root-1"', "an accepted document is read conditionally");
+    } finally {
+      await ap.stop();
+    }
+  });
+});
+
+test("the refusal names a baseUrl back without the user:password in it", async () => {
+  const plane = promoted();
+  const message = await refusal(options(plane, { baseUrl: "https://ops:s3cret@registry.internal.test/" }));
+  assert.ok(!message.includes("s3cret") && !message.includes("ops:"), message);
+  assert.match(message, /that is usually https:\/\/registry\.internal\.test\/roots\/prod\/root\.json\.$/);
 });

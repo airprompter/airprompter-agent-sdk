@@ -80,7 +80,7 @@ test("a root document signed by any other root is refused under the pinned dev r
   assert.deepEqual(verifyRootMetadata({ candidate: devRootDocument, trusted: trustedUnder(publicJwkOf(stranger.rootKey)), now: NOW }), { ok: false, reason: "root_signature_invalid" });
 });
 
-test("the client verifies through HOSTED_ROOTS with no root passed in: a manifest under the pinned root serves, any other is refused and never stored", async () => {
+test("the client verifies through HOSTED_ROOTS with no root passed in (a root it did not sign is refused and never stored), and through a root passed in", async () => {
   const plane = new FakeControlPlane({ organizationId: "org_test", agentId: "agt_steps", target: "prod" }, undefined, {}, { hostedEnvironment: "dev" });
   plane.grantBaseUrl = "https://bucket.test";
   plane.promote([plane.slot({ tag: "support.triage", text: "Triage: {{ticket}}", versionId: "ver_1", variables: [{ name: "ticket", required: true, trust: "end_user" }] })]);

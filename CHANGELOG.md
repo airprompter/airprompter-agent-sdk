@@ -10,6 +10,11 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### `airprompter dev` no longer misses a save when fs.watch drops an event (AIR-2268)
+- **The served folder is also re-read every 500 ms.** `fs.watch` can drop events: a busy macOS `fseventsd`, network and container mounts. When it did, a save never became a generation and the server logged nothing. A re-read that finds a different release or a different set of problems is now handled as a watch event would be: a 200 ms debounce, then a read. So a missed event costs at most one interval, and an unchanged fingerprint still never promotes. A re-read that finds nothing new logs nothing, so a bad file is reported once, not every half second. The idle cost is one read of the folder per tick: a readdir per folder, a stat per entry, a read of each prompt file and `release.json`, and one SHA-256.
+- If `fs.watch` cannot start at all, the server keeps serving on re-reads alone (`watch_unavailable` now names `rescanMs`). A file or subfolder that vanishes between the listing and the read is skipped rather than crashing the server. A served folder that is itself gone is logged once as `read_failed`, and the last generation keeps serving.
+- `cli/test/devRescan.test.ts` drives the reload loop with the watcher silenced, and with a hand-fired one.
+
 - **Runnable framework examples** (AIR-2316): `examples/langchain-typescript/`, a LangChain support agent on the approved prompt `examples/prompts/support/reply.md`, run in CI unchanged against `airprompter dev` and a fake provider (`examples/ci/run.mjs`). For a release: `version-lockstep --set` now also moves the SDK pin in every `examples/*/package.json`, and the check fails while an example pins another version.
 
 ## 1.0.0-rc.5 — 2026-11-27 (protocol 4.0.0)

@@ -24,7 +24,10 @@
  *   alters the release (a slot's bytes, model, variables, or release.json) is
  *   promoted as generation + 1, signed; an unchanged re-read is not. A file
  *   that does not parse is reported and the last good generation keeps
- *   serving.
+ *   serving. `fs.watch` can miss an event (a busy macOS fseventsd, network
+ *   and container mounts; AIR-2268), so the directory is also re-read every
+ *   500 ms: a read that differs from the last one is handled as a watch event
+ *   would be, and an unchanged fingerprint never promotes.
  * - **The keys persist.** `<dir>/.airprompter-dev/keys.json` (mode 0600) holds
  *   the dev root and signing keys; `root.pub.json` beside it is what a client
  *   pins (`--root`). A root pinned yesterday verifies today's generations.
@@ -49,7 +52,7 @@
  * ```
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import type { ManifestPayload, ManifestSlot, P256PrivateJwk, SlotVariable, Target } from "../../../sdk-typescript/packages/sdk/src/core/protocol/types.js";
@@ -157,11 +160,27 @@ export function parsePromptFile(relativePath: string, raw: string): DevSlotSpec 
   return { tag, text: content, model: meta.model ?? "claude-sonnet-5", variables, versionId: meta.version ?? `dev_${sha256Prefixed(Buffer.from(content, "utf8")).slice(7, 19)}` };
 }
 
-function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir).sort()) {
+function walk(dir: string, out: string[] = [], root = true): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir).sort();
+  } catch (error) {
+    // A subfolder removed while it is read (a rename, a checkout) is simply not there; the served folder itself is.
+    if (!root && (error as NodeJS.ErrnoException).code === "ENOENT") return out;
+    throw error;
+  }
+  for (const entry of entries) {
     if (entry.startsWith(".")) continue;
     const path = join(dir, entry);
-    if (statSync(path).isDirectory()) walk(path, out);
+    let isDirectory: boolean;
+    try {
+      isDirectory = statSync(path).isDirectory();
+    } catch (error) {
+      // An editor's temp file can vanish between the listing and the stat: skip it, as the next read will.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (isDirectory) walk(path, out, false);
     else if (PROMPT_FILE.test(entry)) out.push(path);
   }
   return out;
@@ -246,6 +265,125 @@ export function promoteRelease(plane: FakeControlPlane, release: DevRelease, ove
   return plane.generation;
 }
 
+/** How often the directory is re-read as a fallback to `fs.watch` (AIR-2268). */
+export const DEV_RESCAN_MS = 500;
+/** How long the directory must be quiet after an event before it is read. */
+export const DEV_DEBOUNCE_MS = 200;
+
+type WatchFn = (dir: string, listener: (name: string | null) => void) => { close(): void };
+
+const nodeWatch: WatchFn = (dir, listener) => watch(dir, { recursive: true }, (_kind, name) => listener(name === null ? null : String(name)));
+
+export interface DevWatchOptions {
+  dir: string;
+  /** The release as read when serving began. */
+  initial: DevRelease;
+  /** The fingerprint being served now: a read with this fingerprint is never promoted. */
+  served: () => string;
+  /** A read whose release differs from the one served: promote it. */
+  promote: (next: DevRelease) => void;
+  log: (event: Record<string, unknown>) => void;
+  /** Injected by tests; `fs.watch(dir, { recursive: true })` otherwise. */
+  watch?: WatchFn;
+  rescanMs?: number;
+  debounceMs?: number;
+}
+
+export interface DevWatcher {
+  close(): void;
+  /** Counters a test can wait on: completed rescans, and completed reloads (debounced reads that may promote). */
+  readonly stats: { rescans: number; reloads: number };
+}
+
+/**
+ * The directory's hot reload. A watch event starts a debounce; when the directory has been quiet for `debounceMs` it
+ * is read, its problems are logged, and a release whose fingerprint differs from the served one is promoted.
+ *
+ * `fs.watch` can drop events, so every `rescanMs` the directory is also read. A rescan that finds a different
+ * fingerprint or a different set of problems from the last read starts the same debounce, as if a watch event had
+ * come; one that finds the same does nothing and logs nothing. So a missed event costs at most one rescan interval,
+ * and an unchanged fingerprint is never promoted on either path.
+ *
+ * The idle cost is one read of the directory per tick: a readdir per folder, a stat per entry, and a read of every
+ * prompt file and release.json, then one SHA-256 over the parsed release.
+ */
+export function watchDevRelease(options: DevWatchOptions): DevWatcher {
+  const { dir, log } = options;
+  const rescanMs = options.rescanMs ?? DEV_RESCAN_MS;
+  const debounceMs = options.debounceMs ?? DEV_DEBOUNCE_MS;
+  const stats = { rescans: 0, reloads: 0 };
+  const problemsKey = (release: DevRelease) => JSON.stringify(release.problems);
+  let lastFingerprint = options.initial.fingerprint;
+  let lastProblems = problemsKey(options.initial);
+  let lastReadError: string | null = null;
+  let timer: NodeJS.Timeout | null = null;
+  let closed = false;
+
+  const read = (): DevRelease | null => {
+    try {
+      const release = readDevRelease(dir);
+      lastReadError = null;
+      return release;
+    } catch (error) {
+      // The folder itself is gone or unreadable: keep serving the last generation, say so once.
+      const reason = (error as Error).message;
+      if (reason !== lastReadError) log({ event: "read_failed", reason });
+      lastReadError = reason;
+      return null;
+    }
+  };
+  const reload = () => {
+    timer = null;
+    if (closed) return;
+    const next = read();
+    stats.reloads += 1;
+    if (!next) return;
+    lastFingerprint = next.fingerprint;
+    lastProblems = problemsKey(next);
+    for (const problem of next.problems) log({ event: "problem", problem });
+    if (next.slots.length === 0) {
+      log({ event: "kept", reason: "no prompt files; the last generation keeps serving" });
+      return;
+    }
+    if (next.fingerprint === options.served()) return;
+    options.promote(next);
+  };
+  const changed = () => {
+    if (closed) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(reload, debounceMs);
+  };
+
+  let watcher: { close(): void } | null = null;
+  try {
+    watcher = (options.watch ?? nodeWatch)(dir, (name) => {
+      if (name && name.startsWith(DEV_DIR)) return;
+      changed();
+    });
+  } catch (error) {
+    log({ event: "watch_unavailable", reason: (error as Error).message, rescanMs });
+  }
+  const rescan = setInterval(() => {
+    // A debounce already running reads the directory itself when it ends.
+    if (closed || timer) return;
+    const now = read();
+    stats.rescans += 1;
+    if (now && (now.fingerprint !== lastFingerprint || problemsKey(now) !== lastProblems)) changed();
+  }, rescanMs);
+  rescan.unref();
+
+  return {
+    stats,
+    close() {
+      closed = true;
+      clearInterval(rescan);
+      if (timer) clearTimeout(timer);
+      timer = null;
+      watcher?.close();
+    },
+  };
+}
+
 export async function dev(argv: string[], ctx: Context): Promise<number> {
   const parsed = parse(argv, DEV_OPTIONS);
   if (flag(parsed, "help")) {
@@ -294,31 +432,18 @@ export async function dev(argv: string[], ctx: Context): Promise<number> {
   out.line(`Try: AIRPROMPTER_AGENT_KEY=${DEV_API_KEY} airprompter pull --org ${scope.organizationId} --agent ${scope.agentId} --environment ${scope.target} --root ${rootPubPath} --hosted-environment ${scope.target} --base-url ${server.baseUrl} --out ./release.apbundle --plaintext`);
 
   // Hot reload: a change that alters the release is a generation; anything else is not.
-  let timer: NodeJS.Timeout | null = null;
-  let watcher: FSWatcher | null = null;
-  const reload = () => {
-    timer = null;
-    const next = readDevRelease(dir);
-    for (const problem of next.problems) log({ event: "problem", problem });
-    if (next.slots.length === 0) {
-      log({ event: "kept", reason: "no prompt files; the last generation keeps serving" });
-      return;
-    }
-    if (next.fingerprint === release.fingerprint) return;
-    release = next;
-    const generation = promoteRelease(plane, release, overrides);
-    writeFileSync(counterPath, `${generation}\n`);
-    log({ event: "generation", generation, slots: release.slots.map((s) => s.tag), applyPolicy: overrides.applyPolicy ?? release.options.applyPolicy ?? "auto" });
-  };
-  try {
-    watcher = watch(dir, { recursive: true }, (_kind, name) => {
-      if (name && String(name).startsWith(DEV_DIR)) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(reload, 200);
-    });
-  } catch (error) {
-    log({ event: "watch_unavailable", reason: (error as Error).message });
-  }
+  const watcher = watchDevRelease({
+    dir,
+    initial: release,
+    served: () => release.fingerprint,
+    promote: (next) => {
+      release = next;
+      const generation = promoteRelease(plane, release, overrides);
+      writeFileSync(counterPath, `${generation}\n`);
+      log({ event: "generation", generation, slots: release.slots.map((s) => s.tag), applyPolicy: overrides.applyPolicy ?? release.options.applyPolicy ?? "auto" });
+    },
+    log,
+  });
 
   out.flush();
   log({ event: "serving", baseUrl: server.baseUrl, generation: plane.generation });
@@ -330,8 +455,7 @@ export async function dev(argv: string[], ctx: Context): Promise<number> {
     process.once("SIGTERM", stop);
     if (exitAfter) setTimeout(stop, Number(exitAfter) * 1000).unref();
   });
-  if (timer) clearTimeout(timer);
-  watcher?.close();
+  watcher.close();
   await server.close();
   log({ event: "stopped", generation: plane.generation });
   return EXIT.ok;

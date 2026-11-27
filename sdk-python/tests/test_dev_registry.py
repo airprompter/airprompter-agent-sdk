@@ -116,17 +116,20 @@ def test_python_sdk_syncs_from_airprompter_dev_and_honours_unlock_required_local
                 f.write("---\nvariables: ticket!\n---\nTriage {{ticket}} carefully.\n")
             _wait(lambda: server.promoted() >= 2, lambda: f"the server to promote generation 2 (dev: {server.log()})")
             assert server.promoted() == 2, f"one save, one generation: the server promoted past generation 2 (dev: {server.log()})"
-            _wait(lambda: ap.generation == 2, lambda: f"the runtime on generation 2 (status: {ap.status()}; dev: {server.log()})")
-            # Again, at least one client poll later: a second promotion of the same save has had time to land.
+            # `>=`: a runtime that went past 2 is checked against the server first, so a double promotion is named as the
+            # server's fault, not as a runtime that never arrived.
+            _wait(lambda: ap.generation >= 2, lambda: f"the runtime on generation 2 (status: {ap.status()}; dev: {server.log()})")
             assert server.promoted() == 2, f"one save, one generation: the server promoted past generation 2 (dev: {server.log()})"
+            assert ap.generation == 2, f"the runtime past generation 2 the server never promoted (status: {ap.status()})"
             assert ap.prompt("support.triage").render(ticket="T-2").text == "Triage T-2 carefully."
             # release.json turns unlock_required on: generation 3 is staged and waits for the unlock.
             with open(os.path.join(prompts, "release.json"), "w", encoding="utf-8") as f:
                 json.dump({"applyPolicy": "unlock_required"}, f)
             _wait(lambda: server.promoted() >= 3, lambda: f"the server to promote generation 3 (dev: {server.log()})")
             assert server.promoted() == 3, f"one save, one generation: the server promoted past generation 3 (dev: {server.log()})"
-            _wait(lambda: ap.status().staged_generation == 3, lambda: f"generation 3 staged (status: {ap.status()}; dev: {server.log()})")
+            _wait(lambda: (ap.status().staged_generation or 0) >= 3, lambda: f"generation 3 staged (status: {ap.status()}; dev: {server.log()})")
             assert server.promoted() == 3, f"one save, one generation: the server promoted past generation 3 (dev: {server.log()})"
+            assert ap.status().staged_generation == 3, f"staged past generation 3 (status: {ap.status()})"
             assert ap.generation == 2
             assert ap.status().apply_state == "awaiting_unlock"
             unlocked = ap.unlock()

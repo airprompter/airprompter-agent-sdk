@@ -23,7 +23,7 @@ npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.4 @airprompter/datastor
 Pin every package exactly. An unpinned datastore installs 0.6.0, which brings
 the old split packages in beside this one. npm's default range,
 `^1.0.0-rc.4`, also matches later candidates, and a later candidate removes
-`ap.wrap` (see *Coming from `ap.wrap`?* below).
+the wrapped clients (see *Coming from an earlier candidate?* below).
 
 | Import | Use it when |
 | --- | --- |
@@ -425,14 +425,12 @@ Every adapter logs the same events (`ADAPTER_EVENTS` on
 `/frameworks/contract`), each with `adapter`, `slot` and `method`. Pass the
 agent's clock as `now` to an adapter when you replay recorded runs.
 
-**Coming from `ap.wrap`?** It is gone, with `ap.aiSdkMiddleware` and the
-match on rendered text. `ap.wrap(new OpenAI())` becomes
-`instrument(new OpenAI(), ap, { slot })` from
-`@airprompter/agent-sdk/frameworks/openai` (or `/anthropic`), and
-`ap.aiSdkMiddleware()` becomes `airprompterMiddleware(ap, { slot })` from
-`/frameworks/ai-sdk`. To keep placing the text yourself, leave out `slot` and
-call inside `ap.attribute(rendered, fn)`. An Azure deployment or a gateway
-alias whose id is not the release's needs `modelFor`, or nothing is measured.
+**Coming from an earlier candidate?** The wrapped clients, the AI SDK
+method on the agent and the match on rendered text are gone; the
+[CHANGELOG](../CHANGELOG.md) entry for this release maps each one to its
+adapter. To keep placing the text yourself, leave out `slot` and call inside
+`ap.attribute(rendered, fn)`. An Azure deployment or a gateway alias whose id
+is not the release's needs `modelFor`, or nothing is measured.
 
 Tested against clients shaped like the real ones and the real `ai` in CI,
 and against the latest `openai`, `@anthropic-ai/sdk` and `ai` releases

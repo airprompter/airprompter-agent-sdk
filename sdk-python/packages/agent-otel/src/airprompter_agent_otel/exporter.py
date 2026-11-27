@@ -51,11 +51,17 @@ from typing import Any, Callable, Mapping, Optional, Union
 import httpx
 
 from airprompter_agent.core import LATENCY_BUCKET_EDGES_MS, SDK_VERSION, UploadOutcome, UploadSegment
-from airprompter_agent.core._util import iso_ms
 
 OTLP_SCOPE_NAME = "airprompter"
 _DELTA = 1  # AGGREGATION_TEMPORALITY_DELTA
 _ISO = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$")
+
+
+def _iso_ms(epoch_ms: float) -> str:
+    """``2026-09-12T14:03:10.123Z``, what ``Date#toISOString`` writes."""
+    seconds, millis = divmod(int(epoch_ms), 1000)
+    return dt.datetime.fromtimestamp(seconds, tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + f".{millis:03d}Z"
+
 
 Attribute = dict[str, Any]
 
@@ -254,7 +260,7 @@ class OtlpUploadSink:
             result = ExportResult(False, f"exporter:{error or 'error'}")
         if result is None or result.ok:
             self.exported += 1
-            self.last_export_at = iso_ms(self._now_ms())
+            self.last_export_at = _iso_ms(self._now_ms())
             self.last_error = None
             return UploadOutcome("ok")
         self.last_error = result.reason or "failed"
@@ -268,4 +274,12 @@ class OtlpUploadSink:
         return UploadOutcome("dropped", reason=self.last_error)
 
 
-__all__ = ["OTLP_SCOPE_NAME", "ExportResult", "Exporter", "OtlpUploadSink", "http_json_exporter", "otlp_attribute", "spool_rows_to_otlp"]
+__all__ = [
+    "ExportResult",
+    "Exporter",
+    "OTLP_SCOPE_NAME",
+    "OtlpUploadSink",
+    "http_json_exporter",
+    "otlp_attribute",
+    "spool_rows_to_otlp",
+]

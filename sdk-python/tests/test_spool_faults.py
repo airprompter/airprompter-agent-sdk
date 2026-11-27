@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from airprompter_agent.telemetry.spool.writer import HOST_SPOOL_BUDGET_BYTES, DirectorySink
-from airprompter_agent.core.testing import MemoryFs
+from airprompter_agent.testing import MemoryFs
 
 DIR = "/state/airprompter/agt_1/prod/spool/telemetry"
 MINUTE = 1_789_300_800_000.0  # 2026-09-13T12:00:00Z

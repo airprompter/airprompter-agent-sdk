@@ -20,9 +20,17 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from airprompter_agent.sync import KvEntry
-from airprompter_agent.core._util import check_condition
 
-__all__ = ["S3KvStore", "s3_kv_store"]
+__all__ = [
+    "S3KvStore",
+    "s3_kv_store",
+]
+
+
+def _check_condition(if_absent: bool, if_version: Optional[str]) -> None:
+    """Exactly one condition, always: an unconditional write is not part of the ``KvStore`` contract."""
+    if if_absent == (if_version is not None):
+        raise ValueError("put takes exactly one condition: if_absent=True or if_version=<the version read>")
 
 
 def _error(error: BaseException) -> tuple[Optional[str], Optional[int]]:
@@ -65,7 +73,7 @@ class S3KvStore:
         return KvEntry(body, etag)
 
     def put(self, key: str, value: str, *, if_absent: bool = False, if_version: Optional[str] = None) -> bool:
-        check_condition(if_absent, if_version)
+        _check_condition(if_absent, if_version)
         condition = {"IfNoneMatch": "*"} if if_absent else {"IfMatch": if_version}
         try:
             self._client.put_object(Bucket=self._bucket, Key=self._prefix + key, Body=value.encode("utf-8"), ContentType="application/json; charset=utf-8", **condition)

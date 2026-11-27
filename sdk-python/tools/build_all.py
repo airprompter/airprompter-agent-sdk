@@ -45,9 +45,9 @@ PROTOCOL_VERSION = "{version}"
 WHEEL_TOP_LEVEL = {"agent": "airprompter_agent", "agent-otel": "airprompter_agent_otel", "datastore-s3": "airprompter_datastore_s3", "datastore-postgres": "airprompter_datastore_postgres", "datastore-redis": "airprompter_datastore_redis"}
 ALONE_CHECK = """
 import importlib, importlib.util
-for module, name in (("airprompter_agent", "AirPrompterAgent"), ("airprompter_agent.core", "verify_manifest"), ("airprompter_agent.core.testing", None), ("airprompter_agent.sync", "SlotStore"), ("airprompter_agent.runtime", "ReleaseResolver"), ("airprompter_agent.telemetry", "SpoolWriter")):
+for module, name in (("airprompter_agent", "AirPrompterAgent"), ("airprompter_agent.core", "verify_manifest"), ("airprompter_agent.testing", "MemoryFs"), ("airprompter_agent.sync", "SlotStore"), ("airprompter_agent.runtime", "ReleaseResolver"), ("airprompter_agent.telemetry", "SpoolWriter")):
     loaded = importlib.import_module(module)
-    assert name is None or callable(getattr(loaded, name)), f"{module}.{name}"
+    assert callable(getattr(loaded, name)), f"{module}.{name}"
 assert importlib.util.find_spec("airprompter_agent_otel") is None, "the agent's wheel carries no exporter"
 """
 TOGETHER_CHECK = """

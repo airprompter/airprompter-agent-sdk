@@ -89,4 +89,7 @@ def instrument(client: Any, ap: InstrumentRuntime, *, slot: Optional[str] = None
     return instrument_client(client, ap, adapter="anthropic", methods=ANTHROPIC_METHODS, apply=apply_placement, slot=slot, model_for=model_for, now=now)
 
 
-__all__ = ["ANTHROPIC_METHODS", "apply_placement", "instrument"]
+__all__ = [
+    "apply_placement",
+    "instrument",
+]

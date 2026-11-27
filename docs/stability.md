@@ -11,6 +11,7 @@ line in a test, so a change to the promise is a reviewed diff:
 | Language | The pins |
 |---|---|
 | TypeScript | [`sdk-typescript/test/publicSurface.test.ts`](../sdk-typescript/test/publicSurface.test.ts) |
+| Python | `PROMISE` in [`sdk-python/tests/test_package_shape.py`](../sdk-python/tests/test_package_shape.py): each module's `__all__` |
 
 Before 1.0.0 the release candidates hold the same rule loosely: a candidate
 may still remove a name, and says so in the [changelog](../CHANGELOG.md).
@@ -36,6 +37,29 @@ TypeScript, one package and four beside it, each on the same version:
 | `@airprompter/datastore-postgres` | A `KvStore` over Postgres. |
 | `@airprompter/datastore-redis` | A `KvStore` over Redis. |
 
+Python, one distribution and four beside it, each on the same version. A
+module's promise is its `__all__`; a layer's package carries other names as
+attributes, for the layers above it, and they are not public. The names
+differ where the languages do (`snake_case`, classes where TypeScript has
+object literals and unions); each language's pins are its own. The
+distributions ship `py.typed`, so type checkers read the annotations:
+
+| Module | What it is for |
+|---|---|
+| `airprompter_agent` | The agent, its options and results, and the run's types: the Python counterpart of the TypeScript root. It loads on first use, so importing a layer never loads the agent. |
+| `airprompter_agent.core` | As `@airprompter/agent-sdk/core`. |
+| `airprompter_agent.sync` | As `@airprompter/agent-sdk/sync`, with the `kms`, `vault` and `os_keystore` key providers. |
+| `airprompter_agent.runtime` | As `@airprompter/agent-sdk/runtime`. |
+| `airprompter_agent.telemetry` | As `@airprompter/agent-sdk/telemetry`. |
+| `airprompter_agent.testing` | The CI kit: `MemoryFs`, `FakeClock`. |
+| `airprompter_agent.frameworks.openai` | The openai client adapter, sync and async. |
+| `airprompter_agent.frameworks.anthropic` | The anthropic client adapter, sync and async. |
+| `airprompter_agent.frameworks.litellm` | The LiteLLM callback. |
+| `airprompter_agent_otel.exporter` | The spool as OTLP metrics, to any collector. |
+| `airprompter_datastore_s3` | A `KvStore` over S3. |
+| `airprompter_datastore_postgres` | A `KvStore` over Postgres. |
+| `airprompter_datastore_redis` | A `KvStore` over Redis. |
+
 What the promise covers, for every name on those lists:
 
 - **The name and its kind.** A value stays a value, a class stays a class,
@@ -51,7 +75,8 @@ What the promise covers, for every name on those lists:
   `ErrorClass`, `RefusalCode`, `UsageSource`, `StoreErrorCode`, the keys of
   `SlotInference`), and the discriminant of a result union (`kind`, `status`:
   `BundleOutcome`, `FlushOutcome`, `HydrateOutcome`, …), may gain a member in
-  a minor release. Give a `switch` over one a default branch.
+  a minor release. Give a `switch` (TypeScript) or an `if`/`match` chain
+  (Python) a default branch that treats an unknown member as the safe case.
 - **Interfaces the SDK hands you** (`RunSession`, `AgentRuntime`,
   `Placement`, a result or a status) may gain members in a minor release, so
   do not implement them yourself. **Interfaces you implement** (`KvStore`,
@@ -62,7 +87,8 @@ What the promise covers, for every name on those lists:
   say a listed name does.
 - **Error identity.** An error is recognised by its `name` and `code`
   (`errorNamed`, `isStoreError`, …), never by `instanceof`, so two copies of
-  the SDK in one process agree.
+  the SDK in one process agree. In Python an error is a class per name,
+  caught with `except`, and its `code` is the contract.
 - **Both module systems** (TypeScript). Every specifier resolves from
   `import` and from `require`, each with its own declarations; dropping
   either is a major release.
@@ -80,16 +106,19 @@ The wire is versioned apart from the SDK: the protocol in
 
 These resolve, and may change in any release:
 
-- `@airprompter/agent-sdk/frameworks/contract`: the adapter contract
-  (AIR-2231). It is what the adapters above are built on, and it keeps moving
-  while new frameworks prove it. Write an adapter on it, and pin the SDK
-  exactly.
+- `@airprompter/agent-sdk/frameworks/contract` and
+  `airprompter_agent.frameworks.contract`: the adapter contract (AIR-2231).
+  It is what the adapters above are built on, and it keeps moving while new
+  frameworks prove it. Write an adapter on it, and pin the SDK exactly.
 - `@airprompter/agent-sdk/frameworks/steps`: the no-code automation core
   under the Zapier and n8n integrations, until they pass the shared adapter
   suite.
-- Any name a promised specifier does not list. Each layer has a barrel the
-  other layers import (`core/index.ts` and its kin), and its names are not
-  public: the subpath is the curated `public.ts` beside it.
+- Any name a promised specifier does not list. Each TypeScript layer has a
+  barrel the other layers import (`core/index.ts` and its kin), and its names
+  are not public: the subpath is the curated `public.ts` beside it. A Python
+  layer's attributes outside its `__all__` are the same, and a module inside a
+  layer (`airprompter_agent.core.protocol`, `airprompter_agent.core._util`)
+  is never public.
 - Any path past the exports map (`@airprompter/agent-sdk/dist/…`): Node
   refuses it with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
 - The text of a log line or an error message: an error's `code` is the

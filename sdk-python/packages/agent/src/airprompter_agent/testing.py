@@ -1,9 +1,11 @@
-"""The testing kit (S2, AIR-1970): a filesystem that fills, fails and loses files, and a clock a test moves by hand.
+"""``airprompter_agent.testing``, the CI kit (S2, AIR-1970; the TypeScript `/testing`): a filesystem that fills, fails and loses files, and a clock a test moves by hand.
 
 What our own tests run over, and what a customer's CI can import to prove the same things about their host.
 Nothing here is loaded by the runtime.
 
 Example::
+
+    from airprompter_agent.testing import FakeClock, MemoryFs
 
     fs = MemoryFs(capacity_bytes=4096)   # full at 4 KiB: the next write raises OSError(ENOSPC)
     fs.fail_next("fsync", "EIO")         # the next fsync fails, once
@@ -18,9 +20,12 @@ import errno
 import re
 from typing import Optional
 
-from ..ports import ClockPort, FsPort
 
-__all__ = ["MemoryFs", "FakeClock", "ClockPort", "FsPort"]
+# The names 1.0 promises (docs/stability.md): tests/test_package_shape.py pins them. The ports (`FsPort`, `ClockPort`) are `core`'s.
+__all__ = [
+    "FakeClock",
+    "MemoryFs",
+]
 
 
 def _failure(code: str, path: str) -> OSError:

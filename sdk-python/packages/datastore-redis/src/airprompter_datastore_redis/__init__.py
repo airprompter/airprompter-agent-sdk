@@ -20,9 +20,17 @@ import re
 from typing import Any, Optional
 
 from airprompter_agent.sync import KvEntry
-from airprompter_agent.core._util import check_condition
 
-__all__ = ["RedisKvStore", "redis_kv_store"]
+__all__ = [
+    "RedisKvStore",
+    "redis_kv_store",
+]
+
+
+def _check_condition(if_absent: bool, if_version: Optional[str]) -> None:
+    """Exactly one condition, always: an unconditional write is not part of the ``KvStore`` contract."""
+    if if_absent == (if_version is not None):
+        raise ValueError("put takes exactly one condition: if_absent=True or if_version=<the version read>")
 
 # The same scripts, byte for byte, as the TypeScript adapter. KEYS[1] the entry hash, KEYS[2] the index;
 # ARGV[1] the value, ARGV[2] the logical key, ARGV[3] the version read.
@@ -65,7 +73,7 @@ class RedisKvStore:
         return None if value is None or version is None else KvEntry(value, version)
 
     def put(self, key: str, value: str, *, if_absent: bool = False, if_version: Optional[str] = None) -> bool:
-        check_condition(if_absent, if_version)
+        _check_condition(if_absent, if_version)
         if if_absent:
             reply = self._client.execute_command("EVAL", PUT_IF_ABSENT, 2, self._entry(key), self._index, value, key)
         else:

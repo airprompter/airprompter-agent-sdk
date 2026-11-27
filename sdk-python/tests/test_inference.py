@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from airprompter_agent import apply_inference as exported_apply_inference
+from airprompter_agent.runtime import apply_inference as exported_apply_inference
 from airprompter_agent.frameworks.openai import instrument
 from airprompter_agent.core.golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, run_golden_set
 from airprompter_agent.core.protocol.trust import inference_digest_input, release_digest

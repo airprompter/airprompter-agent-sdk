@@ -12,6 +12,7 @@ Example::
 from ._version import PROTOCOL_VERSION
 from .assignment import ASSIGNMENT_MODULUS, AUDIENCE_LIMITS, RAMP_MAX_STEPS, RAMP_MIN_STEP_MS, Assignment, AssignmentError, StepError, arm_for_bucket, assign_arm, bucket_from_hash, capabilities_implemented, effective_arms, ordered_steps, ramp_weights_at, servable_experiments, frozen_experiment, servable_overrides, servable_slots, subject_hash, validate_arms, validate_ramp
 from .capabilities import SUPPORTED_CAPABILITIES
+from .hosted_roots import HOSTED_ROOT_URLS, HOSTED_ROOTS, hosted_environment_of_root, root_url_for
 from .canonical_json import UNDEFINED, CanonicalJsonError, canonical_bytes, canonical_json, sha256_prefixed
 from .trust import (
     AGENT_ID,
@@ -35,6 +36,10 @@ from .trust import (
 )
 
 __all__ = [
+    "HOSTED_ROOTS",
+    "HOSTED_ROOT_URLS",
+    "hosted_environment_of_root",
+    "root_url_for",
     "AGENT_ID",
     "ASSIGNMENT_MODULUS",
     "AUDIENCE_LIMITS",

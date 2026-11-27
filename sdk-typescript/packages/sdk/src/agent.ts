@@ -16,7 +16,7 @@
  * const ap = await AirPrompterAgent.start({
  *   organizationId, agentId, target: "prod",
  *   apiKey: process.env.AIRPROMPTER_AGENT_KEY, // omit to run fully offline from the store or a vendored bundle
- *   root: { pinned: PINNED_ROOT_JWK }, // AirPrompter's root key for the public service; never your app's target
+ *   root: { pinned: PINNED_ROOT_JWK }, // AirPrompter's production root (HOSTED_ROOTS.prod); its root.json is read from api.airprompter.com
  *   sync: { mode: "resident", pollSeconds: 30 },
  * });
  * const r = ap.prompt("support.triage", { subject: userId }).render({ team: "Billing", ticket: userMessage });
@@ -34,7 +34,7 @@ import { join, resolve as resolvePath } from "node:path";
 
 import { bundlePayloadBytes, openBundle, type DistributionKey } from "./core/index.js";
 import { rampWeightsAt } from "./core/index.js";
-import { instant, keyThumbprint, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./core/index.js";
+import { instant, keyThumbprint, rootUrlFor, trustedRootFromPinnedKey, verifyManifest, verifyRootMetadata } from "./core/index.js";
 import type { ApplyPolicy, Bundle, Directive, HostedEnvironment, Manifest, ManifestPayload, ManifestSlot, P256PublicJwk, RefusalCode, RootMetadata, SlotVariable, Target, UploadSink } from "./core/index.js";
 import { copyAudienceTags, validAudienceKey, validAudienceLabel, mintRunRef, parseRunRef, type RunRefEntry } from "./core/index.js";
 import type { Delimiters } from "./core/index.js";
@@ -112,7 +112,13 @@ export interface StartOptions {
   /** The customer's countersign root, when the target requires countersign. */
   countersignRoot?: RootMetadata;
   requireCountersign?: boolean;
-  /** How this process syncs releases. */
+  /**
+   * How this process syncs releases. `rootUrl` is where the root document (the signing keys under the pinned root) is
+   * read. With `root.pinned` set to one of AirPrompter's hosted roots it defaults to that environment's
+   * (`https://api.airprompter.com/roots/prod/root.json`, `https://api.airprompter.dev/roots/dev/root.json`); any other
+   * pinned root has no default, and a runtime that syncs refuses to start without one. What it serves is trusted only
+   * if it verifies against the pinned key.
+   */
   sync?: { mode?: SyncMode; pollSeconds?: number; edgePointerUrl?: string; rootUrl?: string };
   /** Tier 3: a vendored `.apbundle` (path or object) and, for an encrypted one, the distribution key. */
   vendoredBundle?: { bundle: Bundle | string; distributionKey?: DistributionKey };
@@ -571,6 +577,8 @@ export class AirPrompterAgent implements AgentRuntime {
   private readonly sink: SpoolSink;
   private readonly directorySink: DirectorySink | null;
   private readonly client: SyncClient | null;
+  /** Where the root document is read: `sync.rootUrl`, else the hosted default for the pinned root, else nowhere. Set once, at start. */
+  private rootUrl: string | null = null;
 
   private constructor(
     private readonly options: StartOptions,
@@ -649,6 +657,9 @@ export class AirPrompterAgent implements AgentRuntime {
     if (typeof options.agentId !== "string" || !AGENT_ID.test(options.agentId)) {
       throw new AgentStartError("invalid_options", "options.agentId must be an agent id: a letter or digit, then up to 127 letters, digits, dots, underscores, colons or hyphens");
     }
+    // Where the signing keys are learned, before anything opens: a syncing runtime that could never verify refuses here.
+    const rootUrl = rootUrlFor({ rootUrl: options.sync?.rootUrl, pinned: "pinned" in options.root ? options.root.pinned : null, hostedEnvironment: "pinned" in options.root ? options.root.hostedEnvironment : undefined, syncs: Boolean(options.apiKey) && options.sync?.mode !== "offline" });
+    if ("refused" in rootUrl) throw new AgentStartError("invalid_options", rootUrl.refused);
     const stateDir = options.stateDir ?? defaultStateDir();
     const pinnedRoot = "pinned" in options.root ? trustedRootFromPinnedKey({ purpose: "platform", environment: options.root.hostedEnvironment ?? "prod", pinnedRoot: options.root.pinned }) : options.root;
     const keyProvider = options.keyProvider ?? fileKey(join(SlotStore.path({ stateDir, agentId: options.agentId, target: options.target }), "store.key"), options.fs ?? nodeFs);
@@ -667,6 +678,8 @@ export class AirPrompterAgent implements AgentRuntime {
     // S6: the instance id is the PROCESS's, never the store's — N workers on one host are N instances in the fleet view, and
     // their same-minute windows keep distinct keys at ingest (the store's own id stays store.json's identity).
     const agent = new AirPrompterAgent(options, store, trusted, AirPrompterAgent.newInstanceId(), spoolPlacement(options, store.dir, options.now?.() ?? Date.now()), store.instanceId);
+    agent.rootUrl = rootUrl.url;
+    if (rootUrl.defaultFor) agent.log({ event: "root_url_default", environment: rootUrl.defaultFor, rootUrl: rootUrl.url });
     await agent.boot();
     return agent;
   }
@@ -1204,7 +1217,7 @@ export class AirPrompterAgent implements AgentRuntime {
     const pinned = "pinned" in this.options.root;
     const environment = pinned ? ((this.options.root as { hostedEnvironment?: HostedEnvironment }).hostedEnvironment ?? "prod") : null;
     const service = this.options.baseUrl ?? "https://api.airprompter.com";
-    return `The trusted root (keys: ${this.trustedRootKeyIds.join(", ") || "none"}) does not name the manifest's signing key. Check that ${pinned ? `root.pinned is the root of the service at ${service} and root.hostedEnvironment ("${environment}") is its environment (dev needs the dev root)` : `root belongs to the service at ${service}`}, that sync.rootUrl${this.options.sync?.rootUrl ? ` (${this.options.sync.rootUrl})` : ", if set,"} serves that environment's root.json, and that the agent key belongs to it.`;
+    return `The trusted root (keys: ${this.trustedRootKeyIds.join(", ") || "none"}) does not name the manifest's signing key. Check that ${pinned ? `root.pinned is the root of the service at ${service} and root.hostedEnvironment ("${environment}") is its environment (dev needs the dev root)` : `root belongs to the service at ${service}`}, that sync.rootUrl${this.rootUrl ? ` (${this.rootUrl}${this.options.sync?.rootUrl ? "" : ", the default for that root"})` : ", if set,"} serves that environment's root.json, and that the agent key belongs to it.`;
   }
 
   private nowMs(): number {
@@ -1331,7 +1344,7 @@ export class AirPrompterAgent implements AgentRuntime {
         now: () => this.nowIso(),
         scope: { organizationId: this.options.organizationId, agentId: this.options.agentId, target: this.options.target },
         trustedRoot: this.trustedRoot,
-        ...(this.options.sync?.rootUrl ? { fetchRoot: () => this.fetchRoot(this.options.sync!.rootUrl!) } : {}),
+        ...(this.rootUrl ? { fetchRoot: ((url: string) => () => this.fetchRoot(url))(this.rootUrl) } : {}),
         active: this.active,
         etag: this.etag,
         strandedTried: this.strandedTried,

@@ -85,8 +85,10 @@ const ap = await AirPrompterAgent.start({
   agentId: "agt_…",
   target: "prod",
   apiKey: process.env.AIRPROMPTER_AGENT_KEY, // an Agent key (distribution kind); omit to run fully offline
-  root: { pinned: { kty: "EC", crv: "P-256", x: "…", y: "…" } }, // AirPrompter's root key for the public service (prod); pass hostedEnvironment: "dev" only against AirPrompter's dev deployment — it is never your app's target
-  sync: { mode: "resident", pollSeconds: 30, edgePointerUrl: "https://…/g/<token>/generation.json" },
+  // AirPrompter's production root key. The signing keys under it are read from
+  // https://api.airprompter.com/roots/prod/root.json, and used only if they verify against this key.
+  root: { pinned: { kty: "EC", crv: "P-256", x: "hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE", y: "OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE" } },
+  sync: { mode: "resident", pollSeconds: 30 },
 });
 
 const r = ap.prompt("support.triage").render({ team: "Billing", ticket: userMessage });
@@ -98,6 +100,26 @@ const reply = await ap.observe(r, () => openai.chat.completions.create({ model: 
 // …or report by hand: ap.report({ tag: r.tag, artifactId: r.artifactId, versionId: r.versionId, arm: r.arm, model: r.model, status: "ok", latencyMs, tokens: { input, output } });
 ap.feedback(r.runRef, { thumbs: "up" });
 ```
+
+`test/readmeQuickStart.test.ts` runs this block as written against the fake
+control plane, so it is the code that works.
+
+**The root.** `root.pinned` is the trust anchor: a release is served only if
+it verifies under that key. The key alone does not name the signing keys
+under it, so the agent reads the root document too, and for AirPrompter's
+own roots it knows where: production (above, key id `044af6e8…1793`) at
+`https://api.airprompter.com/roots/prod/root.json`, and AirPrompter's dev
+deployment (key id `86267aa3…df91`, with `hostedEnvironment: "dev"`) at
+`https://api.airprompter.dev/roots/dev/root.json`. Both keys are
+`HOSTED_ROOTS` in `@airprompter/agent-sdk/core`. `hostedEnvironment` names
+AirPrompter's deployment, never your app's `target`. Any other root (the
+local registry `airprompter dev` prints, or your own service) has no
+default: add `sync: { rootUrl: "https://<your service>/roots/<env>/root.json" }`.
+A start that would sync without one fails with `AgentStartError`
+(`invalid_options`) saying so, rather than start and never verify a
+release. An explicit `rootUrl` always wins. A runtime that never syncs (no
+`apiKey`, `sync.mode: "offline"`, a vendored bundle or datastore runtime
+holding only the distribution key) needs no root URL.
 
 `render()` never touches the network. A variable declared `end_user` is
 fenced (`<ticket>…</ticket>`) so the model sees where untrusted input

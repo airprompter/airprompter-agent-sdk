@@ -80,16 +80,20 @@ editable; `python tools/build_all.py` builds every sdist and wheel into one
 
 ```python
 import os
+from openai import OpenAI
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.frameworks.openai import instrument
 
+openai = OpenAI()
 ap = AirPrompterAgent.start(
     organization_id="org_…",
     agent_id="agt_…",
     target="prod",
     api_key=os.environ["AIRPROMPTER_AGENT_KEY"],   # an Agent key (distribution kind); omit to run fully offline
-    root={"pinned": {"kty": "EC", "crv": "P-256", "x": "…", "y": "…"}},  # the environment's root key, from your Agent's Settings tab
-    sync={"mode": "resident", "poll_seconds": 30, "edge_pointer_url": "https://…/g/<token>/generation.json"},
+    # AirPrompter's production root key. The signing keys under it are read from
+    # https://api.airprompter.com/roots/prod/root.json, and used only if they verify against this key.
+    root={"pinned": {"kty": "EC", "crv": "P-256", "x": "hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE", "y": "OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE"}},
+    sync={"mode": "resident", "poll_seconds": 30},
     models={"gpt-5": {"provider": "openai"}},   # what this process can call: reported on every heartbeat, never verified
 )
 
@@ -98,13 +102,34 @@ r = ap.prompt("support.triage").render(team="Billing", ticket=user_message)
 # objects), classifies a failure into the closed error set, and returns the result unchanged.
 reply = ap.observe(r, lambda: openai.chat.completions.create(model=r.model, messages=[{"role": "system", "content": r.text}, {"role": "user", "content": user_message}]))
 # …or let an adapter place the approved text, model and settings for you (see "Use with your framework"):
-openai = instrument(OpenAI(), ap, slot="support.triage")
+client = instrument(OpenAI(), ap, slot="support.triage")
 with ap.run(subject=user_id, variables={"team": "Billing", "ticket": user_message}):
-    reply = openai.chat.completions.create(model="gpt-5", messages=[{"role": "user", "content": user_message}])
+    reply = client.chat.completions.create(model="gpt-5", messages=[{"role": "user", "content": user_message}])
 # …or report by hand:
 ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90}, tool_calls={"calls": 2, "errors": 0})
 ap.feedback(r.run_ref, thumbs="up")
 ```
+
+`tests/test_readme_quick_start.py` runs this block as written against the
+fake control plane, so it is the code that works.
+
+**The root.** `root["pinned"]` is the trust anchor: a release is served
+only if it verifies under that key. The key alone does not name the signing
+keys under it, so the agent reads the root document too, and for
+AirPrompter's own roots it knows where: production (above, key id
+`044af6e8…1793`) at `https://api.airprompter.com/roots/prod/root.json`, and
+AirPrompter's dev deployment (key id `86267aa3…df91`, with
+`"hosted_environment": "dev"`) at
+`https://api.airprompter.dev/roots/dev/root.json`. Both keys are
+`HOSTED_ROOTS` in `airprompter_agent.core`. `hosted_environment` names
+AirPrompter's deployment, never your app's `target`. Any other root (the
+local registry `airprompter dev` prints, or your own service) has no
+default: add `sync={"root_url": "https://<your service>/roots/<env>/root.json"}`.
+A start that would sync without one raises `AgentStartError`
+(`invalid_options`) saying so, rather than start and never verify a
+release. An explicit `root_url` always wins. A runtime that never syncs (no
+`api_key`, `sync.mode` `"offline"`, a vendored bundle or datastore runtime
+holding only the distribution key) needs no root URL.
 
 `render()` never touches AirPrompter's network. A variable declared `end_user` is
 fenced (`<ticket>…</ticket>`) so the model sees where untrusted input

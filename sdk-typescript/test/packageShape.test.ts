@@ -39,7 +39,7 @@ const SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datasto
 const PACKAGES = ["sdk", ...SATELLITES] as const;
 const SUBPATHS = [".", "./core", "./sync", "./runtime", "./telemetry", "./testing", "./frameworks/contract", "./frameworks/openai", "./frameworks/anthropic", "./frameworks/ai-sdk", "./frameworks/langchain", "./frameworks/steps"];
 /** Rule 4 of section 3.2: the facade's line count after AIR-2231's deletions. A change that grows it moves this number on purpose. */
-const AGENT_TS_LINES = 2461;
+const AGENT_TS_LINES = 2474;
 type Manifest = { name: string; version: string; private?: boolean; dependencies?: Record<string, string>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }>; devDependencies?: Record<string, string>; exports: Record<string, { types: string; import: string; require: string }>; typesVersions: Record<string, Record<string, string[]>>; airprompter: { sizeBudgetBytes: number | Record<string, number> } };
 const manifestOf = (name: string): Manifest => JSON.parse(readFileSync(join(root, "packages", name, "package.json"), "utf8")) as Manifest;
 

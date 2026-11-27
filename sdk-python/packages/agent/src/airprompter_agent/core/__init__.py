@@ -25,6 +25,10 @@ from .golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, GoldenCaseResult, Gol
 from .judge import JUDGE_RUBRICS, PROTECTION_CRITERIA, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
 from .ports import OS_FS, SYSTEM_CLOCK, ClockPort, FsPort, OsFs, SystemClock, fs_failure_code, fs_or_default
 from .protocol import (
+    HOSTED_ROOTS,
+    HOSTED_ROOT_URLS,
+    hosted_environment_of_root,
+    root_url_for,
     AGENT_ID,
     ASSIGNMENT_MODULUS,
     AUDIENCE_LIMITS,
@@ -90,6 +94,10 @@ except Exception:
     SDK_VERSION = "0+unknown"
 
 __all__ = [
+    "HOSTED_ROOTS",
+    "HOSTED_ROOT_URLS",
+    "hosted_environment_of_root",
+    "root_url_for",
     "APBUNDLE_INFO",
     "AGENT_ID",
     "ASSIGNMENT_MODULUS",

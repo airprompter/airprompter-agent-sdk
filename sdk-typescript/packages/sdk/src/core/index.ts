@@ -31,6 +31,7 @@ export { canonicalJson, canonicalBytes, sha256Prefixed, CanonicalJsonError } fro
 export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, validateRamp, rampWeightsAt, effectiveArms, isAssignmentError, orderedSteps, capabilitiesImplemented, servableExperiments, servableOverrides, frozenExperiment, servableSlots, AssignmentError, StepError, ASSIGNMENT_MODULUS, RAMP_MIN_STEP_MS, RAMP_MAX_STEPS } from "./protocol/assignment.js";
 export { keyThumbprint, publicJwkOf, signBytes, verifyBytes, trustedRootFromPinnedKey, verifyRootMetadata, verifyManifest, referencedPayloads, slotHashes, optionalPayloads, carriedPayloads, releaseDigest, releaseDigestInput, instant } from "./protocol/trust.js";
 export type { Verdict, VerifyManifestInput } from "./protocol/trust.js";
+export { HOSTED_ROOTS, HOSTED_ROOT_URLS, hostedEnvironmentOfRoot, rootUrlFor } from "./protocol/hostedRoots.js";
 
 export { renderTemplate, placeholdersOf, defaultOf, xmlDelimiters, MissingVariableError, UnknownVariableError } from "./render/template.js";
 export type { Delimiters, RenderInput } from "./render/template.js";

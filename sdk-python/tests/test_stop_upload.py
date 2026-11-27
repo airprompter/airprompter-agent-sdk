@@ -205,7 +205,7 @@ def test_unknown_signing_key_logs_what_to_check(state_dir):
     p = plane()
     stranger = public_jwk_of(FakeControlPlane(SCOPE).root_key)  # another root: names none of this plane's signing keys
     events: list = []
-    ap = AirPrompterAgent.start(**KW, api_key=p.api_key, base_url="https://api.dev.test", state_dir=state_dir, root={"pinned": stranger, "hosted_environment": "prod"}, sync=SyncOptions(mode="on_invoke"), transport=p.transport(), now=Clock(T0), logger=events.append)
+    ap = AirPrompterAgent.start(**KW, api_key=p.api_key, base_url="https://api.dev.test", state_dir=state_dir, root={"pinned": stranger, "hosted_environment": "prod"}, sync=SyncOptions(mode="on_invoke", root_url="https://edge.test/roots/prod/root.json"), transport=p.transport(), now=Clock(T0), logger=events.append)
     ap.stop()
     refused = next((e for e in events if e.get("reason") == "unknown_signing_key"), None)
     assert refused is not None, [(e.get("event"), e.get("reason")) for e in events]

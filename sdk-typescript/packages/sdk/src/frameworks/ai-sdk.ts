@@ -125,7 +125,9 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
   /** The model a placed call runs on, or undefined when the slot declined. Settled at the call when `transformParams` saw no model. */
   const modelOfCall = (placed: Placed, model: LanguageModelLike | undefined, method: string): LanguageModelLike | undefined => {
     if (placed.chosen) return placed.chosen;
-    if (model && model.modelId === placed.model) return (placed.chosen = model);
+    // No AI SDK passes no model to both hooks; if one did, the call runs as placed and is measured under the release's id.
+    if (!model) return (placed.chosen = { modelId: placed.model });
+    if (model.modelId === placed.model) return (placed.chosen = model);
     decline(placed.run, placed.model, method);
     return undefined;
   };
@@ -189,9 +191,9 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
       const chosen = modelOfCall(placed, model, "generate");
       if (!chosen) {
         if (placed.owned) placed.run.end();
-        return model?.doGenerate ? model.doGenerate(placed.original) : doGenerate();
+        return model.doGenerate!(placed.original);
       }
-      const call = () => (chosen === placed.caller || chosen === model ? doGenerate() : chosen.doGenerate!(params));
+      const call = () => (chosen === placed.caller || chosen === model || !chosen.doGenerate ? doGenerate() : chosen.doGenerate(params));
       return measureCall(placed.run, slot, call, { ...measure(placed), read: generateResultShape });
     },
     async wrapStream({ doStream, params, model }) {
@@ -200,12 +202,12 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
       const chosen = modelOfCall(placed, model, "stream");
       if (!chosen) {
         if (placed.owned) placed.run.end();
-        return model?.doStream ? model.doStream(placed.original) : doStream();
+        return model.doStream!(placed.original);
       }
       const measurement = beginMeasure(placed.run, slot, measure(placed));
       let result: unknown;
       try {
-        result = await (chosen === placed.caller || chosen === model ? doStream() : chosen.doStream!(params));
+        result = await (chosen === placed.caller || chosen === model || !chosen.doStream ? doStream() : chosen.doStream(params));
       } catch (error) {
         measurement.fail(error);
         throw error;

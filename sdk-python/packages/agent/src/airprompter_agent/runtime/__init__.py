@@ -1,6 +1,7 @@
 """``airprompter_agent.runtime``: serving a verified release: which slot a subject gets under which arm (the ramp
-walked on this host's clock, a retreat honoured), the rendered text with its run reference, the provider wrappers that
-attribute a model call to a render and classify what came back. Consumes a
+walked on this host's clock, a retreat honoured), the rendered text with its run reference, the run session, and the
+``ap.attribute`` scope. What the framework adapters share is in ``runtime.adapter``, reached only through
+``airprompter_agent.frameworks.contract``. Consumes a
 ``LoadedRelease`` from ``airprompter_agent.core`` — the slot store, a daemon or a bundle the customer loaded — and
 never imports the sync or the telemetry layer.
 
@@ -13,7 +14,7 @@ Example::
     rendered: Rendered = resolver.render(outcome.slot, {"customer_name": "Ada"})   # .text, .model, .run_ref
 """
 
-from .attribution import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
+from .attribution import Attribution, attribution_scope, current_attribution
 from .inference import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
 from .observe import ObserveTarget, PendingObservation, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
 from .release.resolver import Disabled, ReleaseResolver, Rendered, ResolveOutcome, Workflow, WorkflowStep, copy_inference, disabled_from, new_subject
@@ -40,7 +41,6 @@ from .variables import (
     unsourced,
 )
 from .run import DEFAULT_RUN_IDLE_TIMEOUT_MS, MAX_OPEN_RUNS, AgentRuntime, Approved, ModelResolver, Passthrough, Placement, Run, RunHost, RunInput, RunRecorder, RunRegistry, RunScope, RunSession
-from .wrap import WRAPPED_METHODS, WrapHooks, wrap_client
 
 __all__ = [
     "DEFAULT_SOURCE_MAX_BYTES",
@@ -73,14 +73,11 @@ __all__ = [
     "ObserveTarget",
     "PendingObservation",
     "ReleaseResolver",
-    "RenderRegistry",
     "Rendered",
     "ResolveOutcome",
     "UsageNormalized",
-    "WRAPPED_METHODS",
     "Workflow",
     "WorkflowStep",
-    "WrapHooks",
     "attribution_scope",
     "classify_error",
     "classify_result",
@@ -105,6 +102,4 @@ __all__ = [
     "normalize_usage",
     "observe_call",
     "observe_call_async",
-    "request_texts",
-    "wrap_client",
 ]

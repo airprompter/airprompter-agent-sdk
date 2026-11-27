@@ -51,8 +51,7 @@ from airprompter_agent.core import DistributionKey, bundle_payload_bytes, open_b
 from airprompter_agent.core import ramp_weights_at, servable_experiments, servable_slots
 from airprompter_agent.core import SUPPORTED_CAPABILITIES
 from airprompter_agent.core import AGENT_ID, TARGET_SLUG, key_thumbprint, trusted_root_from_pinned_key, verify_manifest, verify_root_metadata
-from airprompter_agent.runtime import Attribution, RenderRegistry, attribution_scope, current_attribution, request_texts
-from airprompter_agent.runtime import WrapHooks, wrap_client
+from airprompter_agent.runtime import Attribution, attribution_scope, current_attribution
 from airprompter_agent.core import copy_audience_tags, valid_audience_label
 from airprompter_agent.core import RunRefFacts, mint_run_ref, parse_run_ref, run_ref_key_from
 from airprompter_agent.core import Delimiters
@@ -583,8 +582,6 @@ class AirPrompterAgent:
         self._run_ref_keys = [self._run_ref_key, *[run_ref_key_from(secret, agent_id, target) for secret in options.get("run_ref_previous_secrets") or ()]]
         if not run_ref_secret:
             self._log({"event": "run_ref_key_store_scoped"})
-        # T33: the last renders by text hash, so a wrapped client can tell which slot a call is.
-        self._renders = RenderRegistry()
         #: The application's variable sources (``start(variables=...)``, ``ap.variables.provide()``).
         self.variables = VariableSourceRegistry(options.get("variables"))
         # A source stricter than the prompt's declaration is said once per slot and name for the life of the process.
@@ -1953,12 +1950,10 @@ class AirPrompterAgent:
 
     def _finish(self, prepared: "AirPrompterAgent._Prepared", filled: FilledRender) -> Rendered:
         rendered = self._render_observed(lambda: prepared.resolver.render(prepared.resolved, filled.values, fenced=filled.fenced, text=prepared.text), prepared.row)
-        # The registry keeps its own copy of the block: the one handed out is the caller's to edit.
-        self._renders.register(rendered.text, Attribution(rendered.tag, rendered.version_id, rendered.arm, rendered.model, copy_inference(rendered.inference), rendered.audience_ids, rendered.run_minute, rendered.artifact_id))
         self._say_stricter(rendered.tag, prepared.resolved.slot, filled)
         # The run's reference, which names every slot the run used, replaces the one-slot ref.
         run = prepared.run
-        return replace(rendered, run_ref=run.run_ref) if run is not None and not run.is_ended else rendered
+        return replace(rendered, run_ref=run.run_ref, run_bound=True) if run is not None and not run.is_ended else rendered
 
     def _context(self, prepared: "AirPrompterAgent._Prepared", tag: str, subject: Optional[str]) -> VariableSourceContext:
         return VariableSourceContext(tag=tag, name="", subject=subject, version_id=prepared.resolved.slot["versionId"], arm=prepared.resolved.arm)
@@ -2043,8 +2038,6 @@ class AirPrompterAgent:
             resolved, _run = self._runs.resolve_through(tag, subject, None, lambda run_subject, run_tags: self._resolve_slot(tag, run_subject, True, copy_audience_tags({**self._audience_tags, **run_tags}) if run_tags is not None else None), entry=False)
             slot = resolved.slot
             workflow = resolver.workflow(resolved)
-            for step in workflow.steps:
-                self._renders.register(step.text, Attribution(tag, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute, step.artifact_id, step.step_id))
         row = {"tag": tag, "artifact_id": slot["artifactId"], "version_id": slot["versionId"], "arm": workflow.arm, "model": workflow.model, "audience_ids": resolved.audience_ids, "run_minute": resolved.run_minute}
         declared = list(slot.get("variables", []))
 
@@ -2056,7 +2049,6 @@ class AirPrompterAgent:
 
         def finish(step: WorkflowStep, filled: FilledRender) -> str:
             text = self._render_observed(lambda: resolver.render_text(tag=step.step_id, text=step.text, variables=declared, values=filled.values, fenced=filled.fenced), row)
-            self._renders.register(text, Attribution(tag, step.version_id, workflow.arm, workflow.model, copy_inference(step.inference), step.audience_ids, step.run_minute, step.artifact_id, step.step_id))
             self._say_stricter(step.step_id, slot, filled)
             return text
 
@@ -2073,7 +2065,8 @@ class AirPrompterAgent:
             plan = plan_fill(tag=step.step_id, variables=declared, text=step.text, values=values, registry=self.variables)
             return finish(step, await self._fill_observed_async(lambda: fill_async(plan, context(step), self.variables), step.step_id, row))
 
-        return WorkflowHandle(model=workflow.model, arm=workflow.arm, steps=workflow.steps, variables=workflow.variables, _render_step=render_step, _render_step_async=render_step_async)
+        steps = tuple(replace(step, run_bound=True) for step in workflow.steps) if _run is not None and not _run.is_ended else workflow.steps
+        return WorkflowHandle(model=workflow.model, arm=workflow.arm, steps=steps, variables=workflow.variables, _render_step=render_step, _render_step_async=render_step_async)
 
     def _variables_status(self) -> dict[str, Any]:
         """Per slot and arm of the active release: the required variables neither a literal nor a source fills, so the
@@ -2191,33 +2184,23 @@ class AirPrompterAgent:
             return ObserveTarget(tag, rendered.version_id, entry["arm"] if entry else "none", model or rendered.model or "unknown", rendered.artifact_id, rendered.audience_ids, rendered.run_minute, rendered.step_id)
         return ObserveTarget(rendered.tag, rendered.version_id, rendered.arm, rendered.model, rendered.artifact_id, rendered.audience_ids, rendered.run_minute, getattr(rendered, "step", None))
 
-    # ------------------------------------------------------------------ T33: wrapped clients
-
-    def wrap(self, client: T) -> T:
-        """The ``openai`` or ``anthropic`` client (sync or async), observed without a change at the call site:
-        ``chat.completions.create``, ``responses.create``, ``messages.create`` (``stream=True`` or not) and the
-        ``.stream()`` helpers are timed, their usage and finish reason read, the slot's checks run on the text, and one
-        content-free observation filed — attributed to the render whose text the request carries (or to an enclosing
-        ``attribute()`` block). A call that names no render passes through untouched; nothing the wrapper does can fail
-        the call. Everything else on the client is its own."""
-        return wrap_client(client, self._wrap_hooks())  # type: ignore[return-value]
+    # ------------------------------------------------------------------ the direct path's scope
 
     def attribute(self, rendered: Union[Rendered, WorkflowStep, ObserveTarget]):
-        """``with ap.attribute(rendered):`` — every wrapped call inside the block is that render's, whatever text it carries."""
+        """``with ap.attribute(rendered):`` — every instrumented call inside the block is that render's: the caller placed the text."""
         target = self._target_of(rendered, None)
         # The observe target carries no settings; the rendered prompt (or the workflow step) does.
         return attribution_scope(Attribution(target.tag, target.version_id, target.arm, target.model, copy_inference(getattr(rendered, "inference", None)), target.audience_ids, target.run_minute, target.artifact_id, target.step))
 
-    def attribution_for(self, params: Any) -> Optional[Attribution]:
-        """The render a request's parameters name: an explicit scope first, else a message whose text is a recent render."""
-        return current_attribution() or self._renders.match(request_texts(params))
+    def current_attribution(self) -> Optional[Attribution]:
+        """The attribution an enclosing ``attribute()`` block set, if any: how an instrumented client with no slot finds its render."""
+        return current_attribution()
 
-    def _wrap_hooks(self) -> WrapHooks:
-        return WrapHooks(attribute=self.attribution_for, begin=self._begin_observation, log=self._log)
-
-    def _begin_observation(self, attribution: Attribution, model: str) -> PendingObservation:
+    def begin_observation(self, attribution: Attribution, model: str) -> PendingObservation:
+        """An observation whose clock starts now and that settles later (``.settle(result)`` / ``.fail(error)``), as a
+        stream does. Inside a run that pinned this slot it folds into the run: one request counts once."""
         target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model, attribution.artifact_id, attribution.audience_ids, attribution.run_minute, attribution.step)
-        return PendingObservation(target, lambda o: self.spool.observe(o, self._now_ms()), model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
+        return PendingObservation(target, self._record_observation(None), model=model, now=self._now_ms, evaluate=self._check_evaluator(target))
 
     def golden(self, *, invoke: Optional[GoldenInvoke] = None, tag: Optional[str] = None, staged: bool = False, concurrency: Optional[int] = None) -> list[GoldenReport]:
         """T34: run the golden sets the active (or, with ``staged=True``, the staged) release carries — every slot with one,
@@ -2337,6 +2320,10 @@ class AirPrompterAgent:
         """Open a run, or get the live one named by ``resume``: its slots stay on one version, and it counts once.
         ``fields`` are ``RunInput``'s: ``subject``, ``conversation_id``, ``tags``, ``variables``, ``resume``."""
         return self._runs.open(input if input is not None else RunInput(**fields))
+
+    def _find_run(self, run_ref: str) -> Optional[RunSession]:
+        """Internal (the adapter contract's ``_find_run``): the live run a verified reference names; never opens one."""
+        return self._runs._find_live(run_ref)
 
     def current_run(self) -> Optional[RunSession]:
         """The run this context is inside, if any, and only this agent's. A worker thread sees it when run in ``contextvars.copy_context()``."""

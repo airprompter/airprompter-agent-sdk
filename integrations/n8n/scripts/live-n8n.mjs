@@ -48,7 +48,7 @@
  * @example
  * ```sh
  * AIRPROMPTER_AGENT_ID=agent_… AIRPROMPTER_UPDATE_KEY=apa_… node scripts/live-n8n.mjs
- * # {"ok":true,"exitCode":0,"getPrompt":{"versionId":"…","servedFrom":"network",…},"expected":{"runs":1,…},…}
+ * # {"ok":true,"exitCode":0,"getPrompt":{"promptSha256":"…","versionId":"…","servedFrom":"network",…},"expected":{"runs":1,…},…}
  * ```
  */
 
@@ -440,7 +440,9 @@ try {
   const failed = checks.some((entry) => entry.state === "fail");
   finish({
     ...base,
-    getPrompt: served ? { versionId: served.versionId, arm: served.arm ?? null, generation: served.generation, model: served.model, servedFrom: served.servedFrom, leaseExpiresAt: served.leaseExpiresAt } : null,
+    // promptSha256: the sha256 of the rendered prompt the node returned, so a test can check the text without it
+    // leaving the run (sha256 of the approved text rendered with AIRPROMPTER_VARIABLES).
+    getPrompt: served ? { promptSha256: typeof served.prompt === "string" ? createHash("sha256").update(served.prompt, "utf8").digest("hex") : null, versionId: served.versionId, arm: served.arm ?? null, generation: served.generation, model: served.model, servedFrom: served.servedFrom, leaseExpiresAt: served.leaseExpiresAt } : null,
     reported: reported ? { runRef: reported.runRef, inputTokens: reported.inputTokens, outputTokens: reported.outputTokens, thumbs: "up" } : null,
     // What the agent's Metrics for this environment and slot should gain: exactly one run. If Report Run failed it may
     // still have been recorded (a timeout after the server took it), so runs is null: check Metrics before rerunning.

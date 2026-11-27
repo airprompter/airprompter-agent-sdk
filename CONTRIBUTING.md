@@ -136,7 +136,9 @@ examples, the tools and the scripts — and CI runs it.
 4. Releases are cut by maintainers by tag (`sdk-typescript/vX.Y.Z`,
    `sdk-python/vX.Y.Z`, `protocol/vX.Y.Z`, `cli/vX.Y.Z`), pushed by hand
    or with the **Tag release** workflow (tags and a commit on `main`); the
-   workflow publishes with provenance. You do not need to bump versions in a PR
+   workflow publishes with provenance. After an SDK publish, the same run tags
+   each agent SDK fork at the version it tested, as `compat/<version>`
+   ([`forks/README.md`](forks/README.md)). You do not need to bump versions in a PR
    unless asked.
 
 ## Questions

@@ -58,6 +58,8 @@ class Rendered:
     inference: Optional[Mapping[str, Any]] = None
     audience_ids: Optional[tuple[str, ...]] = None
     run_minute: Optional[str] = None
+    #: True when rendered inside an open run: ``run_ref`` is that run's, so a call measured later belongs to it.
+    run_bound: bool = False
 
 
 @dataclass(frozen=True)

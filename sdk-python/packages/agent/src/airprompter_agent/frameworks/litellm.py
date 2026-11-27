@@ -65,7 +65,9 @@ class LiteLLMRuntime(AgentRuntime, Protocol):
 
 def litellm_metadata(target: Union[Any, tuple[RunSession, str]], *, model: Optional[str] = None) -> dict[str, Any]:
     """The ``metadata=`` for ``litellm.completion``: ``(run, slot)``, a rendered prompt or a workflow step. Content-free:
-    the tag, the signed run reference, and the model when given. Read ``run.run_ref`` here, at the call: it grows."""
+    the tag, the signed run reference, and ``model``: the id you send the release's model under when it is not the
+    release's own (a deployment, a Bedrock id, a Router model group). Read ``run.run_ref`` here, at the call: it grows. A
+    prompt rendered inside ``ap.run`` is marked as that run's, as ``(run, slot)`` is."""
     if isinstance(target, tuple):
         run, slot = target
         # ``run``: the call is this run's, so a record the logger delivers after the run ended is dropped, not re-counted.
@@ -73,6 +75,9 @@ def litellm_metadata(target: Union[Any, tuple[RunSession, str]], *, model: Optio
     else:
         step = getattr(target, "step_id", None)
         fields = {"tag": step.split("#")[0], "step": step, "runRef": target.run_ref} if step else {"tag": target.tag, "runRef": target.run_ref}
+        if getattr(target, "run_bound", False):
+            # Rendered inside ``ap.run``: its reference is the run's, so a late record is the run's too, never a second row.
+            fields["run"] = True
     if model:
         fields["model"] = model
     return {METADATA_KEY: fields}
@@ -133,9 +138,9 @@ class AirPrompterLiteLLMCallback(_Base):
             return
         slot = str(entry["tag"])
         model = str(entry.get("model") or "unknown")
-        sent = kwargs.get("model")
-        if isinstance(sent, str) and sent != model and not sent.endswith("/" + model):
+        if not self._same_model(kwargs, fields, model):
             # Another model's numbers never count against this version.
+            sent = str(kwargs.get("model"))
             if (slot, sent) not in self._said:
                 self._said.add((slot, sent))
                 self._log(ADAPTER_EVENTS["model_unresolved"], slot=slot, method="completion", model=model)
@@ -173,6 +178,23 @@ class AirPrompterLiteLLMCallback(_Base):
             usage_source=usage.source,
             **cohort,
         )
+
+    @staticmethod
+    def _same_model(kwargs: Mapping[str, Any], fields: Mapping[str, Any], model: str) -> bool:
+        """Whether the call ran on the release's model: its own id, or the id the call site named for it
+        (``litellm_metadata(..., model=...)``: a deployment, a Bedrock id, a Router model group). LiteLLM logs the id
+        without its provider prefix (``azure/prod-gpt5`` arrives as ``prod-gpt5``), so both forms match."""
+        names = {model}
+        mapped = fields.get("model")
+        if isinstance(mapped, str):
+            names |= {mapped, mapped.split("/", 1)[-1]}
+        params = kwargs.get("litellm_params") if isinstance(kwargs.get("litellm_params"), Mapping) else {}
+        metadata = params.get("metadata") if isinstance(params.get("metadata"), Mapping) else {}
+        candidates = [kwargs.get("model"), metadata.get("model_group"), kwargs.get("model_group")]
+        sent = [c for c in candidates if isinstance(c, str)]
+        if not sent:
+            return True
+        return any(c in names or c.split("/", 1)[-1] in names for c in sent)
 
     def _serves(self, run: RunSession, entry: Mapping[str, Any]) -> bool:
         """Whether the run still serves the version, arm and artifact the call's reference names for its slot."""

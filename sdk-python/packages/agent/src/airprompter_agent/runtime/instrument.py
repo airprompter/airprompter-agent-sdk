@@ -36,6 +36,7 @@ from .adapt import acquire_run, begin_measure, choose_model
 from .attribution import Attribution
 from .events import ADAPTER_EVENTS
 from .inference import apply_inference
+from .observe import classify_error
 from .proxy import ClientMethod, Pending, is_async, proxy_client, tap_result
 from .run import AgentRuntime, Approved, RunSession
 
@@ -175,10 +176,10 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
             return await original(*args, **kwargs)
         try:
             send = await place_async(run, method, args, kwargs, name)
-        except BaseException:
-            # Cancelled while placing: a run this call opened ends here rather than at the idle sweep.
+        except BaseException as error:
+            # Cancelled while placing: a run this call opened ends here, with the class, rather than at the idle sweep.
             if owned:
-                run.end()
+                run.end(error_class=classify_error(error))
             raise
         pending = pending_for(run, owned, send)
         try:

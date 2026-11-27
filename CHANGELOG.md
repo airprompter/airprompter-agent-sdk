@@ -12,7 +12,7 @@ may change a public shape and says so here.
 
 ## 1.0.0-rc.5 — 2026-11-27 (protocol 4.0.0)
 
-The fifth release candidate: one contract for every framework adapter (AIR-2231), the OpenAI, Anthropic, Vercel AI SDK and LiteLLM support rebuilt as adapters on it, and the wrapped clients of rc.4 removed. It is also the first release since rc.4, so it carries **AirPrompter's production trust root pin** (#110): the Steps core can verify a production manifest only from this release on, and so can any agent pointed at the production service. The Zapier and n8n integrations get it with their own move to rc.5 (they still pin rc.4). Protocol unchanged. Python moves in lockstep (`1.0.0rc5`). No CLI release: `cli/src` uses nothing removed here.
+The fifth release candidate: one contract for every framework adapter (AIR-2231), the OpenAI, Anthropic, Vercel AI SDK and LiteLLM support rebuilt as adapters on it, and the wrapped clients of rc.4 removed. It is also the first release since rc.4, so it carries **AirPrompter's production trust root pin** (#110): the Steps core can verify a production manifest only from this release on, and so can any agent pointed at the production service. The Zapier and n8n integrations get it with their own move to rc.5 (they still pin rc.4). Protocol unchanged. Python moves in lockstep (`1.0.0rc5`). The CLI's version moves with it (lockstep); `cli/src` uses nothing removed here, so tagging `cli/v1.0.0-rc.5` is the release's call.
 
 `1.0.0-rc.1` was once reserved for this contract. That reservation is void: rc.2 to rc.4 shipped first, and a lower version would never be resolved over them, so the contract ships as rc.5 (decided by the orchestrator under the owner's delegation, 2026-11-27).
 

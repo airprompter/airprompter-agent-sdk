@@ -40,7 +40,8 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent / "packages"
+# ``AIRPROMPTER_LINT_PACKAGES`` points the lint at a copy of ``packages/`` (the probes in tests/test_package_shape.py).
+ROOT = Path(os.environ["AIRPROMPTER_LINT_PACKAGES"]) if os.environ.get("AIRPROMPTER_LINT_PACKAGES") else Path(__file__).resolve().parent.parent / "packages"
 PACKAGE = "airprompter_agent"
 LAYERS = {"core": 0, "sync": 1, "runtime": 1, "telemetry": 1, "agent": 2, "frameworks": 2}
 SATELLITES = {"agent-otel": "airprompter_agent_otel", "datastore-s3": "airprompter_datastore_s3", "datastore-postgres": "airprompter_datastore_postgres", "datastore-redis": "airprompter_datastore_redis"}

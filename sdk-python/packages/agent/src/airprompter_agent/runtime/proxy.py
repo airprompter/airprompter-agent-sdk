@@ -278,7 +278,8 @@ class _TappedStream(_Forwarding):
 
 class _TappedAsyncStream(_Forwarding):
     async def __aiter__(self) -> Any:
-        # An async generator, so a consumer that breaks out of the loop settles with what was seen.
+        # An async generator, so a consumer that breaks out of the loop settles with what was seen: at once with
+        # ``async with`` or ``aclose()``, else when the event loop closes the generator, which may be after the run ended.
         try:
             while True:
                 try:

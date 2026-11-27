@@ -410,13 +410,18 @@ with ap.run(subject=user_id) as run:
         reply = litellm.completion(model=own_model, messages=history)  # nothing to serve: your own prompt and model
 ```
 
-(`litellm_params(placed)` is the release's model and sealed settings.) The callback, `litellm.callbacks = [AirPrompterLiteLLMCallback(ap)]`, is for calls made
+(`litellm_params(placed)` is the release's model and sealed settings; `measure_call` is from the adapter contract,
+outside the 1.0 promise.) `measure_call` settles when the call returns, so for `stream=True` it would miss the stream's
+usage: for a stream, pass `metadata=litellm_metadata((run, slot))` and consume it inside the run (below). The callback, `litellm.callbacks = [AirPrompterLiteLLMCallback(ap)]`, is for calls made
 outside any run, with `metadata=litellm_metadata(rendered)`: each is a one-call row. It reads only
 `metadata["airprompter"]`: the slot's tag and a signed run reference, which is the authority (a reference that does
 not verify, or names no entry for that tag, files nothing; a call sent under another model is not counted). If you do
 pass `metadata=litellm_metadata((run, slot))` inside a run, a record that reaches the live run is recorded into it and
 one that arrives after the run ended is dropped with one `adapter_late_record` log: the run is counted once, and that
-call's tokens and latency are not measured. Use `measure_call` or the run's metadata for a call, never both.
+call's tokens and latency are not measured. Use `measure_call` or the run's metadata for a call, never both. A prompt
+rendered inside `ap.run` is marked as that run's (`rendered.run_bound`), so `litellm_metadata(rendered)` there behaves
+as `(run, slot)` does. A call you send under another id for the release's model (a deployment, a Bedrock id, a Router
+model group) names it: `litellm_metadata((run, slot), model=sent_id)`; LiteLLM's stripped provider prefix still matches.
 
 **Coming from an earlier candidate?** The wrapped clients, the explicit helpers, the old integrations package and the
 match on rendered text are gone; the [CHANGELOG](../CHANGELOG.md) entry for this release maps each one to its adapter.

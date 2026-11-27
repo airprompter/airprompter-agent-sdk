@@ -300,16 +300,19 @@ def test_adapters_import_only_the_contract_and_their_framework_and_nothing_below
             shutil.rmtree(folder, ignore_errors=True)
     sub = planted(os.path.join(SRC, "_lint_probe.py"), "from airprompter_agent.runtime import adapter\nPROBE = adapter\n")
     assert "airprompter_agent.runtime.adapter is the adapters' internal module" in sub.stderr, "a submodule named in from-import is seen"
-    init = os.path.join(frameworks, "__init__.py")
-    with open(init, encoding="utf-8") as f:
-        original_init = f.read()
+    # frameworks/__init__ is a real file: the probe edits a copy of the tree, never the source.
+    import tempfile
+
+    copy = tempfile.mkdtemp(prefix="ap-lint-")
     try:
-        with open(init, "a", encoding="utf-8") as f:
+        packages = os.path.join(copy, "packages")
+        shutil.copytree(os.path.join(SDK_PY, "packages"), packages, ignore=shutil.ignore_patterns("__pycache__", "*.egg-info", "dist", "build"))
+        with open(os.path.join(packages, "agent", "src", "airprompter_agent", "frameworks", "__init__.py"), "a", encoding="utf-8") as f:
             f.write("\nfrom . import openai  # noqa\n")
-        assert "frameworks/__init__ imports the standard library only" in lint().stderr
+        copied = subprocess.run([sys.executable, os.path.join(SDK_PY, "tools", "lint_imports.py")], capture_output=True, text=True, env={**os.environ, "AIRPROMPTER_LINT_PACKAGES": packages})
+        assert "frameworks/__init__ imports the standard library only" in copied.stderr, copied.stderr
     finally:
-        with open(init, "w", encoding="utf-8") as f:
-            f.write(original_init)
+        shutil.rmtree(copy, ignore_errors=True)
     runtime_framework = planted(os.path.join(SRC, "runtime", "_lint_probe.py"), "import openai\nPROBE = openai\n")
     assert runtime_framework.returncode == 1 and "runtime imports the framework package openai" in runtime_framework.stderr
     agent_framework = planted(os.path.join(SRC, "_lint_probe.py"), "from langchain_core.messages import SystemMessage\nPROBE = SystemMessage\n")

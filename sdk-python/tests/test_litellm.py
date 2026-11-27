@@ -185,11 +185,16 @@ def test_a_late_record_for_an_ended_run_is_dropped_with_one_log_never_counted_tw
 
 def test_a_call_sent_under_another_model_is_not_counted_against_the_version(agent):
     callback = AirPrompterLiteLLMCallback(agent)
+    logged: list = []
+    callback._ap = type("Spy", (), {"__getattr__": lambda self, name: getattr(agent, name), "log": lambda self, event: logged.append(event)})()
     rendered = agent.prompt("support.triage").render(team="Billing", ticket="refund")
     _success(callback, litellm_metadata(rendered), model="gpt-5-mini")
+    _success(callback, litellm_metadata(rendered), model="gpt-5-mini")
     _success(callback, litellm_metadata(rendered), model="openai/gpt-5")
+    _success(callback, litellm_metadata(rendered, model="azure/my-gpt5-deployment"), model="azure/my-gpt5-deployment")
     windows = _windows(agent)
-    assert [(w["tag"], w["model"], w["count"]) for w in windows] == [("support.triage", "gpt-5", 1)], "only the call on the release's model"
+    assert [(w["tag"], w["model"], w["count"]) for w in windows] == [("support.triage", "gpt-5", 2)], "the release's model, by its id or the id the call site named"
+    assert [e["event"] for e in logged] == ["model_unresolved"], "logged once per model"
 
 
 def test_a_run_resumed_under_the_same_id_on_another_version_does_not_take_an_older_call(agent):
@@ -208,3 +213,28 @@ def test_a_run_resumed_under_the_same_id_on_another_version_does_not_take_an_old
     windows = _windows(agent)
     assert sum(w.get("modelCalls", 0) for w in windows) == 0, "the resumed run serves another version than the call's reference"
     assert metadata["airprompter"]["run"] is True
+
+
+def test_an_alias_of_the_release_model_counts_with_or_without_litellms_stripped_prefix_and_by_router_group(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    rendered = agent.prompt("support.triage").render(team="Billing", ticket="refund")
+    named = litellm_metadata(rendered, model="azure/prod-gpt5")
+    _success(callback, named, model="prod-gpt5")  # LiteLLM logs the id without its provider prefix
+    _success(callback, named, model="azure/prod-gpt5")
+    start = dt.datetime(2026, 9, 12, 14, 3, 10)
+    grouped = {"airprompter": litellm_metadata(rendered)["airprompter"], "model_group": "gpt-5"}
+    callback.log_success_event({"model": "some-deployment-id", "litellm_params": {"metadata": grouped}}, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
+    windows = _windows(agent)
+    assert [(w["tag"], w["model"], w["count"]) for w in windows] == [("support.triage", "gpt-5", 3)], "every alias counts under the release's model"
+
+
+def test_a_prompt_rendered_inside_a_run_is_marked_as_the_runs_so_a_late_record_is_dropped_not_doubled(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    with agent.run(variables={"team": "Billing", "ticket": "refund"}):
+        inside = agent.prompt("support.triage").render(team="Billing", ticket="refund")
+    outside = agent.prompt("support.triage").render(team="Billing", ticket="refund")
+    assert inside.run_bound and not outside.run_bound
+    assert litellm_metadata(inside)["airprompter"].get("run") is True and "run" not in litellm_metadata(outside)["airprompter"]
+    _success(callback, litellm_metadata(inside))  # LiteLLM logged it after the run ended
+    windows = _windows(agent)
+    assert sum(w["count"] for w in windows) == 1, "the run counted once; the late record is not a second row"

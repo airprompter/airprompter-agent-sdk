@@ -1953,7 +1953,7 @@ class AirPrompterAgent:
         self._say_stricter(rendered.tag, prepared.resolved.slot, filled)
         # The run's reference, which names every slot the run used, replaces the one-slot ref.
         run = prepared.run
-        return replace(rendered, run_ref=run.run_ref) if run is not None and not run.is_ended else rendered
+        return replace(rendered, run_ref=run.run_ref, run_bound=True) if run is not None and not run.is_ended else rendered
 
     def _context(self, prepared: "AirPrompterAgent._Prepared", tag: str, subject: Optional[str]) -> VariableSourceContext:
         return VariableSourceContext(tag=tag, name="", subject=subject, version_id=prepared.resolved.slot["versionId"], arm=prepared.resolved.arm)

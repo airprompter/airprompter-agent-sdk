@@ -42,6 +42,7 @@
  *   N8N_BIN                   empty      an n8n to use instead of `npx --yes n8n@$N8N_VERSION`; required with --nodes-dir
  *   AIRPROMPTER_KIT_NODES_DIR empty      same as --nodes-dir
  *   AIRPROMPTER_KIT_COMMIT    empty      prepare: the commit of a copy without .git; a run: the commit to expect
+ *   AIRPROMPTER_EXPECTED_PROMPT_SHA256  empty   the sha256 the rendered prompt must have: adds the get_prompt.rendered check
  * Flags (`--flag value` or `--flag=value`; anything else exits 2): --keep (leave the folder, without the n8n
  *   encryption key, for debugging), --no-build, --any-n8n, --prepare-nodes-dir <folder>, --nodes-dir <folder>.
  *
@@ -258,6 +259,8 @@ let variables = { ticket: "Refund for order 1042 has not arrived" };
 try {
   if (!env.agentId || !env.updateKey) throw new Error("set AIRPROMPTER_AGENT_ID and AIRPROMPTER_UPDATE_KEY (an Update key bound to that agent and AIRPROMPTER_ENVIRONMENT)");
   if (nodesDirEnvProblem) throw new Error(nodesDirEnvProblem);
+  const expectedPrompt = process.env.AIRPROMPTER_EXPECTED_PROMPT_SHA256?.trim();
+  if (expectedPrompt && !/^[0-9a-f]{64}$/.test(expectedPrompt)) throw new Error("AIRPROMPTER_EXPECTED_PROMPT_SHA256 must be a sha256 in lowercase hex (64 characters)");
   if (preinstalled) {
     // Offline means no npm at all: npx would fetch n8n from the registry.
     if (!n8nBin) throw new Error("--nodes-dir runs offline and needs N8N_BIN (a pre-installed n8n), not npx");
@@ -293,6 +296,8 @@ const freePort = () => new Promise((done, fail) => {
   });
 });
 
+/** The sha256 (lowercase hex) of the exact prompt string the node returned, as UTF-8 bytes; the text never leaves. */
+const promptSha256 = (prompt) => (typeof prompt === "string" ? createHash("sha256").update(prompt, "utf8").digest("hex") : null);
 const countFiles = (dir) => (existsSync(dir) ? readdirSync(dir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).length : 0);
 
 try {
@@ -424,6 +429,8 @@ try {
   check("workflow.get_and_report", "Get Prompt → model stub → Report Run ran in n8n", counted.ok, counted.ok ? undefined : counted.error);
   check("get_prompt.network", `Get Prompt served slot ${env.slot} from AirPrompter, verified, with a version and its text`, served?.servedFrom === "network" && served?.slot === env.slot && typeof served?.versionId === "string" && typeof served?.prompt === "string" && served.prompt.length > 0, served ? { slot: served.slot, versionId: served.versionId, arm: served.arm, generation: served.generation, servedFrom: served.servedFrom } : undefined);
   check("get_prompt.run_ref", "Get Prompt returned a run reference", typeof served?.runRef === "string" && served.runRef.length > 0);
+  const expectedPromptSha256 = process.env.AIRPROMPTER_EXPECTED_PROMPT_SHA256?.trim();
+  if (expectedPromptSha256) check("get_prompt.rendered", "Get Prompt rendered exactly the expected text (its sha256 equals AIRPROMPTER_EXPECTED_PROMPT_SHA256)", promptSha256(served?.prompt) === expectedPromptSha256, { promptSha256: promptSha256(served?.prompt), expected: expectedPromptSha256 });
   check("report_run.accepted", "Report Run was accepted for that runRef, with the usage detected from the model item", reported?.reported === true && reported.runRef === served?.runRef && reported.inputTokens === 123 && reported.outputTokens === 7, reported ?? (counted.ok ? undefined : counted.error));
   const releases = join(userFolder, ".n8n", "airprompter", env.agentId.replace(/[^A-Za-z0-9._-]/g, "_"), env.environment.replace(/[^A-Za-z0-9._-]/g, "_"), "releases");
   const storedFiles = countFiles(releases);
@@ -435,14 +442,14 @@ try {
 
   const offline = results.get("apQaStoredCopy01");
   const offlineServed = offline.ok ? offline.output("Get Prompt")[0] : undefined;
-  check("get_prompt.stored_copy", "with every request failing, Get Prompt served the same version from the stored copy", storedFiles === 0 || !served ? null : offlineServed?.servedFrom === "stored" && offlineServed?.versionId === served?.versionId, storedFiles === 0 || !served ? "skipped: the first run stored nothing" : offline.ok ? { servedFrom: offlineServed?.servedFrom, versionId: offlineServed?.versionId } : offline.error);
+  check("get_prompt.stored_copy", "with every request failing, Get Prompt served the same version and text from the stored copy", storedFiles === 0 || !served ? null : offlineServed?.servedFrom === "stored" && offlineServed?.versionId === served?.versionId && promptSha256(offlineServed?.prompt) === promptSha256(served?.prompt), storedFiles === 0 || !served ? "skipped: the first run stored nothing" : offline.ok ? { servedFrom: offlineServed?.servedFrom, versionId: offlineServed?.versionId, sameText: promptSha256(offlineServed?.prompt) === promptSha256(served?.prompt) } : offline.error);
 
   const failed = checks.some((entry) => entry.state === "fail");
   finish({
     ...base,
-    // promptSha256: the sha256 of the rendered prompt the node returned, so a test can check the text without it
-    // leaving the run (sha256 of the approved text rendered with AIRPROMPTER_VARIABLES).
-    getPrompt: served ? { promptSha256: typeof served.prompt === "string" ? createHash("sha256").update(served.prompt, "utf8").digest("hex") : null, versionId: served.versionId, arm: served.arm ?? null, generation: served.generation, model: served.model, servedFrom: served.servedFrom, leaseExpiresAt: served.leaseExpiresAt } : null,
+    // promptSha256 / promptBytes: of the rendered prompt the node returned in the counted (network) run, so a test
+    // can check the text without it leaving the run (qa/README.md › What to assert says how to compute the expected one).
+    getPrompt: served ? { promptSha256: promptSha256(served.prompt), promptBytes: typeof served.prompt === "string" ? Buffer.byteLength(served.prompt, "utf8") : null, versionId: served.versionId, arm: served.arm ?? null, generation: served.generation, model: served.model, servedFrom: served.servedFrom, leaseExpiresAt: served.leaseExpiresAt } : null,
     reported: reported ? { runRef: reported.runRef, inputTokens: reported.inputTokens, outputTokens: reported.outputTokens, thumbs: "up" } : null,
     // What the agent's Metrics for this environment and slot should gain: exactly one run. If Report Run failed it may
     // still have been recorded (a timeout after the server took it), so runs is null: check Metrics before rerunning.

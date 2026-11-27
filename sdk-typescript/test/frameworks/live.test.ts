@@ -124,21 +124,28 @@ test("openai: chat.completions.create (plain and stream: true), chat.completions
   let streamed = "";
   for await (const chunk of await openai.chat.completions.create({ model: "gpt-5", messages, stream: true, stream_options: { include_usage: true } })) streamed += chunk.choices[0]?.delta?.content ?? "";
   assert.equal(streamed, "Regards, us");
+  // The provider stream's own toReadableStream() and tee() are measured too (the Next.js route handler's pattern).
+  const piped = (await openai.chat.completions.create({ model: "gpt-5", messages, stream: true, stream_options: { include_usage: true } })).toReadableStream() as ReadableStream<Uint8Array>;
+  const lines = (await new Response(piped).text()).trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(lines.map((chunk) => chunk.choices[0]?.delta?.content ?? "").join(""), "Regards, us");
+  const [left, right] = (await openai.chat.completions.create({ model: "gpt-5", messages, stream: true, stream_options: { include_usage: true } })).tee();
+  for await (const _ of left) void _;
+  for await (const _ of right) void _;
   const helper = openai.chat.completions.stream({ model: "gpt-5", messages });
   const final = await helper.finalChatCompletion();
   assert.equal(final.choices[0].message.content, "Regards, us");
   const responses = await openai.responses.create({ model: "gpt-5", instructions: "mine", input: "hello" });
   assert.equal(responses.output_text, "No signature");
-  assert.equal(seen.length, 5);
+  assert.equal(seen.length, 7);
   assert.equal(seen[0]!.body.model, "gpt-5");
   assert.deepEqual((seen[0]!.body.messages as unknown[])[0], { role: "system", content: "Triage this ticket." }, "the approved text reached the wire");
-  assert.deepEqual((seen[3]!.body.messages as unknown[])[0], { role: "system", content: "the caller's own prompt" }, "the .stream() helper passed through");
-  assert.equal(seen[4]!.body.instructions, "Triage this ticket.");
+  assert.deepEqual((seen[5]!.body.messages as unknown[])[0], { role: "system", content: "the caller's own prompt" }, "the .stream() helper passed through");
+  assert.equal(seen[6]!.body.instructions, "Triage this ticket.");
   const rows = (await windows()).sort((a, b) => `${a.status}${a.errorClass}`.localeCompare(`${b.status}${b.errorClass}`));
   assert.deepEqual(
     rows.map((r) => [r.tag, r.model, r.status, r.errorClass ?? null, r.count, r.tokens, r.checks ?? null]),
     [
-      ["support.triage", "gpt-5", "error", "truncated", 1, { input: 10, cachedInput: 2, output: 4 }, { passed: 1, failed: 0 }],
+      ["support.triage", "gpt-5", "error", "truncated", 3, { input: 30, cachedInput: 6, output: 12 }, { passed: 3, failed: 0 }],
       ["support.triage", "gpt-5", "ok", null, 3, { input: 29, cachedInput: 4, output: 11 }, { passed: 2, failed: 1 }],
     ],
   );

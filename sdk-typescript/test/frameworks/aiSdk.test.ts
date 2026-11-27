@@ -128,6 +128,17 @@ test("a call the middleware did not place passes through; the version stamps", a
   }
   const generated = { content: [] };
   assert.equal(await middleware.wrapGenerate({ doGenerate: async () => generated, params: { prompt: [] }, model: {} }), generated);
+  // AI SDK 4 passes no model to transformParams: the choice waits for the call, which names one. Another model declines.
+  const placed = (await middleware.transformParams({ type: "generate", params: { prompt: [{ role: "user", content: "hi" }] } })) as Record<string, unknown>;
+  const v4calls: unknown[] = [];
+  const v4model = (modelId: string) => ({ modelId, doGenerate: async (p: unknown) => (v4calls.push(p), { text: "v4", finishReason: "stop", usage: { promptTokens: 2, completionTokens: 1 } }) });
+  const elsewhere = v4model("gpt-4o");
+  await middleware.wrapGenerate({ doGenerate: () => elsewhere.doGenerate(placed), params: placed, model: elsewhere });
+  assert.deepEqual((v4calls[0] as { prompt: unknown[] }).prompt, [{ role: "user", content: "hi" }], "declined at the call: the caller's own prompt");
+  const again = (await middleware.transformParams({ type: "generate", params: { prompt: [] } })) as Record<string, unknown>;
+  const released = v4model("gpt-5");
+  await middleware.wrapGenerate({ doGenerate: () => released.doGenerate(again), params: again, model: released });
+  assert.deepEqual((v4calls[1] as { prompt: unknown[] }).prompt[0], { role: "system", content: "Reply politely." }, "the release's model: placed");
   // AI SDK 4's call options carry `mode`: the cap is `maxTokens`.
   const v1 = (await middleware.transformParams({ type: "generate", params: { mode: { type: "regular" }, prompt: [] }, model: { modelId: "gpt-5" } })) as Record<string, unknown>;
   assert.deepEqual([v1.maxTokens, "maxOutputTokens" in v1], [800, false]);

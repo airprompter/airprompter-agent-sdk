@@ -95,8 +95,11 @@ interface Placed {
   run: RunSession;
   owned: boolean;
   caller: LanguageModelLike | undefined;
-  chosen: LanguageModelLike;
+  /** Undefined when `transformParams` saw no model (AI SDK 4): the choice is made when the call names it. */
+  chosen: LanguageModelLike | undefined;
   model: string;
+  /** The caller's own params, for a call declined once its model is known. */
+  original: unknown;
 }
 
 export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddlewareOptions): AiSdkMiddleware {
@@ -107,7 +110,25 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
   const stamps: Pick<AiSdkMiddleware, "middlewareVersion" | "specificationVersion"> =
     options.version === "v1" || options.version === "v2" ? { middlewareVersion: options.version } : options.version === "v3" || options.version === "v4" ? { specificationVersion: options.version } : { middlewareVersion: "v2", specificationVersion: "v4" };
 
-  const log = (event: string, fields: Record<string, unknown>) => ap.log({ event, adapter: "ai-sdk", slot, ...fields });
+  // A customer logger that throws never reaches the call.
+  const log = (event: string, fields: Record<string, unknown>) => {
+    try {
+      ap.log({ event, adapter: "ai-sdk", slot, ...fields });
+    } catch {
+      // nothing to do: the log is the customer's
+    }
+  };
+  const decline = (run: RunSession, model: string, method: string) => {
+    if (!unresolved.has(model)) (unresolved.add(model), log(ADAPTER_EVENTS.modelUnresolved, { method, model }));
+    run.decline(slot, "model_unresolved");
+  };
+  /** The model a placed call runs on, or undefined when the slot declined. Settled at the call when `transformParams` saw no model. */
+  const modelOfCall = (placed: Placed, model: LanguageModelLike, method: string): LanguageModelLike | undefined => {
+    if (placed.chosen) return placed.chosen;
+    if (model.modelId === placed.model) return (placed.chosen = model);
+    decline(placed.run, placed.model, method);
+    return undefined;
+  };
   const measure = (placed: Placed) => ({ model: placed.model, onSettled: () => placed.owned && placed.run.end(), ...(options.now ? { now: options.now } : {}) });
 
   return {
@@ -124,14 +145,17 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
       }
       const { run, owned } = acquired;
       const passthrough = () => (owned && run.end(), params);
+      let pinned = false;
       try {
         const placed = await run.place(slot);
         if (placed.kind !== "approved") return passthrough();
-        const chosen = chooseModel<LanguageModelLike | undefined>({ releaseModelId: placed.model, callerModel: model, callerModelId: model?.modelId, ...(options.modelFor ? { modelFor: options.modelFor } : {}) });
+        pinned = true;
+        // AI SDK 4 passes no model here: with no `modelFor`, the choice waits for the call, which names it.
+        const later = model === undefined && !options.modelFor;
+        const chosen = later ? undefined : chooseModel<LanguageModelLike | undefined>({ releaseModelId: placed.model, callerModel: model, callerModelId: model?.modelId, ...(options.modelFor ? { modelFor: options.modelFor } : {}) });
         // A string would be an id to build a model from, and the manifest names no provider: only a model object serves.
-        if (typeof chosen !== "object" || chosen === null) {
-          if (!unresolved.has(placed.model)) (unresolved.add(placed.model), log(ADAPTER_EVENTS.modelUnresolved, { method: type, model: placed.model }));
-          run.decline(slot, "model_unresolved");
+        if (!later && (typeof chosen !== "object" || chosen === null)) {
+          decline(run, placed.model, type);
           return passthrough();
         }
         // AI SDK 4's call options carry `mode` and `inputFormat`; later contracts carry neither.
@@ -144,37 +168,56 @@ export function airprompterMiddleware(ap: AgentRuntime, options: AiSdkMiddleware
         if (obj(prompt[0])?.role === "system") prompt[0] = system;
         else prompt.unshift(system);
         const out = { ...record, ...values, prompt };
-        placements.set(out, { run, owned, caller: model, chosen, model: placed.model });
+        placements.set(out, { run, owned, caller: model, chosen: chosen as LanguageModelLike | undefined, model: placed.model, original: params });
         return out;
       } catch (error) {
         log(ADAPTER_EVENTS.placementFailed, { method: type, reason: (error as Error).message });
+        // The slot pinned a version this call will not serve: decline it, so no row or feedback names that version.
+        if (pinned) {
+          try {
+            run.decline(slot, "model_unresolved");
+          } catch {
+            // the call still goes out as written
+          }
+        }
         return passthrough();
       }
     },
-    async wrapGenerate({ doGenerate, params }) {
+    async wrapGenerate({ doGenerate, params, model }) {
       const placed = obj(params) ? placements.get(params as object) : undefined;
       if (!placed) return doGenerate();
-      const call = () => (placed.chosen === placed.caller ? doGenerate() : placed.chosen.doGenerate!(params));
+      const chosen = modelOfCall(placed, model, "generate");
+      if (!chosen) {
+        if (placed.owned) placed.run.end();
+        return model.doGenerate!(placed.original);
+      }
+      const call = () => (chosen === placed.caller || chosen === model ? doGenerate() : chosen.doGenerate!(params));
       return measureCall(placed.run, slot, call, { ...measure(placed), read: generateResultShape });
     },
-    async wrapStream({ doStream, params }) {
+    async wrapStream({ doStream, params, model }) {
       const placed = obj(params) ? placements.get(params as object) : undefined;
       if (!placed) return doStream();
+      const chosen = modelOfCall(placed, model, "stream");
+      if (!chosen) {
+        if (placed.owned) placed.run.end();
+        return model.doStream!(placed.original);
+      }
       const measurement = beginMeasure(placed.run, slot, measure(placed));
       let result: unknown;
       try {
-        result = await (placed.chosen === placed.caller ? doStream() : placed.chosen.doStream!(params));
+        result = await (chosen === placed.caller || chosen === model ? doStream() : chosen.doStream!(params));
       } catch (error) {
         measurement.fail(error);
         throw error;
       }
       const record = obj(result);
-      const source = record?.stream;
-      if (!(source instanceof ReadableStream)) {
+      const source = record?.stream as ReadableStream<unknown> | undefined;
+      // Duck-typed: a stream from another realm or a polyfill is not `instanceof` this one.
+      if (typeof source?.getReader !== "function") {
         measurement.settle(undefined);
         return result;
       }
-      return { ...record, stream: tapReadable(source, measurement) };
+      return { ...record, stream: tapReadable(source!, measurement) };
     },
   };
 }

@@ -198,7 +198,32 @@ export function tapStream(stream: AsyncIterable<unknown>, method: ClientMethod, 
     get(target, prop) {
       if (prop === Symbol.asyncIterator) return () => iterate();
       const value = Reflect.get(target, prop, target);
+      // The provider streams' own `tee()` and `toReadableStream()` iterate the real object, past this tap: both are
+      // rebuilt on the tapped iteration. Each `tee()` branch is tapped; the first to finish settles.
+      if (prop === "tee" && typeof value === "function") {
+        return () => ((value as () => unknown[]).call(target) as AsyncIterable<unknown>[]).map((branch) => tapStream(branch, method, final));
+      }
+      if (prop === "toReadableStream" && typeof value === "function") return () => readableOf(iterate());
       return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
+/** What the provider streams' `toReadableStream()` produces: one JSON line per chunk, as bytes. */
+function readableOf(iterator: AsyncGenerator<unknown>): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const step = await iterator.next();
+        if (step.done) controller.close();
+        else controller.enqueue(encoder.encode(`${JSON.stringify(step.value)}\n`));
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    async cancel() {
+      await iterator.return(undefined);
     },
   });
 }

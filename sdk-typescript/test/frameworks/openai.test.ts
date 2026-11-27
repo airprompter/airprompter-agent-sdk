@@ -73,6 +73,19 @@ test("a different model id with no modelFor declines: one error row, the caller'
   assert.equal(out.filter((r) => r.status === "ok").length, 1, "the mapped call ran on the version and was measured");
 });
 
+test("a modelFor that throws after the slot pinned declines it: the caller's request goes out, and the version gets an error row, never an ok one", async () => {
+  const events: Record<string, unknown>[] = [];
+  const { ap, rows } = await startAgent(supportSlots, events);
+  const client = new FakeOpenAI();
+  const params = { model: "gpt-4o", messages: [] };
+  const openai = instrument(client, ap, { slot: "support.triage", modelFor: () => { throw new Error("no deployment"); } });
+  await ap.run({ variables: { team: "Billing" } }, () => openai.chat.completions.create(params));
+  assert.equal(client.calls[0], params);
+  assert.equal(events.filter((e) => e.event === "adapter_placement_failed").length, 1);
+  const out = await rows();
+  assert.deepEqual(out.map((r) => [r.status, r.errorClass]), [["error", "model_unresolved"]]);
+});
+
 test("two instrumented clients with different slots in one run give two run rows", async () => {
   const { ap, rows } = await startAgent((plane) => [plane.slot({ tag: "support.triage", text: "Triage.", model: "gpt-5", variables: [] }), plane.slot({ tag: "support.reply", text: "Reply.", model: "gpt-5", variables: [] })]);
   const triage = instrument(new FakeOpenAI(), ap, { slot: "support.triage" });
@@ -144,7 +157,7 @@ test("nothing the adapter does fails the call: a run whose place throws sends th
   assert.deepEqual(log.map((e) => e.event), ["adapter_placement_failed"]);
 });
 
-test("no slot and no scope: untouched, unobserved, one log per method; inside ap.attribute the sealed settings go on a call to the release's model, and a call to another model keeps its own", async () => {
+test("no slot and no scope: untouched, unobserved, one log per method; inside ap.attribute the sealed settings go on a call to the release's model, and a call to another model goes out as written, unobserved", async () => {
   const events: Record<string, unknown>[] = [];
   const { ap, rows } = await startAgent((plane) => [{ ...plane.slot({ tag: "support.reply", text: "Reply politely.", model: "gpt-5" }), inference: { temperatureMilli: 200, maxOutputTokens: 800 } }], events);
   const client = new FakeOpenAI();
@@ -169,7 +182,7 @@ test("no slot and no scope: untouched, unobserved, one log per method; inside ap
   assert.equal(events.filter((e) => e.event === "model_unresolved").length, 1);
   assert.deepEqual(events.find((e) => e.event === "adapter_inference_overridden")?.parameters, ["temperature"]);
   const out = byKey(await rows());
-  assert.deepEqual(out.map((r) => [r.tag, r.model, r.count]), [["support.reply", "gpt-5", 2], ["support.reply", "my-azure-deployment", 1]], "every scoped call is observed, under the model it ran on");
+  assert.deepEqual(out.map((r) => [r.tag, r.model, r.count]), [["support.reply", "gpt-5", 2]], "another model's numbers never count against this version");
 });
 
 test("asResponse() on a slot-bound call hands back a response nobody has read, and the call is still measured", async () => {

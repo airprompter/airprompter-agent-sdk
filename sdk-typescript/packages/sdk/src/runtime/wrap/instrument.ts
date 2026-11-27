@@ -9,13 +9,15 @@
  * | `slot`, run open                  | `await run.place(slot)`, applied to a copy       | `run.recordModelCall(slot, …)`  |
  * | `slot`, no run                    | `ap.openRun()`, ended when the call settles      | same                            |
  * | `slot`, a `.stream()` helper      | untouched: it cannot await                       | not measured; one log           |
- * | no `slot`, inside `ap.attribute`  | the scope's settings, on the release's model     | `ap.observe`                    |
+ * | no `slot`, inside `ap.attribute`  | the scope's settings, on the release's model     | `ap.observe` (not on another)   |
  * | no `slot`, no scope               | untouched                                        | not observed; one log           |
  * | placement is `passthrough`        | untouched                                        | not measured                    |
  *
  * The release's model wins or nothing is applied: a call naming another
- * model with no `modelFor` declines the slot (slot mode) or keeps its own
- * model and settings (scope mode), with one `model_unresolved` log. A failure
+ * model with no `modelFor` declines the slot (slot mode) or goes out as
+ * written and unobserved (scope mode), with one `model_unresolved` log. A
+ * slot-bound call is measured when the caller awaits it: one nobody awaits
+ * settles with the run's idle sweep. A failure
  * here never fails the customer's call: the request goes out as the caller
  * wrote it.
  *
@@ -65,7 +67,14 @@ const modelOf = (params: Record<string, unknown> | null): string | undefined => 
 export function instrumentClient<T extends object>(client: T, ap: InstrumentRuntime, options: InstrumentClientOptions): T {
   const said = new Set<string>();
   const { slot, adapter } = options;
-  const log = (event: string, fields: Record<string, unknown>) => ap.log({ event, adapter, ...fields });
+  // A customer logger that throws never reaches the call.
+  const log = (event: string, fields: Record<string, unknown>) => {
+    try {
+      ap.log({ event, adapter, ...fields });
+    } catch {
+      // nothing to do: the log is the customer's
+    }
+  };
   const once = (event: string, fields: Record<string, unknown>) => {
     const key = JSON.stringify([event, fields.method, fields.model]);
     if (said.has(key)) return;
@@ -100,7 +109,14 @@ export function instrumentClient<T extends object>(client: T, ap: InstrumentRunt
     // Boxed: an async function would adopt the `APIPromise` and lose `withResponse()` and `asResponse()`.
     const issued = (async (): Promise<{ out: unknown; pending: Pending }> => {
       const placed = await placement(run, slotName, method, args, name);
-      if (!placed) return { out: original(...args), pending: { settle: end, fail: end } };
+      if (!placed) {
+        try {
+          return { out: original(...args), pending: { settle: end, fail: end } };
+        } catch (error) {
+          end();
+          throw error;
+        }
+      }
       const pending = beginMeasure(run, slotName, { model: placed.model, onSettled: end, ...(options.now ? { now: options.now } : {}) });
       try {
         return { out: original(...placed.args), pending };
@@ -116,9 +132,11 @@ export function instrumentClient<T extends object>(client: T, ap: InstrumentRunt
   async function placement(run: RunSession, slotName: string, method: ClientMethod, args: unknown[], name: string): Promise<{ args: unknown[]; model: string } | undefined> {
     const params = obj(args[0]);
     if (!params) return undefined;
+    let pinned = false;
     try {
       const placed = await run.place(slotName);
       if (placed.kind !== "approved") return undefined;
+      pinned = true;
       const model = modelFrom(placed.model, params);
       if (model === undefined) {
         once(ADAPTER_EVENTS.modelUnresolved, { slot: slotName, method: name, model: placed.model });
@@ -128,6 +146,14 @@ export function instrumentClient<T extends object>(client: T, ap: InstrumentRunt
       return { args: [options.apply(params, { ...placed, model }, method.kind), ...args.slice(1)], model: placed.model };
     } catch (error) {
       log(ADAPTER_EVENTS.placementFailed, { slot: slotName, method: name, reason: (error as Error).message });
+      // The slot pinned a version this call will not serve: decline it, so no row or feedback names that version.
+      if (pinned) {
+        try {
+          run.decline(slotName, "model_unresolved");
+        } catch {
+          // the call still goes out as written
+        }
+      }
       return undefined;
     }
   }
@@ -144,11 +170,13 @@ export function instrumentClient<T extends object>(client: T, ap: InstrumentRunt
       return original(...args);
     }
     const params = obj(args[0]);
+    let unresolved = false;
     if (params) {
       try {
         // The caller placed the text. The release's model and sealed settings go on, or nothing does.
         const model = modelFrom(attribution.model, params);
         if (model === undefined) {
+          unresolved = true;
           once(ADAPTER_EVENTS.modelUnresolved, { slot: attribution.tag, method: name, model: attribution.model });
         } else {
           const applied = applyInference(method.kind, { ...params, model }, attribution.inference ?? {});
@@ -160,6 +188,8 @@ export function instrumentClient<T extends object>(client: T, ap: InstrumentRunt
         log(ADAPTER_EVENTS.placementFailed, { slot: attribution.tag, method: name, reason: (error as Error).message });
       }
     }
+    // Another model's numbers must not count against this version: the call goes out as written, unobserved.
+    if (unresolved) return original(...args);
     // The clock starts now; the observation settles when the response (or the whole stream) has gone by.
     const final = deferred();
     void ap.observe(attribution, () => final.promise, { model: modelOf(obj(args[0])) ?? attribution.model }).catch(noop);

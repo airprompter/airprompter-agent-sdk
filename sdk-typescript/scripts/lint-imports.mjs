@@ -45,6 +45,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
+
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "..");
 const sdkSrc = join(root, "packages", "sdk", "src");
@@ -80,16 +82,39 @@ function walk(dir, out = []) {
   return out;
 }
 
-const SPECIFIER = /(?:^|\n)\s*(?:import|export)\b[^;]*?\bfrom\s+"([^"]+)"|\bimport\s*\(\s*"([^"]+)"\s*\)/g;
-
+/**
+ * Every module a file names, with its line, read from the TypeScript AST rather than by pattern, so no quoting or
+ * layout gets past it: `import … from`, a bare `import "x"`, `export … from`, `import x = require("x")`, `require("x")`
+ * and `import("x")`. A dynamic `import()` or `require()` whose argument is not a string literal is itself an offence:
+ * what it loads cannot be checked.
+ */
+const parsed = new Map();
 function specifiersOf(file) {
+  if (!parsed.has(file)) parsed.set(file, parse(file));
+  return parsed.get(file);
+}
+
+function parse(file) {
   const text = readFileSync(file, "utf8");
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
   const out = [];
-  for (const m of text.matchAll(SPECIFIER)) {
-    const spec = m[1] ?? m[2];
-    const line = text.slice(0, m.index).split("\n").length;
-    out.push({ spec, line: line + (m[0].startsWith("\n") ? 1 : 0) });
-  }
+  const lineOf = (node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+  const literal = (node) => (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : null);
+  const visit = (node) => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
+      const spec = literal(node.moduleSpecifier);
+      if (spec !== null) out.push({ spec, line: lineOf(node) });
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      const spec = literal(node.moduleReference.expression);
+      if (spec !== null) out.push({ spec, line: lineOf(node) });
+    } else if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
+      const spec = literal(node.arguments[0]);
+      if (spec !== null) out.push({ spec, line: lineOf(node) });
+      else offenders.push(`${relative(root, file)}:${lineOf(node)}: a dynamic import of a computed specifier cannot be checked; name the module`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
   return out;
 }
 

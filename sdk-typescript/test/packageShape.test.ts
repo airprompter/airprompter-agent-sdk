@@ -118,6 +118,12 @@ test("adapters (AIR-2231): an adapter imports only the contract, its own folder 
       ['import { airprompterMiddleware } from "../ai-sdk.js";\nexport const probe = airprompterMiddleware;\n', /an adapter imports only the contract, its own folder and its framework, not \.\.\/ai-sdk\.js/],
       ['import Anthropic from "@anthropic-ai/sdk";\nexport const probe = Anthropic;\n', /@anthropic-ai\/sdk is not in frameworks\/openai's allowlist/],
       ['import { acquireRun } from "../../runtime/adapter/index.js";\nexport const probe = acquireRun;\n', /an adapter imports only the contract/],
+      // Every form the AST names, however it is quoted or laid out.
+      ["import { x } from '../../runtime/wrap/proxy.js';\nexport const probe = x;\n", /not \.\.\/\.\.\/runtime\/wrap\/proxy\.js/],
+      ['import "../../runtime/index.js";\n', /not \.\.\/\.\.\/runtime\/index\.js/],
+      ['import p = require("../../runtime/index.js");\nexport const probe = p;\n', /not \.\.\/\.\.\/runtime\/index\.js/],
+      ['export const a = 1; const m = require("ai");\nexport const b = m;\n', /ai is not in frameworks\/openai's allowlist/],
+      ['const name = "openai";\nexport const probe = import(name);\n', /a dynamic import of a computed specifier cannot be checked/],
     ] as const) {
       const result = planted(probe, source);
       assert.equal(result.status, 1, source);

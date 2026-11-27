@@ -192,7 +192,8 @@ export function instrumentClient<T extends object>(client: T, ap: InstrumentRunt
     if (unresolved) return original(...args);
     // The clock starts now; the observation settles when the response (or the whole stream) has gone by.
     const final = deferred();
-    void ap.observe(attribution, () => final.promise, { model: modelOf(obj(args[0])) ?? attribution.model }).catch(noop);
+    // Under the release's id, as every adapter measures, whatever id `modelFor` sent the call under.
+    void ap.observe(attribution, () => final.promise, { model: attribution.model }).catch(noop);
     let out: unknown;
     try {
       out = original(...args);

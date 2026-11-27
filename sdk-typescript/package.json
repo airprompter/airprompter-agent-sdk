@@ -1,6 +1,6 @@
 {
   "name": "@airprompter/agent-sdk-workspace",
-  "version": "1.0.0-rc.4",
+  "version": "1.0.0-rc.5",
   "private": true,
   "description": "Workspace for the AirPrompter agent SDK: @airprompter/agent-sdk, @airprompter/agent-otel and the three @airprompter/datastore-* adapters. One version, released in lockstep.",
   "license": "BSD-3-Clause",
@@ -37,6 +37,8 @@
     "redis": "^4.7.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.3",
+    "undici": "7.30.2",
+    "undici-v8": "npm:undici@8.12.4",
     "zod": "4.6.7"
   }
 }

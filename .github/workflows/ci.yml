@@ -308,6 +308,35 @@ jobs:
           path: cli/dist/${{ matrix.artifact }}
           retention-days: 7
 
+  examples:
+    # Every framework example in examples/, run unchanged on the SDK and the CLI built from this commit: a local
+    # registry (`airprompter dev examples/prompts`) and a fake provider that plays one recorded tool loop. No provider
+    # key, no AirPrompter account. examples/ci/run.mjs says what it checks.
+    name: Examples (Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor the example READMEs state, and the version the other jobs use.
+        node: [20, 22]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # The npm release.yml publishes with, so the packed SDK is the one a release would ship.
+      - run: npm install -g npm@11.21.2
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: sdk-typescript
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: cli
+      - name: Every example pins the SDK at this commit's version
+        run: npm run version:lockstep
+        working-directory: sdk-typescript
+      - name: Each example against the fake provider
+        run: node examples/ci/run.mjs
+
   integration-zapier:
     # The Zapier app is a thin client of the SDK in this repository (a file: dependency), so the SDK is built first.
     # Its tests run against `airprompter dev`'s own code from cli/src; no Zapier account or login is involved.

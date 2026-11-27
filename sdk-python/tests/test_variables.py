@@ -381,8 +381,6 @@ def test_agent_renders_from_sources_fenced_by_the_stricter_trust(state_dir):
             ap.variables.revoke(name)
         ap.heartbeat_now()
         assert plane.heartbeats[-1]["catalog"]["variables"] == [], "an empty list is a report"
-        # The registry is the agent's: a wrapped client finds the render by its text.
-        assert ap.attribution_for({"messages": [{"role": "user", "content": caller.text}]}) is not None
     finally:
         ap.stop()
 

@@ -95,14 +95,19 @@ release. The rules are in the header of
   and in `SDK_SUBPATHS` in `sdk-typescript/scripts/install-alone.mjs`: it
   imports with no peer installed. (LangChain, until AIR-2234, instead names
   the peer it is missing.)
-- The Python module `airprompter_agent/frameworks/<name>.py`, its
-  `pyproject.toml` extra, and `sdk-python/tests/test_package_shape.py`.
+- The Python module `airprompter_agent/frameworks/<name>.py` with an entry in
+  `ADAPTERS` in `sdk-python/tools/lint_imports.py`, its `pyproject.toml`
+  extra, a live test beside `sdk-python/tests/test_frameworks_live.py`, and
+  its `pip install --upgrade` in `wrap-latest.yml`.
 - `conformance/frameworks/fixtures/<name>/` with every required fixture kind
   (AIR-2233).
 - The framework in `.github/workflows/wrap-latest.yml`: its `npm i --no-save
   <framework>@latest` (or `pip install --upgrade`) line and its test files in
   the run step, so the latest framework release runs the tests weekly.
 - A section in the SDK READMEs (*Use with your framework*).
+- A runnable example in `examples/<framework>-<language>/`, once the adapter
+  is released ([`examples/README.md`](examples/README.md) › Adding an
+  example).
 - The framework's section in prompt-haven's public `frameworks.mdx`
   (AIR-2239).
 

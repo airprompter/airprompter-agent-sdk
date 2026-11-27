@@ -12,7 +12,7 @@ conformance vectors and the same on-disk store as the TypeScript SDK — a
 store one SDK wrote is a store the other (and the `airprompter` CLI) opens.
 
 ```bash
-pip install "airprompter-agent==1.0.0rc4"   # the 1.0 release candidate; extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
+pip install "airprompter-agent==1.0.0rc5"   # the 1.0 release candidate; extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
 ```
 
 ## Packages
@@ -22,7 +22,7 @@ you use. The tree mirrors the TypeScript SDK's subpaths.
 
 ```bash
 # With a satellite, pin each one to the same candidate:
-pip install "airprompter-agent==1.0.0rc4" "airprompter-datastore-s3==1.0.0rc4" "airprompter-agent-otel==1.0.0rc4"
+pip install "airprompter-agent==1.0.0rc5" "airprompter-datastore-s3==1.0.0rc5" "airprompter-agent-otel==1.0.0rc5"
 ```
 
 Pin every distribution exactly. Unpinned, `airprompter-agent` installs 0.5.0,
@@ -33,10 +33,12 @@ and `uv pip install` resolves the same pins with no flag.
 
 | Import | Use it when |
 | --- | --- |
-| `airprompter_agent` | `AirPrompterAgent`, its options and results, and the names the layers below export. `airprompter_agent.integrations.*` holds the openai, anthropic and LiteLLM clients. |
+| `airprompter_agent` | `AirPrompterAgent`, its options and results, and the names the layers below export. |
+| `airprompter_agent.frameworks.openai`, `.anthropic`, `.litellm` | The openai and anthropic clients (sync and async) and LiteLLM as adapters: the approved text, model and settings go on every call, measured into the run ([Use with your framework](#use-with-your-framework)). The frameworks are extras, imported by nothing else. |
+| `airprompter_agent.frameworks.contract` | The contract every adapter follows, for writing your own. Outside the 1.0 promise: a minor may change it. |
 | `airprompter_agent.core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane client, the port protocols. The CI kit is `airprompter_agent.core.testing`. |
 | `airprompter_agent.sync` | Your CI pulls and verifies releases (`sync_once`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). Key providers are extras: `[kms]`, `[vault]`, `[keyring]`. |
-| `airprompter_agent.runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `.core` + `ReleaseResolver`); the provider wrappers (`wrap_client`, `observe_call`). |
+| `airprompter_agent.runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `.core` + `ReleaseResolver`); the run session, `observe_call` and the `ap.attribute` scope. |
 | `airprompter_agent.telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
 
 Everything runs on your systems.
@@ -79,7 +81,7 @@ editable; `python tools/build_all.py` builds every sdist and wheel into one
 ```python
 import os
 from airprompter_agent import AirPrompterAgent
-from airprompter_agent.integrations.openai import chat_completion
+from airprompter_agent.frameworks.openai import instrument
 
 ap = AirPrompterAgent.start(
     organization_id="org_…",
@@ -95,11 +97,10 @@ r = ap.prompt("support.triage").render(team="Billing", ticket=user_message)
 # observe() times the call, reads `usage` off the provider's response (OpenAI, Anthropic, Bedrock — dicts or SDK
 # objects), classifies a failure into the closed error set, and returns the result unchanged.
 reply = ap.observe(r, lambda: openai.chat.completions.create(model=r.model, messages=[{"role": "system", "content": r.text}, {"role": "user", "content": user_message}]))
-# …or wrap the client once and change nothing at the call site: the call is attributed to the render whose text it carries.
-openai = ap.wrap(OpenAI())
-reply = openai.chat.completions.create(model=r.model, messages=[{"role": "system", "content": r.text}, {"role": "user", "content": user_message}])
-# …or the explicit helper, which places the rendered text for you:
-reply = chat_completion(ap, r, openai, messages=[{"role": "user", "content": user_message}])
+# …or let an adapter place the approved text, model and settings for you (see "Use with your framework"):
+openai = instrument(OpenAI(), ap, slot="support.triage")
+with ap.run(subject=user_id, variables={"team": "Billing", "ticket": user_message}):
+    reply = openai.chat.completions.create(model="gpt-5", messages=[{"role": "user", "content": user_message}])
 # …or report by hand:
 ap.report(tag=r.tag, artifact_id=r.artifact_id, version_id=r.version_id, arm=r.arm, model=r.model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90}, tool_calls={"calls": 2, "errors": 0})
 ap.feedback(r.run_ref, thumbs="up")
@@ -122,8 +123,8 @@ coroutine functions need `await ….render_async()`. `ap.prompt(tag).needs()`
 and `ap.status().variables` name what no source fills. See
 [docs/variables.md](../docs/variables.md).
 
-Async applications use `await ap.observe_async(r, lambda: client.messages.create(...))`
-(and `chat_completion_async` / `messages_create_async`). Everything else
+Async applications use `await ap.observe_async(r, lambda: client.messages.create(...))`,
+and an instrumented `AsyncOpenAI` / `AsyncAnthropic` places with `place_async`. Everything else
 is synchronous and thread-safe; resident mode runs its sync, heartbeat and
 update-window timers on daemon threads.
 
@@ -335,7 +336,7 @@ host as a finding instead of hiding it.
 | Provider | `storageProtection` | Extra |
 |---|---|---|
 | `file_key(path)` (default: `store.key` beside the store, 0600) | `file_key` | — |
-| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install "airprompter-agent[kms]==1.0.0rc4"` |
+| `kms(key_id)` — AWS KMS Encrypt/Decrypt | `kms` | `pip install "airprompter-agent[kms]==1.0.0rc5"` |
 | `vault(transit_key)` — HashiCorp Vault transit | `vault` | `[vault]` |
 | `os_keystore()` — Keychain / Credential Locker / Secret Service | `os_keystore` | `[keyring]` |
 | `custom_key_provider(wrap=…, unwrap=…)` | `custom` | — |
@@ -343,71 +344,95 @@ host as a finding instead of hiding it.
 `SlotStore.rotate_key(provider)` re-wraps the DEK under a new provider
 without re-encrypting a payload.
 
-## Provider wrappers
+## Use with your framework
 
-**`ap.wrap(client)` (D65)** returns the same `openai` / `anthropic` client
-(sync or async) with its public model-call methods observed — a proxy,
-never a patched internal, and no import of the provider package (they are
-optional extras). Each call is timed, its usage and finish reason read off
-the response or the stream as it goes by, the slot's declared checks run
-on the text here, and one content-free observation filed. Nothing the
-wrapper does can fail the call: an unattributed call passes straight
-through (logged `wrap_unattributed`) and a stream a consumer abandons
-reports what was seen.
+Each framework has an adapter under `airprompter_agent.frameworks.<name>`. Every adapter does the same job: it asks the
+run for the approved prompt, model and settings, puts them into the framework's call, and reports what the call cost.
+The framework is an extra (`[openai]`, `[anthropic]`, `[litellm]`): nothing else imports it.
 
-| Client | Observed methods | Streams |
+| Framework | Import | One line |
 | --- | --- | --- |
-| `openai` (`OpenAI` / `AsyncOpenAI`) | `chat.completions.create` / `.parse` / `.stream()`, `responses.create` / `.parse` / `.stream()`, `beta.chat.completions.parse` | `stream=True` (usage from the last chunk — pass `stream_options={"include_usage": True}`); the `.stream()` context managers through `get_final_completion()` / `get_final_response()`, else the helper's `current_completion_snapshot` when the block closes |
-| `anthropic` (`Anthropic` / `AsyncAnthropic`) | `messages.create`, `messages.stream()`, `beta.messages.*` | `stream=True` (usage from `message_start` + `message_delta`); `messages.stream()` through `get_final_message()`, else `current_message_snapshot` when the block closes |
-| LiteLLM | `AirPrompterLiteLLMCallback(ap)` on `litellm.callbacks` | attributed by `metadata=litellm_metadata(rendered)` or by the messages' text |
+| `openai` (`OpenAI` / `AsyncOpenAI`) | `airprompter_agent.frameworks.openai` | `openai = instrument(OpenAI(), ap, slot="support.reply")` |
+| `anthropic` (`Anthropic` / `AsyncAnthropic`) | `airprompter_agent.frameworks.anthropic` | `anthropic = instrument(Anthropic(), ap, slot="support.reply")` |
+| LiteLLM | `airprompter_agent.frameworks.litellm` | inside `ap.run`: `measure_call(run, slot, lambda: litellm.completion(**litellm_params(placed), ...))`; outside: `litellm.callbacks = [AirPrompterLiteLLMCallback(ap)]` with `metadata=litellm_metadata(rendered)` |
 
-`with_raw_response` / `with_streaming_response` surfaces and any method
-not in the table are the client's own and are not observed.
+```python
+from openai import OpenAI
+from airprompter_agent.frameworks.openai import instrument
 
-**The release's inference settings.** A prompt
-version declares how its model is called — temperature, top-p, the output
-cap, stop sequences, reasoning effort — and the release seals those with
-the text (`rendered.inference`, integers on the wire: `temperatureMilli`
-200 is 0.2, `topPBps` 9000 is 0.9; a workflow step carries its own). A
-wrapped call attributed to that render goes out with the release's values:
-`temperature`, `top_p`, `max_completion_tokens` / `max_output_tokens` /
-`max_tokens`, `stop` / `stop_sequences`, `reasoning_effort` /
-`reasoning.effort` (the Responses `reasoning` object is merged, its other
-members kept). A call site that wrote a different value is told once —
-`wrap_inference_overridden` names the parameters — never failed. The
-settings go only on a call to the release's model: a call that names
-another model keeps its own parameters (`wrap_inference_model_mismatch`),
-since settings sealed for one model are refused by another. A setting the
-call cannot carry is reported, not sent (`wrap_inference_unsupported`, with
-a reason): a stop sequence on Responses or a reasoning effort on Messages
-(`shape`); on Anthropic Messages, which takes one sampling parameter,
-temperature goes and top-p does not (`one_sampling_parameter`), and neither
-goes beside a `thinking` block the call site set (`thinking`). A LiteLLM
-callback sees a call after the fact, so pass
-`**litellm_inference(rendered)` to `litellm.completion` (OpenAI chat
-names). Instrumentation that calls a provider itself uses
-`apply_inference(kind, params, inference, model=…)` (exported from
-`airprompter_agent.runtime` and `airprompter_agent`); a golden-set `invoke`
-receives `inference` so the activation gate samples as production does.
+openai = instrument(OpenAI(), ap, slot="support.reply")
+with ap.run(subject=user_id):
+    reply = openai.chat.completions.create(model="gpt-5", messages=[{"role": "user", "content": question}])
+# the system message is the approved text, on the release's model and settings: one run row
+```
 
-**Which render a call belongs to.** In order: an enclosing
-`with ap.attribute(rendered):` block (a `contextvars` variable, so it
-follows `await`s and threads started with a copied context); else a
-request text — `system`, `instructions`, then each message's string or
-`text` parts — that is exactly one of the last 256 renders (matched by
-SHA-256; the registry keeps hashes and dimension names, never a prompt);
-else the call is unattributed and passed through. The request's `model`
-names the window.
+What every adapter does, the same as in TypeScript:
 
-The explicit helpers remain: `airprompter_agent.integrations.openai`
-(`chat_completion`, `responses_create`, async twins) and
-`airprompter_agent.integrations.anthropic` (`messages_create`, async twin)
-place the rendered text for you and call `ap.observe` by name. Each imports
-its library lazily; none is required to install the SDK. The wrapper suites
-run against clients shaped like the real ones in CI and against the latest
-`openai`, `anthropic` and `litellm` releases weekly
-(`.github/workflows/wrap-latest.yml`; `WRAP_LIVE=1 python -m pytest
-tests/test_wrap_live.py` locally).
+- **The approved text goes in the system position.** Chat Completions: a leading `system` or `developer` message is
+  replaced, or one is prepended. Responses: `instructions`. Messages: `system` (your own `system` blocks, with any
+  `cache_control`, are replaced whole). The caller's arguments are never mutated.
+- **The release's model wins, or the slot declines.** A call that names the release's model, or none, runs on it. A
+  call that names another model needs `model_for(release_model_id, caller_model)` (an Azure deployment, a Bedrock id, a
+  gateway alias); without it the slot declines for the run (`model_unresolved`, logged once, one error row against that
+  version) and the call goes out exactly as you wrote it.
+- **The sealed settings go on the call** under the provider's own names (`temperature`, `top_p`, the output cap, `stop`
+  / `stop_sequences`, the reasoning effort); a value the call site set differently is replaced and logged
+  (`adapter_inference_overridden`), a setting the call cannot carry is reported, not sent
+  (`adapter_inference_unsupported`).
+- **When nothing can be served,** your own prompt and model run, untouched, and nothing is measured.
+- **One request is one run.** Inside `ap.run(...)` every call joins that run; with none open, each call is a one-call
+  run that ends when the response or the stream settles. Consume a stream inside the `with` block.
+- **Nothing the adapter does fails your call.**
+
+The direct clients: with a slot, stream with `create(stream=True)`; a `.stream()` helper passes through unmeasured (one
+`adapter_stream_helper_unmeasured` log), as in TypeScript. Without a slot the client only measures, inside
+`with ap.attribute(rendered):` where you placed the text yourself: a call to the release's model (or naming none) gets
+that model and the sealed settings and is observed; a call to another model with no `model_for` goes out unchanged and
+is not observed. A call with neither a slot nor a scope passes through unobserved (`adapter_unattributed`, once per
+method). Nothing guesses which prompt a call belongs to from its text. Every adapter logs the same events
+(`ADAPTER_EVENTS`), each with `adapter`, `slot` and `method`; pass the agent's clock as `now` when you replay recorded
+runs.
+
+**LiteLLM: the callback cannot measure a call made inside `ap.run`.** LiteLLM logs a call after it returns (on a
+thread pool, or a logging worker for async calls), usually after the run has ended, and an ended run takes no more
+records. Inside a run, measure the call where you make it:
+
+```python
+from airprompter_agent.frameworks.contract import measure_call
+from airprompter_agent.frameworks.litellm import litellm_params
+
+with ap.run(subject=user_id) as run:
+    placed = run.place("support.reply")
+    if placed.kind == "approved":
+        messages = [{"role": "system", "content": placed.instructions}, *history]
+        reply = measure_call(run, "support.reply", lambda: litellm.completion(messages=messages, **litellm_params(placed)), model=placed.model)
+    else:
+        reply = litellm.completion(model=own_model, messages=history)  # nothing to serve: your own prompt and model
+```
+
+(`litellm_params(placed)` is the release's model and sealed settings; `measure_call` is from the adapter contract,
+outside the 1.0 promise.) `measure_call` settles when the call returns, so for `stream=True` it would miss the stream's
+usage: for a stream, pass `metadata=litellm_metadata((run, slot))` and consume it inside the run (below). The callback, `litellm.callbacks = [AirPrompterLiteLLMCallback(ap)]`, is for calls made
+outside any run, with `metadata=litellm_metadata(rendered)`: each is a one-call row. It reads only
+`metadata["airprompter"]`: the slot's tag and a signed run reference, which is the authority (a reference that does
+not verify, or names no entry for that tag, files nothing; a call sent under another model is not counted). If you do
+pass `metadata=litellm_metadata((run, slot))` inside a run, a record that reaches the live run is recorded into it and
+one that arrives after the run ended is dropped with one `adapter_late_record` log: the run is counted once, and that
+call's tokens and latency are not measured. Use `measure_call` or the run's metadata for a call, never both. A prompt
+rendered inside `ap.run` is marked as that run's (`rendered.run_bound`), so `litellm_metadata(rendered)` there behaves
+as `(run, slot)` does. A call you send under another id for the release's model (a deployment, a Bedrock id, a Router
+model group) names it: `litellm_metadata((run, slot), model=sent_id)`; LiteLLM's stripped provider prefix still matches.
+
+**Coming from an earlier candidate?** The wrapped clients, the explicit helpers, the old integrations package and the
+match on rendered text are gone; the [CHANGELOG](../CHANGELOG.md) entry for this release maps each one to its adapter.
+To keep placing the text yourself, leave out `slot` and call inside `with ap.attribute(rendered):`. An Azure deployment
+or a gateway alias whose id is not the release's needs `model_for`, or nothing is measured.
+
+Tested against clients shaped like the real ones in CI, and against the real `openai`, `anthropic` and `litellm`
+releases weekly (`.github/workflows/wrap-latest.yml`; `WRAP_LIVE=1 python -m pytest tests/test_frameworks_live.py`
+locally). **Writing an adapter:** `airprompter_agent.frameworks.contract` is the contract (`acquire_run`,
+`choose_model`, `settings_for`, `measure_call` / `begin_measure`, `ADAPTER_EVENTS`, the run types); it is outside the
+1.0 promise. See [CONTRIBUTING.md › Adding a framework adapter](../CONTRIBUTING.md#adding-a-framework-adapter).
 
 ## Parity with the TypeScript SDK
 
@@ -431,6 +456,6 @@ a `run_ref` minted there).
 | Apply control: update window (DST-safe), `on_staged` hook, Freeze precedence, heartbeat | ✓ | ✓ (`zoneinfo`) |
 | `observe()`: OpenAI / Anthropic / Bedrock usage, error classes | ✓ | ✓ + SDK objects, async variant |
 | Variable sources (`variables`, `needs()`, `status().variables`, fenced by the stricter trust, workflow steps) | ✓ (`renderAsync`) | ✓ (`render()` runs plain callables on threads; `render_async()` awaits coroutine functions) |
-| Provider wrappers | `ap.wrap()` for openai / Anthropic, AI SDK middleware | `ap.wrap()` for openai / anthropic (sync + async), explicit helpers, LiteLLM callback |
+| Framework adapters on one contract (`frameworks/contract`) | openai, Anthropic, Vercel AI SDK, LangChain | openai, anthropic (sync + async), LiteLLM callback |
 | Spool upload on hosts | `airprompterd` uploads every writer's segments under that writer's own report (T26); with no live daemon the runtime uploads its own (S5) | ✓ (`SpoolUploader`, `upload_now()`, `TelemetryOptions(upload=False)`) |
 | Serverless flush under the runtime's own grant (`flushTelemetry`, `requestUploadGrant`) | ✓, awaited before `invoke()` returns (S5) | ✓ (`flush_telemetry()`, `request_upload_grant()`, `TelemetryOptions(flush="background")` opt-out) |

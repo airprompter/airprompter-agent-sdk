@@ -18,6 +18,14 @@
  * 5. Prints one JSON line on stdout, every time. Progress and PASS/FAIL lines go to stderr.
  *    Exit 0: every check passed. 1: a check failed, or n8n could not run (`error`). 2: bad input. 130: interrupted.
  *
+ * Offline (a CI image that must not reach the npm registry at test time): steps 1–2 once, at image build time,
+ * into a folder of their own, then every run copies that folder instead of building and installing:
+ *   node scripts/live-n8n.mjs --prepare-nodes-dir /opt/airprompter/n8n-nodes     # build time: npm, network
+ *   N8N_BIN=/opt/n8n/node_modules/.bin/n8n node scripts/live-n8n.mjs --nodes-dir /opt/airprompter/n8n-nodes
+ * With `--nodes-dir` (or N8N_NODES_DIR) the kit runs no npm at all, needs N8N_BIN (npx would reach the registry), and
+ * reaches only AirPrompter. The folder records what was packed (`airprompter-kit.json`: package and SDK versions, the
+ * tarball's sha256, the commit) and the JSON summary repeats it, so a test can check it matches the commit it pins.
+ *
  * Environment (the Update key is read from the environment only, never from an argument):
  *   AIRPROMPTER_AGENT_ID      required   the agent
  *   AIRPROMPTER_UPDATE_KEY    required   an Update key bound to that agent and AIRPROMPTER_ENVIRONMENT
@@ -30,7 +38,10 @@
  *   AIRPROMPTER_SUBJECT       qa-n8n-subject-1   the A/B subject, so the arm is the same on every run
  *   N8N_VERSION               2.49.8     the n8n this kit is proven on; another version fails the n8n.version check
  *   N8N_BIN                   empty      an n8n binary to use instead of `npx --yes n8n@$N8N_VERSION`
- * Flags: --keep (leave the folder, without the n8n encryption key, for debugging), --no-build, --any-n8n.
+ *   N8N_NODES_DIR             empty      same as --nodes-dir
+ *   AIRPROMPTER_KIT_COMMIT    empty      with --prepare-nodes-dir: the commit being packed, when there is no .git
+ * Flags: --keep (leave the folder, without the n8n encryption key, for debugging), --no-build, --any-n8n,
+ *   --prepare-nodes-dir <folder>, --nodes-dir <folder>.
  *
  * @example
  * ```sh
@@ -40,8 +51,8 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -51,7 +62,10 @@ const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKFLOWS_DIR = join(PACKAGE_DIR, "qa", "workflows");
 const NODE_TYPE = "n8n-nodes-airprompter.airPrompter";
 const CREDENTIAL_ID = "apQaCredential01";
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const args = new Set(argv);
+const valueOf = (flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
+const KIT_MANIFEST = "airprompter-kit.json";
 const startedAt = new Date().toISOString();
 const log = (line) => process.stderr.write(`[live-n8n] ${line}\n`);
 const checks = [];
@@ -82,6 +96,67 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
+/**
+ * Steps 1–2: build, pack, and install the tarball into `nodesDir` the way n8n installs a community package. Returns
+ * what was installed. Used per run by default, and once by --prepare-nodes-dir.
+ */
+function packAndInstall(nodesDir, scratch) {
+  if (!args.has("--no-build")) {
+    log("building");
+    execFileSync("npm", ["run", "build"], { cwd: PACKAGE_DIR, stdio: ["ignore", "ignore", "inherit"] });
+  }
+  const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", scratch], { cwd: PACKAGE_DIR, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }))[0];
+  const tarball = join(scratch, packed.filename);
+  writeFileSync(join(nodesDir, "package.json"), JSON.stringify({ name: "installed-nodes", private: true }));
+  log(`installing ${packed.filename} (${packed.files.length} files) into ${nodesDir}`);
+  execFileSync("npm", ["install", tarball, "--omit=dev", "--omit=peer", "--legacy-peer-deps", "--ignore-scripts", "--bin-links=false", "--install-strategy=shallow", "--package-lock=false", "--audit=false", "--fund=false"], { cwd: nodesDir, stdio: ["ignore", "ignore", "inherit"] });
+  let commit = process.env.AIRPROMPTER_KIT_COMMIT?.trim() || null;
+  if (!commit) {
+    try {
+      // Only this repository's own commit: a copy extracted inside some other checkout must not borrow its HEAD.
+      const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: PACKAGE_DIR, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      if (resolve(top, "integrations", "n8n") === PACKAGE_DIR) commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: PACKAGE_DIR, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      commit = null;
+    }
+  }
+  return { package: packed.name, packageVersion: packed.version, tarballSha256: createHash("sha256").update(readFileSync(tarball)).digest("hex"), commit, preparedAt: new Date().toISOString() };
+}
+
+/** What is installed in a community-nodes folder: the package, and the SDK under it (n8n's shallow strategy nests it). */
+function installedIn(nodesDir) {
+  const pkg = join(nodesDir, "node_modules", "n8n-nodes-airprompter", "package.json");
+  if (!existsSync(pkg)) throw new Error(`${nodesDir} has no node_modules/n8n-nodes-airprompter: prepare it with --prepare-nodes-dir`);
+  const sdkManifest = [join(nodesDir, "node_modules", "n8n-nodes-airprompter", "node_modules"), join(nodesDir, "node_modules")].map((dir) => join(dir, "@airprompter", "agent-sdk", "package.json")).find((path) => existsSync(path));
+  if (!sdkManifest) throw new Error(`${nodesDir} has no @airprompter/agent-sdk under the package`);
+  return { packageVersion: JSON.parse(readFileSync(pkg, "utf8")).version, sdkVersion: JSON.parse(readFileSync(sdkManifest, "utf8")).version };
+}
+
+// --prepare-nodes-dir: steps 1–2 only, into a folder of its own, for an image built ahead of offline runs.
+if (args.has("--prepare-nodes-dir")) {
+  const target = resolve(valueOf("--prepare-nodes-dir") ?? "");
+  let scratch = null;
+  let outcome;
+  try {
+    if (!valueOf("--prepare-nodes-dir") || valueOf("--prepare-nodes-dir").startsWith("--")) throw Object.assign(new Error("--prepare-nodes-dir needs a folder"), { exitCode: 2 });
+    if (existsSync(target) && readdirSync(target).length > 0) throw Object.assign(new Error(`${target} is not empty`), { exitCode: 2 });
+    mkdirSync(target, { recursive: true });
+    scratch = mkdtempSync(join(tmpdir(), "airprompter-live-n8n-pack-"));
+    const kit = { ...packAndInstall(target, scratch), ...installedIn(target) };
+    writeFileSync(join(target, KIT_MANIFEST), `${JSON.stringify(kit, null, 2)}\n`);
+    log(`prepared ${target}: ${kit.package} ${kit.packageVersion}, SDK ${kit.sdkVersion}${kit.commit ? `, commit ${kit.commit}` : ""}`);
+    outcome = { ok: true, exitCode: 0, nodesDir: target, kit };
+  } catch (error) {
+    log(error.message);
+    outcome = { ok: false, exitCode: error.exitCode ?? 1, nodesDir: target, error: error.message };
+  }
+  // Before exiting: process.exit would skip a finally.
+  if (scratch) rmSync(scratch, { recursive: true, force: true });
+  process.stdout.write(`${JSON.stringify(outcome)}\n`);
+  process.exit(outcome.exitCode);
+}
+const preinstalled = valueOf("--nodes-dir") ?? (process.env.N8N_NODES_DIR?.trim() || undefined);
+
 const env = {
   agentId: process.env.AIRPROMPTER_AGENT_ID?.trim(),
   updateKey: process.env.AIRPROMPTER_UPDATE_KEY?.trim(),
@@ -98,6 +173,9 @@ const base = { agentId: env.agentId ?? null, environment: env.environment, apiUr
 let variables = { ticket: "Refund for order 1042 has not arrived" };
 try {
   if (!env.agentId || !env.updateKey) throw new Error("set AIRPROMPTER_AGENT_ID and AIRPROMPTER_UPDATE_KEY (an Update key bound to that agent and AIRPROMPTER_ENVIRONMENT)");
+  if (preinstalled !== undefined && (!preinstalled || preinstalled.startsWith("--"))) throw new Error("--nodes-dir needs the folder --prepare-nodes-dir made");
+  // Offline means no npm at all: npx would fetch n8n from the registry.
+  if (preinstalled && !process.env.N8N_BIN) throw new Error("--nodes-dir runs offline and needs N8N_BIN (a pre-installed n8n), not npx");
   if (process.env.AIRPROMPTER_VARIABLES?.trim()) {
     variables = JSON.parse(process.env.AIRPROMPTER_VARIABLES);
     if (!variables || typeof variables !== "object" || Array.isArray(variables)) throw new Error("AIRPROMPTER_VARIABLES must be a JSON object");
@@ -131,19 +209,23 @@ try {
   const nodesDir = join(userFolder, ".n8n", "nodes");
   mkdirSync(nodesDir, { recursive: true });
 
-  // 1–2. Build, pack, install where n8n keeps community packages.
-  if (!args.has("--no-build")) {
-    log("building");
-    execFileSync("npm", ["run", "build"], { cwd: PACKAGE_DIR, stdio: ["ignore", "ignore", "inherit"] });
+  // 1–2. Build, pack, install where n8n keeps community packages; or copy a folder prepared ahead (no npm, offline).
+  if (preinstalled) {
+    const source = resolve(preinstalled);
+    installedIn(source);
+    cpSync(source, nodesDir, { recursive: true, dereference: true });
+    let kit = null;
+    try {
+      kit = JSON.parse(readFileSync(join(source, KIT_MANIFEST), "utf8"));
+    } catch {
+      kit = null;
+    }
+    base.nodes = { mode: "preinstalled", from: source, kit };
+    log(`using the community-nodes folder prepared in ${source}${kit?.commit ? ` (commit ${kit.commit})` : ""}; no npm`);
+  } else {
+    base.nodes = { mode: "packed", kit: packAndInstall(nodesDir, work) };
   }
-  const packed = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", work], { cwd: PACKAGE_DIR, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }))[0];
-  writeFileSync(join(nodesDir, "package.json"), JSON.stringify({ name: "installed-nodes", private: true }));
-  log(`installing ${packed.filename} (${packed.files.length} files) into ${nodesDir}`);
-  execFileSync("npm", ["install", join(work, packed.filename), "--omit=dev", "--omit=peer", "--legacy-peer-deps", "--ignore-scripts", "--bin-links=false", "--install-strategy=shallow", "--package-lock=false", "--audit=false", "--fund=false"], { cwd: nodesDir, stdio: ["ignore", "ignore", "inherit"] });
-  // n8n's shallow strategy nests the package's own dependencies under it.
-  const sdkManifest = [join(nodesDir, "node_modules", "n8n-nodes-airprompter", "node_modules"), join(nodesDir, "node_modules")].map((dir) => join(dir, "@airprompter", "agent-sdk", "package.json")).find((path) => existsSync(path));
-  if (!sdkManifest) throw new Error("the install did not bring @airprompter/agent-sdk");
-  const sdkVersion = JSON.parse(readFileSync(sdkManifest, "utf8")).version;
+  const { sdkVersion } = installedIn(nodesDir);
   base.sdkVersion = sdkVersion;
 
   // 3. A fresh n8n: its own user folder, encryption key and task-runner port.
@@ -157,6 +239,9 @@ try {
     N8N_VERSION_NOTIFICATIONS_ENABLED: "false",
     N8N_PERSONALIZATION_ENABLED: "false",
     N8N_LOG_LEVEL: process.env.N8N_LOG_LEVEL || "warn",
+    N8N_TEMPLATES_ENABLED: "false",
+    // Offline: should anything in n8n reach for npm, it gets the cache or fails, never the registry.
+    ...(preinstalled ? { npm_config_offline: "true" } : {}),
   };
   delete n8nEnv.N8N_CUSTOM_EXTENSIONS;
   delete n8nEnv.AIRPROMPTER_UPDATE_KEY;

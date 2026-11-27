@@ -9,19 +9,24 @@ that. We never change the forks' code. Shipping a patch from one would be a new 
 | Kind | Repositories |
 |---|---|
 | Public forks (Actions, issues, wiki and projects off) | `langchainjs`, `langgraphjs`, `openai-node`, `anthropic-sdk-typescript`, `vercel-ai`, `openai-agents-js`, `langchain`, `langgraph`, `openai-agents-python`, `pydantic-ai`, `openai-python`, `anthropic-sdk-python` |
-| Private mirrors (no fork link; `ee/LICENSE` and `enterprise/LICENSE.md` forbid redistributing those folders) | `mastra`, `litellm`. **Never make either public.** |
+| Private mirrors (Actions off; no fork link; `ee/LICENSE` and `enterprise/LICENSE.md` forbid redistributing those folders) | `mastra`, `litellm`. **Never make either public.** |
 
 ## Tracking upstream
 
 [`sync-forks.yml`](../.github/workflows/sync-forks.yml) runs daily at 05:41 UTC and on demand. The forks' own
 Actions stay off. It runs [`scripts/forks/sync.mjs`](../scripts/forks/sync.mjs), which does the following:
 
-- **Default branch.** A fork is fast-forwarded with GitHub's `merge-upstream`. A mirror is fetched from upstream and
-  pushed without force. A branch that cannot fast-forward is reported.
+- **Default branch, fast-forward only.** A fork is first compared with upstream. If ours has a commit upstream
+  lacks, the run reports it and does not sync, because `merge-upstream` would write a merge commit. Otherwise
+  `merge-upstream` fast-forwards it. A mirror is fetched from upstream and pushed without force. A branch that
+  cannot fast-forward is reported.
 - **Tags.** Every upstream tag we lack is added. Ours are never overwritten or deleted:
   - When upstream moves a tag or deletes one, the run reports it and keeps ours.
-  - That repository gets no new tags until the change is checked and its tag is listed under
-    `acknowledgedTagChanges` for the repository.
+  - That repository gets no new tags until someone checks the change and acknowledges it under
+    `acknowledgedTagChanges` as `{ "tag": …, "upstream": "<the commit upstream now names>" }` (or `null` for a
+    deletion). An acknowledgement covers that one change: if the tag moves again, the run reports it again.
+  - A floating pointer that moves on every build (a nightly, `*-bleeding`) goes under `ignoreTags`. It is never
+    copied, compared or reported. pydantic-ai's `clai2-bleeding` is the one there today.
   - A tag counts as moved only when the commit it names changes, so re-creating an annotated tag on the same commit
     is not reported.
 - **`compat/*`** tags are ours and the sync never touches them.
@@ -57,9 +62,10 @@ Open the run summary, or the `fork-sync-report` artifact, which lists both commi
 
 - **Moved or deleted upstream.** That repository is paused: it gets no new tags until someone decides. Compare
   `https://github.com/<upstream>/compare/<ours>...<theirs>`.
-  - **A floating pointer** (a nightly, `*-bleeding`, `latest`) or the same release re-tagged: acknowledge it. In a
-    PR, add the tag to that repository's `acknowledgedTagChanges`, with a line in `$acknowledgedTagChanges` saying
-    what you saw and when.
+  - **A floating pointer** (a nightly, `*-bleeding`, `latest`): in a PR, add it to that repository's `ignoreTags`,
+    with a line in `$ignoreTags` saying what you saw and when.
+  - **The same release re-tagged:** add the `{ "tag", "upstream" }` pair that the run's note prints to
+    `acknowledgedTagChanges`.
   - **A release tag that now names different code, or was deleted:** tell the owner before acknowledging it, and
     check whether a `compat/*` tag on that fork names the old commit. Ours stays as it was either way.
   - After the PR merges, run the workflow with `only: airprompter/<repo>`.
@@ -84,7 +90,8 @@ that release tested, as `compat/<sdk version>`:
     installs no framework or provider client. Only the weekly `wrap-latest` run installs them, at `@latest`.
 - **The commit** is the one that the upstream's own tag for that version names on our fork, such as
   `langchain@1.6.1` or `v7.50.0`. If a monorepo released its tested packages from different commits, each package
-  gets `compat/<sdk version>/<package>` instead.
+  gets `compat/<sdk version>/<package>` instead. That is the one departure from the ticket's single name. Git
+  cannot hold both forms for one version, so a clash is a conflict.
 - **Tags are lightweight and never move.** If a compat tag already exists on another commit, the run fails and
   creates nothing. It also fails when a tested version's upstream tag has not reached our fork yet, rather than
   skipping it quietly.
@@ -101,8 +108,8 @@ node scripts/forks/compat-tags.mjs 1.0.0-rc.4
 |---|---|---|---|
 | `airprompter/langchainjs` | `compat/1.0.0-rc.4` | `langchain` 1.6.1, `@langchain/core` 1.3.4 (one release commit) | `bb1fe4deb9af41e287343b7ff6f2b68b4db81d27` |
 | `airprompter/langgraphjs` | `compat/1.0.0-rc.4` | `@langchain/langgraph` 1.6.1 | `77294a35a56bfdb86e5952158bcb343fc3c41950` |
-| `airprompter/openai-node` | `compat/1.0.0-rc.4` | `openai` 7.50.0 | `42563fe08083ed7af6feba046063e3100fa7ef50` |
-| `airprompter/anthropic-sdk-typescript` | `compat/1.0.0-rc.4` | `@anthropic-ai/sdk` 0.129.0 | `bf2058689f845dfb10e59bd9ebeb5cb4e9318a9d` |
+| `airprompter/openai-node` | `compat/1.0.0-rc.4` | `openai` 7.50.0 (installed through `@langchain/openai`; `wrapLive.test.ts` ran against it) | `42563fe08083ed7af6feba046063e3100fa7ef50` |
+| `airprompter/anthropic-sdk-typescript` | `compat/1.0.0-rc.4` | `@anthropic-ai/sdk` 0.129.0 (installed through `@langchain/anthropic`; `wrapLive.test.ts` ran against it) | `bf2058689f845dfb10e59bd9ebeb5cb4e9318a9d` |
 
 rc.4 has already shipped, so no release run will create these. Once the secret exists, create them with:
 

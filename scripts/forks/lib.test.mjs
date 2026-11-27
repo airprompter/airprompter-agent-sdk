@@ -27,9 +27,18 @@ test("a sync adds missing tags, reports moved and deleted ones, and leaves compa
 test("an unacknowledged move or deletion upstream stops every new tag for that repository", () => {
   const moved = { add: ["v3"], moved: [{ tag: "v2", ours: A, upstream: B }], deletedUpstream: [] };
   assert.deepEqual(tagGate(moved), { open: ["v2"], push: [] });
-  assert.deepEqual(tagGate(moved, ["v2"]), { open: [], push: ["v3"] });
+  assert.deepEqual(tagGate(moved, [{ tag: "v2", upstream: B }]), { open: [], push: ["v3"] });
+  // An acknowledgement accepts that one move: the same tag moved again is reported again.
+  assert.deepEqual(tagGate({ ...moved, moved: [{ tag: "v2", ours: A, upstream: C }] }, [{ tag: "v2", upstream: B }]), { open: ["v2"], push: [] });
   assert.deepEqual(tagGate({ add: ["v3"], moved: [], deletedUpstream: ["v0"] }), { open: ["v0"], push: [] });
+  assert.deepEqual(tagGate({ add: ["v3"], moved: [], deletedUpstream: ["v0"] }, [{ tag: "v0", upstream: null }]), { open: [], push: ["v3"] });
   assert.deepEqual(tagGate({ add: ["v3"], moved: [], deletedUpstream: [] }), { open: [], push: ["v3"] });
+});
+
+test("ignoreTags: a floating pointer is never copied, compared or reported", () => {
+  const upstream = new Map([["nightly", C], ["v1", A], ["fresh-float", B]]);
+  const ours = new Map([["nightly", A], ["v1", A]]);
+  assert.deepEqual(planTagSync(upstream, ours, ["nightly", "fresh-float"]), { add: [], moved: [], deletedUpstream: [] });
 });
 
 test("the manifest lists the twelve forks and two private mirrors of AIR-2314", () => {
@@ -52,6 +61,8 @@ test("the manifest refuses a repository outside the org, a duplicate, and a tag 
   assert.throws(() => loadManifest(write([{ ...ok, packages: [{ registry: "npm", name: "x", tag: "v1" }] }])), /without \{version\}/);
   assert.throws(() => loadManifest(write([{ ...ok, kind: "public-mirror" }])), /kind must be/);
   assert.throws(() => loadManifest(write([{ ...ok, packages: [{ registry: "cargo", name: "x", tag: "v{version}" }] }])), /npm or pypi/);
+  assert.throws(() => loadManifest(write([{ ...ok, ignoreTags: ["compat/1.0.0"] }])), /never compat/);
+  assert.throws(() => loadManifest(write([{ ...ok, acknowledgedTagChanges: ["v1"] }])), /acknowledgedTagChanges entries/);
   assert.throws(() => loadManifest(write([{ ...ok, packages: [{ registry: "pypi", name: "x", tag: "v{version}", testedVersionFrom: "x.txt" }] }])), /no reader for a Python/);
 });
 
@@ -74,6 +85,7 @@ test("compat tags: one per fork on the tested commit, per package when a monorep
       { repo: "airprompter/moved", packages: [{ registry: "npm", name: "one", tag: "v{version}", testedVersionFrom: "lock" }] },
       { repo: "airprompter/untested", packages: [{ registry: "npm", name: "absent", tag: "v{version}", testedVersionFrom: "lock" }, { registry: "pypi", name: "py", tag: "v{version}" }] },
       { repo: "airprompter/unsynced", packages: [{ registry: "npm", name: "one", tag: "v{version}", testedVersionFrom: "lock" }] },
+      { repo: "airprompter/folder", packages: [{ registry: "npm", name: "one", tag: "v{version}", testedVersionFrom: "lock" }] },
     ],
   };
   const tags = {
@@ -83,6 +95,7 @@ test("compat tags: one per fork on the tested commit, per package when a monorep
     "airprompter/moved": new Map([["v1.0.0", A], ["compat/1.2.3", C]]),
     "airprompter/untested": new Map(),
     "airprompter/unsynced": new Map(),
+    "airprompter/folder": new Map([["v1.0.0", A], ["compat/1.2.3/one", A]]),
   };
   const reads = [];
   const plan = planCompatTags(manifest, "1.2.3", { readAtTag: (tag, path) => (reads.push(`${tag}:${path}`), lock), forkTags: (repo) => tags[repo] });
@@ -97,4 +110,5 @@ test("compat tags: one per fork on the tested commit, per package when a monorep
   assert.match(by.untested.skipped[1].reason, /nothing certifies it/);
   assert.match(by.unsynced.skipped[0].reason, /sync the fork first/);
   assert.equal(by.unsynced.skipped[0].missingOnFork, true, "compat-tags fails on it rather than skipping quietly");
+  assert.deepEqual(by.folder.tags.map((t) => t.state), ["conflict"], "compat/X cannot be created beside compat/X/<package>");
 });

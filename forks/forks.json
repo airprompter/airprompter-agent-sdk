@@ -75,8 +75,8 @@
       "upstream": "pydantic/pydantic-ai",
       "kind": "fork",
       "branch": "main",
-      "acknowledgedTagChanges": ["clai2-bleeding"],
-      "$acknowledgedTagChanges": "clai2-bleeding is upstream's floating pre-release pointer, moved on every build (first seen moved 2026-11-27); ours stays at the 2026-11-05 copy.",
+      "ignoreTags": ["clai2-bleeding"],
+      "$ignoreTags": "clai2-bleeding is upstream's floating pre-release pointer, moved on every build (first seen moved 2026-11-27). Ours stays at the 2026-11-05 copy and is not compared.",
       "packages": [{ "registry": "pypi", "name": "pydantic-ai", "tag": "v{version}" }]
     },
     {

@@ -12,7 +12,7 @@
  * the planned tags through the GitHub API with `FORK_SYNC_TOKEN` (Contents: write). Those tags are lightweight and point
  * at commits the fork already holds. `release.yml` runs it with `--apply` after a TypeScript or Python SDK publish.
  *
- *   $ node scripts/forks/compat-tags.mjs 1.0.0-rc.4                    # the plan, as a table, and JSON on stdout
+ *   $ node scripts/forks/compat-tags.mjs 1.0.0-rc.4                    # the plan on stderr, JSON on stdout
  *   $ FORK_SYNC_TOKEN=… node scripts/forks/compat-tags.mjs 1.0.0-rc.4 --registry npm --apply   # what release.yml runs
  */
 
@@ -36,10 +36,7 @@ if (registry !== null && registry !== "npm" && registry !== "pypi") {
   log("--registry is npm (the TypeScript SDK's packages) or pypi (the Python SDK's)");
   process.exit(2);
 }
-if (apply && !token) {
-  log("--apply needs FORK_SYNC_TOKEN (Contents: write on every fork listed).");
-  process.exit(2);
-}
+
 
 const show = (tag, path) => {
   try {
@@ -66,6 +63,12 @@ for (const entry of plan) {
   for (const skip of entry.skipped) log(`${entry.repo}  not tagged: ${skip.package}${skip.version ? ` ${skip.version}` : ""}: ${skip.reason}`);
 }
 
+// A token is needed only when there is something to create (the Python leg plans nothing today).
+const toCreate = plan.flatMap((entry) => entry.tags.filter((tag) => tag.state === "create"));
+if (apply && toCreate.length > 0 && !token) {
+  log(`--apply has ${toCreate.length} tag(s) to create and needs FORK_SYNC_TOKEN (Contents: write on those forks).`);
+  process.exit(2);
+}
 const created = [];
 if (apply && conflicts.length === 0) {
   for (const entry of plan) {

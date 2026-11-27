@@ -38,6 +38,10 @@ export function loadManifest(path = join(REPO_ROOT, "forks", "forks.json")) {
     if (fork.kind !== "fork" && fork.kind !== "private-mirror") throw new Error(`${path}: ${fork.repo} kind must be fork or private-mirror`);
     if (seen.has(fork.repo)) throw new Error(`${path}: ${fork.repo} is listed twice`);
     seen.add(fork.repo);
+    if (fork.ignoreTags !== undefined && !(Array.isArray(fork.ignoreTags) && fork.ignoreTags.every((tag) => typeof tag === "string" && tag && !tag.startsWith(COMPAT_PREFIX)))) throw new Error(`${path}: ${fork.repo} ignoreTags must be tag names (never compat/*)`);
+    for (const entry of fork.acknowledgedTagChanges ?? []) {
+      if (typeof entry?.tag !== "string" || !(entry.upstream === null || /^[0-9a-f]{40,64}$/.test(entry.upstream ?? ""))) throw new Error(`${path}: ${fork.repo} acknowledgedTagChanges entries are { "tag": …, "upstream": "<commit upstream now names>" | null }`);
+    }
     for (const pkg of fork.packages ?? []) {
       if (pkg.registry !== "npm" && pkg.registry !== "pypi") throw new Error(`${path}: ${fork.repo} ${pkg.name} registry must be npm or pypi`);
       if (!pkg.tag?.includes("{version}")) throw new Error(`${path}: ${fork.repo} ${pkg.name} has a tag without {version}`);
@@ -69,29 +73,35 @@ export function parseLsRemote(text) {
 /**
  * What a sync does with tags: add the upstream tags we lack; report a tag upstream now points elsewhere (`moved`)
  * and one we hold that upstream no longer has (`deletedUpstream`). Ours stay as they are in both cases, and
- * `compat/*` is never compared, added or reported.
+ * `compat/*` is never compared, added or reported. `ignoreTags` names floating pointers (a nightly, `*-bleeding`)
+ * that move on every build: never copied, compared or reported.
  */
-export function planTagSync(upstream, ours) {
+export function planTagSync(upstream, ours, ignoreTags = []) {
+  const ignored = new Set(ignoreTags);
   const add = [];
   const moved = [];
   const deletedUpstream = [];
   for (const [tag, sha] of upstream) {
-    if (tag.startsWith(COMPAT_PREFIX)) continue;
+    if (tag.startsWith(COMPAT_PREFIX) || ignored.has(tag)) continue;
     const mine = ours.get(tag);
     if (mine === undefined) add.push(tag);
     else if (mine !== sha) moved.push({ tag, ours: mine, upstream: sha });
   }
-  for (const tag of ours.keys()) if (!tag.startsWith(COMPAT_PREFIX) && !upstream.has(tag)) deletedUpstream.push(tag);
+  for (const tag of ours.keys()) if (!tag.startsWith(COMPAT_PREFIX) && !ignored.has(tag) && !upstream.has(tag)) deletedUpstream.push(tag);
   return { add: add.sort(), moved: moved.sort((a, b) => a.tag.localeCompare(b.tag)), deletedUpstream: deletedUpstream.sort() };
 }
 
 /**
  * The ticket's rule: while a moved or deleted upstream tag is not acknowledged, the repository gets no new tags.
- * `open` is what still needs a person; `push` is what the sync may add.
+ * An acknowledgement accepts one change only: `{ tag, upstream }` names the commit upstream moved it to, or
+ * `upstream: null` for a deletion, so a later move of the same tag is reported again. `open` still needs a person;
+ * `push` is what the sync may add.
  */
 export function tagGate(plan, acknowledged = []) {
-  const ack = new Set(acknowledged);
-  const open = [...plan.moved.map((entry) => entry.tag), ...plan.deletedUpstream].filter((tag) => !ack.has(tag));
+  const ack = new Set(acknowledged.map((entry) => `${entry.tag}\u0000${entry.upstream ?? ""}`));
+  const open = [...plan.moved.map((entry) => ({ tag: entry.tag, upstream: entry.upstream })), ...plan.deletedUpstream.map((tag) => ({ tag, upstream: null }))]
+    .filter((change) => !ack.has(`${change.tag}\u0000${change.upstream ?? ""}`))
+    .map((change) => change.tag);
   return { open, push: open.length > 0 ? [] : plan.add };
 }
 
@@ -150,9 +160,12 @@ export function planCompatTags(manifest, sdkVersion, { readAtTag, forkTags, regi
       ? resolved.length ? [{ tag: `${COMPAT_PREFIX}${sdkVersion}`, commit: resolved[0].commit, covers: resolved }] : []
       : resolved.map((entry) => ({ tag: `${COMPAT_PREFIX}${sdkVersion}/${entry.package}`, commit: entry.commit, covers: [entry] }));
     for (const tag of tags) {
-      const existing = (ours ??= forkTags(fork.repo)).get(tag.tag);
-      tag.state = existing === undefined ? "create" : existing === tag.commit ? "present" : "conflict";
-      if (tag.state === "conflict") tag.existing = existing;
+      ours ??= forkTags(fork.repo);
+      const existing = ours.get(tag.tag);
+      // Git cannot hold both compat/X and compat/X/<package>: a ref cannot also be a folder.
+      const clash = [...ours.keys()].find((name) => name.startsWith(`${tag.tag}/`) || (tag.tag.startsWith(`${COMPAT_PREFIX}${sdkVersion}/`) && name === `${COMPAT_PREFIX}${sdkVersion}`));
+      tag.state = existing === undefined ? (clash ? "conflict" : "create") : existing === tag.commit ? "present" : "conflict";
+      if (tag.state === "conflict") tag.existing = existing ?? `${clash} (a ref/folder clash)`;
     }
     entries.push({ repo: fork.repo, tags, skipped });
   }
@@ -161,7 +174,12 @@ export function planCompatTags(manifest, sdkVersion, { readAtTag, forkTags, regi
 
 /** `git ls-remote --tags <url>`, parsed. The URL may carry a token; it is never printed. */
 export function lsRemoteTags(url) {
-  return parseLsRemote(execFileSync("git", ["ls-remote", "--tags", url], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }));
+  try {
+    return parseLsRemote(execFileSync("git", ["ls-remote", "--tags", url], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }));
+  } catch (error) {
+    // The URL may carry the token; say which repository without it.
+    throw new Error(`git ls-remote ${url.replace(/\/\/[^@/]+@/, "//")} failed: ${String(error.stderr || error.message).replace(/\/\/[^@/\s]+@/g, "//").trim().split("\n").pop()}`);
+  }
 }
 
 /** An https URL for a repository, with the token when one is given (for pushes and private mirrors). */

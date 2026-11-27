@@ -285,6 +285,8 @@ jobs:
         env:
           FORK_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
         run: |
+          # A release tagged from a commit older than the fork tooling has nothing to run.
+          if [ ! -f scripts/forks/compat-tags.mjs ]; then echo "::notice::scripts/forks is not in this release's commit; no compat tags."; exit 0; fi
           case "$GITHUB_REF_NAME" in
             sdk-typescript/v*) registry=npm; version="${GITHUB_REF_NAME#sdk-typescript/v}" ;;
             sdk-python/v*) registry=pypi; version=$(printf '%s' "${GITHUB_REF_NAME#sdk-python/v}" | sed -E -e 's/^([0-9.]+)rc([0-9]+)$/\1-rc.\2/' -e 's/^([0-9.]+)b([0-9]+)$/\1-beta.\2/' -e 's/^([0-9.]+)a([0-9]+)$/\1-alpha.\2/') ;;

@@ -9,8 +9,8 @@
  *    and reported.
  * 2. **Tags.** Upstream tags we lack are fetched and pushed. A tag upstream moved or deleted is reported and ours is
  *    kept. While such a change is unacknowledged, that repository gets no new tags: the sync stops and reports
- *    instead of guessing. Acknowledge a change by listing the tag under `acknowledgedTagChanges` for that repository
- *    in `forks/forks.json`. `compat/*` tags are ours and never touched.
+ *    instead of guessing. Acknowledge one change under `acknowledgedTagChanges` (`{ tag, upstream }`) in
+ *    `forks/forks.json`; list a floating pointer under `ignoreTags`. `compat/*` tags are ours and never touched.
  *
  * Exit 0 when every repository synced cleanly or only acknowledged changes remain; exit 1 otherwise. A Markdown
  * report goes to `$GITHUB_STEP_SUMMARY` when set, and JSON to stdout.
@@ -91,11 +91,11 @@ async function syncOne(fork) {
     git(work, ["remote", "add", "upstream", gitUrl(fork.upstream)]);
     git(work, ["remote", "add", "ours", gitUrl(fork.repo, token)]);
     report.branch = await syncBranch(fork, work);
-    const plan = planTagSync(lsRemoteTags(gitUrl(fork.upstream)), lsRemoteTags(gitUrl(fork.repo, token)));
+    const plan = planTagSync(lsRemoteTags(gitUrl(fork.upstream)), lsRemoteTags(gitUrl(fork.repo, token)), fork.ignoreTags);
     const { open, push } = tagGate(plan, fork.acknowledgedTagChanges);
     report.tags = { toAdd: plan.add.length, moved: plan.moved, deletedUpstream: plan.deletedUpstream, unacknowledged: open, added: 0 };
     if (open.length > 0) {
-      report.tags.stopped = `paused: upstream moved or deleted ${open.join(", ")}. Ours are kept; no tags were added. To accept, add ${JSON.stringify(open)} to acknowledgedTagChanges for ${fork.repo} in forks/forks.json (forks/README.md › When the sync fails).`;
+      report.tags.stopped = `paused: upstream moved or deleted ${open.join(", ")}. Ours are kept; no tags were added. To accept, add ${JSON.stringify([...plan.moved.filter((m) => open.includes(m.tag)).map((m) => ({ tag: m.tag, upstream: m.upstream })), ...plan.deletedUpstream.filter((t) => open.includes(t)).map((tag) => ({ tag, upstream: null }))])} to acknowledgedTagChanges for ${fork.repo} in forks/forks.json, or a floating tag to ignoreTags (forks/README.md › When the sync fails).`;
     } else if (push.length > 0 && !dryRun) {
       pushTags(work, push);
       report.tags.added = push.length;

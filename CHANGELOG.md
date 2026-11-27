@@ -23,6 +23,12 @@ may change a public shape and says so here.
 - **Lint and budgets:** an adapter imports only `./contract.js` and its own framework (an allowlist per adapter in `scripts/lint-imports.mjs`; LangChain is exempt until AIR-2234); core, sync, runtime, telemetry and the agent import no framework package; an adapter file over 300 lines fails `npm run size`; `agent.ts`'s line count is pinned by `packageShape.test.ts`. CONTRIBUTING.md has *Adding a framework adapter*.
 - `ai` 7.0.162 is a pinned devDependency, so CI proves on the real AI SDK that `wrapGenerate` receives the object `transformParams` returned.
 
+### n8n: Report Run records inside a real n8n (AIR-2393)
+- **Report Run never recorded in n8n.** n8n installs its own `undici` as the global `fetch` dispatcher, and that undici refuses the explicit `content-length` the SDK's telemetry upload sets (`invalid content-length header`), so the upload held and nothing was counted. `integrations/n8n` now hands the Steps core a `fetch` without that header (`fetch` computes it from the body). The SDK-side fix is to stop setting the header in `telemetry/uploader.ts`; `test/n8n/dispatcher.test.ts` says when the workaround can go.
+- **Root Public Key is optional** in the n8n credential: Dev's root is pinned. Production still needs it on `1.0.0-rc.4`.
+- **`integrations/n8n/scripts/live-n8n.mjs`** runs the node in a real, headless n8n (installed as a community package) against a live AirPrompter, for the n8n QA test (`integrations/n8n/qa/README.md`).
+- **Self-hosted n8n only at launch**; depending on the SDK is accepted (decisions recorded on AIR-2393).
+
 ### Steps: the hosted prod root is pinned (AIR-2214)
 - **`HOSTED_ROOTS.prod` is AirPrompter's production root** (key id `044af6e8…1793`), exactly as the root ceremony of 2026-11-27 wrote it (`infrastructure/trust/agent-root/prod/root-public.jwk.json` in the service repository). A Steps client pointed at the production service needs no `root` any more and no longer reports `root_not_pinned`. A test checks the real prod root document (`fixtures/hosted-prod-root.json`) against the pinned key, and refuses a document signed by any other root, including dev's. Zapier and n8n get it when they move to the release that carries it.
 

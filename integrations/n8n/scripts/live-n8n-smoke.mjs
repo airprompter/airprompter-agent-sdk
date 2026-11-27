@@ -154,11 +154,13 @@ try {
   const notPassed = (summary?.checks ?? []).filter((entry) => entry.state !== "pass").map((entry) => `${entry.id}=${entry.state}`);
   if (notPassed.length) problems.push(`checks not passed: ${notPassed.join(", ")}`);
   if (summary && !(summary.checks ?? []).some((entry) => entry.id === "get_prompt.rendered")) problems.push("the kit did not run get_prompt.rendered");
-  if (process.argv.slice(2).some((arg) => arg === "--nodes-dir" || arg.startsWith("--nodes-dir=")) && summary?.nodes?.mode !== "preinstalled") problems.push("--nodes-dir given but the kit did not use the prepared folder");
+  const offline = process.argv.slice(2).some((arg) => arg === "--nodes-dir" || arg.startsWith("--nodes-dir=")) || Boolean(process.env.AIRPROMPTER_KIT_NODES_DIR?.trim());
+  if (offline && summary?.nodes?.mode !== "preinstalled") problems.push("--nodes-dir given but the kit did not use the prepared folder");
   if (summary?.getPrompt && (summary.getPrompt.versionId !== VERSION || summary.getPrompt.servedFrom !== "network")) problems.push(`Get Prompt served ${summary.getPrompt.versionId} from ${summary.getPrompt.servedFrom}, not ${VERSION} from network`);
   if (delivered.runs !== 1 || delivered.statuses.join() !== "ok" || delivered.versionIds.join() !== VERSION || delivered.inputTokens !== 123 || delivered.outputTokens !== 7 || delivered.thumbsUp !== 1 || delivered.unparsedRows > 0) problems.push(`the fake plane received ${JSON.stringify(delivered)}, not exactly one ok run on ${VERSION} with 123/7 tokens and one thumbs up`);
   const ok = problems.length === 0;
-  verdict = { ...(summary ?? {}), ok, exitCode: interrupted ? (interrupted === "SIGINT" ? 130 : 143) : ok ? 0 : 1, smoke: { expectedPromptSha256, delivered, problems, kitExitCode: code } };
+  // The kit's bad input (exit 2) stays exit 2, so a mistyped flag reads as bad input, not as a failed smoke.
+  verdict = { ...(summary ?? {}), ok, exitCode: interrupted ? (interrupted === "SIGINT" ? 130 : 143) : ok ? 0 : code === 2 ? 2 : 1, smoke: { expectedPromptSha256, delivered, problems, kitExitCode: code } };
 } catch (error) {
   verdict = { ok: false, exitCode: 1, startedAt, error: `the smoke could not run: ${error.message}` };
 } finally {

@@ -194,7 +194,7 @@ test("the smoke script prints one JSON line on every exit, and fails when the ki
   const none = spawnSync(process.execPath, [SMOKE], { encoding: "utf8", env: { ...process.env, N8N_BIN: "" } });
   assert.equal(none.status, 2);
   assert.match(JSON.parse(none.stdout.trim()).error, /set N8N_BIN/);
-  // A stand-in n8n that answers --version and --help, then fails: the kit stops, and so does the smoke, with reasons.
+  // Fake npm and n8n on PATH: the kit's default mode fails at npm pack, so it stops, and so does the smoke, with reasons.
   const tools = fakeTools(t);
   const broken = spawnSync(process.execPath, [SMOKE, "--no-build"], { encoding: "utf8", env: { ...process.env, ...tools.env } });
   const verdict = JSON.parse(broken.stdout.trim().split("\n").pop() || "{}");

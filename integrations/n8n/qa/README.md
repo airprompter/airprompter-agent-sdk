@@ -140,8 +140,10 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n-s
     up.
 - **Output:** one JSON line every time. It is the kit's line with `ok` and `exitCode` set to the smoke's verdict,
   plus a `smoke` object (`expectedPromptSha256`, `delivered`, `problems`, `kitExitCode`).
-- **Exit codes:** 0 or 1. 2 means no `N8N_BIN`, or a `SMOKE_TIMEOUT_MS` that is not a positive whole number. 130
-  or 143 means interrupted, after the kit has stopped.
+- **Exit codes:** 0 or 1. 2 means bad input: no `N8N_BIN`, a `SMOKE_TIMEOUT_MS` that is not a positive whole
+  number, or the kit's own bad input. 130 or 143 means interrupted, after the kit has stopped.
+- **Stopping it:** signal the smoke process itself, not its process group. The kit runs in a group of its own, and
+  the smoke forwards the signal there and waits for it.
 - **Timeout:** `SMOKE_TIMEOUT_MS` (default 15 minutes) stops the kit's whole process group if it hangs: SIGTERM, then
   SIGKILL 15 s later.
 - **Trust root:** the fake plane signs with its own root, so this step does not exercise the pinned dev root. The

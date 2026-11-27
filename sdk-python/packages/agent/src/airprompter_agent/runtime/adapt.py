@@ -31,7 +31,8 @@ T = TypeVar("T")
 
 
 class AcquiredRun(NamedTuple):
-    """What ``acquire_run`` answers: ``.run`` and ``.owned`` (TypeScript's ``{ run, owned }``), and unpacks as a pair."""
+    """What ``acquire_run`` answers: ``.run`` and ``.owned`` (TypeScript's ``{ run, owned }``). It unpacks as a pair, but
+    new code reads the fields by name: a field added later would break a two-name unpack."""
 
     run: RunSession
     owned: bool

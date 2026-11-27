@@ -1,12 +1,15 @@
 name: Wrappers against the latest provider SDKs
 
-# T33 (D65): `ap.wrap()`, the AI SDK middleware and the LiteLLM callback are
-# built on the provider SDKs' public surfaces, which move. Every week the
+# The framework adapters (frameworks/openai, anthropic, ai-sdk; the Python
+# twins and the LiteLLM callback) are built on the provider SDKs' public
+# surfaces, which move. Every week the
 # wrapper suites run against the LATEST releases of `openai`,
 # `@anthropic-ai/sdk`, `ai`, `openai` (Python), `anthropic` and `litellm`
 # with recorded responses served through each client's own transport option
 # — nothing reaches a provider. A red run here is the early warning that a
-# supported range must move; CI proper pins nothing and never installs them.
+# supported range must move. CI proper runs the same suites on the versions
+# the workspace pins (`ai` is a pinned devDependency; `openai` and
+# `@anthropic-ai/sdk` arrive with the LangChain ones), or skips them.
 
 on:
   schedule:
@@ -38,7 +41,7 @@ jobs:
           done
         working-directory: sdk-typescript
       - name: Wrapper suites against the real clients
-        run: WRAP_LIVE=1 node --import tsx --test test/wrapLive.test.ts test/wrap.test.ts
+        run: WRAP_LIVE=1 node --import tsx --test test/frameworks/live.test.ts test/frameworks/openai.test.ts test/frameworks/anthropic.test.ts test/frameworks/aiSdk.test.ts
         working-directory: sdk-typescript
 
   python:

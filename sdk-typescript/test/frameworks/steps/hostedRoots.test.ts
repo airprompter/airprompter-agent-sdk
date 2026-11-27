@@ -2,8 +2,9 @@
  * The roots `@airprompter/agent-sdk/frameworks/steps` pins (`HOSTED_ROOTS`): each one is the key the offline ceremony
  * wrote, the real root document that ceremony signed verifies under it, and nothing signed by another root does.
  *
- * `fixtures/hosted-dev-root.json` is the service repository's `infrastructure/trust/agent-root/dev/root.json`,
- * byte for byte (public: keys and signatures only).
+ * `fixtures/hosted-dev-root.json` and `fixtures/hosted-prod-root.json` are the service repository's
+ * `infrastructure/trust/agent-root/{dev,prod}/root.json`, byte for byte (public: keys and signatures only), as each
+ * ceremony wrote them.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,18 +17,47 @@ import { MemoryKvStore } from "../../../packages/sdk/src/sync/index.js";
 import { HOSTED_ROOTS, createAutomationClient, isAutomationError, kvAutomationDatastore, pinnedRootFor } from "../../../packages/sdk/src/frameworks/steps/index.js";
 
 const devRootDocument = JSON.parse(readFileSync(new URL("./fixtures/hosted-dev-root.json", import.meta.url), "utf8")) as RootMetadata;
+const prodRootDocument = JSON.parse(readFileSync(new URL("./fixtures/hosted-prod-root.json", import.meta.url), "utf8")) as RootMetadata;
 // Inside the document's validity (it was signed 2026-09-14 and expires 2026-12-13); renewal re-signs it under the same root.
 const NOW = "2026-11-16T00:00:00.000Z";
 
-const trustedUnder = (pinnedRoot: P256PublicJwk) => trustedRootFromPinnedKey({ purpose: "platform", environment: "dev", pinnedRoot });
+// The prod document was signed 2026-11-27 and expires 2027-02-25.
+const PROD_NOW = "2026-11-28T00:00:00.000Z";
 
-test("dev is pinned to the ceremony's root key; prod is not pinned until its ceremony runs", () => {
+const trustedUnder = (pinnedRoot: P256PublicJwk, environment: "dev" | "prod" = "dev") =>
+  trustedRootFromPinnedKey({ purpose: "platform", environment, pinnedRoot });
+
+test("dev is pinned to the ceremony's root key", () => {
   const dev = HOSTED_ROOTS.dev!;
   assert.ok(dev, "a dev root is pinned");
   assert.equal(keyThumbprint(dev), "86267aa3dc49005a0c1474d5c9c06bd7e1d0e835da715a864c1eca706545df91");
   assert.deepEqual(devRootDocument.signed.roles.root.keyIds, [keyThumbprint(dev)], "the ceremony's document names the pinned key as its root");
-  assert.equal(HOSTED_ROOTS.prod, undefined);
-  assert.equal(pinnedRootFor("prod"), null);
+});
+
+test("prod is pinned to the 2026-11-27 ceremony's root key, and no root pins two environments", () => {
+  const prod = HOSTED_ROOTS.prod!;
+  assert.ok(prod, "a prod root is pinned");
+  assert.equal(keyThumbprint(prod), "044af6e83353a2ea3758cc3feb3b1b7031c82bda5d6cd9287ba7730363e11793");
+  assert.deepEqual(prodRootDocument.signed.roles.root.keyIds, [keyThumbprint(prod)], "the ceremony's document names the pinned key as its root");
+  assert.equal(prodRootDocument.signed.environment, "prod");
+  assert.deepEqual(pinnedRootFor("prod"), prod);
+  assert.notEqual(keyThumbprint(prod), keyThumbprint(HOSTED_ROOTS.dev!));
+  assert.equal(pinnedRootFor("staging"), null, "staging has no ceremony");
+});
+
+test("the root document AirPrompter's prod ceremony signed verifies under the pinned prod root, and under no other", () => {
+  assert.deepEqual(verifyRootMetadata({ candidate: prodRootDocument, trusted: trustedUnder(HOSTED_ROOTS.prod!, "prod"), now: PROD_NOW }), { ok: true });
+  // Not under the dev root, and the dev document not under the prod root.
+  assert.equal(verifyRootMetadata({ candidate: prodRootDocument, trusted: trustedUnder(HOSTED_ROOTS.dev!, "prod"), now: PROD_NOW }).ok, false);
+  assert.equal(verifyRootMetadata({ candidate: devRootDocument, trusted: trustedUnder(HOSTED_ROOTS.prod!, "prod"), now: NOW }).ok, false);
+
+  const stranger = new FakeControlPlane({ organizationId: "org_test", agentId: "agt_steps", target: "prod" }, undefined, {}, { hostedEnvironment: "prod" });
+  assert.deepEqual(verifyRootMetadata({ candidate: stranger.root, trusted: trustedUnder(HOSTED_ROOTS.prod!, "prod"), now: PROD_NOW }), { ok: false, reason: "root_signature_invalid" });
+  const forged = structuredClone(prodRootDocument);
+  const strangerSigningId = stranger.root.signed.roles.targets.keyIds[0]!;
+  forged.signed.keys[strangerSigningId] = stranger.root.signed.keys[strangerSigningId]!;
+  forged.signed.roles.targets.keyIds = [strangerSigningId];
+  assert.deepEqual(verifyRootMetadata({ candidate: forged, trusted: trustedUnder(HOSTED_ROOTS.prod!, "prod"), now: PROD_NOW }), { ok: false, reason: "root_signature_invalid" });
 });
 
 test("the root document AirPrompter's dev ceremony signed verifies under the pinned dev root", () => {

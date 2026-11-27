@@ -15,7 +15,7 @@
  * @example
  * ```ts
  * const key = distributionKeyFor({ updateKey, agentId, environment: "prod" }); // same inputs → same key, every invocation
- * const root = pinnedRootFor("prod", options.root);                           // null until the production key is pinned
+ * const root = pinnedRootFor("prod", options.root);                           // the pinned production root unless one is passed in
  * const fetch = timedFetch(globalThis.fetch, 8000);
  * ```
  */
@@ -27,11 +27,13 @@ import type { DistributionKey, FetchLike, HostedEnvironment, P256PublicJwk } fro
  * AirPrompter's root public key per hosted environment, exactly as the offline root ceremony wrote it
  * (`infrastructure/trust/agent-root/{environment}/root-public.jwk.json` in the service repository). An environment
  * with no ceremony yet has no entry: a connection to it needs `root` passed in, and `testConnection` says so
- * (`root_not_pinned`). `prod` is absent until its ceremony runs.
+ * (`root_not_pinned`). `staging` has none.
  */
 export const HOSTED_ROOTS: Partial<Record<HostedEnvironment, P256PublicJwk>> = {
   // Ceremony of 2026-09-14 (AIR-1935); key id 86267aa3dc49005a0c1474d5c9c06bd7e1d0e835da715a864c1eca706545df91.
   dev: { kty: "EC", crv: "P-256", x: "gAQGIbpqvkYwfGnz2yJjAFcMLZm43fsQ6zXF4CjImss", y: "ImPVZkVwb3KC73p9T3EBtGzhm-s-vI6VVu0ovgka6ek" },
+  // Ceremony of 2026-11-27 (AIR-2214); key id 044af6e83353a2ea3758cc3feb3b1b7031c82bda5d6cd9287ba7730363e11793.
+  prod: { kty: "EC", crv: "P-256", x: "hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE", y: "OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE" },
 };
 
 export function pinnedRootFor(environment: HostedEnvironment, override?: P256PublicJwk): P256PublicJwk | null {

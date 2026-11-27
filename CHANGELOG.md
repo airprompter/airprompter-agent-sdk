@@ -10,6 +10,9 @@ may change a public shape and says so here.
 
 ## Unreleased
 
+### Steps: the hosted prod root is pinned (AIR-2214)
+- **`HOSTED_ROOTS.prod` is AirPrompter's production root** (key id `044af6e8…1793`), exactly as the root ceremony of 2026-11-27 wrote it (`infrastructure/trust/agent-root/prod/root-public.jwk.json` in the service repository). A Steps client pointed at the production service needs no `root` any more and no longer reports `root_not_pinned`. A test checks the real prod root document (`fixtures/hosted-prod-root.json`) against the pinned key, and refuses a document signed by any other root, including dev's. Zapier and n8n get it when they move to the release that carries it.
+
 ### Zapier and n8n on 1.0.0-rc.4
 - **`integrations/zapier` and `integrations/n8n` depend on `@airprompter/agent-sdk` `1.0.0-rc.4`** (exact pin, registry lockfiles). Both now speak protocol 4.0.0 and refuse 3.x manifests, matching AirPrompter's dev server.
 - **The temporary protocol override is removed** (added in #105). The Zapier tests run against the repository's registry at 4.0.0 again: `SERVED_PROTOCOL` is gone from `zapier.test.ts`, `startRegistry` loses its `protocol` option, and `devPlane` / `promoteRelease` in the CLI lose the test-only `protocol` override (`DevPromoteOverrides`). The n8n tests use rc.4's own `FakeControlPlane`, which stamps 4.0.0.

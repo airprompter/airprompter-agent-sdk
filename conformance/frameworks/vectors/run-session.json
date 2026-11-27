@@ -1,0 +1,563 @@
+{
+  "description": "The run session (11a, rules 1 to 11), as scripts both SDKs run through `sessionScenario`: an offline agent over a memory sink and a fake clock, a release the harness seals into a plaintext bundle, a script of steps, and what the run must answer and write. Hand-written and reviewed, not generated. Rows match on the fields named (a subset, deep); every deterministic vector's rows must also equal run-session.rows.json, the spool's own lines number by number, in both SDKs. See ../README.md for the step ops. AIR-2268's Python differences: `start()` with nothing verified starts (offline) and passes through `no_verified_release` in both SDKs (rule 4); the audience cohort is read at placement in both (rule 9, observed audience); moments past 2^53 are summed in doubles in both, Python changed to match (rule 5); `1` against `1.0` in a selector and `5.0` as an integer cannot reach an SDK from this harness, because the harness writes JSON from JavaScript; they stay open on AIR-2268, tested neither here nor, today, in the Python SDK. `awaiting_unlock` has no vector: these agents are offline, and a first bundle activates whatever its apply policy says (by design), so only an over-the-air first release reaches it; each SDK's run-session tests cover it, and placement-reasons.json holds it in the list.",
+  "agent": {"organizationId": "org_conformance", "agentId": "agt_conformance", "target": "dev", "runRefSecret": "conformance-run-ref-secret-0001", "t0": 1789300800000, "idleTimeoutMs": 900000},
+  "releases": {
+    "one": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}]},
+    "c": {"slots": [{"tag": "support.reply", "text": "Version C", "versionId": "ver_c", "model": "gpt-5"}]},
+    "two": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}, {"tag": "support.triage", "text": "Classify", "versionId": "ver_t", "model": "gpt-5-mini"}]},
+    "ab": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}], "experiments": [{"experimentId": "exp_1", "tag": "support.reply", "salt": "AAECAwQFBgcICQoLDA0ODw", "arms": [{"arm": "control", "weightBps": 5000}, {"arm": "candidate", "weightBps": 5000, "overrides": [{"tag": "support.reply", "text": "Version B", "versionId": "ver_b", "model": "gpt-5"}]}]}]},
+    "all-candidate": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}], "experiments": [{"experimentId": "exp_1", "tag": "support.reply", "salt": "AAECAwQFBgcICQoLDA0ODw", "arms": [{"arm": "control", "weightBps": 0}, {"arm": "candidate", "weightBps": 10000, "overrides": [{"tag": "support.reply", "text": "Version B", "versionId": "ver_b", "model": "gpt-5"}]}]}]},
+    "ab-instance": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}], "experiments": [{"experimentId": "exp_1", "tag": "support.reply", "salt": "AAECAwQFBgcICQoLDA0ODw", "subjectKey": "instance", "arms": [{"arm": "control", "weightBps": 5000}, {"arm": "candidate", "weightBps": 5000, "overrides": [{"tag": "support.reply", "text": "Version B", "versionId": "ver_b", "model": "gpt-5"}]}]}]},
+    "assignment-salt": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}], "experiments": [{"experimentId": "exp_1", "tag": "support.reply", "salt": "_____________________w", "arms": [{"arm": "control", "weightBps": 9000}, {"arm": "candidate", "weightBps": 1000, "overrides": [{"tag": "support.reply", "text": "Version B", "versionId": "ver_b", "model": "gpt-5"}]}]}]},
+    "ramp": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}], "experiments": [{"experimentId": "exp_1", "tag": "support.reply", "salt": "AAECAwQFBgcICQoLDA0ODw", "ramp": [{"notBefore": "2026-09-13T13:00:00Z", "weightBps": [0, 10000]}], "arms": [{"arm": "control", "weightBps": 10000}, {"arm": "candidate", "weightBps": 0, "overrides": [{"tag": "support.reply", "text": "Version B", "versionId": "ver_b", "model": "gpt-5"}]}]}]},
+    "reasons": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}, {"tag": "needs.variable", "text": "Hello {{name}}", "versionId": "ver_v", "model": "gpt-5", "variables": [{"name": "name", "required": true, "trust": "operator"}]}, {"tag": "off.slot", "text": "Off", "versionId": "ver_off", "model": "gpt-5"}, {"tag": "a.flow", "text": "flow", "versionId": "ver_flow", "model": "gpt-5", "steps": [{"text": "Step one"}]}], "directives": [{"kind": "disable", "scope": "slot", "tag": "off.slot"}]},
+    "sourced": {"slots": [{"tag": "support.reply", "text": "Order {{order}}", "versionId": "ver_o", "model": "gpt-5", "variables": [{"name": "order", "required": true, "trust": "operator"}]}]},
+    "settings": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5", "inference": {"temperatureMilli": 200, "maxOutputTokens": 800}}]},
+    "nine": {"slots": [{"tag": "slot.a", "text": "Slot A", "versionId": "ver_sa", "model": "gpt-5"}, {"tag": "slot.b", "text": "Slot B", "versionId": "ver_sb", "model": "gpt-5"}, {"tag": "slot.c", "text": "Slot C", "versionId": "ver_sc", "model": "gpt-5"}, {"tag": "slot.d", "text": "Slot D", "versionId": "ver_sd", "model": "gpt-5"}, {"tag": "slot.e", "text": "Slot E", "versionId": "ver_se", "model": "gpt-5"}, {"tag": "slot.f", "text": "Slot F", "versionId": "ver_sf", "model": "gpt-5"}, {"tag": "slot.g", "text": "Slot G", "versionId": "ver_sg", "model": "gpt-5"}, {"tag": "slot.h", "text": "Slot H", "versionId": "ver_sh", "model": "gpt-5"}, {"tag": "slot.i", "text": "Slot I", "versionId": "ver_si", "model": "gpt-5"}]},
+    "observed": {"slots": [{"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}], "observations": [{"tag": "support.reply", "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "when", "when": {"key": "intent", "is": "billing"}}, "observeFrom": "2026-01-01T00:00:00Z"}]},
+    "late-tag": {"slots": [{"tag": "support.triage", "text": "Classify A", "versionId": "ver_ta", "model": "gpt-5-mini"}, {"tag": "support.reply", "text": "Version A", "versionId": "ver_a", "model": "gpt-5"}], "observations": [{"tag": "support.triage", "audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "selector": {"mode": "when", "when": {"key": "intent", "is": "billing"}}, "observeFrom": "2026-01-01T00:00:00Z"}, {"tag": "support.reply", "audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "when", "when": {"key": "intent", "is": "billing"}}, "observeFrom": "2026-01-01T00:00:00Z"}], "experiments": [{"experimentId": "exp_t", "tag": "support.triage", "salt": "AAECAwQFBgcICQoLDA0ODw", "audience": {"audienceId": "aud_BBBBBBBBBBBBBBBBBBBBBB", "selector": {"mode": "when", "when": {"key": "intent", "is": "billing"}}}, "arms": [{"arm": "control", "weightBps": 0}, {"arm": "candidate", "weightBps": 10000, "overrides": [{"tag": "support.triage", "text": "Classify B", "versionId": "ver_tb", "model": "gpt-5-mini"}]}]}, {"experimentId": "exp_r", "tag": "support.reply", "salt": "AAECAwQFBgcICQoLDA0ODw", "audience": {"audienceId": "aud_AAAAAAAAAAAAAAAAAAAAAA", "selector": {"mode": "when", "when": {"key": "intent", "is": "billing"}}}, "arms": [{"arm": "control", "weightBps": 0}, {"arm": "candidate", "weightBps": 10000, "overrides": [{"tag": "support.reply", "text": "Version B", "versionId": "ver_b", "model": "gpt-5"}]}]}]}
+  },
+  "vectors": [
+    {
+      "name": "no subject never uses the instance id: twenty-four runs on one instance land on both arms", "rule": 1, "release": "ab", "deterministic": false,
+      "steps": [
+        {"op": "sample", "runs": 24, "input": {}, "slot": "support.reply", "expect": {"distinct": 2}}
+      ]
+    },
+    {
+      "name": "no subject: a run lands where its own run id lands as a subject, six times over", "rule": 1, "release": "ab", "deterministic": false,
+      "steps": [
+        {"op": "open", "run": "r1", "input": {}},
+        {"op": "place", "run": "r1", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s1", "input": {"subject": {"runIdOf": "r1"}}},
+        {"op": "place", "run": "s1", "slot": "support.reply", "expect": {"sameAs": 1}},
+        {"op": "open", "run": "r2", "input": {}},
+        {"op": "place", "run": "r2", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s2", "input": {"subject": {"runIdOf": "r2"}}},
+        {"op": "place", "run": "s2", "slot": "support.reply", "expect": {"sameAs": 5}},
+        {"op": "open", "run": "r3", "input": {}},
+        {"op": "place", "run": "r3", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s3", "input": {"subject": {"runIdOf": "r3"}}},
+        {"op": "place", "run": "s3", "slot": "support.reply", "expect": {"sameAs": 9}},
+        {"op": "open", "run": "r4", "input": {}},
+        {"op": "place", "run": "r4", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s4", "input": {"subject": {"runIdOf": "r4"}}},
+        {"op": "place", "run": "s4", "slot": "support.reply", "expect": {"sameAs": 13}},
+        {"op": "open", "run": "r5", "input": {}},
+        {"op": "place", "run": "r5", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s5", "input": {"subject": {"runIdOf": "r5"}}},
+        {"op": "place", "run": "s5", "slot": "support.reply", "expect": {"sameAs": 17}},
+        {"op": "open", "run": "r6", "input": {}},
+        {"op": "place", "run": "r6", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s6", "input": {"subject": {"runIdOf": "r6"}}},
+        {"op": "place", "run": "s6", "slot": "support.reply", "expect": {"sameAs": 21}}
+      ]
+    },
+    {
+      "name": "a subject is used before conversationId, and conversationId alone lands where assignment.json puts it", "rule": 1, "release": "assignment-salt",
+      "steps": [
+        {"op": "open", "run": "r1", "input": {"conversationId": "user-42"}},
+        {"op": "place", "run": "r1", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version B"}},
+        {"op": "open", "run": "r2", "input": {"subject": "user-42", "conversationId": "conversation-9"}},
+        {"op": "place", "run": "r2", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version B"}},
+        {"op": "end", "run": "r1"},
+        {"op": "end", "run": "r2"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_b", "arm": "candidate", "count": 2, "modelCalls": 0, "agentRun": 2, "status": "ok"}]}
+    },
+    {
+      "name": "conversationId is used before a fresh id: six conversations land where the same strings land as subjects", "rule": 1, "release": "ab",
+      "steps": [
+        {"op": "open", "run": "c1", "input": {"conversationId": "conversation-1"}},
+        {"op": "place", "run": "c1", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s1", "input": {"subject": "conversation-1"}},
+        {"op": "place", "run": "s1", "slot": "support.reply", "expect": {"sameAs": 1}},
+        {"op": "open", "run": "c2", "input": {"conversationId": "conversation-2"}},
+        {"op": "place", "run": "c2", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s2", "input": {"subject": "conversation-2"}},
+        {"op": "place", "run": "s2", "slot": "support.reply", "expect": {"sameAs": 5}},
+        {"op": "open", "run": "c3", "input": {"conversationId": "conversation-3"}},
+        {"op": "place", "run": "c3", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s3", "input": {"subject": "conversation-3"}},
+        {"op": "place", "run": "s3", "slot": "support.reply", "expect": {"sameAs": 9}},
+        {"op": "open", "run": "c4", "input": {"conversationId": "conversation-4"}},
+        {"op": "place", "run": "c4", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s4", "input": {"subject": "conversation-4"}},
+        {"op": "place", "run": "s4", "slot": "support.reply", "expect": {"sameAs": 13}},
+        {"op": "open", "run": "c5", "input": {"conversationId": "conversation-5"}},
+        {"op": "place", "run": "c5", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s5", "input": {"subject": "conversation-5"}},
+        {"op": "place", "run": "s5", "slot": "support.reply", "expect": {"sameAs": 17}},
+        {"op": "open", "run": "c6", "input": {"conversationId": "conversation-6"}},
+        {"op": "place", "run": "c6", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "s6", "input": {"subject": "conversation-6"}},
+        {"op": "place", "run": "s6", "slot": "support.reply", "expect": {"sameAs": 21}}
+      ]
+    },
+    {
+      "name": "a fixed subject lands on the arm assignment.json gives (different salt, same subject: candidate)", "rule": 1, "release": "assignment-salt",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "user-42"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version B", "model": "gpt-5"}},
+        {"op": "ref", "run": "r", "expect": {"entries": [{"tag": "support.reply", "versionId": "ver_b", "arm": "candidate", "bucket": 9752}]}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_b", "arm": "candidate", "count": 1}]}
+    },
+    {
+      "name": "subjectKey \"instance\" still uses the instance id: twenty-four subjects land on one arm", "rule": 1, "release": "ab-instance", "deterministic": false,
+      "steps": [
+        {"op": "sample", "runs": 24, "input": {"subject": "user-{i}"}, "slot": "support.reply", "expect": {"distinct": 1}}
+      ]
+    },
+    {
+      "name": "a ramp step does not move a pinned run; the next run moves", "rule": 2, "release": "ramp",
+      "steps": [
+        {"op": "open", "run": "r1", "input": {"subject": "user-1"}},
+        {"op": "place", "run": "r1", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "advance", "ms": 7200000},
+        {"op": "place", "run": "r1", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "end", "run": "r1"},
+        {"op": "open", "run": "r2", "input": {"subject": "user-1"}},
+        {"op": "place", "run": "r2", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version B"}},
+        {"op": "end", "run": "r2"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "arm": "control", "count": 1, "status": "ok", "latencyMs": {"sum": 7200000}}, {"tag": "support.reply", "versionId": "ver_b", "arm": "candidate", "count": 1, "status": "ok"}]}
+    },
+    {
+      "name": "a release swap keeps the pin and its text; the next run takes the new version", "rule": 2, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r1", "input": {"subject": "ann"}},
+        {"op": "place", "run": "r1", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "swapRelease", "release": "c"},
+        {"op": "place", "run": "r1", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "recordModelCall", "run": "r1", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 40, "usage": {"input": 7, "cachedInput": 0, "output": 3, "source": "reported"}}},
+        {"op": "end", "run": "r1"},
+        {"op": "open", "run": "r2", "input": {"subject": "ann"}},
+        {"op": "place", "run": "r2", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version C"}},
+        {"op": "end", "run": "r2"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "arm": "none", "count": 1, "modelCalls": 1, "tokens": {"input": 7, "output": 3}}, {"tag": "support.reply", "versionId": "ver_c", "arm": "none", "count": 1, "modelCalls": 0}]}
+    },
+    {
+      "name": "a slot disable gives passthrough slot_disabled at the next place, even for a pinned slot, and the row keeps the pin", "rule": 2, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "ann"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1, "usage": {"input": 5, "cachedInput": 0, "output": 5, "source": "reported"}}},
+        {"op": "applyDirective", "directives": [{"kind": "disable", "scope": "slot", "tag": "support.reply"}]},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "passthrough", "reason": "slot_disabled"}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "count": 1, "tokens": {"input": 5, "output": 5}}], "runCounters": {"passthrough": {"slot_disabled": 1}}}
+    },
+    {
+      "name": "a disabled pinned arm re-places on the control, and the run stays counted on the arm it started on", "rule": 2, "release": "all-candidate",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "ann"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version B"}},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1, "usage": {"input": 5, "cachedInput": 0, "output": 5, "source": "reported"}}},
+        {"op": "applyDirective", "directives": [{"kind": "disable", "scope": "arm", "experimentId": "exp_1", "arm": "candidate"}]},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1, "usage": {"input": 5, "cachedInput": 0, "output": 5, "source": "reported"}}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "arm": "candidate", "versionId": "ver_b", "count": 1, "modelCalls": 2, "tokens": {"input": 10, "output": 10}}], "events": {"run_replaced": 1}}
+    },
+    {
+      "name": "a frozen experiment (every arm disabled) passes a pinned slot through", "rule": 2, "release": "ab",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "user-42"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "applyDirective", "directives": [{"kind": "disable", "scope": "arm", "experimentId": "exp_1", "arm": "control"}, {"kind": "disable", "scope": "arm", "experimentId": "exp_1", "arm": "candidate"}]},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "passthrough", "reason": "slot_disabled"}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "count": 1}], "runCounters": {"passthrough": {"slot_disabled": 1}}}
+    },
+    {
+      "name": "repeated resume returns one live session and merges its tags: a later slot's rule reads them", "rule": 3, "release": "late-tag",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "ann"}},
+        {"op": "place", "run": "r", "slot": "support.triage", "expect": {"kind": "approved", "instructions": "Classify A"}},
+        {"op": "open", "run": "again", "input": {"resume": {"ref": "r"}, "tags": {"intent": "billing"}}},
+        {"op": "open", "run": "third", "input": {"resume": {"ref": "r"}}},
+        {"op": "ref", "run": "again", "expect": {"runIdOf": "r"}},
+        {"op": "place", "run": "third", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version B"}},
+        {"op": "end", "run": "again"},
+        {"op": "end", "run": "third"},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.triage", "versionId": "ver_ta", "arm": "none", "count": 1, "agentRun": 1}, {"tag": "support.reply", "versionId": "ver_b", "arm": "candidate", "count": 1, "agentRun": 0}]}
+    },
+    {
+      "name": "after a sweep, a two-call resume with one old ref is two sessions in all: one new run with the same runId on the same arm", "rule": 3, "release": "ab", "deterministic": false,
+      "steps": [
+        {"op": "open", "run": "first", "input": {}},
+        {"op": "place", "run": "first", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "recordModelCall", "run": "first", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1}},
+        {"op": "advance", "ms": 900000},
+        {"op": "sweep"},
+        {"op": "open", "run": "hook1", "input": {"resume": {"ref": "first"}}},
+        {"op": "place", "run": "hook1", "slot": "support.reply", "expect": {"sameAs": 1}},
+        {"op": "recordModelCall", "run": "hook1", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1}},
+        {"op": "open", "run": "hook2", "input": {"resume": {"ref": "first"}}},
+        {"op": "place", "run": "hook2", "slot": "support.reply", "expect": {"sameAs": 1}},
+        {"op": "recordModelCall", "run": "hook2", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1}},
+        {"op": "ref", "run": "hook2", "expect": {"runIdOf": "first"}},
+        {"op": "end", "run": "hook2"}
+      ],
+      "expect": {"agentRuns": 2}
+    },
+    {
+      "name": "after a sweep, a two-call resume naming the subject on every hook is one new run on the same arm, its rows compared", "rule": 3, "release": "ab",
+      "steps": [
+        {"op": "open", "run": "first", "input": {"subject": "user-42"}},
+        {"op": "place", "run": "first", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "recordModelCall", "run": "first", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1}},
+        {"op": "advance", "ms": 900000},
+        {"op": "sweep"},
+        {"op": "open", "run": "hook1", "input": {"resume": {"ref": "first"}, "subject": "user-42"}},
+        {"op": "place", "run": "hook1", "slot": "support.reply", "expect": {"sameAs": 1}},
+        {"op": "recordModelCall", "run": "hook1", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1}},
+        {"op": "open", "run": "hook2", "input": {"resume": {"ref": "first"}, "subject": "user-42"}},
+        {"op": "place", "run": "hook2", "slot": "support.reply", "expect": {"sameAs": 1}},
+        {"op": "recordModelCall", "run": "hook2", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 1}},
+        {"op": "ref", "run": "hook2", "expect": {"runIdOf": "first"}},
+        {"op": "end", "run": "hook2"}
+      ],
+      "expect": {"agentRuns": 2, "rows": [{"tag": "support.reply", "versionId": "ver_a", "arm": "control", "count": 1, "modelCalls": 1, "status": "interrupted", "errorClass": null}, {"tag": "support.reply", "versionId": "ver_a", "arm": "control", "count": 1, "modelCalls": 2, "status": "ok"}]}
+    },
+    {
+      "name": "a forged ref opens a new run, logs run_resume_refused once, and throws nothing", "rule": 3, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "ann"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "open", "run": "forged", "input": {"resume": {"forged": "r"}}},
+        {"op": "ref", "run": "forged", "expect": {"runIdNotOf": "r", "entries": []}},
+        {"op": "open", "run": "junk", "input": {"resume": "not a run reference"}},
+        {"op": "end", "run": "r"},
+        {"op": "end", "run": "forged"},
+        {"op": "end", "run": "junk"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "count": 1}], "events": {"run_resume_refused": 2}}
+    },
+    {
+      "name": "a resume on a second agent over the same store counts as a second run on the same arm", "rule": 3, "release": "ab",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "user-42"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "end", "run": "r"},
+        {"op": "restart"},
+        {"op": "open", "run": "later", "input": {"resume": {"ref": "r"}, "subject": "user-42"}},
+        {"op": "place", "run": "later", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "ref", "run": "later", "expect": {"runIdOf": "r"}},
+        {"op": "end", "run": "later"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "arm": "control", "count": 1}, {"tag": "support.reply", "versionId": "ver_a", "arm": "control", "count": 1}]}
+    },
+    {
+      "name": "each reason an offline agent can reach returns passthrough and throws nothing (six of the seven: awaiting_unlock needs an over-the-air first release)", "rule": 4, "release": null,
+      "steps": [
+        {"op": "open", "run": "empty", "input": {}},
+        {"op": "place", "run": "empty", "slot": "support.reply", "expect": {"kind": "passthrough", "reason": "no_verified_release"}},
+        {"op": "swapRelease", "release": "reasons"},
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "nothing.here", "expect": {"kind": "passthrough", "reason": "no_slot"}},
+        {"op": "place", "run": "r", "slot": "needs.variable", "expect": {"kind": "passthrough", "reason": "variables_unfilled"}},
+        {"op": "place", "run": "r", "slot": "off.slot", "expect": {"kind": "passthrough", "reason": "slot_disabled"}},
+        {"op": "place", "run": "r", "slot": "a.flow", "expect": {"kind": "passthrough", "reason": "slot_kind_unsupported"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "decline", "run": "r", "slot": "support.reply", "expect": {"kind": "passthrough", "reason": "model_unresolved"}},
+        {"op": "open", "run": "filled", "input": {"variables": {"name": "Ann"}}},
+        {"op": "place", "run": "filled", "slot": "needs.variable", "expect": {"kind": "approved", "instructions": "Hello Ann"}},
+        {"op": "end", "run": "empty"},
+        {"op": "end", "run": "r"},
+        {"op": "end", "run": "filled"}
+      ],
+      "expect": {"runCounters": {"passthrough": {"no_verified_release": 1, "no_slot": 1, "variables_unfilled": 1, "slot_disabled": 1, "slot_kind_unsupported": 1, "model_unresolved": 1}}}
+    },
+    {
+      "name": "decline writes one error row, and the three calls after it are in that one row", "rule": 4, "release": "two",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}, "scope": "run"},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "decline", "run": "r", "slot": "support.reply", "expect": {"kind": "passthrough", "reason": "model_unresolved"}},
+        {"op": "decline", "run": "r", "slot": "support.reply", "expect": {"kind": "passthrough", "reason": "model_unresolved"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "passthrough", "reason": "model_unresolved"}},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "claude-x", "latencyMs": 10}},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "claude-x", "latencyMs": 10}},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "claude-x", "latencyMs": 10}},
+        {"op": "place", "run": "r", "slot": "support.triage", "expect": {"kind": "approved"}},
+        {"op": "ref", "run": "r", "expect": {"entries": [{"tag": "support.triage", "versionId": "ver_t"}]}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "status": "error", "errorClass": "model_unresolved", "count": 1, "modelCalls": 3, "agentRun": 1}, {"tag": "support.triage", "versionId": "ver_t", "status": "ok", "count": 1, "agentRun": 0}], "runCounters": {"passthrough": {"model_unresolved": 1}}}
+    },
+    {
+      "name": "a missing variable writes one error row against its version, however many places follow", "rule": 4, "release": "reasons",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "needs.variable", "expect": {"kind": "passthrough", "reason": "variables_unfilled"}},
+        {"op": "place", "run": "r", "slot": "needs.variable", "expect": {"kind": "passthrough", "reason": "variables_unfilled"}},
+        {"op": "place", "run": "r", "slot": "needs.variable", "expect": {"kind": "passthrough", "reason": "variables_unfilled"}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "needs.variable", "versionId": "ver_v", "status": "error", "errorClass": "render_missing_variable", "count": 1}], "runCounters": {"passthrough": {"variables_unfilled": 1}}}
+    },
+    {
+      "name": "the sweep skips a run inside ap.run until its fn settles", "rule": 5, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}, "scope": "run"},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 5}},
+        {"op": "advance", "ms": 1800000},
+        {"op": "sweep"},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 5}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "status": "ok", "count": 1, "modelCalls": 2, "latencyMs": {"sum": 1800000}}], "events": {"run_late_record": 0}}
+    },
+    {
+      "name": "an idle end writes the last error's class, and a record after it is late", "rule": 5, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "advance", "ms": 300},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 300, "errorClass": "provider_rate_limited"}},
+        {"op": "advance", "ms": 900000},
+        {"op": "sweep"},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 5}}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "status": "error", "errorClass": "provider_rate_limited", "count": 1, "modelCalls": 1, "latencyMs": {"sum": 300}}], "events": {"run_late_record": 1}}
+    },
+    {
+      "name": "an idle end with no error writes interrupted, its latency stopping at the last activity", "rule": 5, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "advance", "ms": 500},
+        {"op": "recordToolCall", "run": "r", "slot": "support.reply", "call": {"ok": true}},
+        {"op": "advance", "ms": 900000},
+        {"op": "sweep"},
+        {"op": "recordModelCall", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 5}, "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "status": "interrupted", "errorClass": null, "count": 1, "modelCalls": 0, "tools": {"calls": 1, "errors": 0}, "toolsReported": true, "latencyMs": {"sum": 500}}], "events": {"run_late_record": 1}}
+    },
+    {
+      "name": "end twice writes once; a pinned slot with no model call still writes a run row with modelCalls 0", "rule": 5, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "end", "run": "r"},
+        {"op": "end", "run": "r", "errorClass": "provider_error"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "status": "ok", "errorClass": null, "count": 1, "modelCalls": 0, "usageSource": "unavailable", "toolsReported": false}]}
+    },
+    {
+      "name": "a parked run survives ap.run's end, resumes in-process and writes one row", "rule": 5, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}, "scope": "run"},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 5}},
+        {"op": "end", "run": "r", "interrupted": true},
+        {"op": "advance", "ms": 60000},
+        {"op": "open", "run": "resumed", "input": {"resume": {"ref": "r"}}},
+        {"op": "ref", "run": "resumed", "expect": {"runIdOf": "r"}},
+        {"op": "recordModelCall", "run": "resumed", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 5}},
+        {"op": "end", "run": "resumed"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "status": "ok", "count": 1, "modelCalls": 2, "latencyMs": {"sum": 60000}}]}
+    },
+    {
+      "name": "a parked run nobody resumes is written once by the sweep, as interrupted", "rule": 5, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "end", "run": "r", "interrupted": true},
+        {"op": "end", "run": "r"},
+        {"op": "advance", "ms": 900000},
+        {"op": "sweep"},
+        {"op": "sweep"},
+        {"op": "recordModelCall", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 5}, "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "status": "interrupted", "count": 1}], "events": {"run_late_record": 1}}
+    },
+    {
+      "name": "the decoded runRef carries no prompt text, no subject and no tag value", "rule": 6, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "subject-ann-7f2", "tags": {"plan": "plan-secret-9q"}}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "ref", "run": "r", "expect": {"entries": [{"tag": "support.reply", "versionId": "ver_a", "artifactId": "art_support_reply", "model": "gpt-5", "arm": "none"}], "excludes": ["Version A", "subject-ann-7f2", "plan-secret-9q"]}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"logExcludes": ["Version A", "subject-ann-7f2", "plan-secret-9q"]}
+    },
+    {
+      "name": "runRef has no entries until a slot is placed, grows per new slot, stops at eight; the runId is fixed at open", "rule": 7, "release": "nine",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "ref", "run": "r", "expect": {"entries": []}},
+        {"op": "place", "run": "r", "slot": "slot.a", "expect": {"kind": "approved"}},
+        {"op": "ref", "run": "r", "expect": {"entryCount": 1, "runIdOf": "r"}},
+        {"op": "place", "run": "r", "slot": "slot.a", "expect": {"kind": "approved"}},
+        {"op": "place", "run": "r", "slot": "slot.b", "expect": {"kind": "approved"}},
+        {"op": "ref", "run": "r", "expect": {"entryCount": 2, "runIdOf": "r"}},
+        {"op": "place", "run": "r", "slot": "slot.c"},
+        {"op": "place", "run": "r", "slot": "slot.d"},
+        {"op": "place", "run": "r", "slot": "slot.e"},
+        {"op": "place", "run": "r", "slot": "slot.f"},
+        {"op": "place", "run": "r", "slot": "slot.g"},
+        {"op": "place", "run": "r", "slot": "slot.h"},
+        {"op": "place", "run": "r", "slot": "slot.i", "expect": {"kind": "approved", "instructions": "Slot I"}},
+        {"op": "ref", "run": "r", "expect": {"entryCount": 8, "runIdOf": "r"}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rowCount": 9, "agentRuns": 1, "events": {"run_ref_slots_capped": 1}}
+    },
+    {
+      "name": "feedback fans out to every entry once; slot names one; a slot the run did not use is refused", "rule": 7, "release": "two",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "support.triage", "expect": {"kind": "approved"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "end", "run": "r"},
+        {"op": "feedback", "run": "r", "signals": {"thumbs": "up"}, "expect": {"filed": true}},
+        {"op": "feedback", "run": "r", "slot": "support.reply", "signals": {"rating": 4}, "expect": {"filed": true}},
+        {"op": "feedback", "run": "r", "slot": "not.used", "signals": {"rating": 4}, "expect": {"filed": false}},
+        {"op": "feedback", "run": "r", "model": "gpt-4.1", "signals": {"rating": 4}, "expect": {"filed": false}}
+      ],
+      "expect": {"rows": [{"tag": "support.triage", "versionId": "ver_t", "count": 1, "outcomes": {"thumbs": {"n": 1, "sum": 1}}}, {"tag": "support.reply", "versionId": "ver_a", "count": 1, "outcomes": {"thumbs": {"n": 1, "sum": 1}, "rating": {"n": 1, "sum": 4}}}]}
+    },
+    {
+      "name": "a ref minted before a release swap files on its own version; explain decodes it, and null for a forged one", "rule": 7, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "end", "run": "r"},
+        {"op": "swapRelease", "release": "c"},
+        {"op": "explain", "run": "r", "expect": {"entries": [{"tag": "support.reply", "versionId": "ver_a", "arm": "none", "model": "gpt-5"}]}},
+        {"op": "explain", "forged": "r", "expect": {"entries": null}},
+        {"op": "feedback", "run": "r", "signals": {"thumbs": "down"}, "expect": {"filed": true}}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "count": 1, "outcomes": {"thumbs": {"n": 1, "sum": 0}}}]}
+    },
+    {
+      "name": "a run reference the TypeScript SDK minted parses here: explain decodes it and feedback files on its version", "rule": 7, "release": "one",
+      "steps": [
+        {"op": "explain", "token": "WyJhZ3RfY29uZm9ybWFuY2UiLCJkZXYiLCJ0c01pbnRlZFJ1bkNvbmZvcm1hbmNlIixbeyJ0YWciOiJzdXBwb3J0LnJlcGx5IiwiYXJ0aWZhY3RJZCI6ImFydF9zdXBwb3J0X3JlcGx5IiwidmVyc2lvbklkIjoidmVyX2EiLCJtb2RlbCI6ImdwdC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xM1QxMjowMDowMFoifV1d.7RZrIJcaYRizqR6Y4p8cbU", "expect": {"entries": [{"tag": "support.reply", "versionId": "ver_a", "arm": "none", "model": "gpt-5", "runMinute": "2026-09-13T12:00:00Z"}]}},
+        {"op": "feedback", "token": "WyJhZ3RfY29uZm9ybWFuY2UiLCJkZXYiLCJ0c01pbnRlZFJ1bkNvbmZvcm1hbmNlIixbeyJ0YWciOiJzdXBwb3J0LnJlcGx5IiwiYXJ0aWZhY3RJZCI6ImFydF9zdXBwb3J0X3JlcGx5IiwidmVyc2lvbklkIjoidmVyX2EiLCJtb2RlbCI6ImdwdC01IiwiYXJtIjoibm9uZSIsImJ1Y2tldCI6bnVsbCwicnVuTWludXRlIjoiMjAyNi0wOS0xM1QxMjowMDowMFoifV1d.7RZrIJcaYRizqR6Y4p8cbU", "signals": {"rating": 5}, "expect": {"filed": true}}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "arm": "none", "count": 0, "outcomes": {"rating": {"n": 1, "sum": 5}}}]}
+    },
+    {
+      "name": "concurrent place calls render once and answer the same placement", "rule": 8, "release": "sourced", "variableSources": {"order": "A-1"},
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "support.reply", "concurrent": 6, "expect": {"kind": "approved", "instructions": "Order A-1"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Order A-1"}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"sourceCalls": {"order": 1}, "events": {"run_placed": 1}, "rows": [{"tag": "support.reply", "versionId": "ver_o", "count": 1}]}
+    },
+    {
+      "name": "a tag set after the first slot reaches the second slot's rule and does not move the first", "rule": 9, "release": "late-tag",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "ann"}},
+        {"op": "place", "run": "r", "slot": "support.triage", "expect": {"kind": "approved", "instructions": "Classify A"}},
+        {"op": "setTags", "run": "r", "tags": {"intent": "billing"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version B"}},
+        {"op": "place", "run": "r", "slot": "support.triage", "expect": {"kind": "approved", "instructions": "Classify A"}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.triage", "versionId": "ver_ta", "arm": "none", "count": 1}, {"tag": "support.reply", "versionId": "ver_b", "arm": "candidate", "count": 1, "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"]}]}
+    },
+    {
+      "name": "an unmapped name and a mapped slot absent from the release each log once and count once", "rule": 10, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "slotFor", "run": "r", "slots": {"agent": "support.reply", "writer": "missing.slot"}, "name": "agent", "expect": {"slot": "support.reply"}},
+        {"op": "slotFor", "run": "r", "slots": {"agent": "support.reply", "writer": "missing.slot"}, "name": "planner", "expect": {"slot": null}},
+        {"op": "slotFor", "run": "r", "slots": {"agent": "support.reply", "writer": "missing.slot"}, "name": "planner", "expect": {"slot": null}},
+        {"op": "slotFor", "run": "r", "slots": {"agent": "support.reply", "writer": "missing.slot"}, "name": "writer", "expect": {"slot": null}},
+        {"op": "slotFor", "run": "r", "slots": {"agent": "support.reply", "writer": "missing.slot"}, "name": "writer", "expect": {"slot": null}},
+        {"op": "slotFor", "run": "r", "slots": {"default": "support.reply"}, "name": "anything", "expect": {"slot": "support.reply"}},
+        {"op": "slotFor", "run": "r", "slots": "missing.slot", "expect": {"slot": null}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [], "runCounters": {"passthrough": {"unmapped_step": 1, "slot_not_in_release": 1}}, "events": {"run_step_unmapped": 1, "run_slot_not_in_release": 1}}
+    },
+    {
+      "name": "one run_placed per slot, however many places", "rule": 11, "release": "two",
+      "steps": [
+        {"op": "open", "run": "r", "input": {}},
+        {"op": "place", "run": "r", "slot": "support.reply"},
+        {"op": "place", "run": "r", "slot": "support.reply"},
+        {"op": "place", "run": "r", "slot": "support.triage"},
+        {"op": "place", "run": "r", "slot": "support.triage"},
+        {"op": "place", "run": "r", "slot": "support.reply"},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"events": {"run_placed": 2, "run_passthrough": 0}, "rows": [{"tag": "support.reply", "count": 1, "agentRun": 1}, {"tag": "support.triage", "count": 1, "agentRun": 0}]}
+    },
+    {
+      "name": "five model calls and four tools in one run: one count, summed tokens and their squares, wall-clock latency, step rows of their own", "rule": 5, "release": "settings",
+      "steps": [
+        {"op": "open", "run": "r", "input": {"subject": "ann"}},
+        {"op": "place", "run": "r", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A", "model": "gpt-5", "settings": {"temperatureMilli": 200, "maxOutputTokens": 800}}},
+        {"op": "advance", "ms": 200},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"step": "agent", "model": "gpt-5", "latencyMs": 200, "usage": {"input": 100, "cachedInput": 0, "output": 10, "source": "reported"}}},
+        {"op": "recordToolCall", "run": "r", "slot": "support.reply", "call": {"step": "tools", "ok": true}},
+        {"op": "advance", "ms": 200},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"step": "agent", "model": "gpt-5", "latencyMs": 200, "usage": {"input": 110, "cachedInput": 50, "output": 10, "source": "reported"}}},
+        {"op": "recordToolCall", "run": "r", "slot": "support.reply", "call": {"step": "tools", "ok": false}},
+        {"op": "advance", "ms": 200},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"step": "agent", "model": "gpt-5", "latencyMs": 200, "usage": {"input": 120, "cachedInput": 50, "output": 10, "source": "reported"}}},
+        {"op": "recordToolCall", "run": "r", "slot": "support.reply", "call": {"step": "tools", "ok": true}},
+        {"op": "advance", "ms": 200},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"step": "agent", "model": "gpt-5", "latencyMs": 200, "usage": {"input": 130, "cachedInput": 0, "output": 10, "source": "reported"}}},
+        {"op": "recordToolCall", "run": "r", "slot": "support.reply", "call": {"step": "tools", "ok": true}},
+        {"op": "advance", "ms": 200},
+        {"op": "recordModelCall", "run": "r", "slot": "support.reply", "call": {"step": "agent", "model": "gpt-5", "latencyMs": 200, "usage": {"input": 140, "cachedInput": 0, "output": 20, "source": "reported"}}},
+        {"op": "end", "run": "r"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "versionId": "ver_a", "arm": "none", "model": "gpt-5", "status": "ok", "errorClass": null, "usageSource": "reported", "toolsReported": true, "count": 1, "agentRun": 1, "modelCalls": 5, "tools": {"calls": 4, "errors": 1}, "tokens": {"input": 600, "cachedInput": 100, "output": 60}, "tokensSq": {"input": 360000, "cachedInput": 10000, "output": 3600, "inputOutput": 36000, "inputCached": 60000, "cachedOutput": 6000}, "latencyMs": {"sum": 1000}}], "steps": [{"step": "agent", "modelCalls": 5, "tokens": {"input": 600, "cachedInput": 100, "output": 60}, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"sum": 1000}}, {"step": "tools", "modelCalls": 0, "tools": {"calls": 4, "errors": 1}}]}
+    },
+    {
+      "name": "moments past 2^53 are summed as IEEE doubles in both SDKs, so a window's tokensSq matches to the integer (AIR-2268: Python's stayed exact)", "rule": 5, "release": "one",
+      "steps": [
+        {"op": "open", "run": "r1", "input": {}},
+        {"op": "place", "run": "r1", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "recordModelCall", "run": "r1", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 10, "usage": {"input": 105280354, "cachedInput": 1000, "output": 3, "source": "reported"}}},
+        {"op": "end", "run": "r1"},
+        {"op": "open", "run": "r2", "input": {}},
+        {"op": "place", "run": "r2", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "recordModelCall", "run": "r2", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 10, "usage": {"input": 104996776, "cachedInput": 1000, "output": 3, "source": "reported"}}},
+        {"op": "end", "run": "r2"},
+        {"op": "open", "run": "r3", "input": {}},
+        {"op": "place", "run": "r3", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "recordModelCall", "run": "r3", "slot": "support.reply", "call": {"model": "gpt-5", "latencyMs": 10, "usage": {"input": 186582983, "cachedInput": 1000, "output": 3, "source": "reported"}}},
+        {"op": "end", "run": "r3"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "count": 3, "agentRun": 3, "modelCalls": 3, "tokens": {"input": 396860113, "cachedInput": 3000, "output": 9}, "tokensSq": {"input": 56921485453937780, "cachedInput": 3000000, "output": 27, "inputOutput": 1190580339, "inputCached": 396860113000, "cachedOutput": 9000}}]}
+    },
+    {
+      "name": "the audience cohort is read at the slot's placement: a run in the observed audience writes its audience id, one outside writes an empty list", "rule": 9, "release": "observed",
+      "steps": [
+        {"op": "open", "run": "inside", "input": {"tags": {"intent": "billing"}}},
+        {"op": "place", "run": "inside", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "place", "run": "inside", "slot": "nothing.here", "expect": {"kind": "passthrough", "reason": "no_slot"}},
+        {"op": "end", "run": "inside"},
+        {"op": "open", "run": "outside", "input": {"tags": {"intent": "sales"}}},
+        {"op": "place", "run": "outside", "slot": "support.reply", "expect": {"kind": "approved", "instructions": "Version A"}},
+        {"op": "end", "run": "outside"},
+        {"op": "open", "run": "late", "input": {}},
+        {"op": "setTags", "run": "late", "tags": {"intent": "billing"}},
+        {"op": "place", "run": "late", "slot": "support.reply", "expect": {"kind": "approved"}},
+        {"op": "ref", "run": "late", "expect": {"entries": [{"tag": "support.reply", "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"]}]}},
+        {"op": "end", "run": "late"}
+      ],
+      "expect": {"rows": [{"tag": "support.reply", "count": 2, "audienceIds": ["aud_AAAAAAAAAAAAAAAAAAAAAA"]}, {"tag": "support.reply", "count": 1, "audienceIds": []}]}
+    }
+  ]
+}

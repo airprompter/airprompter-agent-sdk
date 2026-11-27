@@ -10,7 +10,7 @@
 //   $ npx @airprompter/protocol-conformance --adapter ./adapter.mjs
 //   $ npx @airprompter/protocol-conformance --adapter-command "python3 adapter.py" --only trust-manifest,otel
 //   $ node conformance/harness.mjs --adapter conformance/adapters/reference.mjs --json     # in this repository
-//     … [--vectors <dir>] [--allow-skips]
+//     … [--vectors <dir>] [--allow-skips] [--compare <report.json>] [--write-golden]   (the last two: run-session, frameworks/README.md)
 //
 // The adapter contract is ADAPTER.md: the operations it lists, JSON in, JSON
 // out, an error as `{ error: { reason } }` where the protocol names a
@@ -32,10 +32,10 @@ export function vectorsDir(override) {
   throw new Error("no protocol/vectors directory: pass --vectors <dir>");
 }
 
-export const OPERATIONS = ["audiencePredicate", "audienceValidator", "canonicalJson", "orderedSteps", "assignArm", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "servableSlots", "carriedPayloads", "inspectSegment", "runRefKeyFrom", "mintRunRef", "parseRunRef", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
+export const PROTOCOL_OPERATIONS = ["audiencePredicate", "audienceValidator", "canonicalJson", "orderedSteps", "assignArm", "experimentConflict", "validateRamp", "rampWeightsAt", "effectiveArms", "servableSlots", "carriedPayloads", "inspectSegment", "runRefKeyFrom", "mintRunRef", "parseRunRef", "verifyRootMetadata", "verifyManifest", "latencyBucketIndex", "minuteOf", "segmentName", "planSegments", "aggregateWindows", "normalizeFeedback", "evaluateChecks", "patternRefusal", "checksRefusals", "projectChecks", "spoolRowsToOtlp"];
 
-/** Which operations each section needs; a section runs only when its adapter has them all. */
-export const SECTIONS = {
+/** Which operations each protocol section needs; a section runs only when its adapter has them all. */
+export const PROTOCOL_SECTIONS = {
   audiences: ["audiencePredicate","audienceValidator","verifyManifest"],
   "canonical-json": ["canonicalJson"],
   "workflow-steps": ["orderedSteps"],
@@ -58,6 +58,16 @@ export const SECTIONS = {
   otel: ["spoolRowsToOtlp"],
 };
 
+// AIR-2233: the framework sections (`frameworks`, `run-session`) and their operations, from frameworks/run.mjs's
+// registry. Repository-only: the published package carries the protocol sections, so this loads when it is there.
+const frameworksRunner = existsSync(join(here, "frameworks", "run.mjs")) ? await import(pathToFileURL(join(here, "frameworks", "run.mjs")).href) : null;
+
+export const OPERATIONS = [...PROTOCOL_OPERATIONS, ...(frameworksRunner?.OPERATIONS ?? [])];
+export const SECTIONS = { ...PROTOCOL_SECTIONS, ...(frameworksRunner?.SECTIONS ?? {}) };
+/** A real framework run or a whole scenario takes longer than a protocol vector. */
+const SLOW_TIMEOUT_MS = 120_000;
+const timeoutFor = (fn, timeoutMs) => (frameworksRunner?.SLOW_OPERATIONS.has(fn) ? Math.max(timeoutMs, SLOW_TIMEOUT_MS) : timeoutMs);
+
 // ---------------------------------------------------------------------------
 // Adapters: an ES module's exports, or a JSON-lines process.
 
@@ -69,6 +79,8 @@ export async function moduleAdapter(specifier) {
   return {
     kind: `module ${specifier}`,
     capabilities,
+    // The language of the SDK under test: a framework fixture runs only on its own language's adapter.
+    language: typeof mod.language === "string" ? mod.language : null,
     async call(fn, args) {
       if (typeof ops[fn] !== "function") return { error: { reason: "unsupported", message: `${fn} is not implemented` } };
       try {
@@ -112,10 +124,11 @@ export async function commandAdapter(command, { cwd = process.cwd(), timeoutMs =
   const call = (fn, args) =>
     new Promise((resolve) => {
       const id = nextId++;
+      const limitMs = timeoutFor(fn, timeoutMs);
       const timer = setTimeout(() => {
         pending.delete(id);
-        resolve({ error: { reason: "timeout", message: `${fn}: no answer in ${timeoutMs} ms` } });
-      }, timeoutMs);
+        resolve({ error: { reason: "timeout", message: `${fn}: no answer in ${limitMs} ms` } });
+      }, limitMs);
       pending.set(id, { resolve, timer });
       if (!child.stdin.writable) {
         pending.delete(id);
@@ -133,6 +146,7 @@ export async function commandAdapter(command, { cwd = process.cwd(), timeoutMs =
   return {
     kind: `command "${command}"`,
     capabilities,
+    language: typeof caps.result?.language === "string" ? caps.result.language : null,
     call,
     async close() {
       child.stdin.end();
@@ -152,7 +166,7 @@ const short = (value) => {
   return text && text.length > 160 ? `${text.slice(0, 157)}…` : text;
 };
 
-export async function runHarness({ adapter, vectors, only = null, allowSkips = false, log = console.log }) {
+export async function runHarness({ adapter, vectors, only = null, allowSkips = false, compare = null, writeGolden = false, log = console.log }) {
   const readJson = (name) => JSON.parse(readFileSync(join(vectors, "vectors", name), "utf8"));
   const report = { adapter: adapter.kind, sections: [], passed: 0, failed: 0, skipped: [] };
   let current = null;
@@ -349,6 +363,8 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
     },
   };
 
+  for (const name of Object.keys(frameworksRunner?.SECTIONS ?? {})) sections[name] = () => frameworksRunner.runSection(name, { adapter, ok, fail, report, options: { compare, writeGolden } });
+
   const wanted = only ? only.split(",").map((s) => s.trim()).filter(Boolean) : Object.keys(sections);
   for (const name of wanted) {
     if (!sections[name]) throw new Error(`no section ${name}; sections: ${Object.keys(sections).join(", ")}`);
@@ -372,7 +388,7 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
 // The command line.
 
 export async function main(argv = process.argv.slice(2)) {
-  const opts = { adapter: null, command: null, vectors: null, only: null, allowSkips: false, json: false };
+  const opts = { adapter: null, command: null, vectors: null, only: null, allowSkips: false, json: false, compare: null, writeGolden: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => argv[++i];
@@ -381,9 +397,11 @@ export async function main(argv = process.argv.slice(2)) {
     else if (arg === "--vectors") opts.vectors = next();
     else if (arg === "--only") opts.only = next();
     else if (arg === "--allow-skips") opts.allowSkips = true;
+    else if (arg === "--compare") opts.compare = next();
+    else if (arg === "--write-golden") opts.writeGolden = true;
     else if (arg === "--json") opts.json = true;
     else if (arg === "--help" || arg === "-h") {
-      console.log("usage: airprompter-conformance (--adapter <module.mjs> | --adapter-command \"<cmd>\") [--vectors <protocol dir>] [--only <section,…>] [--allow-skips] [--json]\nsections: " + Object.keys(SECTIONS).join(", "));
+      console.log("usage: airprompter-conformance (--adapter <module.mjs> | --adapter-command \"<cmd>\") [--vectors <protocol dir>] [--only <section,…>] [--allow-skips] [--json] [--compare <report.json>] [--write-golden]\nsections: " + Object.keys(SECTIONS).join(", "));
       return 0;
     } else throw new Error(`unknown argument ${arg}`);
   }
@@ -393,7 +411,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const adapter = opts.command ? await commandAdapter(opts.command) : await moduleAdapter(opts.adapter);
   try {
-    const report = await runHarness({ adapter, vectors: vectorsDir(opts.vectors), only: opts.only, allowSkips: opts.allowSkips, log: opts.json ? () => {} : console.log });
+    const report = await runHarness({ adapter, vectors: vectorsDir(opts.vectors), only: opts.only, allowSkips: opts.allowSkips, compare: opts.compare, writeGolden: opts.writeGolden, log: opts.json ? () => {} : console.log });
     // The report can pass 64 KiB: written and flushed before the exit, or a pipe reader sees it cut short.
     if (opts.json) await new Promise((resolve) => process.stdout.write(`${JSON.stringify(report)}\n`, resolve));
     return report.ok ? 0 : 1;

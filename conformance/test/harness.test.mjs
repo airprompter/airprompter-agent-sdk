@@ -11,23 +11,27 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { OPERATIONS, SECTIONS, commandAdapter, moduleAdapter, runHarness, vectorsDir } from "../harness.mjs";
+import { OPERATIONS, PROTOCOL_OPERATIONS, PROTOCOL_SECTIONS, SECTIONS, commandAdapter, moduleAdapter, runHarness, vectorsDir } from "../harness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const harnessPath = join(here, "..", "harness.mjs");
 const referencePath = join(here, "..", "adapters", "reference.mjs");
 const quiet = () => {};
 
-test("every section names only known operations; the reference adapter implements them all and passes every section", async () => {
+// The framework sections (frameworks/run.mjs) hold an SDK's run and its adapters; the reference is the protocol's yardstick.
+const protocolOnly = Object.keys(PROTOCOL_SECTIONS).join(",");
+
+test("every section names only known operations; the reference adapter implements every protocol one and passes every protocol section", async () => {
   for (const [section, ops] of Object.entries(SECTIONS)) for (const op of ops) assert.ok(OPERATIONS.includes(op), `${section} needs ${op}`);
+  assert.ok("frameworks" in SECTIONS && "run-session" in SECTIONS, "the harness lists the framework sections");
   const adapter = await moduleAdapter(referencePath);
-  assert.deepEqual([...adapter.capabilities].sort(), [...OPERATIONS].sort());
-  const report = await runHarness({ adapter, vectors: vectorsDir(), log: quiet });
+  assert.deepEqual([...adapter.capabilities].sort(), [...PROTOCOL_OPERATIONS].sort());
+  const report = await runHarness({ adapter, vectors: vectorsDir(), only: protocolOnly, log: quiet });
   assert.equal(report.failed, 0, JSON.stringify(report.sections.flatMap((s) => s.checks.filter((c) => !c.ok))));
   assert.equal(report.skipped.length, 0);
   assert.ok(report.passed > 200, `${report.passed} checks`);
   assert.equal(report.ok, true);
-  assert.deepEqual(report.sections.map((s) => s.name), Object.keys(SECTIONS));
+  assert.deepEqual(report.sections.map((s) => s.name), Object.keys(PROTOCOL_SECTIONS));
 });
 
 test("a wrong answer fails by vector name with the difference; a missing operation skips its section and the run is incomplete", async () => {
@@ -54,7 +58,7 @@ const { planSegments, aggregateWindows, spoolRowsToOtlp, ...rest } = reference;
 export const ops = rest;
 `);
     const partial = await moduleAdapter(partialPath);
-    const incomplete = await runHarness({ adapter: partial, vectors: vectorsDir(), log: quiet });
+    const incomplete = await runHarness({ adapter: partial, vectors: vectorsDir(), only: protocolOnly, log: quiet });
     assert.equal(incomplete.failed, 0);
     assert.deepEqual(incomplete.skipped, [
       { section: "spool-rotation", missing: ["planSegments"] },
@@ -101,7 +105,7 @@ rl.on("line", (line) => {
       assert.ok(answer.result && typeof answer.result.bucket === "number", JSON.stringify(answer));
       const refused = await adapter.call("assignArm", { salt: "AAECAwQFBgcICQoLDA0ODw", subject: "user-1", arms: [{ arm: "control", weightBps: 10000 }] });
       assert.equal(refused.error?.reason, "too_few_arms");
-      const report = await runHarness({ adapter, vectors: vectorsDir(), log: quiet });
+      const report = await runHarness({ adapter, vectors: vectorsDir(), only: protocolOnly, log: quiet });
       assert.equal(report.failed, 0, JSON.stringify(report.sections.flatMap((s) => s.checks.filter((c) => !c.ok)).slice(0, 3)));
       assert.deepEqual(report.skipped, [{ section: "otel", missing: ["spoolRowsToOtlp"] }]);
     } finally {

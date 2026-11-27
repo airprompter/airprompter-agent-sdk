@@ -75,6 +75,23 @@ def test_record_run_is_the_only_thing_that_raises_count():
     assert row["checks"] == {"passed": 1, "failed": 0}
 
 
+def test_moments_past_2_53_are_summed_as_the_typescript_sdk_sums_them_in_doubles():
+    # AIR-2233 (AIR-2268's "moments stay exact past 2^53"): three runs whose input squares pass 2**53. JavaScript rounds
+    # each product and each sum to a double; Python does the same, so a window's tokensSq is one number in both.
+    writer, rows = writing()
+    inputs = (105280354, 104996776, 186582983)
+    for tokens in inputs:
+        writer.record_run(run(tokens={"input": tokens, "cachedInput": 0, "output": 3}), T0)
+    [row] = windows(rows())
+    as_double = 0.0
+    for tokens in inputs:
+        as_double = as_double + float(tokens) * float(tokens)
+    assert sum(t * t for t in inputs) != int(as_double), "a case where exact and double arithmetic part"
+    assert float(row["tokensSq"]["input"]) == as_double and row["tokensSq"]["input"] == 56921485453937780
+    assert json.dumps(row["tokensSq"]["input"]) == "56921485453937780", "an integer on the wire, spelt as JSON.stringify spells that double"
+    assert row["tokensSq"]["output"] == 27 and isinstance(row["tokensSq"]["output"], int), "below 2**53, plain integer arithmetic"
+
+
 def test_record_step_writes_a_type_step_row_and_no_window():
     writer, rows = writing()
     writer.record_step(step("support.reply#1"), T0)

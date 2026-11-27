@@ -22,7 +22,7 @@ import { FakeControlPlane } from "../../packages/sdk/src/core/testing/index.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_lc", target: "prod" as const };
 const TAG = "support-reply";
-const fixture = JSON.parse(readFileSync(new URL("../../../conformance/frameworks/fixtures/langchain/tool-loop.json", import.meta.url), "utf8"));
+const fixture = JSON.parse(readFileSync(new URL("../../../conformance/frameworks/fixtures/langchain/tool-loop-ts.json", import.meta.url), "utf8"));
 
 type Turn = { content?: string; toolCalls?: string[]; usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number } }; finish?: string; fail?: number };
 type Request = { url: string; model: string; system: string[]; temperature?: number; top_p?: number; max_tokens?: number; stop?: unknown; messages: Array<{ role: string; content: unknown }> };
@@ -85,17 +85,14 @@ const ask = (text = "hi") => ({ messages: [new HumanMessage(text)] });
 
 test("the fixture: five model calls and four tools are one run, with the release's text and model on every request", async () => {
   const { ap, plane, rows } = await host({ promote: false });
-  const { release } = fixture;
-  plane.promote([plane.slot({ tag: release.tag, text: release.text, versionId: release.versionId, model: release.model, variables: [] })]);
+  // The conformance suite runs this fixture through the built SDK (conformance/frameworks); this is the source-tree twin.
+  const [release] = fixture.release.slots as Array<{ tag: string; text: string; versionId: string; model: string }>;
+  plane.promote([plane.slot({ tag: release!.tag, text: release!.text, versionId: release!.versionId, model: release!.model, variables: [] })]);
   await ap.syncNow();
   const { requests, fetch } = provider(fixture.recorded.turns);
-  const agent = createAgent({ model: chatModel(fetch, release.model), tools: [lookup], systemPrompt: "The caller's own prompt.", middleware: [airprompter(ap, { slots: fixture.agent.slots })] });
+  const agent = createAgent({ model: chatModel(fetch, release!.model), tools: [lookup], systemPrompt: fixture.agent.systemPrompt, middleware: [airprompter(ap, { slots: fixture.agent.slots })] });
   const result = await agent.invoke(ask(), { context: { airprompter: fixture.input } } as never);
-  assert.equal(requests.length, fixture.expect.calls.count);
-  for (const request of requests) {
-    assert.deepEqual(request.system, [fixture.expect.calls.system]);
-    assert.equal(request.model, fixture.expect.calls.model);
-  }
+  assert.deepEqual(requests.map((request) => ({ system: request.system, model: request.model })), fixture.expect.calls);
   assert.equal(typeof (result as { airprompter_run_ref?: unknown }).airprompter_run_ref, "string");
   const written = await rows();
   assert.equal(written.length, fixture.expect.rows.length);
@@ -103,7 +100,7 @@ test("the fixture: five model calls and four tools are one run, with the release
     const row = written[index] as unknown as Record<string, unknown>;
     for (const [key, value] of Object.entries(expected as Record<string, unknown>)) {
       if (key === "tokens") assert.deepEqual({ input: (row.tokens as WindowRow["tokens"]).input, output: (row.tokens as WindowRow["tokens"]).output }, value);
-      else assert.equal(row[key], value, key);
+      else assert.deepEqual(row[key], value, key);
     }
   }
 });

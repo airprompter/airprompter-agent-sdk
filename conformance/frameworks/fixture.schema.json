@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.dev/conformance/frameworks/fixture.schema.json",
+  "title": "A recorded framework run",
+  "description": "fixtures/<framework>/<kind>-<case>.json: one run of a real framework with the AirPrompter adapter in place, its provider responses recorded, and what the provider must have seen and AirPrompter must have written. Driven by the adapter's `driveRun` (README.md › Fixtures).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "framework",
+    "language",
+    "frameworkVersion",
+    "kind",
+    "release",
+    "agent",
+    "input",
+    "recorded",
+    "expect"
+  ],
+  "properties": {
+    "framework": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "The folder it sits in."
+    },
+    "language": {
+      "enum": [
+        "ts",
+        "py"
+      ]
+    },
+    "frameworkVersion": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The framework version the turns were recorded from; the weekly job reruns the fixture on the latest."
+    },
+    "kind": {
+      "enum": [
+        "tool-loop",
+        "streaming",
+        "stream-escape",
+        "handoff",
+        "node-map",
+        "passthrough",
+        "interrupted",
+        "model",
+        "late-tag",
+        "slot-typo",
+        "canary-checkpoint",
+        "settings",
+        "two-store",
+        "split-invocation",
+        "shadow"
+      ]
+    },
+    "note": {
+      "type": "string"
+    },
+    "release": {
+      "oneOf": [
+        {
+          "$ref": "vector.schema.json#/$defs/release"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "agent": {
+      "type": "object",
+      "description": "The adapter's options, in the driver's own terms (slots, a node map, modelFor), and what the driver builds."
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "type": "string"
+        },
+        "conversationId": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "variables": {
+          "type": "object"
+        }
+      }
+    },
+    "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turns"
+      ],
+      "properties": {
+        "turns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "description": "The provider responses, served in order through the framework's own transport or a fake model of its real base class. Nothing reaches a provider."
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "placements": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Each slot's placement, in order, from the run's `run_placed` logs, a decline (`run_passthrough model_unresolved`) folded in: slot, kind, reason, versionId, arm. Never text: the approved text and model are checked where they matter, in `calls`."
+        },
+        "calls": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "What the provider saw, call by call: system, model, settings in the provider's own key names, or `untouched` (byte-identical to the unwrapped call)."
+        },
+        "runRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "entries": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "runIdStable": {
+              "type": "boolean"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Every window row, matched as a deep subset."
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "runCounters": {
+          "type": "object",
+          "description": "The heartbeat's runCounters, exactly."
+        },
+        "events": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "stateExcludes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Strings that must not appear in what AirPrompter wrote to framework state (canary-checkpoint).",
+          "minItems": 1
+        }
+      },
+      "required": [
+        "calls",
+        "rows"
+      ]
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Every framework package the turns were recorded from, by name, when there is more than one (`frameworkVersion` is the framework's own)."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "tool-loop",
+              "handoff"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expect": {
+            "properties": {
+              "runRef": {
+                "required": [
+                  "entries"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "tool-loop",
+              "handoff",
+              "streaming",
+              "interrupted",
+              "split-invocation",
+              "two-store"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expect": {
+            "required": [
+              "runRef"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "passthrough",
+              "slot-typo",
+              "model"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expect": {
+            "required": [
+              "runCounters"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "canary-checkpoint"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expect": {
+            "required": [
+              "stateExcludes"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

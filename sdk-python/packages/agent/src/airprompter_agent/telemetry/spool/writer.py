@@ -30,6 +30,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Callable, Mapping, Optional, Sequence, Union
 
 from airprompter_agent.core import instant
@@ -59,6 +60,17 @@ def _finite(value: Union[int, float]) -> bool:
         return math.isfinite(value)
     except OverflowError:  # an integer past every double: JavaScript reads it as Infinity
         return False
+
+
+def _plus_product(total: Union[int, float], a: Union[int, float], b: Union[int, float] = 1) -> Union[int, float]:
+    """``total + a * b`` as the TypeScript SDK computes it: in IEEE doubles, the product rounded, then the sum. A moment
+    past 2**53 is then the same number in both languages, to the integer (AIR-2233). An integer stays an integer on the
+    wire, spelt as JavaScript spells that double (its shortest round-trip digits, ``56921485453937780``), so the line
+    is the same bytes as the TypeScript SDK's. Below 2**53 every step is exact, so this is plain arithmetic there."""
+    result = float(total) + float(a) * float(b)
+    if isinstance(total, int) and isinstance(a, int) and isinstance(b, int) and result.is_integer():
+        return int(result) if abs(result) < 2**53 else int(Decimal(repr(result)))
+    return result
 
 
 def _has_valid_outcome(outcomes: Mapping[str, Union[int, float, bool]]) -> bool:
@@ -445,7 +457,7 @@ def _merge_outcomes(row: SpoolRow, outcomes: Mapping[str, Union[int, float, bool
         if not _finite(numeric * numeric):
             continue
         current = (row.get("outcomes") or {}).get(name) or {"n": 0, "sum": 0, "sumSq": 0}
-        merged = {"n": current["n"] + 1, "sum": current["sum"] + numeric, "sumSq": current["sumSq"] + numeric * numeric}
+        merged = {"n": current["n"] + 1, "sum": _plus_product(current["sum"], numeric), "sumSq": _plus_product(current["sumSq"], numeric, numeric)}
         # A value that would leave a total infinite would serialise as null and cost the whole segment.
         if not _finite(merged["sum"]) or not _finite(merged["sumSq"]):
             continue
@@ -561,12 +573,12 @@ class SpoolWriter:
         row["latencyMs"]["sum"] += latency_sum
         _add_tokens(row, (tokens_in, cached, tokens_out))
         moments = row.setdefault("tokensSq", {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0})
-        moments["input"] += tokens_in * tokens_in
-        moments["cachedInput"] += cached * cached
-        moments["output"] += tokens_out * tokens_out
-        moments["inputOutput"] += tokens_in * tokens_out
-        moments["inputCached"] += tokens_in * cached
-        moments["cachedOutput"] += cached * tokens_out
+        moments["input"] = _plus_product(moments["input"], tokens_in, tokens_in)
+        moments["cachedInput"] = _plus_product(moments["cachedInput"], cached, cached)
+        moments["output"] = _plus_product(moments["output"], tokens_out, tokens_out)
+        moments["inputOutput"] = _plus_product(moments["inputOutput"], tokens_in, tokens_out)
+        moments["inputCached"] = _plus_product(moments["inputCached"], tokens_in, cached)
+        moments["cachedOutput"] = _plus_product(moments["cachedOutput"], cached, tokens_out)
         if totals.checks is not None:
             _add_checks(row, count_of(_member(totals.checks, "passed")), count_of(_member(totals.checks, "failed")))
         return row

@@ -1,8 +1,9 @@
 // The TypeScript SDK through the harness's adapter contract (ADAPTER.md):
 // the core and telemetry layers' barrels (`dist/esm/<layer>/index.js`, the
 // SDK's internals: the protocol operations the vectors exercise are not all
-// on the curated `/core` and `/telemetry` subpaths, docs/stability.md) and
-// `@airprompter/agent-otel/exporter` for the OTLP mapping — from the built
+// on the curated `/core` and `/telemetry` subpaths, docs/stability.md),
+// `@airprompter/agent-otel/exporter` for the OTLP mapping, and the agent itself
+// for the run-session and framework sections (agent-sdk-run.mjs) — from the built
 // dist, so this adapter runs on plain Node after `node
 // sdk-typescript/scripts/build.mjs`. What `run.mjs` proves for the reference,
 // this proves for the code a customer installs.
@@ -12,6 +13,8 @@
 
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
+
+import { runOps } from "./agent-sdk-run.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // A file URL, not a path: Windows's `D:\…` is not an import specifier.
@@ -35,7 +38,12 @@ const refusing = (fn) => (args) => {
   }
 };
 
+/** The framework sections run this adapter's TypeScript fixtures. */
+export const language = "ts";
+
 export const ops = {
+  // AIR-2233: `sessionScenario`, `unavailableReasons`, `driveRun` (agent-sdk-run.mjs).
+  ...runOps,
   audiencePredicate: ({selector,tags}) => ({valid:core.validAudienceSelector(selector), matches:core.matchesAudience(selector,tags)}),
   audienceValidator: ({kind,value}) => ({valid:kind === "key" ? core.validAudienceKey(value) : kind === "label" ? core.validAudienceLabel(value) : core.validAudienceInstant(value)}),
   canonicalJson: refusing(({ json }) => {

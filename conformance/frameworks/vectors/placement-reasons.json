@@ -1,0 +1,4 @@
+{
+  "description": "The closed list of reasons a slot passes through (the framework's own prompt and model run unchanged). Each SDK's list, in this order, must equal it: `unavailableReasons()` in the conformance adapter answers the SDK's own constant (TypeScript `UNAVAILABLE_REASONS` from the runtime layer, checked against the `UnavailableReason` union at compile time, Python `airprompter_agent.runtime.run.UNAVAILABLE_REASONS`). Adding a reason is a contract change (11a), made here and in both SDKs together.",
+  "reasons": ["no_verified_release", "awaiting_unlock", "slot_disabled", "no_slot", "slot_kind_unsupported", "model_unresolved", "variables_unfilled"]
+}

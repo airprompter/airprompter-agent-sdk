@@ -14,7 +14,8 @@ npx airprompter-conformance --adapter-command "./my-sdk-adapter" --only trust-ma
 Exit `0` only when every section that ran passed and none was skipped;
 `--allow-skips` accepts a partial adapter (a section skipped is reported,
 never counted as passed); `1` on any failure; `2` on a usage error.
-`--json` prints the report as one document. The vectors are bundled with
+`--json` prints the report as one document; `--compare <report.json>` holds the
+run-session rows to another adapter's report. The vectors are bundled with
 the package; `--vectors <dir>` points at another `protocol/` checkout.
 
 ## Two transports
@@ -83,6 +84,23 @@ bytes travel base64url. `→` is the arguments object, `←` the result object;
 | checks | `checksRefusals` | `{ checks }` | `{ refusals: [{ name, reason }] }` |
 | checks | `projectChecks` | `{ checks }` | `{ projected: [check…] }` |
 | otel | `spoolRowsToOtlp` | `{ rows, resource, sdkVersion }` | `{ request }` — one OTLP/HTTP JSON `ExportMetricsServiceRequest` |
+
+## The framework operations (this repository)
+
+The `frameworks` and `run-session` sections ([`frameworks/README.md`](frameworks/README.md))
+hold an SDK's run session and its framework adapters to one recorded suite.
+They load from `frameworks/run.mjs` when it is present, and are not in the
+published package: there, `OPERATIONS` and `SECTIONS` hold the protocol's
+alone. An adapter names its language — `export const language =
+"ts"` on a module, `{ "ops": […], "language": "py" }` in a process's
+`capabilities` answer — so it is handed its own fixtures. These calls may take
+up to 120 s.
+
+| Section | Operation | → | ← |
+|---|---|---|---|
+| run-session | `unavailableReasons` | `{}` | `{ reasons: [reason…] }`: the SDK's own closed list, in order |
+| run-session | `sessionScenario` | `{ agent: { organizationId, agentId, target, runRefSecret, t0, idleTimeoutMs, rootPublicJwk }, bundle \| null, variableSources: { name: value }, steps: [step…] }`: start an offline agent pinned to `rootPublicJwk`, with a memory sink and a clock at `t0`; `applyBundle(bundle)`; run the steps (a `swapRelease` / `applyDirective` step carries its own `bundle`); stop | `{ results: [one per step], rows: [window row…], steps: [step row…], refusals: [refusal row…], wire: { rows, steps, refusals }, runCounters, log: [event…], sourceCalls }`: `wire` holds the same rows as the lines the spool writes (JSON text, numbers as the SDK spells them), compared by their digits; a step that throws answers `{ error }` in its place |
+| frameworks | `driveRun` | `{ fixture, bundle \| null, agent }`: the same agent; then the fixture's driver builds the framework with the adapter in place and runs it on `fixture.recorded.turns` | `{ placements: [{ slot, kind, reason?, versionId?, arm?, declined? }…], calls: [what the provider saw…], runRefs: [ref…], rows, steps, refusals, wire, runCounters, log, state? }` |
 
 Results are compared key-order-insensitively; a refusal is compared by
 `reason` alone. A canonical-JSON refusal the vectors express only in

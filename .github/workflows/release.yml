@@ -40,6 +40,11 @@
 #                          (the harness with the protocol's vectors bundled
 #                          at pack time), with provenance (S14).
 #
+# After the npm or pypi job publishes, `compat-tags` tags each agent SDK fork at the version this release tested,
+# as compat/<version> (AIR-2314, forks/README.md). It reads the tested versions from the release tag itself, never
+# moves a compat tag, and needs the FORK_SYNC_TOKEN secret. A failure there does not undo the publish: fix the
+# cause and re-run that job.
+#
 # Tags are pushed by hand or by tag-release.yml, which then dispatches this
 # workflow on the tag (a GITHUB_TOKEN tag push starts no workflow); the publish
 # jobs gate on github.ref, so a dispatch on a tag publishes as a push does.
@@ -260,6 +265,32 @@ jobs:
           files: airprompter-agent.spdx.json
           generate_release_notes: true
           prerelease: ${{ steps.channel.outputs.prerelease }}
+
+  compat-tags:
+    name: Tag the agent SDK forks at the versions this release tested (compat/<version>)
+    needs: [npm, pypi]
+    if: ${{ always() && (needs.npm.result == 'success' || needs.pypi.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Create compat/<version> on each fork that this release certifies
+        env:
+          FORK_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+        run: |
+          case "$GITHUB_REF_NAME" in
+            sdk-typescript/v*) registry=npm; version="${GITHUB_REF_NAME#sdk-typescript/v}" ;;
+            sdk-python/v*) registry=pypi; version=$(printf '%s' "${GITHUB_REF_NAME#sdk-python/v}" | sed -E -e 's/^([0-9.]+)rc([0-9]+)$/\1-rc.\2/' -e 's/^([0-9.]+)b([0-9]+)$/\1-beta.\2/' -e 's/^([0-9.]+)a([0-9]+)$/\1-alpha.\2/') ;;
+            *) echo "not an SDK release tag: $GITHUB_REF_NAME"; exit 1 ;;
+          esac
+          node scripts/forks/compat-tags.mjs "$version" --registry "$registry" --apply
 
   cli:
     name: Build and sign the CLI

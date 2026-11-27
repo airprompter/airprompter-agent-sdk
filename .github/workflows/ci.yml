@@ -39,6 +39,8 @@ jobs:
         run: node docs/check-links.mjs
       - name: Every source file opens with a header and a usage example (CONTRIBUTING.md › File headers)
         run: node scripts/check-headers.mjs
+      - name: Fork tracking rules (forks/forks.json, scripts/forks)
+        run: node --test scripts/forks/lib.test.mjs
       - name: Vectors and examples are byte-for-byte generated
         run: |
           python3 protocol/tools/gen_assignment_vectors.py /tmp/assignment.json

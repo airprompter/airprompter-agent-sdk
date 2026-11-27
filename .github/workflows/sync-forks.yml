@@ -1,0 +1,59 @@
+name: Sync the agent SDK forks
+
+# AIR-2314: the forks and private mirrors in forks/forks.json do not update themselves, and their own Actions stay
+# off, so this repository syncs them: each default branch (fast-forward only) and every new upstream tag. A tag
+# upstream moved or deleted is reported and ours is kept; that repository then gets no new tags until the change
+# is listed under acknowledgedTagChanges. compat/* tags (one per tested SDK version) are never touched.
+#
+# Needs the FORK_SYNC_TOKEN secret: a token with Contents: write and Workflows: write on every repository listed
+# (Workflows, because a fast-forward can carry upstream's own .github/workflows changes). Without it the run fails
+# at the first step and says so.
+
+on:
+  schedule:
+    - cron: "41 5 * * *" # daily 05:41 UTC
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "One repository, e.g. airprompter/langgraphjs (empty: all)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Plan only: push nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-forks
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync forks and mirrors
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sync (default branches, then tags)
+        env:
+          FORK_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+          ONLY: ${{ inputs.only }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
+          node scripts/forks/sync.mjs "${args[@]}" > sync-report.json
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-sync-report
+          path: sync-report.json
+          if-no-files-found: ignore

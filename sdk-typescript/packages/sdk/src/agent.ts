@@ -446,7 +446,7 @@ function anySignal(a: AbortSignal, b: AbortSignal): AbortSignal {
   return both.signal;
 }
 
-type FlushOutcome = { status: "uploaded"; segment: string; rows: number } | { status: "nothing" } | { status: "held"; reason: string; rows: number };
+export type FlushOutcome = { status: "uploaded"; segment: string; rows: number } | { status: "nothing" } | { status: "held"; reason: string; rows: number };
 
 /** `render()` refused by the control plane's standing instructions: a disable directive. */
 export class RenderRefusedError extends Error {
@@ -461,8 +461,8 @@ export class RenderRefusedError extends Error {
 }
 
 /** The reporters the heartbeat schema admits (`protocol/schemas/heartbeat.schema.json`, `sdk.name`). */
-export const HEARTBEAT_REPORTER_NAMES = ["agent-sdk-typescript", "agent-sdk-python", "airprompter-cli", "airprompterd"] as const;
-export type HeartbeatReporterName = (typeof HEARTBEAT_REPORTER_NAMES)[number];
+export type HeartbeatReporterName = "agent-sdk-typescript" | "agent-sdk-python" | "airprompter-cli" | "airprompterd";
+export const HEARTBEAT_REPORTER_NAMES = ["agent-sdk-typescript", "agent-sdk-python", "airprompter-cli", "airprompterd"] as const satisfies readonly HeartbeatReporterName[];
 
 /** What `applyBundle()` (and the vendored bundle at boot) did with a bundle, and why when it did nothing. */
 export type BundleOutcome =

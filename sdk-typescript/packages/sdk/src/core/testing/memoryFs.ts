@@ -25,7 +25,6 @@
 
 import type { FsFailure, FsOpenFlags, FsPort } from "../protocol/ports.js";
 
-type Op = keyof FsPort;
 
 function failure(code: string, path: string): FsFailure {
   const error = new Error(`${code}: ${path}`) as FsFailure;
@@ -54,15 +53,15 @@ export class MemoryFs implements FsPort {
   private readonly dirs = new Set<string>(["/"]);
   private readonly handles = new Map<number, { path: string; flags: FsOpenFlags }>();
   private nextFd = 3;
-  private readonly pending = new Map<Op, { code: string; times: number }>();
+  private readonly pending = new Map<keyof FsPort, { code: string; times: number }>();
   /** Every operation in order — a test asserts what the spool did, not only what it left. */
-  readonly journal: Array<{ op: Op; path: string }> = [];
+  readonly journal: Array<{ op: keyof FsPort; path: string }> = [];
   clockMs = 0;
 
   constructor(public capacityBytes: number = Number.POSITIVE_INFINITY) {}
 
   /** The next `times` calls to `op` fail with `code`. */
-  failNext(op: Op, code: FsFailure["code"], times = 1): void {
+  failNext(op: keyof FsPort, code: FsFailure["code"], times = 1): void {
     this.pending.set(op, { code, times });
   }
 
@@ -82,7 +81,7 @@ export class MemoryFs implements FsPort {
     return [...this.files.entries()].map(([path, file]) => ({ path, bytes: file.bytes.length })).sort((a, b) => (a.path < b.path ? -1 : 1));
   }
 
-  private gate(op: Op, path: string): void {
+  private gate(op: keyof FsPort, path: string): void {
     this.journal.push({ op, path });
     const pending = this.pending.get(op);
     if (!pending) return;

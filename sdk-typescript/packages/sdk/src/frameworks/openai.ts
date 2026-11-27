@@ -62,7 +62,7 @@ function responsesAccumulator(): StreamAccumulator {
 }
 
 /** The OpenAI client's model-call methods. Anything else on the client is its own. */
-export const OPENAI_METHODS: ClientMethods = [
+const OPENAI_METHODS: ClientMethods = [
   { path: ["chat", "completions", "create"], kind: "chat", accumulate: chatAccumulator },
   { path: ["chat", "completions", "parse"], kind: "chat", accumulate: chatAccumulator },
   { path: ["chat", "completions", "stream"], kind: "chat", accumulate: chatAccumulator, helper: true },

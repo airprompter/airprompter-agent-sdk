@@ -8,16 +8,16 @@
         "packages/sdk/src/index.ts"
       ],
       "@airprompter/agent-sdk/core": [
-        "packages/sdk/src/core/index.ts"
+        "packages/sdk/src/core/public.ts"
       ],
       "@airprompter/agent-sdk/sync": [
-        "packages/sdk/src/sync/index.ts"
+        "packages/sdk/src/sync/public.ts"
       ],
       "@airprompter/agent-sdk/runtime": [
-        "packages/sdk/src/runtime/index.ts"
+        "packages/sdk/src/runtime/public.ts"
       ],
       "@airprompter/agent-sdk/telemetry": [
-        "packages/sdk/src/telemetry/index.ts"
+        "packages/sdk/src/telemetry/public.ts"
       ],
       "@airprompter/agent-sdk/testing": [
         "packages/sdk/src/testing.ts"

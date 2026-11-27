@@ -27,9 +27,14 @@
   },
   "exports": {
     "./exporter": {
-      "types": "./dist/esm/exporter/index.d.ts",
-      "import": "./dist/esm/exporter/index.js",
-      "require": "./dist/cjs/exporter/index.js"
+      "import": {
+        "types": "./dist/esm/exporter/index.d.ts",
+        "default": "./dist/esm/exporter/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/exporter/index.d.ts",
+        "default": "./dist/cjs/exporter/index.js"
+      }
     }
   },
   "files": [

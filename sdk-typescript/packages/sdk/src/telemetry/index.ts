@@ -1,5 +1,5 @@
 /**
- * `@airprompter/agent-sdk/telemetry`: the content-free spool and its uploader:
+ * The telemetry layer's barrel, what the layers above import (the subpath `@airprompter/agent-sdk/telemetry` is the curated `./public.ts`): the content-free spool and its uploader:
  * minute windows written as append-only segments (or held in memory on a
  * serverless host), the host budget, and the direct-to-object-store upload
  * under a grant. Builds on the row schemas in `@airprompter/agent-sdk/core`
@@ -17,7 +17,7 @@
  */
 
 export { SpoolWriter, DirectorySink, MemorySink, SegmentPlanner, segmentName, SEGMENT_MAX_BYTES, HOST_SPOOL_BUDGET_BYTES, SERVERLESS_BUFFER_BYTES } from "./spool/writer.js";
-export type { SpoolSink, SinkFaults, DirectorySinkOptions, SegmentManifestSource } from "./spool/writer.js";
+export type { SpoolSink, SinkFaults, DirectorySinkOptions, SegmentManifestSource, OutcomeDimensions } from "./spool/writer.js";
 export { SPOOL_MANIFEST_FORMAT, DAEMON_DISCOVERY_FORMAT, MANIFEST_GRACE_MS, DAEMON_DISCOVERY_MAX_AGE_MS, DAEMON_DISCOVERY_REFRESH_MS, DAEMON_DISCOVERY_FILE, MANIFEST_SUFFIX, MANIFEST_NAME, manifestNameOf, segmentNameOfManifest, sha256Hex, writeSegmentManifest, readSegmentManifest, daemonDiscoveryPath, readDaemonDiscovery, writeDaemonDiscovery, removeDaemonDiscovery } from "./spool/manifest.js";
 export type { SegmentManifest, DaemonDiscovery, DiscoveryResult } from "./spool/manifest.js";
 export { LATENCY_BUCKET_EDGES_MS, latencyBucketIndex, minuteOf, epochMinute } from "../core/index.js";

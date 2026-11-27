@@ -16,7 +16,7 @@
  *
  * @example
  * ```ts
- * import { diffReleases } from "@airprompter/agent-sdk/core";
+ * import { diffReleases } from "../index.js"; // the core barrel: internal, used by the CLI's `diff` and the agent
  * const before = { "support.triage": { digest: "a1", versionId: "v1", ordinal: 1, experimentId: null, weights: [], disabled: false } };
  * const after = { "support.triage": { digest: "b2", versionId: "v2", ordinal: 2, experimentId: null, weights: [], disabled: false } };
  * diffReleases(before, after); // [{ slot: "support.triage", change: "new_version", previous: before["support.triage"], next: after["support.triage"] }]

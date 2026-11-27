@@ -1,5 +1,5 @@
 /**
- * `@airprompter/agent-sdk/runtime`: serving a verified release: which slot a
+ * The runtime layer's barrel, what the layers above import (the subpath `@airprompter/agent-sdk/runtime` is the curated `./public.ts`): serving a verified release: which slot a
  * subject gets under which arm (the ramp walked on this host's clock, a
  * retreat honoured), the rendered text with its run reference, the run
  * session, and the `ap.attribute` scope. What the framework adapters share

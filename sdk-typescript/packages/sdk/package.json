@@ -32,79 +32,139 @@
   "types": "./dist/esm/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/esm/index.d.ts",
-      "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.js"
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
     },
     "./core": {
-      "types": "./dist/esm/core/index.d.ts",
-      "import": "./dist/esm/core/index.js",
-      "require": "./dist/cjs/core/index.js"
+      "import": {
+        "types": "./dist/esm/core/public.d.ts",
+        "default": "./dist/esm/core/public.js"
+      },
+      "require": {
+        "types": "./dist/cjs/core/public.d.ts",
+        "default": "./dist/cjs/core/public.js"
+      }
     },
     "./sync": {
-      "types": "./dist/esm/sync/index.d.ts",
-      "import": "./dist/esm/sync/index.js",
-      "require": "./dist/cjs/sync/index.js"
+      "import": {
+        "types": "./dist/esm/sync/public.d.ts",
+        "default": "./dist/esm/sync/public.js"
+      },
+      "require": {
+        "types": "./dist/cjs/sync/public.d.ts",
+        "default": "./dist/cjs/sync/public.js"
+      }
     },
     "./runtime": {
-      "types": "./dist/esm/runtime/index.d.ts",
-      "import": "./dist/esm/runtime/index.js",
-      "require": "./dist/cjs/runtime/index.js"
+      "import": {
+        "types": "./dist/esm/runtime/public.d.ts",
+        "default": "./dist/esm/runtime/public.js"
+      },
+      "require": {
+        "types": "./dist/cjs/runtime/public.d.ts",
+        "default": "./dist/cjs/runtime/public.js"
+      }
     },
     "./telemetry": {
-      "types": "./dist/esm/telemetry/index.d.ts",
-      "import": "./dist/esm/telemetry/index.js",
-      "require": "./dist/cjs/telemetry/index.js"
+      "import": {
+        "types": "./dist/esm/telemetry/public.d.ts",
+        "default": "./dist/esm/telemetry/public.js"
+      },
+      "require": {
+        "types": "./dist/cjs/telemetry/public.d.ts",
+        "default": "./dist/cjs/telemetry/public.js"
+      }
     },
     "./testing": {
-      "types": "./dist/esm/testing.d.ts",
-      "import": "./dist/esm/testing.js",
-      "require": "./dist/cjs/testing.js"
+      "import": {
+        "types": "./dist/esm/testing.d.ts",
+        "default": "./dist/esm/testing.js"
+      },
+      "require": {
+        "types": "./dist/cjs/testing.d.ts",
+        "default": "./dist/cjs/testing.js"
+      }
     },
     "./frameworks/contract": {
-      "types": "./dist/esm/frameworks/contract.d.ts",
-      "import": "./dist/esm/frameworks/contract.js",
-      "require": "./dist/cjs/frameworks/contract.js"
+      "import": {
+        "types": "./dist/esm/frameworks/contract.d.ts",
+        "default": "./dist/esm/frameworks/contract.js"
+      },
+      "require": {
+        "types": "./dist/cjs/frameworks/contract.d.ts",
+        "default": "./dist/cjs/frameworks/contract.js"
+      }
     },
     "./frameworks/openai": {
-      "types": "./dist/esm/frameworks/openai.d.ts",
-      "import": "./dist/esm/frameworks/openai.js",
-      "require": "./dist/cjs/frameworks/openai.js"
+      "import": {
+        "types": "./dist/esm/frameworks/openai.d.ts",
+        "default": "./dist/esm/frameworks/openai.js"
+      },
+      "require": {
+        "types": "./dist/cjs/frameworks/openai.d.ts",
+        "default": "./dist/cjs/frameworks/openai.js"
+      }
     },
     "./frameworks/anthropic": {
-      "types": "./dist/esm/frameworks/anthropic.d.ts",
-      "import": "./dist/esm/frameworks/anthropic.js",
-      "require": "./dist/cjs/frameworks/anthropic.js"
+      "import": {
+        "types": "./dist/esm/frameworks/anthropic.d.ts",
+        "default": "./dist/esm/frameworks/anthropic.js"
+      },
+      "require": {
+        "types": "./dist/cjs/frameworks/anthropic.d.ts",
+        "default": "./dist/cjs/frameworks/anthropic.js"
+      }
     },
     "./frameworks/ai-sdk": {
-      "types": "./dist/esm/frameworks/ai-sdk.d.ts",
-      "import": "./dist/esm/frameworks/ai-sdk.js",
-      "require": "./dist/cjs/frameworks/ai-sdk.js"
+      "import": {
+        "types": "./dist/esm/frameworks/ai-sdk.d.ts",
+        "default": "./dist/esm/frameworks/ai-sdk.js"
+      },
+      "require": {
+        "types": "./dist/cjs/frameworks/ai-sdk.d.ts",
+        "default": "./dist/cjs/frameworks/ai-sdk.js"
+      }
     },
     "./frameworks/langchain": {
-      "types": "./dist/esm/frameworks/langchain.d.ts",
-      "import": "./dist/esm/frameworks/langchain.js",
-      "require": "./dist/cjs/frameworks/langchain.js"
+      "import": {
+        "types": "./dist/esm/frameworks/langchain.d.ts",
+        "default": "./dist/esm/frameworks/langchain.js"
+      },
+      "require": {
+        "types": "./dist/cjs/frameworks/langchain.d.ts",
+        "default": "./dist/cjs/frameworks/langchain.js"
+      }
     },
     "./frameworks/steps": {
-      "types": "./dist/esm/frameworks/steps/index.d.ts",
-      "import": "./dist/esm/frameworks/steps/index.js",
-      "require": "./dist/cjs/frameworks/steps/index.js"
+      "import": {
+        "types": "./dist/esm/frameworks/steps/index.d.ts",
+        "default": "./dist/esm/frameworks/steps/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/frameworks/steps/index.d.ts",
+        "default": "./dist/cjs/frameworks/steps/index.js"
+      }
     }
   },
   "typesVersions": {
     "*": {
       "core": [
-        "dist/esm/core/index.d.ts"
+        "dist/esm/core/public.d.ts"
       ],
       "sync": [
-        "dist/esm/sync/index.d.ts"
+        "dist/esm/sync/public.d.ts"
       ],
       "runtime": [
-        "dist/esm/runtime/index.d.ts"
+        "dist/esm/runtime/public.d.ts"
       ],
       "telemetry": [
-        "dist/esm/telemetry/index.d.ts"
+        "dist/esm/telemetry/public.d.ts"
       ],
       "testing": [
         "dist/esm/testing.d.ts"
@@ -144,7 +204,7 @@
       "./core": 315000,
       "./sync": 220000,
       "./runtime": 242000,
-      "./telemetry": 187000,
+      "./telemetry": 192000,
       "./testing": 85000,
       "./frameworks/contract": 10000,
       "./frameworks/openai": 14000,

@@ -12,5 +12,8 @@
  * plane.promote([plane.slot({ tag: "support.reply", text: "Reply politely." })]);
  * const ap = await AirPrompterAgent.start({ ...plane.scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { rootUrl: "https://api.test/roots/prod/root.json" }, fetch: plane.fetch() }); // the fake's own root: not a hosted one, so its rootUrl is named
  * ```
+ *
+ * The names 1.0 promises are listed, never a star export: `test/publicSurface.test.ts` pins them.
  */
-export * from "./core/testing/index.js";
+export { FakeClock, FakeControlPlane, MemoryFs, serveOverHttp } from "./core/testing/index.js";
+export type { SlotSpec } from "./core/testing/index.js";

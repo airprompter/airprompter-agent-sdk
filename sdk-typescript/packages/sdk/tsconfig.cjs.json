@@ -5,7 +5,7 @@
     "rootDir": "src",
     "module": "CommonJS",
     "moduleResolution": "Node10",
-    "declaration": false,
+    "declaration": true,
     "verbatimModuleSyntax": false
   },
   "include": [

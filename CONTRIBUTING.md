@@ -95,6 +95,10 @@ release. The rules are in the header of
   and in `SDK_SUBPATHS` in `sdk-typescript/scripts/install-alone.mjs`: it
   imports with no peer installed. (LangChain, until AIR-2234, instead names
   the peer it is missing.)
+- Its names, one per line, in `PROMISE` in
+  `sdk-typescript/test/publicSurface.test.ts`, and a row in
+  [`docs/stability.md`](docs/stability.md); or the subpath in `OUTSIDE` and
+  that page's *Outside the promise*, with the reason.
 - The Python module `airprompter_agent/frameworks/<name>.py` with an entry in
   `ADAPTERS` in `sdk-python/tools/lint_imports.py`, its `pyproject.toml`
   extra, a live test beside `sdk-python/tests/test_frameworks_live.py`, and

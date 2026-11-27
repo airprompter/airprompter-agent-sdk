@@ -23,7 +23,8 @@
  *
  * @example
  * ```ts
- * const openai = instrumentClient(new OpenAI(), ap, { adapter: "openai", methods: OPENAI_METHODS, slot: "support.reply", apply: applyPlacement });
+ * const methods: ClientMethods = [{ path: ["chat", "completions", "create"], kind: "chat", accumulate: () => myAccumulator() }]; // a StreamAccumulator you write
+ * const openai = instrumentClient(new OpenAI(), ap, { adapter: "openai", methods, slot: "support.reply", apply: applyPlacement });
  * await ap.run({ subject: userId }, () => openai.chat.completions.create({ model: "gpt-5", messages })); // the approved text, model and settings
  * ```
  */

@@ -6,7 +6,7 @@
  *
  * @example
  * ```ts
- * import { RunRegistry, type RunSession } from "@airprompter/agent-sdk/runtime";
+ * import { RunRegistry, type RunSession } from "../index.js"; // the runtime barrel; the registry is internal, `RunSession` is on `/runtime`
  * ```
  */
 

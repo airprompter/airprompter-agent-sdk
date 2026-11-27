@@ -10,6 +10,8 @@
 //     once that peer is there.
 //   - each satellite beside it: exactly one copy of the SDK resolves, and the
 //     satellite's own import works, ESM and CommonJS.
+//   - a TypeScript `.cts` file under `module: Node16` type-checks against
+//     every specifier: the `require` condition carries CommonJS declarations.
 //
 // A subpath that reaches for a package it does not declare, or a file the
 // exports map does not name, fails here and nowhere else.
@@ -39,7 +41,7 @@ const SDK_SUBPATHS = {
   "@airprompter/agent-sdk/frameworks/contract": ["chooseModel", "settingsFor", "measureCall", "instrumentClient"],
   "@airprompter/agent-sdk/frameworks/openai": ["instrument", "applyPlacement"],
   "@airprompter/agent-sdk/frameworks/anthropic": ["instrument", "applyPlacement"],
-  "@airprompter/agent-sdk/frameworks/ai-sdk": ["airprompterMiddleware", "generateResultShape"],
+  "@airprompter/agent-sdk/frameworks/ai-sdk": ["airprompterMiddleware"],
   // No peers: the Steps core uses Node built-ins only, so it imports with the SDK alone.
   "@airprompter/agent-sdk/frameworks/steps": ["createAutomationClient", "usageFrom"],
 };
@@ -130,6 +132,16 @@ try {
   const copies = copiesOfSdk(join(together, "node_modules"));
   if (copies.length !== 1) throw new Error(`together: ${copies.length} copies of @airprompter/agent-sdk resolve: ${copies.join(", ")}`);
   console.log("install-alone: every package together: one copy of @airprompter/agent-sdk resolves");
+
+  // A CommonJS TypeScript consumer (`module: Node16`, a `.cts` file) reads the `require` condition's own declarations:
+  // pointed at the ESM ones it would fail with TS1479 on every specifier.
+  const specs = [...Object.entries(SDK_SUBPATHS), ...Object.values(SATELLITES).map(({ spec, names }) => [spec, names])];
+  writeFileSync(join(together, "tsconfig.json"), JSON.stringify({ compilerOptions: { module: "node16", moduleResolution: "node16", target: "es2022", lib: ["es2022"], types: [], strict: true, noEmit: true, skipLibCheck: true }, files: ["consumer.cts"] }));
+  // Each import names a value, so a declaration that re-exports nothing fails here too, not only TS1479.
+  writeFileSync(join(together, "consumer.cts"), specs.map(([spec, names], index) => `import { ${names[0]} as v${index} } from ${JSON.stringify(spec)};\nexport const kind${index}: string = typeof v${index};\n`).join(""));
+  const tsc = spawnSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "-p", together], { encoding: "utf8" });
+  if (tsc.status !== 0) throw new Error(`a CommonJS TypeScript consumer fails to type-check:\n${tsc.stdout}${tsc.stderr}`);
+  console.log(`install-alone: a module: Node16 CommonJS consumer type-checks against ${specs.length} specifiers`);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

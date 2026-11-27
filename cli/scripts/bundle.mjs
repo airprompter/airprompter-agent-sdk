@@ -22,7 +22,7 @@ await build({
   // the binary bundles imports the SDK by subpath; inside the SDK, imports are relative.
   alias: {
     "@airprompter/agent-otel/exporter": join(root, "..", "sdk-typescript", "packages", "agent-otel", "src", "exporter", "index.ts"),
-    ...Object.fromEntries(["core", "sync", "runtime", "telemetry"].map((layer) => [`@airprompter/agent-sdk/${layer}`, join(root, "..", "sdk-typescript", "packages", "sdk", "src", layer, "index.ts")])),
+    ...Object.fromEntries(["core", "sync", "runtime", "telemetry"].map((layer) => [`@airprompter/agent-sdk/${layer}`, join(root, "..", "sdk-typescript", "packages", "sdk", "src", layer, "public.ts")])),
   },
   platform: "node",
   target: "node20",

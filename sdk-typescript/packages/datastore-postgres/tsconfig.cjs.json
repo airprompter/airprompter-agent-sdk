@@ -5,12 +5,12 @@
     "rootDir": "src",
     "module": "CommonJS",
     "moduleResolution": "Node10",
-    "declaration": false,
+    "declaration": true,
     "verbatimModuleSyntax": false,
     "baseUrl": ".",
     "paths": {
       "@airprompter/agent-sdk/*": [
-        "../sdk/dist/esm/*/index.d.ts"
+        "../sdk/dist/cjs/*/public.d.ts"
       ]
     }
   },

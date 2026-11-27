@@ -19,25 +19,24 @@ The QA test adds what the script cannot see: the agent's Metrics show exactly on
 
 ## What it needs
 
-- **Node 20 or later, and npm.** It needs network access to `api.airprompter.dev` and `registry.npmjs.org`.
+- **Node 22.19 or later, and npm.** The node itself runs on Node 20; the test dependencies (undici 8) need 22.19. It needs network access to `api.airprompter.dev` and `registry.npmjs.org`.
 - **n8n 2.49.8.** Install it once and point `N8N_BIN` at it, so a run does not download n8n:
   `npm i n8n@2.49.8` in a cache folder, then `N8N_BIN=<that folder>/node_modules/.bin/n8n`. Without `N8N_BIN`, the
   script uses `npx --yes n8n@2.49.8`. The `n8n.version` check fails on any other version, unless you pass
   `--any-n8n`.
 - **This package's dev dependencies:** `npm ci --legacy-peer-deps` in `integrations/n8n`.
-- **A dev agent.** The QA repo's per-run Team owner creates it in its disposable organization:
+- **A dev agent.** A Team owner creates it, for QA the per-run owner in its disposable organization, with the
+  console's own API calls:
 
   | Step | Call (owner's console session) |
   |---|---|
-  | 1. Approve a prompt version with one variable | Import `Route this ticket: {{ticket}}` (with a per-run marker), then approve the version through the workspace's lifecycle steps |
+  | 1. Approve a prompt version with one variable | Import `Route this ticket: {{ticket}}` with a per-run marker, then approve the version through the workspace's required lifecycle steps |
   | 2. Create the agent | `POST /workspace/{ws}/agents` `{ "name": … }` |
   | 3. Attach the slot | `POST /workspace/{ws}/agents/{agent}/slots` `{ "kind": "prompt", "artifactId": <prompt>, "displayName": "Ticket triage", "tag": "triage", "variables": [{ "name": "ticket", "required": true, "trust": "operator" }] }` |
   | 4. Mint the Update key | `POST /workspace/{ws}/agents/{agent}/keys` `{ "target": "dev", "kind": "agent", "label": "QA n8n" }`. Read `secret` (`apa_…`) from this one answer. |
   | 5. Seal a release | `POST /workspace/{ws}/agents/{agent}/releases` `{ "environment": "dev", "pins": [{ "tag": "triage", "versionId": <version>, "model": "gpt-5-mini" }] }`, after a `dryRun: true` preview, acknowledging any warnings it flags |
-  | 6. Promote it | `POST /workspace/{ws}/agents/{agent}/environments/dev/promote` `{ "releaseDigest": …, "expectedStateRevision": <from the board> }` |
+  | 6. Promote it | `POST /workspace/{ws}/agents/{agent}/environments/dev/promote` `{ "releaseDigest": …, "expectedStateRevision": … }`. Read `board.environments.dev.stateRevision` from `GET /workspace/{ws}/agents/{agent}/board`. |
 
-  The helpers in the QA repo's `tests/e2e/support/team-agents-api.ts` (`createAgent`, `attachPromptSlot`,
-  `createUpdateKey`, `sealRelease`, `promoteRelease`, `readMetrics`, `pollUntil`) make exactly these calls.
 
 ## Run it
 
@@ -56,7 +55,7 @@ N8N_BIN=<cache>/node_modules/.bin/n8n node scripts/live-n8n.mjs > live-n8n.json
   n8n boots 10 to 30 seconds each.
 - **Output:** one JSON line on stdout, every time. PASS and FAIL lines go to stderr.
 - **Exit codes:** 0 when every check passed; 1 when a check failed or n8n could not run (`error` says why); 2 for
-  bad input.
+  bad input; 130 when interrupted.
 
 The JSON fields a test reads:
 
@@ -81,14 +80,25 @@ Check ids, which are stable: `n8n.version`, `workflow.get_and_report`, `get_prom
 1. **The script:** exit 0, `ok: true`, and every check `pass`.
 2. **The served version:** `getPrompt.versionId` is the version approved in step 1, and `getPrompt.servedFrom` is
    `network`.
-3. **Metrics:** call `GET /workspace/{ws}/agents/{agent}/metrics?environment=dev&range=24h&tag=triage`.
-   - **Poll it.** The rollup runs every 5 minutes, so poll every 30 seconds for up to 20 minutes. A
+3. **Metrics:** call `GET /workspace/{ws}/agents/{agent}/metrics?environment=dev&range=24h&tag=triage`
+   with the owner's session.
+   - **Poll it.** The rollup runs every 5 minutes, so poll every 30 seconds until `tiles.runs >= 1`, for up to 20
+     minutes. On dev on 2026-11-27 the run appeared 4.5 minutes after Report Run. A
      `503 agent_telemetry_correction_pending` answer means retry.
-   - **Expect** `tiles.runs` to equal `expected.runs`, which is 1, and the rows to be exactly
-     `[{ versionId: expected.versionId, runs: 1 }]`. The agent is fresh, so this is not a before-and-after count.
+   - **Then assert, all from the one response.** The agent is fresh, so this is not a before-and-after count.
+     - `tiles.runs === expected.runs`, which is 1.
+     - `tiles.tokensIn === 123` and `tiles.tokensOut === 7`.
+     - `rows` holds exactly one entry, and that entry has:
+       - `versionId === expected.versionId`;
+       - `arm === expected.arm` (`none` without an A/B test);
+       - `runs === 1`;
+       - `feedback.good === 1`, the thumbs up.
    - **What the count proves:** the Get Prompt with no Report Run and the stored-copy Get Prompt (`notCounted`)
      must not add runs. The count stays 1.
    - In the console, this is **Agents › the agent › Metrics**, environment Development, slot `triage`.
+
+**Test timeout:** about 25 minutes. That is about 2 for the script, up to 20 for Metrics, and headroom. Each n8n
+call inside the script is limited to 10 minutes.
 
 If `report_run.accepted` fails, `expected.runs` is `null`. A Report Run that timed out may still have been
 recorded, so read Metrics before running the script again.

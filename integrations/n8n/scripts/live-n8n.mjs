@@ -16,7 +16,7 @@
  *    - get-prompt-stored-copy: Get Prompt with every outbound request failing (AirPrompter and its edge both
  *      unreachable), in an n8n of its own, served from the copy the first run stored.
  * 5. Prints one JSON line on stdout, every time. Progress and PASS/FAIL lines go to stderr.
- *    Exit 0: every check passed. 1: a check failed, or n8n could not run (`error`). 2: bad input.
+ *    Exit 0: every check passed. 1: a check failed, or n8n could not run (`error`). 2: bad input. 130: interrupted.
  *
  * Environment (the Update key is read from the environment only, never from an argument):
  *   AIRPROMPTER_AGENT_ID      required   the agent
@@ -77,6 +77,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     args.delete("--keep");
     cleanUp();
+    finish({ error: `interrupted (${signal}); a Report Run in flight may still have been recorded`, expected: { runs: null } }, 130);
     process.exit(130);
   });
 }

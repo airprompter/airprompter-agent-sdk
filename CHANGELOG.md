@@ -10,12 +10,13 @@ may change a public shape and says so here.
 
 ## Unreleased
 
-### `airprompter dev` no longer misses a save when fs.watch drops an event (AIR-2268)
-- **The served folder is also re-read every 500 ms.** `fs.watch` can drop events: a busy macOS `fseventsd`, network and container mounts. When it did, a save never became a generation and the server logged nothing. A re-read that finds a different release or a different set of problems is now handled as a watch event would be: a 200 ms debounce, then a read. So a missed event costs at most one interval, and an unchanged fingerprint still never promotes. A re-read that finds nothing new logs nothing, so a bad file is reported once, not every half second. The idle cost is one read of the folder per tick: a readdir per folder, a stat per entry, a read of each prompt file and `release.json`, and one SHA-256.
-- If `fs.watch` cannot start at all, the server keeps serving on re-reads alone (`watch_unavailable` now names `rescanMs`). A file or subfolder that vanishes between the listing and the read is skipped rather than crashing the server. A served folder that is itself gone is logged once as `read_failed`, and the last generation keeps serving.
-- `cli/test/devRescan.test.ts` drives the reload loop with the watcher silenced, and with a hand-fired one.
-
 - **Runnable framework examples** (AIR-2316): `examples/langchain-typescript/`, a LangChain support agent on the approved prompt `examples/prompts/support/reply.md`, run in CI unchanged against `airprompter dev` and a fake provider (`examples/ci/run.mjs`). For a release: `version-lockstep --set` now also moves the SDK pin in every `examples/*/package.json`, and the check fails while an example pins another version.
+
+### `airprompter dev` no longer misses a save when fs.watch drops an event (AIR-2268)
+- **The served folder is also re-read every 500 ms.** `fs.watch` can drop events: a busy macOS `fseventsd`, network and container mounts. When it did, a save never became a generation and the server logged nothing. A re-read that finds a different release, or a different set of problems, now starts the same debounce a watch event does. A missed event costs at most about 700 ms more than a delivered one (one interval plus the debounce). An unchanged fingerprint still never promotes, and a re-read that finds nothing new logs nothing, so a bad file is reported once, not twice a second. The idle cost is one read of the folder per tick: a readdir per folder, a stat per entry, a read of each prompt file and `release.json`, and the release's SHA-256s.
+- **Only settled saves are promoted.** Two reads, one debounce (200 ms) apart, must agree before anything is logged or promoted, on both paths. A save written in bursts is promoted once, whole; before, the reload could read it half-written. A writer that pauses for longer than 200 ms in the middle of a file can still be read half-written.
+- **Nothing in the reload stops the server.** If `fs.watch` cannot start (`watch_unavailable`) or fails later (`watch_failed`, for example EPERM on Windows when the folder is deleted), the server keeps serving on re-reads alone. A served folder that is gone is logged once (`read_failed`). A promotion that throws is logged (`promote_failed`). In each case the last generation keeps serving. A file or subfolder that vanishes between the listing and the stat (an editor's temp file) is skipped instead of crashing the server. A prompt file that is a symlink to nothing is reported as a problem.
+- `cli/test/devRescan.test.ts` drives the reload loop with the watcher silenced, hand-fired, failing, and unable to start.
 
 ## 1.0.0-rc.5 — 2026-11-27 (protocol 4.0.0)
 

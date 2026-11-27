@@ -11,7 +11,8 @@
  * It passes only when the kit exits 0 with every check `pass` (none skipped), including `get_prompt.rendered` (the
  * expected text's sha256 is set for it), and when the fake plane received exactly one counted run on `ver_smoke`
  * with 123 input and 7 output tokens. It prints one JSON line every time: the kit's, with `ok`/`exitCode` set to
- * the smoke's verdict and a `smoke` object (`problems` lists what failed), and exits 0 or 1 (2: bad input).
+ * the smoke's verdict and a `smoke` object (`problems` lists what failed), and exits 0 or 1 (2: bad input; 130 or
+ * 143 when interrupted, after the kit has stopped).
  * SMOKE_TIMEOUT_MS (default 900000) kills the kit's whole process group if it hangs.
  *
  * @example
@@ -40,6 +41,7 @@ if (!process.env.N8N_BIN?.trim()) {
 
 let server = null;
 let child = null;
+let interrupted = null;
 const stop = (signal) => {
   if (child?.pid) {
     try {
@@ -49,7 +51,13 @@ const stop = (signal) => {
     }
   }
 };
-for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => stop(signal));
+// Forward to the kit's whole process group and let the normal path wait for it, close the server and print the line.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    interrupted = signal;
+    stop(signal);
+  });
+}
 
 let verdict;
 try {
@@ -58,11 +66,14 @@ try {
   const plane = new FakeControlPlane({ organizationId: "org_smoke", agentId: "agent_smoke", target: "prod" });
   plane.promote([plane.slot({ tag: "triage", text: TEXT, versionId: VERSION, model: "gpt-5-mini", variables: [{ name: "ticket", required: true, trust: "operator" }] })]);
   server = await serveOverHttp(plane, { port: 0 });
-  // The upload grant's fake bucket sits behind the same listener, so Report Run is delivered end to end.
+  // The upload grant's fake bucket and the edge pointer sit behind the same listener: nothing leaves loopback (the
+  // fake's default edge is https://edge.test, which a permissive resolver would try).
   plane.grantBaseUrl = server.baseUrl;
+  plane.edgePointerUrl = `${server.baseUrl}/g/target-token/generation.json`;
   // An operator-trust variable is substituted as is: the text the node must render. A function, so `$` is literal.
   const expectedPromptSha256 = createHash("sha256").update(TEXT.replaceAll("{{ticket}}", () => TICKET), "utf8").digest("hex");
 
+  const problemsAtSpawn = [];
   // Its own process group, so a timeout or an interrupt reaches n8n and its task runner too.
   child = spawn(process.execPath, [KIT, ...process.argv.slice(2)], {
     detached: true,
@@ -88,7 +99,13 @@ try {
     timedOut = true;
     stop("SIGKILL");
   }, timeoutMs);
-  const code = await new Promise((done) => child.on("close", (status) => done(status ?? 1)));
+  const code = await new Promise((done) => {
+    child.on("error", (error) => {
+      problemsAtSpawn.push(`the kit could not start: ${error.message}`);
+      done(1);
+    });
+    child.on("close", (status) => done(status ?? 1));
+  });
   clearTimeout(timer);
 
   let summary = null;
@@ -105,7 +122,8 @@ try {
   const windows = rows.filter((row) => row.type === "window" && row.count > 0);
   const delivered = { runs: windows.reduce((sum, row) => sum + row.count, 0), versionIds: [...new Set(windows.map((row) => row.versionId))], inputTokens: windows.reduce((sum, row) => sum + (row.tokens?.input ?? 0), 0), outputTokens: windows.reduce((sum, row) => sum + (row.tokens?.output ?? 0), 0) };
 
-  const problems = [];
+  const problems = [...problemsAtSpawn];
+  if (interrupted) problems.push(`interrupted (${interrupted})`);
   if (timedOut) problems.push(`the kit did not finish within ${timeoutMs} ms and was killed`);
   if (!summary) problems.push("the kit printed no JSON");
   if (code !== 0) problems.push(`the kit exited ${code}${summary?.error ? `: ${summary.error}` : ""}`);
@@ -116,7 +134,7 @@ try {
   if (summary?.getPrompt && (summary.getPrompt.versionId !== VERSION || summary.getPrompt.servedFrom !== "network")) problems.push(`Get Prompt served ${summary.getPrompt.versionId} from ${summary.getPrompt.servedFrom}, not ${VERSION} from network`);
   if (delivered.runs !== 1 || delivered.versionIds.join() !== VERSION || delivered.inputTokens !== 123 || delivered.outputTokens !== 7) problems.push(`the fake plane received ${JSON.stringify(delivered)}, not exactly one run on ${VERSION} with 123/7 tokens`);
   const ok = problems.length === 0;
-  verdict = { ...(summary ?? {}), ok, exitCode: ok ? 0 : 1, smoke: { expectedPromptSha256, delivered, problems, kitExitCode: code } };
+  verdict = { ...(summary ?? {}), ok, exitCode: interrupted ? (interrupted === "SIGINT" ? 130 : 143) : ok ? 0 : 1, smoke: { expectedPromptSha256, delivered, problems, kitExitCode: code } };
 } catch (error) {
   verdict = { ok: false, exitCode: 1, startedAt, error: `the smoke could not run: ${error.message}` };
 } finally {

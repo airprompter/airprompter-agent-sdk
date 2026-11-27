@@ -188,3 +188,19 @@ test("--prepare-nodes-dir refuses an untracked build input: it would be packed u
   const output = run(["--prepare-nodes-dir", join(repo, "out")], { AIRPROMPTER_KIT_COMMIT: "c0ffee0000000000000000000000000000000001" }, join(home, "scripts", "live-n8n.mjs"));
   assert.match(output.json.error, /is not this checkout's commit/, "got past the dirty check to the next refusal");
 });
+
+test("the smoke script prints one JSON line on every exit, and fails when the kit cannot run n8n", (t) => {
+  const SMOKE = join(PACKAGE, "scripts", "live-n8n-smoke.mjs");
+  const none = spawnSync(process.execPath, [SMOKE], { encoding: "utf8", env: { ...process.env, N8N_BIN: "" } });
+  assert.equal(none.status, 2);
+  assert.match(JSON.parse(none.stdout.trim()).error, /set N8N_BIN/);
+  // A stand-in n8n that answers --version and --help, then fails: the kit stops, and so does the smoke, with reasons.
+  const tools = fakeTools(t);
+  const broken = spawnSync(process.execPath, [SMOKE, "--no-build"], { encoding: "utf8", env: { ...process.env, ...tools.env } });
+  const verdict = JSON.parse(broken.stdout.trim().split("\n").pop() || "{}");
+  assert.equal(broken.status, 1);
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.exitCode, 1);
+  assert.ok(verdict.smoke.problems.some((problem: string) => /the kit exited 1/.test(problem)), JSON.stringify(verdict.smoke));
+  assert.deepEqual(verdict.smoke.delivered.runs, 0, "nothing reached the fake plane");
+});

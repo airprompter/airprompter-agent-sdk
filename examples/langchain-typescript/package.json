@@ -14,14 +14,14 @@
   },
   "dependencies": {
     "@airprompter/agent-sdk": "1.0.0-rc.5",
-    "@langchain/core": "1.3.4",
-    "@langchain/openai": "1.8.0",
-    "langchain": "1.6.1",
+    "@langchain/core": "1.5.1",
+    "@langchain/openai": "1.8.5",
+    "langchain": "1.6.8",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "22.20.2",
-    "tsx": "4.23.13",
-    "typescript": "5.9.3"
+    "@types/node": "26.6.7",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
   }
 }

@@ -21,7 +21,7 @@
 
 import { outputTextOf, type SlotInference } from "../../core/index.js";
 import { classifyError, classifyResult, normalizeUsage } from "../observe.js";
-import type { AgentRuntime, ModelResolver, RunInput, RunSession } from "../run/index.js";
+import type { AgentRuntime, ModelCallRecord, ModelResolver, RunInput, RunSession } from "../run/index.js";
 import { INFERENCE_KEYS, applyInference, temperatureOf, topPOf, type AppliedInference, type RequestKind } from "./inference.js";
 import type { Pending } from "./proxy.js";
 
@@ -128,9 +128,27 @@ export interface Measurement extends Pending {
   readonly settled: boolean;
 }
 
+/**
+ * The recorder for one call that has begun. A run session opens the call now, so a run that ends before the call settles
+ * says its calls were not all measured (`callsReported: false`); any other `RunSession` just records.
+ */
+function beginCall(run: RunSession, slot: string): (call: ModelCallRecord) => void {
+  try {
+    const begun = (run as { callBegun?: (slot: string) => (call: ModelCallRecord) => boolean }).callBegun;
+    if (typeof begun === "function") {
+      const record = begun.call(run, slot);
+      return (call) => void record(call);
+    }
+  } catch {
+    // measuring never fails the customer's call
+  }
+  return (call) => run.recordModelCall(slot, call);
+}
+
 /** Start the clock for one model call that settles later, as a stream or a start/end hook pair does. */
 export function beginMeasure(run: RunSession, slot: string, options: MeasureOptions): Measurement {
   const now = options.now ?? Date.now;
+  const record = beginCall(run, slot);
   const started = now();
   const base = { model: options.model, ...(options.step !== undefined ? { step: options.step } : {}), ...(options.toolsObserved !== undefined ? { toolsObserved: options.toolsObserved } : {}) };
   let settled = false;
@@ -159,15 +177,15 @@ export function beginMeasure(run: RunSession, slot: string, options: MeasureOpti
           const shaped = options.read ? options.read(result) : result;
           const errorClass = classifyResult(shaped);
           const text = outputTextOf(shaped);
-          run.recordModelCall(slot, { ...base, latencyMs, usage: normalizeUsage(shaped), ...(errorClass ? { errorClass } : {}), ...(text !== null ? { outputText: text } : {}) });
+          record({ ...base, latencyMs, usage: normalizeUsage(shaped), ...(errorClass ? { errorClass } : {}), ...(text !== null ? { outputText: text } : {}) });
         } catch {
           // An unreadable result still counts as a call, with no usage.
-          run.recordModelCall(slot, { ...base, latencyMs });
+          record({ ...base, latencyMs });
         }
       });
     },
     fail(error) {
-      finish(() => run.recordModelCall(slot, { ...base, latencyMs: Math.max(0, now() - started), errorClass: classifyError(error) }));
+      finish(() => record({ ...base, latencyMs: Math.max(0, now() - started), errorClass: classifyError(error) }));
     },
   };
 }

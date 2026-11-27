@@ -459,7 +459,9 @@ outside any run, with `metadata=litellm_metadata(rendered)`: each is a one-call 
 not verify, or names no entry for that tag, files nothing; a call sent under another model is not counted). If you do
 pass `metadata=litellm_metadata((run, slot))` inside a run, a record that reaches the live run is recorded into it and
 one that arrives after the run ended is dropped with one `adapter_late_record` log: the run is counted once, and that
-call's tokens and latency are not measured. Use `measure_call` or the run's metadata for a call, never both. A prompt
+call's tokens and latency are not measured. The row says so: the callback's pre-call hook opens the call on the run,
+so a run that ends before its log is written as not measured (`callsReportedRuns` 0, protocol 4.1.0), never as a run
+that made no call. Use `measure_call` or the run's metadata for a call, never both. A prompt
 rendered inside `ap.run` carries that run's reference, so `litellm_metadata(rendered)` there behaves
 as `(run, slot)` does. A call you send under another id for the release's model (a deployment, a Bedrock id, a Router
 model group) names it: `litellm_metadata((run, slot), model=sent_id)`; LiteLLM's stripped provider prefix still matches.

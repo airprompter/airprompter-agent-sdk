@@ -262,3 +262,107 @@ def test_a_workflow_step_inside_a_run_is_that_runs_in_context_and_a_late_record_
     finally:
         ap.stop()
         shutil.rmtree(state_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------------------------- protocol 4.1.0: the pre-call hook (AIR-2547)
+
+
+def _call(metadata, call_id, model="gpt-5"):
+    """What LiteLLM hands both hooks of one call: the same ``litellm_call_id``, the caller's metadata."""
+    return {"model": model, "litellm_call_id": call_id, "litellm_params": {"metadata": metadata}}
+
+
+def _settle(callback, kwargs):
+    start = dt.datetime(2026, 9, 12, 14, 3, 10)
+    callback.log_success_event(kwargs, {"usage": {"prompt_tokens": 3, "completion_tokens": 2}}, start, start + dt.timedelta(milliseconds=5))
+
+
+def test_a_call_whose_log_lands_after_the_run_ended_writes_calls_not_reported(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    logged: list = []
+    callback._ap = type("Spy", (), {"__getattr__": lambda self, name: getattr(agent, name), "log": lambda self, event: logged.append(event)})()
+    with agent.run(variables={"team": "Billing", "ticket": "refund"}) as run:
+        run.place("support.triage")
+        kwargs = _call(litellm_metadata((run, "support.triage")), "call-1")
+        callback.log_pre_api_call("gpt-5", [], kwargs)  # in the caller's context, before the request
+    _settle(callback, kwargs)  # the logger fired after the block ended: dropped
+    [row] = _windows(agent)
+    assert (row["count"], row["modelCalls"], row["usageSource"], row["callsReportedRuns"]) == (1, 0, "unavailable", 0), "the row says the call was not measured, never that none was made"
+    assert not callback._open, "the late record closes what the pre-call hook opened"
+    assert [e["event"] for e in logged] == ["adapter_late_record"], "one log for the late record"
+
+
+def test_a_call_logged_in_time_is_measured_and_a_retry_opens_it_once(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    with agent.run(variables={"team": "Billing", "ticket": "refund"}) as run:
+        run.place("support.triage")
+        kwargs = _call(litellm_metadata((run, "support.triage")), "call-1")
+        callback.log_pre_api_call("gpt-5", [], kwargs)
+        callback.log_pre_api_call("gpt-5", [], kwargs)  # LiteLLM's retry of the same call
+        _settle(callback, kwargs)
+    [row] = _windows(agent)
+    assert (row["modelCalls"], row["usageSource"], row["callsReportedRuns"]) == (1, "reported", 1)
+
+
+def test_the_pre_call_hook_opens_nothing_for_a_call_it_would_not_count(agent):
+    callback = AirPrompterLiteLLMCallback(agent)
+    with agent.run(variables={"team": "Billing", "ticket": "refund"}) as run:
+        run.place("support.triage")
+        metadata = litellm_metadata((run, "support.triage"))
+        callback.log_pre_api_call("gpt-4o", [], _call(metadata, "other-model", model="gpt-4o"))  # another model's call
+        callback.log_pre_api_call("gpt-5", [], _call({"other": 1}, "no-attribution"))
+        callback.log_pre_api_call("gpt-5", [], {"model": "gpt-5", "litellm_params": {"metadata": metadata}})  # no call id
+    [row] = _windows(agent)
+    assert (row["modelCalls"], row["callsReportedRuns"]) == (0, 1), "a run whose only calls were not its own made no model call"
+    assert not callback._open
+
+
+def test_open_calls_are_bounded_and_an_ended_runs_calls_go_first(agent, monkeypatch):
+    from airprompter_agent.frameworks import litellm as module
+
+    monkeypatch.setattr(module, "OPEN_CALLS_MAX", 2)
+    callback = AirPrompterLiteLLMCallback(agent)
+    live = agent.open_run(variables={"team": "Billing", "ticket": "refund"})
+    live.place("support.triage")
+    metadata = litellm_metadata((live, "support.triage"))
+    callback.log_pre_api_call("gpt-5", [], _call(metadata, "call-0"))  # the oldest, on a live run
+    with agent.run(variables={"team": "Billing", "ticket": "refund"}) as ended:
+        ended.place("support.triage")
+        callback.log_pre_api_call("gpt-5", [], _call(litellm_metadata((ended, "support.triage")), "never-logged"))  # an abandoned stream
+    callback.log_pre_api_call("gpt-5", [], _call(metadata, "call-1"))
+    assert list(callback._open) == ["call-0", "call-1"], "the ended run's call went first, though call-0 is older"
+    callback.log_pre_api_call("gpt-5", [], _call(metadata, "call-2"))
+    assert list(callback._open) == ["call-1", "call-2"], "past the cap with every run live, the oldest goes"
+    live.end()
+    rows = _windows(agent)
+    assert [row["callsReportedRuns"] for row in rows] == [0], "both runs share one row; neither is measured"
+    assert sum(row["count"] for row in rows) == 2
+
+
+def test_a_log_on_a_thread_without_the_callers_context_settles_the_call_the_pre_call_hook_opened():
+    """A workflow step inside ``ap.run``: its own reference names no run, so the pre-call hook finds the run in the
+    caller's context; a sync stream's log fires on a thread without it, and still settles the call on that run."""
+    import threading
+
+    state_dir = tempfile.mkdtemp(prefix="ap-integrations-")
+    plane = FakeControlPlane({"organizationId": "org_1", "agentId": "agt_1", "target": "prod"})
+    plane.promote([plane.slot(tag="docs.flow", text="flow", steps=[{"text": "Step one"}])])
+    ap = AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target="prod", api_key=plane.api_key, base_url="https://api.test", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, sync=SyncOptions(mode="on_invoke", root_url="https://edge.test/roots/prod/root.json"), transport=plane.transport(), telemetry={"sink": "memory"})
+    try:
+        callback = AirPrompterLiteLLMCallback(ap)
+        logged: list = []
+        callback._ap = type("Spy", (), {"__getattr__": lambda self, name: getattr(ap, name), "log": lambda self, event: logged.append(event)})()
+        with ap.run(subject="u1"):
+            step = ap.workflow("docs.flow").steps[0]
+            kwargs = _call(litellm_metadata(step), "step-call", model=step.model)
+            callback.log_pre_api_call(step.model, [], kwargs)
+            worker = threading.Thread(target=_settle, args=(callback, kwargs))
+            worker.start()
+            worker.join()
+        ap.spool.close_windows(ap._now_ms())
+        rows = [row for row in ap.drain_memory_sink() if row["type"] == "window" and row["count"] > 0]
+        assert [(r["count"], r["modelCalls"], r["usageSource"], r["callsReportedRuns"]) for r in rows] == [(1, 1, "reported", 1)], rows
+        assert not [e for e in logged if e["event"] == "adapter_late_record"], "in time: not a late record"
+    finally:
+        ap.stop()
+        shutil.rmtree(state_dir, ignore_errors=True)

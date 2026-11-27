@@ -542,6 +542,7 @@ class SpoolWriter:
                 "count": 0,
                 "modelCalls": 0,
                 "agentRun": 0,
+                "callsReportedRuns": 0,
                 "tools": {"calls": 0, "errors": 0},
                 "latencyMs": _empty_histogram(),
                 "tokens": {"input": 0, "output": 0},
@@ -567,6 +568,9 @@ class SpoolWriter:
             row.pop("outcomeRunMinute")
         row["count"] += 1
         row["agentRun"] += totals.agent_run
+        # A measure, never a dimension (protocol 4.1.0): a 4.0 reader strips it, so in the key it would fold two rows into one.
+        if totals.calls_reported:
+            row["callsReportedRuns"] = row.get("callsReportedRuns", 0) + 1
         row["modelCalls"] += count_of(totals.model_calls)
         _add_tools(row, tools)
         row["latencyMs"]["buckets"][bucket] += 1
@@ -640,7 +644,7 @@ class SpoolWriter:
         # A caller that hands in ``tool_calls`` saw them, so zero calls means none ran.
         tools_reported = observation.tool_calls is not None
         with self._lock:
-            row = self._add_run(RunTotals(dimensions=dimensions, status=observation.status, error_class=observation.error_class, usage_source=usage_source, tools_reported=tools_reported, agent_run=1, model_calls=1, latency_ms=observation.latency_ms, tokens=tokens, tools=tools, checks=observation.checks), at_ms)
+            row = self._add_run(RunTotals(dimensions=dimensions, status=observation.status, error_class=observation.error_class, usage_source=usage_source, tools_reported=tools_reported, calls_reported=usage_source != "unavailable", agent_run=1, model_calls=1, latency_ms=observation.latency_ms, tokens=tokens, tools=tools, checks=observation.checks), at_ms)
             if observation.outcomes:
                 _merge_outcomes(row, observation.outcomes)
             if step is None:

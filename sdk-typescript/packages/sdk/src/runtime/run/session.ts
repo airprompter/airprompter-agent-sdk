@@ -20,6 +20,10 @@
  * run.recordToolCall("support.reply", { step: "tools", ok: true });
  * run.end(); // one run row with count 1, however many calls; one step row per step
  * ```
+ *
+ * A row cannot change once written, so a record that arrives after `end` is dropped with one log. What the row can say
+ * is that a call began and had not settled: `beginMeasure` opens the call here (`callBegun`), and a slot with a call
+ * still open at the end writes `callsReported: false` and `usageSource: "unavailable"`.
  */
 
 import { evaluateChecks, latencyBucketIndex, LATENCY_BUCKET_EDGES_MS, RUN_REF_MAX_ENTRIES, stepName, type ErrorClass, type RunDimensions, type RunRefEntry, type UsageSource } from "../../core/index.js";
@@ -53,6 +57,8 @@ interface SlotState extends Counts {
   steps: Map<string, StepCounts>;
   /** True once this slot's tool calls are known to be seen: a tool record, a model call with `toolsObserved`, or a folded observation with `toolCalls`. Its step rows take the same value. */
   toolsReported: boolean;
+  /** Model calls begun through `callBegun` and not yet recorded. One still open when the run ends means a call the row does not hold. */
+  inFlight: number;
 }
 
 /** What the session needs from its registry. */
@@ -65,6 +71,11 @@ export interface RegistryHooks {
 
 const emptyCounts = (): Counts => ({ modelCalls: 0, input: 0, cachedInput: 0, output: 0, allReported: true, tools: { calls: 0, errors: 0 } });
 const usageOf = (counts: Counts): UsageSource => (counts.modelCalls > 0 && counts.allReported ? "reported" : "unavailable");
+/**
+ * Every call of the slot measured, a slot with none included: nothing recorded without usage, nothing still open. A slot
+ * that declined or failed to render served nothing.
+ */
+const callsReportedOf = (state: SlotState): boolean => state.allReported && state.inFlight === 0 && !state.pin.rowError;
 
 export class Session implements RunSession {
   readonly subject: string;
@@ -199,8 +210,31 @@ export class Session implements RunSession {
   }
 
   recordModelCall(slot: string, call: ModelCallRecord): void {
+    this.addModelCall(slot, call, undefined);
+  }
+
+  /**
+   * @internal AIR-2547, for `beginMeasure` only: a model call on this slot has begun and settles later. The answer
+   * records it, once, and closes it in the same step, answering false when the run had already ended. A run that ends
+   * before then writes `callsReported: false` for the slot: the record can only arrive after the row was written, and
+   * is dropped as late. With no pinned slot, or after the end, it opens nothing and records as `recordModelCall` does.
+   * Kept in step with the Python twin (`_call_begun`); `stripInternal` keeps it out of the `.d.ts`.
+   */
+  callBegun(slot: string): (call: ModelCallRecord) => boolean {
+    const state = this.ended ? undefined : this.states.get(slot);
+    const open = { pending: state !== undefined };
+    if (state) state.inFlight += 1;
+    return (call) => this.addModelCall(slot, call, open);
+  }
+
+  /** False when the call was not taken: the run had ended (logged as late) or the slot is not pinned. */
+  private addModelCall(slot: string, call: ModelCallRecord, open: { pending: boolean } | undefined): boolean {
     const state = this.recordable(slot);
-    if (!state) return;
+    if (!state) return false;
+    if (open?.pending) {
+      open.pending = false;
+      state.inFlight -= 1;
+    }
     this.lastErrorClass = call.errorClass ?? null;
     if (call.toolsObserved === true) state.toolsReported = true;
     const reported = call.usage?.source === "reported";
@@ -219,6 +253,7 @@ export class Session implements RunSession {
         state.checks = { passed: (state.checks?.passed ?? 0) + outcome.passed, failed: (state.checks?.failed ?? 0) + outcome.failed };
       }
     }
+    return true;
   }
 
   recordToolCall(slot: string, call: ToolCallRecord): void {
@@ -363,8 +398,9 @@ export class Session implements RunSession {
           dimensions: state.dims,
           status,
           errorClass,
-          usageSource: usageOf(state),
+          usageSource: callsReportedOf(state) ? usageOf(state) : "unavailable",
           toolsReported: state.toolsReported,
+          callsReported: callsReportedOf(state),
           agentRun,
           modelCalls: state.modelCalls,
           latencyMs,
@@ -468,7 +504,7 @@ export class Session implements RunSession {
       const rowError = existing.pin.rowError ?? pin.rowError;
       existing.pin = { ...rest, ...(existing.pin.entry ? { entry: existing.pin.entry } : {}), ...(rowError ? { rowError } : {}) };
     } else {
-      this.states.set(slot, { ...emptyCounts(), pin, dims: pin.dims!, steps: new Map(), toolsReported: false });
+      this.states.set(slot, { ...emptyCounts(), pin, dims: pin.dims!, steps: new Map(), toolsReported: false, inFlight: 0 });
     }
     this.minted = undefined;
   }

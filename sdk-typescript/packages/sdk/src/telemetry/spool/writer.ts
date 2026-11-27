@@ -473,6 +473,7 @@ export class SpoolWriter {
         count: 0,
         modelCalls: 0,
         agentRun: 0,
+        callsReportedRuns: 0,
         tools: { calls: 0, errors: 0 },
         latencyMs: { buckets: emptyHistogram(), sum: 0 },
         tokens: { input: 0, output: 0 },
@@ -494,6 +495,8 @@ export class SpoolWriter {
     if (row.outcomeRunMinute === row.minute) delete row.outcomeRunMinute;
     row.count += 1;
     row.agentRun += totals.agentRun;
+    // A measure, not in the key: a 4.0 reader strips it (spool-format.md).
+    if (totals.callsReported) row.callsReportedRuns = (row.callsReportedRuns ?? 0) + 1;
     row.modelCalls += countOf(totals.modelCalls);
     addTools(row, totals.tools);
     const bucket = latencyBucketIndex(totals.latencyMs);
@@ -570,7 +573,7 @@ export class SpoolWriter {
     const toolsReported = observation.toolCalls !== undefined;
     const errorClass = observation.errorClass ?? null;
     const checks = observation.checks ? { passed: observation.checks.passed ?? 0, failed: observation.checks.failed ?? 0 } : undefined;
-    const row = this.addRun({ dimensions, status: observation.status, errorClass, usageSource, toolsReported, agentRun: 1, modelCalls: 1, latencyMs: observation.latencyMs, tokens, tools, ...(checks ? { checks } : {}) }, nowMs);
+    const row = this.addRun({ dimensions, status: observation.status, errorClass, usageSource, toolsReported, callsReported: usageSource !== "unavailable", agentRun: 1, modelCalls: 1, latencyMs: observation.latencyMs, tokens, tools, ...(checks ? { checks } : {}) }, nowMs);
     if (observation.outcomes) mergeOutcomes(row, observation.outcomes);
     if (step === undefined) return;
     const buckets = emptyHistogram();

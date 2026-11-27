@@ -97,7 +97,7 @@ const onlyKeys = (object: Record<string, unknown>, allowed: readonly string[]): 
 
 const ROW_VERSIONS: Readonly<Record<string, number>> = { window: 5, step: 2, refusal: 1, dropped: 1 };
 const TOKEN_MOMENTS = ["input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput"] as const;
-const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "toolsReported", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"] as const;
+const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "toolsReported", "count", "modelCalls", "agentRun", "callsReportedRuns", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"] as const;
 const STEP_FIELDS = ["type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "toolsReported", "modelCalls", "latencyMs", "tokens", "tools", "sdk"] as const;
 const WINDOW_ONLY_FIELDS = ["tokensSq", "count", "outcomes", "checks"] as const;
 const REFUSAL_FIELDS = ["type", "v", "at", "instanceId", "reason", "generation", "tag"] as const;
@@ -179,6 +179,7 @@ export function validateSpoolRow(value: unknown): RowVerdict {
       if (!WINDOW_STATUSES.includes(value.status as string)) return { ok: false, reason: "status", later: true };
       if (!isNonNegativeInt(value.count)) return { ok: false, reason: "count" };
       if (!isNonNegativeInt(value.agentRun) || value.agentRun > value.count) return { ok: false, reason: "agentRun" };
+      if (value.callsReportedRuns !== undefined && (!isNonNegativeInt(value.callsReportedRuns) || value.callsReportedRuns > value.count)) return { ok: false, reason: "callsReportedRuns" };
       if (value.outcomeRunMinute !== undefined && (!validAudienceMinute(value.outcomeRunMinute) || Date.parse(value.outcomeRunMinute) > Date.parse(value.minute as string))) return { ok: false, reason: "outcomeRunMinute" };
       if (value.count === 0 && (value.outcomeRunMinute === undefined || !isObject(value.outcomes) || Object.keys(value.outcomes).length === 0)) return { ok: false, reason: "outcomeRunMinute" };
       if (value.count > 0 && value.outcomeRunMinute !== undefined && Date.parse(String(value.outcomeRunMinute)) !== Date.parse(value.minute as string)) return { ok: false, reason: "outcomeRunMinute" };

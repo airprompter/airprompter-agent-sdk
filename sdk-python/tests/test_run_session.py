@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import pathlib
 import shutil
 import tempfile
 import threading
@@ -22,6 +23,8 @@ from airprompter_agent.agent import AirPrompterAgent, RenderRefusedError
 from airprompter_agent.core._util import iso_ms, now_ms
 from airprompter_agent.core.protocol.trust import public_jwk_of, release_digest
 from airprompter_agent.runtime.run import Approved, Passthrough
+
+from airprompter_agent.frameworks.contract import begin_measure
 
 from .control_plane import FakeControlPlane
 
@@ -1131,6 +1134,87 @@ def test_take_reports_tools_when_the_observation_carries_tool_calls(fx):
         rendered = ap.prompt(TAG).render()
         ap.observe(rendered, lambda: {"usage": {"input_tokens": 1, "output_tokens": 1}}, tool_calls={"calls": 0, "errors": 0})
     assert [(row["toolsReported"], row["tools"]["calls"]) for row in fx.counted(ap)] == [(True, 0)]
+    ap.stop()
+
+
+# ---------------------------------------------------------------------------------------------- protocol 4.1.0: callsReportedRuns
+
+#: Session vectors both SDKs run, in AIR-2233's run-session step format, so the two sessions answer the same cases.
+CALLS_REPORTED = json.loads((pathlib.Path(__file__).resolve().parents[2] / "conformance" / "frameworks" / "vectors" / "calls-reported.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("vector", CALLS_REPORTED["vectors"], ids=[v["name"] for v in CALLS_REPORTED["vectors"]])
+def test_calls_reported_vectors(fx, vector):
+    release = vector["release"]
+    fx.plane.promote([fx.plane.slot(tag=release["tag"], text=release["text"], version_id=release["versionId"], model=release["model"], variables=[])])
+    ap = fx.start()
+    run = None
+    measures: dict[str, Any] = {}
+    for step in vector["steps"]:
+        op = step["op"]
+        if op == "open":
+            run = ap.open_run(**step.get("input", {}))
+        elif op == "place":
+            run.place(step["slot"])
+        elif op == "beginModelCall":
+            measures[step["id"]] = begin_measure(run, step["slot"], model=release["model"])
+        elif op == "settleModelCall":
+            measures[step["id"]].settle(step.get("response"))
+        elif op == "failModelCall":
+            measures[step["id"]].fail(RuntimeError("provider down"))
+        elif op == "decline":
+            run.decline(step["slot"], "model_unresolved")
+        elif op == "end":
+            run.end()
+        else:
+            raise AssertionError(f"unknown op {op}")
+    rows = fx.counted(ap)
+    assert len(rows) == len(vector["expect"]["rows"]), "one run row per slot, never a second for a late record"
+    for row, expected in zip(rows, vector["expect"]["rows"]):
+        got = {key: ({"input": row["tokens"]["input"], "output": row["tokens"]["output"]} if key == "tokens" else row[key]) for key in expected}
+        assert got == expected
+    for event in vector.get("logs", []):
+        assert fx.named(event), event
+    ap.stop()
+
+
+def test_calls_reported_one_call_rows_follow_their_usage_source_and_a_session_without_the_hook_still_records(fx):
+    fx.plane.promote([fx.slot_of("Version A", "ver_a")])
+    ap = fx.start()
+    ap.observe(ap.prompt(TAG).render(), lambda: {"usage": {"input_tokens": 4, "output_tokens": 2}})
+    ap.observe(ap.prompt(TAG).render(), lambda: {"text": "no usage"})
+    assert sorted((row["usageSource"], row["count"], row["callsReportedRuns"]) for row in fx.counted(ap)) == [("reported", 1, 1), ("unavailable", 1, 0)]
+
+    class Own:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def record_model_call(self, slot: str, **call: Any) -> None:
+            self.calls.append(call)
+
+    own = Own()
+    begin_measure(own, TAG, model="gpt-5").settle({"usage": {"input_tokens": 1, "output_tokens": 1}})  # type: ignore[arg-type]
+    assert len(own.calls) == 1
+    ap.stop()
+
+
+def test_calls_reported_a_record_and_the_end_on_two_threads_never_leave_a_recorded_call_open(fx):
+    """The record closes its call under the session's lock: the end sees it recorded or open, never both."""
+    fx.plane.promote([fx.slot_of("Version A", "ver_a")])
+    ap = fx.start()
+    for _ in range(20):
+        run = ap.open_run()
+        run.place(TAG)
+        measure = begin_measure(run, TAG, model="gpt-5")
+        settler = threading.Thread(target=measure.settle, args=({"usage": {"input_tokens": 3, "output_tokens": 1}},))
+        settler.start()
+        run.end()
+        settler.join()
+    for row in fx.counted(ap):
+        # Recorded before the end: reported and measured. Still open at the end: no call on the row, not measured.
+        assert (row["usageSource"], row["callsReportedRuns"] == row["count"]) in {("reported", True), ("unavailable", False)}
+        if row["usageSource"] == "unavailable":
+            assert row["modelCalls"] == 0
     ap.stop()
 
 

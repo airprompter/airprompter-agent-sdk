@@ -89,6 +89,8 @@ export interface RunTotals {
   usageSource: UsageSource;
   /** True when the writer saw this run's tool calls, so `tools.calls: 0` means none ran rather than not reported. */
   toolsReported: boolean;
+  /** Every model call of the run on this slot was measured (none is true). Adds 1 to `callsReportedRuns`. */
+  callsReported: boolean;
   /** 1 when this is the first slot of its run, so an agent-wide total counts a two-slot run once. */
   agentRun: 0 | 1;
   modelCalls: number;
@@ -150,6 +152,8 @@ export interface WindowRow {
   count: number;
   modelCalls: number;
   agentRun: number;
+  /** 4.1.0: runs whose model calls were all measured. Not in the key; absent from an earlier writer. */
+  callsReportedRuns?: number;
   tools: { calls: number; errors: number };
   latencyMs: { buckets: number[]; sum: number };
   tokens: { input: number; cachedInput?: number; output: number };

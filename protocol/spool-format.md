@@ -121,7 +121,7 @@ field or a row it does not know is under Readers.
 | Form | Told apart by | `count` | `latencyMs` | Carries |
 | -- | -- | -- | -- | -- |
 | Run row | `count` above 0 | runs | run wall-clock; bucket total equals `count` | tokens totals for the run, `modelCalls`, `agentRun`, `tools`, `tokensSq`, `outcomes[*].sumSq`, `checks` |
-| Feedback-only row | `count: 0` with `outcomeRunMinute` | 0 | all zero | outcomes only; every measure zero; no `tokensSq`; `toolsReported: false` |
+| Feedback-only row | `count: 0` with `outcomeRunMinute` | 0 | all zero | outcomes only; every measure zero; no `tokensSq`; `toolsReported: false`; `callsReportedRuns: 0` |
 
 ```json
 {"type":"window","v":5,"artifactId":"prm_8b2f…",
@@ -130,7 +130,7 @@ field or a row it does not know is under Readers.
  "tag":"support.triage","versionId":"pv_…","arm":"candidate",
  "model":"claude-haiku-4-5","status":"ok","errorClass":null,
  "usageSource":"reported","toolsReported":true,
- "count":412,"modelCalls":1236,"agentRun":412,
+ "count":412,"modelCalls":1236,"agentRun":412,"callsReportedRuns":412,
  "tools":{"calls":188,"errors":3},
  "latencyMs":{"buckets":[0,0,3,41,188,150,27,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"sum":617384},
  "tokens":{"input":493200,"cachedInput":329600,"output":103000},
@@ -159,6 +159,30 @@ field or a row it does not know is under Readers.
   carries `toolCalls`; a run session reports them for a slot once a tool call
   is recorded, a model call says its tools are observed, or a folded
   observation carries `toolCalls`. A feedback-only row carries `false`.
+- `callsReportedRuns` (4.1.0) counts this row's runs whose model calls were
+  all measured: none was recorded without its usage, and none had begun and
+  not yet settled when the run's row was written. A run that made no model
+  call counts, so `modelCalls: 0` with the run counted means it made none.
+  It is a measure, never a dimension of the key, between 0 and `count`.
+  - Writers: a row whose `usageSource` is not `unavailable` has it equal to
+    `count`; in an `unavailable` row it counts only runs that made no model
+    call, so their tokens are zero. A one-call observation counts when its
+    `usageSource` is not `unavailable` (`measured` and `estimated` count). A
+    run session counts a slot when every call it recorded reported its
+    usage, so a folded observation counts only when `reported`, no call it
+    began (`beginMeasure`, or a framework's start hook) was still open at the
+    run's end, and the slot served: a declined or unrendered slot's error row
+    (`model_unresolved`, `render_missing_variable`) does not count, since its
+    version served nothing (after a decline the caller's own call goes out
+    unmeasured). A record that arrives after the
+    row was written is dropped with a log, never a second row, so the call it
+    began is what the row can say. A feedback-only row carries 0.
+  - Readers: the measured runs of a row are `count` when `usageSource` is not
+    `unavailable`, else `callsReportedRuns`; the measured tokens and
+    `tokensSq` are those of the rows that are not `unavailable`. A row
+    without the field comes from a writer before 4.1.0: read its measured
+    runs as `count` when `usageSource` is not `unavailable`, else 0. A reader
+    on 4.0 strips the field.
 - `tokensSq` holds the second moments of each run's token totals, summed over
   runs: `input`, `cachedInput` and `output` squared, and the products
   `inputOutput`, `inputCached` and `cachedOutput`, where `inputOutput` is
@@ -203,7 +227,9 @@ field or a row it does not know is under Readers.
   outcomeRunMinute)` **replace** each other at ingest (SET semantics), so
   a replayed segment is a no-op. The writer's open window has the same key,
   so a `reported` run and an `unavailable` run in one minute are two rows,
-  and neither field is first-wins inside a window.
+  and neither field is first-wins inside a window. `callsReportedRuns` is
+  not in the key: a field in the key bumps `v`, and a 4.0 reader that strips
+  it would fold two rows into one.
 
 ### `step` — one step of a run in one minute
 
@@ -341,6 +367,8 @@ reported with the platform's `retryAfterSeconds` and nothing is uploaded.
    usageSource, toolsReported, audienceIds, outcomeRunMinute)` — the `tag`,
    `artifactId`, `versionId` and `arm` come from the release you rendered;
    `toolsReported` is `true` only when you counted the run's tool calls.
+   Add 1 to `callsReportedRuns` for a run whose every model call gave you
+   its usage, or that made none.
 3. At minute end write the row to the open segment, `fsync`, close per the
    rules above.
 

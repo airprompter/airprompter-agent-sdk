@@ -2,7 +2,7 @@
   "schema": "heartbeat-request",
   "reason": "registration never carries observed tag values",
   "document": {
-    "protocol": "4.0.0",
+    "protocol": "4.1.0",
     "capabilities": [],
     "registration": {
       "tagKeys": [

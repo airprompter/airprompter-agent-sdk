@@ -8,12 +8,14 @@ Example::
     from airprompter_agent.runtime.adapter import acquire_run, begin_measure, choose_model, measure_call, settings_for
 """
 
-from .adapt import AcquiredRun, MappedSettings, Measure, acquire_run, apply_settings, begin_measure, choose_model, measure_call, measure_call_async, settings_for
+from .adapt import AcquiredRun, MappedSettings, Measure, _begin_call, acquire_run, apply_settings, begin_measure, choose_model, measure_call, measure_call_async, settings_for
 from .events import ADAPTER_EVENTS
 from .instrument import ApplyPlacement, InstrumentRuntime, instrument_client
 from .proxy import ClientMethod, Pending, StreamAccumulator, read_field
 
 __all__ = [
+    # Internal even here: for ``frameworks/contract._open_call`` alone (AIR-2547).
+    "_begin_call",
     "ADAPTER_EVENTS",
     "AcquiredRun",
     "ApplyPlacement",

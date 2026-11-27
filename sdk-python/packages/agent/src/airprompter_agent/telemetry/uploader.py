@@ -79,7 +79,7 @@ _SLUG = re.compile(r"[a-z][a-z0-9_]{0,31}")
 _ROW_VERSIONS = {"window": 5, "step": 2, "refusal": 1, "dropped": 1}
 _TOKEN_MOMENTS = ("input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput")
 _MAX_SAFE_INTEGER = 2**53 - 1
-_WINDOW_FIELDS = ("type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "toolsReported", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk")
+_WINDOW_FIELDS = ("type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "toolsReported", "count", "modelCalls", "agentRun", "callsReportedRuns", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk")
 _STEP_FIELDS = ("type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "toolsReported", "modelCalls", "latencyMs", "tokens", "tools", "sdk")
 _WINDOW_ONLY_FIELDS = ("tokensSq", "count", "outcomes", "checks")
 _REFUSAL_FIELDS = ("type", "v", "at", "instanceId", "reason", "generation", "tag")
@@ -194,6 +194,9 @@ def _window_reason(value: Mapping[str, Any]) -> Optional[str]:
         return "count"
     if not _is_int(value.get("agentRun")) or value["agentRun"] > count:
         return "agentRun"
+    # Protocol 4.1.0. Absent: an earlier writer, which says nothing about its calls.
+    if "callsReportedRuns" in value and (not _is_int(value["callsReportedRuns"]) or value["callsReportedRuns"] > count):
+        return "callsReportedRuns"
     filing, original = value["minute"], value.get("outcomeRunMinute")
     if "outcomeRunMinute" in value and (not valid_audience_minute(original) or instant(original) > instant(filing)):
         return "outcomeRunMinute"

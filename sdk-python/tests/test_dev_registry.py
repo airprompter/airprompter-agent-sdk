@@ -47,7 +47,11 @@ class DevServer:
         if not line:
             self.stop()
             raise AssertionError(f"airprompter dev did not start: {self.log()}")
-        self.facts = json.loads(line)
+        try:
+            self.facts = json.loads(line)
+        except ValueError:
+            self.stop()
+            raise AssertionError(f"airprompter dev printed no facts line: {line!r} (dev: {self.log()})") from None
 
     def log(self) -> str:
         with open(self.log_path, encoding="utf-8") as f:
@@ -113,6 +117,8 @@ def test_python_sdk_syncs_from_airprompter_dev_and_honours_unlock_required_local
             _wait(lambda: server.promoted() >= 2, lambda: f"the server to promote generation 2 (dev: {server.log()})")
             assert server.promoted() == 2, f"one save, one generation: the server promoted past generation 2 (dev: {server.log()})"
             _wait(lambda: ap.generation == 2, lambda: f"the runtime on generation 2 (status: {ap.status()}; dev: {server.log()})")
+            # Again, at least one client poll later: a second promotion of the same save has had time to land.
+            assert server.promoted() == 2, f"one save, one generation: the server promoted past generation 2 (dev: {server.log()})"
             assert ap.prompt("support.triage").render(ticket="T-2").text == "Triage T-2 carefully."
             # release.json turns unlock_required on: generation 3 is staged and waits for the unlock.
             with open(os.path.join(prompts, "release.json"), "w", encoding="utf-8") as f:
@@ -120,6 +126,7 @@ def test_python_sdk_syncs_from_airprompter_dev_and_honours_unlock_required_local
             _wait(lambda: server.promoted() >= 3, lambda: f"the server to promote generation 3 (dev: {server.log()})")
             assert server.promoted() == 3, f"one save, one generation: the server promoted past generation 3 (dev: {server.log()})"
             _wait(lambda: ap.status().staged_generation == 3, lambda: f"generation 3 staged (status: {ap.status()}; dev: {server.log()})")
+            assert server.promoted() == 3, f"one save, one generation: the server promoted past generation 3 (dev: {server.log()})"
             assert ap.generation == 2
             assert ap.status().apply_state == "awaiting_unlock"
             unlocked = ap.unlock()

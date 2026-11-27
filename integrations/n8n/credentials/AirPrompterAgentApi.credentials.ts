@@ -3,8 +3,9 @@
  * the agent id, and the trust anchor every release is verified against. It is tested by the AirPrompter node's
  * `airPrompterAgentApiTest`, which fetches the signed manifest and verifies it (a plain HTTP check could not).
  *
- * Where the stored copy lives is chosen here too, so every node using the credential agrees: the n8n user folder
- * (self-hosted) or the workflow's static data (no disk, e.g. n8n Cloud).
+ * Where the stored copy lives is chosen here too, so every node using the credential agrees: the n8n user folder,
+ * shared by the instance, or the workflow's static data, in n8n's database (for queue mode or an external database
+ * without a shared volume).
  *
  * @example
  * ```ts
@@ -74,9 +75,8 @@ export class AirPrompterAgentApi implements ICredentialType {
       type: "string",
       typeOptions: { rows: 4 },
       default: "",
-      required: true,
       placeholder: '{"kty":"EC","crv":"P-256","x":"…","y":"…"}',
-      description: "AirPrompter's root public key (a JSON Web Key) for the deployment below. Every release is checked against it before it is used or stored.",
+      description: "Required for Production in this version of the node: paste AirPrompter's Production root key from the node's README. Leave empty for Dev, whose root this version pins. For a local airprompter dev registry, paste its root.pub.json. Every release is checked against the root before it is used or stored, and the credential test says when a root is missing.",
     },
     {
       displayName: "API Base URL",
@@ -118,8 +118,8 @@ export class AirPrompterAgentApi implements ICredentialType {
       type: "options",
       default: "userFolder",
       options: [
-        { name: "n8n User Folder (Self-Hosted)", value: "userFolder", description: "~/.n8n/airprompter (or N8N_USER_FOLDER), shared by every workflow" },
-        { name: "Workflow Static Data (No Disk)", value: "workflowStaticData", description: "Inside each workflow; saved after production executions only" },
+        { name: "n8n User Folder", value: "userFolder", description: "~/.n8n/airprompter (or N8N_USER_FOLDER), shared by every workflow on the instance" },
+        { name: "Workflow Static Data", value: "workflowStaticData", description: "Inside each workflow, in n8n's database; saved after production executions only" },
       ],
       description: "Where the signed releases are kept so steps keep serving while AirPrompter is unreachable",
     },

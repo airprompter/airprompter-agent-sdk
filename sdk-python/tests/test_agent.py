@@ -667,32 +667,13 @@ def test_audience_registration_evicts_stale_names_keeps_active_names_and_serves_
 
 
 
-def test_ambiguous_cohort_text_requires_scope():
-    from airprompter_agent.runtime.attribution import Attribution, RenderRegistry, attribution_scope, current_attribution
-    registry=RenderRegistry(2)
-    a=Attribution("support.reply","ver_a","control","gpt-5",audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",),run_minute="2026-09-12T14:03:00Z")
-    b=Attribution("support.reply","ver_a","control","gpt-5",audience_ids=(),run_minute=a.run_minute)
-    registry.register("identical",a)
-    assert registry.match(["identical"]) == a
-    registry.register("identical",b)
-    assert registry.match(["identical"]) is None
-    registry.register("identical",a)
-    assert registry.match(["identical"]) is None
-    with attribution_scope(a): assert current_attribution() == a
-    registry=RenderRegistry(2)
-    registry.register("same prompt text",Attribution("support.reply","ver_1","none","gpt-5",artifact_id="prm_alpha"))
-    registry.register("same prompt text",Attribution("support.reply","ver_1","none","gpt-5",artifact_id="prm_beta"))
-    assert registry.match(["same prompt text"]) is None
-    registry=RenderRegistry(2)
-    registry.register("same artifact text",Attribution("support.reply","ver_1","control","gpt-5",artifact_id="prm_alpha"))
-    registry.register("same artifact text",Attribution("support.reply","ver_2","candidate","gpt-5",artifact_id="prm_alpha"))
-    assert registry.match(["same artifact text"]) is None
-    registry=RenderRegistry(2)
-    first=Attribution("support.reply","ver_1","candidate","gpt-5",audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",),run_minute="2026-09-12T14:03:00Z",artifact_id="prm_alpha")
-    second=Attribution("support.reply","ver_1","candidate","gpt-5",audience_ids=first.audience_ids,run_minute="2026-09-12T14:04:00Z",artifact_id="prm_alpha")
-    registry.register("repeated prompt text",first)
-    registry.register("repeated prompt text",second)
-    assert registry.match(["repeated prompt text"]) == second
+def test_explicit_scope_is_the_one_way_a_direct_call_names_its_render():
+    from airprompter_agent.runtime.attribution import Attribution, attribution_scope, current_attribution
+    a = Attribution("support.reply", "ver_a", "control", "gpt-5", audience_ids=("aud_AAAAAAAAAAAAAAAAAAAAAA",), run_minute="2026-09-12T14:03:00Z")
+    assert current_attribution() is None
+    with attribution_scope(a):
+        assert current_attribution() == a
+    assert current_attribution() is None
 
 
 def test_a_run_ref_minted_on_one_store_parses_on_another_with_the_same_secret_and_feedback_lands():
@@ -788,7 +769,7 @@ def test_attribute_on_a_workflow_step_and_report_with_step_write_the_slot_tag_in
         flow = ap.workflow("docs.flow")
         step_one = flow.steps[0]
         with ap.attribute(step_one):
-            inner = ap.attribution_for({})
+            inner = ap.current_attribution()
         assert (inner.tag, inner.step, inner.arm) == ("docs.flow", "docs.flow#1", "none")
         ap.observe(inner, lambda: {"usage": {"input_tokens": 3, "output_tokens": 2}}, tool_calls={"calls": 3, "errors": 0})
         ap.report(tag="docs.flow", step="docs.flow#1", artifact_id=step_one.artifact_id, version_id=step_one.version_id, arm="none", model=step_one.model, status="ok", latency_ms=5, tool_calls={"calls": 2, "errors": 1})

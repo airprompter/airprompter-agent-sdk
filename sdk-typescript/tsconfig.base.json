@@ -16,6 +16,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "declaration": true,
+    "stripInternal": true,
     "sourceMap": true,
     "resolveJsonModule": true
   }

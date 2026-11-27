@@ -13,6 +13,15 @@ updates:
   - package-ecosystem: npm
     directory: /conformance
     schedule: { interval: weekly }
+  # The framework examples, one PR a week for all of them. The SDK pin moves with version-lockstep, never here.
+  - package-ecosystem: npm
+    directories: ["/examples/langchain-typescript"]
+    schedule: { interval: weekly }
+    ignore:
+      - dependency-name: "@airprompter/*"
+    groups:
+      examples:
+        patterns: ["*"]
   - package-ecosystem: pip
     directory: /sdk-python
     schedule: { interval: weekly }

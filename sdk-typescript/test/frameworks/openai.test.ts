@@ -181,8 +181,12 @@ test("no slot and no scope: untouched, unobserved, one log per method; inside ap
   assert.deepEqual([azure!.model, azure!.temperature, "max_completion_tokens" in azure!], ["my-azure-deployment", 1, false], "another model is never replaced");
   assert.equal(events.filter((e) => e.event === "model_unresolved").length, 1);
   assert.deepEqual(events.find((e) => e.event === "adapter_inference_overridden")?.parameters, ["temperature"]);
+  // With modelFor, the call goes out under the mapped id and is measured under the release's.
+  const mapped = instrument(client, ap, { modelFor: (release) => `azure-${release}` });
+  await ap.attribute(rendered, () => mapped.chat.completions.create({ model: "gpt-4o", messages: [] }));
+  assert.equal((client.calls[5] as Params).model, "azure-gpt-5");
   const out = byKey(await rows());
-  assert.deepEqual(out.map((r) => [r.tag, r.model, r.count]), [["support.reply", "gpt-5", 2]], "another model's numbers never count against this version");
+  assert.deepEqual(out.map((r) => [r.tag, r.model, r.count]), [["support.reply", "gpt-5", 3]], "another model's numbers never count against this version; a mapped one counts as the release's");
 });
 
 test("asResponse() on a slot-bound call hands back a response nobody has read, and the call is still measured", async () => {

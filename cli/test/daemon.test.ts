@@ -34,35 +34,30 @@ import { FakeControlPlane, serveOverHttp } from "../../sdk-typescript/test/helpe
 import { minimalReport } from "../src/commands/daemon.js";
 import { run } from "../src/cli.js";
 import { EXIT, type Context } from "../src/io.js";
+import { childLines, jsonLines } from "./helpers/child.js";
+import { until } from "./helpers/wait.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_1", target: "prod" as const };
 const cliRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const skip = process.platform === "win32" ? "signals and file modes differ on Windows; the ubuntu lane covers this" : false;
 
-const until = async (check: () => boolean | Promise<boolean>, what: string | (() => string), timeoutMs = 15_000): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await check())) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${typeof what === "function" ? what() : what}`);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-};
-
 interface Daemon {
   child: ChildProcess;
   stderr: string[];
   exited: Promise<number | null>;
+  /** SIGTERM, then SIGKILL after `graceMs`; the exit code (null when it had to be killed). */
+  stop: (graceMs?: number) => Promise<number | null>;
 }
 
 function startDaemon(args: string[], env: Record<string, string>): Daemon {
   const child = spawn(process.execPath, ["--import", "tsx", join(cliRoot, "src", "main.ts"), "daemon", ...args, "--json"], { cwd: cliRoot, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
-  const stderr: string[] = [];
-  child.stderr!.setEncoding("utf8");
-  child.stderr!.on("data", (chunk: string) => stderr.push(...chunk.split("\n").filter(Boolean)));
-  const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
-  return { child, stderr, exited };
+  // Whole lines, and the exit once stderr is drained: a `final_upload` written just before exit is in by then.
+  const { stderr, closed: exited, stop } = childLines(child);
+  return { child, stderr, exited, stop };
 }
 
-const events = (daemon: Daemon) => daemon.stderr.map((line) => JSON.parse(line) as Record<string, unknown>);
+// A line that is not JSON (a runtime warning) is skipped here and stays in `stderr` for the failure messages.
+const events = (daemon: Daemon) => jsonLines(daemon.stderr);
 
 function capture(work: string, env: Record<string, string> = {}): { ctx: Context; lines: string[]; errors: string[] } {
   const lines: string[] = [];
@@ -153,15 +148,14 @@ test("the telemetry daemon: publishes daemon.json and no store; ships two writer
     assert.deepEqual({ store: doc.store, spoolDir: doc.spoolDir, live: doc.daemon.live, pid: doc.daemon.pid }, { store: storeDir, spoolDir, live: true, pid: daemon.child.pid }, "A's store is on this host too; status reads it without the daemon");
 
     // A clean stop deletes the file; A takes its upload back within a minute (here: now).
-    daemon.child.kill("SIGTERM");
-    assert.equal(await daemon.exited, 0);
+    assert.equal(await daemon.stop(), 0, `a clean stop on SIGTERM (daemon: ${daemon.stderr.slice(-4).join(" | ")})`);
     assert.ok(events(daemon).some((e) => e.event === "final_upload"));
     assert.equal(existsSync(discoveryPath), false, "a clean stop takes daemon.json with it");
     const placement = await a.checkTelemetryDaemon();
     assert.deepEqual({ uploadedBy: placement.uploadedBy, daemon: placement.daemon }, { uploadedBy: "self", daemon: null });
   } finally {
     for (const sdk of sdks) await sdk.stop();
-    if (daemon.child.exitCode === null) daemon.child.kill("SIGKILL");
+    await daemon.stop(2_000);
     await http.close();
     rmSync(work, { recursive: true, force: true });
   }

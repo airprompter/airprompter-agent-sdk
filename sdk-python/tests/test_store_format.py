@@ -10,7 +10,7 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.core._util import b64url_encode
-from airprompter_agent.agent import SDK_VERSION, AgentStartError
+from airprompter_agent.agent import SDK_VERSION, AgentStartError, SyncOptions
 from airprompter_agent.core.protocol.trust import public_jwk_of
 from airprompter_agent.sync.store.key_provider import file_key
 from airprompter_agent.sync.store.slot_store import STORE_FORMAT_VERSION, STORE_FORMATS_READ, SlotStore, StoreError, StoreHooks
@@ -92,7 +92,7 @@ def test_n_plus_one_is_refused_naming_the_writer(state_dir):
     plane = FakeControlPlane(SCOPE)
     plane.promote([plane.slot(tag="support.reply", text="Reply.")])
     with pytest.raises(AgentStartError) as start:
-        AirPrompterAgent.start(organization_id="org_1", **KW, api_key=plane.api_key, base_url="https://api.test", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=plane.transport())
+        AirPrompterAgent.start(organization_id="org_1", **KW, api_key=plane.api_key, base_url="https://api.test", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, sync=SyncOptions(root_url="https://edge.test/roots/prod/root.json"), transport=plane.transport())
     assert start.value.code == "store_newer" and "airprompterd 0.9.0" in str(start.value)
     write_store(state_dir, {**v2, "version": 3, "active": None, "staged": None, "generation": 0, "writer": None})
     with pytest.raises(StoreError) as unknown:

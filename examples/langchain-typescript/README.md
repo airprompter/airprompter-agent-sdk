@@ -84,18 +84,18 @@ Four things change:
 
 - **The key.** `AIRPROMPTER_AGENT_KEY` holds your agent's Agent key from the
   AirPrompter console, never `apa_dev_local`. Keep it out of your code.
-- **The root.** These two lines replace `baseUrl`, `root` and `sync`, and
-  the `registry` constant above the call goes:
+- **The root.** This line replaces `baseUrl`, `root` and `sync`, and the
+  `registry` constant above the call goes:
 
   ```ts
   root: { pinned: { kty: "EC", crv: "P-256", x: "hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE", y: "OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE" } },
-  sync: { rootUrl: "https://api.airprompter.com/roots/prod/root.json" },
   ```
 
-  The first pins AirPrompter's production root. The second is where that
-  root lists the keys that sign each release: without it the agent cannot
-  verify one, and your own prompt runs. The SDK verifies production
-  releases from `1.0.0-rc.5` on.
+  It pins AirPrompter's production root. The agent reads the keys that
+  sign each release from that root's document,
+  `https://api.airprompter.com/roots/prod/root.json`, by default; the local
+  registry's root has no default, which is why `agent.ts` names its
+  `rootUrl`. The SDK verifies production releases from `1.0.0-rc.5` on.
 - **The target.** `organizationId`, `agentId` and `target` name your agent
   and the environment it runs in, such as `prod`, as the console shows them.
 - **The subject.** Pass your user's id as `subject` in place of

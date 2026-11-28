@@ -114,7 +114,7 @@ test("a live heartbeat is the one schema: the fields older runtimes left out are
   const plane = new FakeControlPlane(scope);
   plane.promote([plane.slot({ tag: "support.reply", text: "Reply" })]);
   const stateDir = mkdtempSync(join(tmpdir(), "ap-wire-"));
-  const ap = await AirPrompterAgent.start({ ...scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "resident", pollSeconds: 3600 }, fetch: plane.fetch(), tags: { region: "eu" } });
+  const ap = await AirPrompterAgent.start({ ...scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { mode: "resident", pollSeconds: 3600, rootUrl: "https://edge.test/roots/prod/root.json" }, fetch: plane.fetch(), tags: { region: "eu" } });
   try {
     const body = ap.heartbeatBody();
     assert.equal(heartbeat(body), true, JSON.stringify(heartbeat.errors));

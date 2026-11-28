@@ -10,7 +10,7 @@
  *
  * const plane = new FakeControlPlane({ organizationId: "org_1", agentId: "agt_1", target: "prod" });
  * plane.promote([plane.slot({ tag: "support.reply", text: "Reply politely." })]);
- * const ap = await AirPrompterAgent.start({ ...plane.scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, fetch: plane.fetch() });
+ * const ap = await AirPrompterAgent.start({ ...plane.scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { rootUrl: "https://api.test/roots/prod/root.json" }, fetch: plane.fetch() }); // the fake's own root: not a hosted one, so its rootUrl is named
  * ```
  */
 export * from "./core/testing/index.js";

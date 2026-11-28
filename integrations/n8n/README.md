@@ -43,7 +43,7 @@ Create an **AirPrompter Agent API** credential:
 | Agent ID | The agent in AirPrompter that holds the slots. |
 | Update Key | The agent's Update key (key kind "agent", bound to one agent and one environment). It reads approved releases and nothing more. |
 | Environment | The environment the key is bound to, such as `prod`. |
-| Root Public Key | Leave it empty for **Production** and **Dev**: the SDK this version depends on (`1.0.0-rc.5`) pins both roots (`HOSTED_ROOTS`). Only for a deployment it does not pin, such as Staging, or a local `airprompter dev` registry: that root's public key (a JSON Web Key, `root.pub.json`). Every release is verified against the root before it is stored or used. |
+| Root Public Key | Leave it empty for **Production** and **Dev**: the SDK this version depends on pins both roots (`HOSTED_ROOTS` in [`core/protocol/hostedRoots.ts`](https://github.com/airprompter/airprompter-agent-sdk/blob/main/sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts), since `1.0.0-rc.5`; prod key id `044af6e8…1793`). Only for **Staging** (ask AirPrompter for its root key; the SDK pins none) or a local `airprompter dev` registry (its `root.pub.json`): that root's public key, a JSON Web Key. A credential that holds the Production key from an earlier version keeps working, since it is the same key. Every release is verified against the root before it is stored or used. Production must be serving protocol 4.0.0 manifests, which this SDK reads; until it does, the credential test reports `protocol_unsupported`. |
 | API Base URL | `https://api.airprompter.com` by default. For testing, use a dev URL or a local `airprompter dev` registry. |
 | AirPrompter Deployment | The deployment that signs the releases: `prod`, `staging` or `dev`. This is not the agent's environment. |
 | Root Document URL | Optional. Defaults to *API Base URL*`/roots/<deployment>/root.json`. |
@@ -186,12 +186,11 @@ and its linter (`npm run lint:cloud`) refuse four things this package needs or h
 Report Run is the run's one count: the Steps core calls the SDK's `ap.reportRun`. Get Prompt renders outside any
 run and writes no run row.
 
-**Requests inside n8n.** n8n installs its own `undici` as the global `fetch` dispatcher, and that undici refuses a
-request whose `content-length` the caller also set. The SDK's telemetry upload set one up to 1.0.0-rc.4, so every
-Report Run failed in real n8n. Until rc.5, `src/n8n/connect.ts` gave the core a `fetch` that dropped the header.
-SDK 1.0.0-rc.5 leaves the header to the HTTP client, so the node now uses the core's own `fetch`.
-`test/n8n/dispatcher.test.ts` still runs Report Run under such a dispatcher, and checks that the SDK no longer sets
-the header.
+**Requests inside n8n.** n8n installs its own `undici` as the global `fetch` dispatcher, and it refuses a request
+whose `content-length` the caller set. SDKs up to 1.0.0-rc.4 set one on the telemetry upload, so Report Run failed
+in real n8n and the node stripped the header. From 1.0.0-rc.5 the SDK leaves it to `fetch`, and the node uses the
+core's own `fetch`. `test/n8n/dispatcher.test.ts` runs Report Run under such a dispatcher, and fails if the SDK
+sets the header again.
 
 ## Develop
 

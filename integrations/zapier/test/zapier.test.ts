@@ -169,3 +169,9 @@ test("the API base URL is an https origin (a local registry may use http)", asyn
   assert.throws(() => baseUrlOf("https://user:pw@api.airprompter.com"), /origin only/);
   assert.throws(() => baseUrlOf("https://api.airprompter.com/v1?x=1"), /origin only/);
 });
+
+test("the SDK this app pins carries AirPrompter's prod and dev roots, not staging, as the README says", async () => {
+  const { HOSTED_ROOTS } = await import("@airprompter/agent-sdk/frameworks/steps");
+  assert.ok(HOSTED_ROOTS.prod && HOSTED_ROOTS.dev, "a Production or Dev connection needs no root key");
+  assert.equal(HOSTED_ROOTS.staging, undefined, "Staging still needs its root pasted into the advanced field");
+});

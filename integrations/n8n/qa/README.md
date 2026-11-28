@@ -182,8 +182,8 @@ AIRPROMPTER_AGENT_ID=<agent> AIRPROMPTER_UPDATE_KEY=<apa_…> AIRPROMPTER_ENVIRO
 N8N_BIN=<cache>/node_modules/.bin/n8n node scripts/live-n8n.mjs > live-n8n.json
 ```
 
-- **Defaults:** `AIRPROMPTER_API_URL=https://api.airprompter.dev`, `AIRPROMPTER_DEPLOYMENT=dev` (this version pins
-  the dev root), `AIRPROMPTER_VARIABLES={"ticket":"Refund for order 1042 has not arrived"}` and
+- **Defaults:** `AIRPROMPTER_API_URL=https://api.airprompter.dev`, `AIRPROMPTER_DEPLOYMENT=dev` (QA runs against dev;
+  this version pins the dev and prod roots), `AIRPROMPTER_VARIABLES={"ticket":"Refund for order 1042 has not arrived"}` and
   `AIRPROMPTER_SUBJECT=qa-n8n-subject-1`. The fixed subject puts every run on the same A/B arm.
 - **The Update key** is read from the environment only. The script never prints it. It deletes its temporary
   folder, including the n8n database that holds the credential, on exit and on Ctrl-C.

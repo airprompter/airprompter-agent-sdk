@@ -59,6 +59,7 @@ test("the credential declares the fields the nodes read, and its test verifies t
     const prodPinned = await node.methods.credentialTest.airPrompterAgentApiTest.call({} as never, { id: "c", name: "c", type: "airPrompterAgentApi", data: { ...credentialsFor(h.plane, server.baseUrl), rootKey: "", hostedEnvironment: "prod" } } as never);
     assert.equal(prodPinned.status, "Error", "the fake plane's releases do not verify under AirPrompter's real prod root");
     assert.doesNotMatch(prodPinned.message, /root key is pinned|root_not_pinned/i, prodPinned.message);
+    assert.match(prodPinned.message, /root_signature_invalid/, "refused because the fake root is not AirPrompter's prod root");
   } finally {
     await server.close();
   }

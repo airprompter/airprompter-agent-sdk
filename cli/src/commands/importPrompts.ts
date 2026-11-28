@@ -232,7 +232,7 @@ export async function importPrompts(argv: string[], ctx: Context): Promise<numbe
   const tokenEnv = str(parsed, "session-token-env") ?? "AIRPROMPTER_SESSION_TOKEN";
   const token = ctx.env[tokenEnv];
   if (!token) throw usage(`${tokenEnv} is not set — run \`airprompter login\` and export the token it prints (a signed-in user, never an API key: team writes need one)`);
-  if (!ctx.fetch) throw usage("no fetch available: Node 20+ is required");
+  if (!ctx.fetch) throw usage("no fetch available: Node 22+ is required");
 
   const items = itemsFromSource(from, str(parsed, "map"));
   if (items.length === 0) throw usage(`${from}: nothing to import`);

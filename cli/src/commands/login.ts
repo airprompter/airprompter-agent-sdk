@@ -71,7 +71,7 @@ export async function login(argv: string[], ctx: Context): Promise<number> {
   let password = ctx.env[passwordEnv];
   if (!password) password = (await promptSecret(ctx, `Password for ${email}`)) ?? undefined;
   if (!password) throw usage(`${passwordEnv} is not set and there is no terminal to ask on (the password is never taken on argv)`);
-  if (!ctx.fetch) throw usage("no fetch available: Node 20+ is required");
+  if (!ctx.fetch) throw usage("no fetch available: Node 22+ is required");
   const baseUrl = (str(parsed, "base-url") ?? "https://api.airprompter.com").replace(/\/+$/, "");
   const response = await ctx.fetch(`${baseUrl}/auth/sign-in`, {
     method: "POST",

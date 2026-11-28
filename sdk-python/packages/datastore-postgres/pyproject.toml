@@ -8,14 +8,13 @@ version = "1.0.0rc5"
 description = "The AirPrompter release datastore over one PostgreSQL table: a KvStore with INSERT … ON CONFLICT and versioned UPDATEs, for kv_release_datastore. Bring your own driver (psycopg 3, psycopg2, a psycopg_pool)."
 readme = "README.md"
 license = "BSD-3-Clause"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "AirPrompter" }]
 keywords = ["airprompter", "prompts", "llm", "agent", "datastore", "postgres", "postgresql"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",

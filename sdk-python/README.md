@@ -7,7 +7,7 @@ content-free telemetry to a local spool. Nothing AirPrompter runs is on
 your request path; with the network gone, the last verified release keeps
 serving.
 
-Python 3.10+, `cryptography` and `httpx` (behind the SDK's own `Transport`: `transport=` takes any
+Python 3.11+, `cryptography` and `httpx` (behind the SDK's own `Transport`: `transport=` takes any
 callable from `HttpRequest` to `HttpResponse`). The same protocol, the same
 conformance vectors and the same on-disk store as the TypeScript SDK — a
 store one SDK wrote is a store the other (and the `airprompter` CLI) opens.

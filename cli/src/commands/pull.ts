@@ -72,7 +72,7 @@ export async function pull(argv: string[], ctx: Context): Promise<number> {
   const apiKeyEnv = str(parsed, "api-key-env") ?? "AIRPROMPTER_AGENT_KEY";
   const apiKey = ctx.env[apiKeyEnv];
   if (!apiKey) throw usage(`${apiKeyEnv} is not set (the Agent key is read from the environment, never from argv)`);
-  if (!ctx.fetch) throw usage("no fetch available: Node 20+ is required");
+  if (!ctx.fetch) throw usage("no fetch available: Node 22+ is required");
 
   const client = new SyncClient({ baseUrl: str(parsed, "base-url") ?? "https://api.airprompter.com", agentId: scope.agentId, target: scope.target, apiKey, fetch: ctx.fetch, userAgent: `airprompter-cli/${CLI_VERSION}` });
 

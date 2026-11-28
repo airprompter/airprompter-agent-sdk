@@ -13,7 +13,7 @@ With it, every model call in the request carries the release's system text
 and model in place of your own, and the whole request counts as one run
 against one version, however many model and tool calls it makes.
 
-You need **Node 20 or later** and an OpenAI API key. You do not need an
+You need **Node 22 or later** and an OpenAI API key. You do not need an
 AirPrompter account: the prompt comes from a local registry.
 
 ## Run it

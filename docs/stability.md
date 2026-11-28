@@ -127,6 +127,23 @@ These resolve, and may change in any release:
 - The CLI's internals, and the source tree. The CLI's own commands and flags
   are described in [`cli/README.md`](../cli/README.md).
 
+## Support floors
+
+- **Node.js 22 or later** for the TypeScript packages (`engines`). Node 20 is
+  not supported: it reached its end of life in April 2026, and the frameworks
+  the adapters serve (`ai` 7, `@mastra/core`, `openai`) need 22.
+- **Python 3.11 or later** for the Python distributions (`requires-python`).
+  Python 3.10 is not supported: it reached its end of life in October 2026,
+  and `pydantic-ai-slim` refuses it.
+- **Frameworks** are optional peers (npm) and extras (Python), each with the
+  floor its `package.json` or `pyproject.toml` declares.
+
+Raising the Node.js or Python floor past that line's end of life is a minor
+release, announced in the changelog one minor ahead; raising it sooner is a
+major release. A framework's floor may rise in a minor release once the
+adapter supports the framework's newer major and the changelog has said so a
+minor ahead.
+
 ## Release candidates
 
 The install lines in the READMEs pin exactly on every version (`--save-exact`,

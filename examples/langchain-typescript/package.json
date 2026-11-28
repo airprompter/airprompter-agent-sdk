@@ -6,7 +6,7 @@
   "license": "BSD-3-Clause",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "tsx agent.ts",

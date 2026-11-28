@@ -8,7 +8,9 @@ AI SDK and LangChain, and content-free telemetry.
 ```ts
 import { AirPrompterAgent } from "@airprompter/agent-sdk";
 
-const ap = await AirPrompterAgent.start({ organizationId, agentId, target: "prod", apiKey, root: { pinned }, sync: { mode: "resident", pollSeconds: 30, edgePointerUrl } });
+// AirPrompter's production root key: the signing keys under it are read from https://api.airprompter.com/roots/prod/root.json.
+const pinned = { kty: "EC", crv: "P-256", x: "hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE", y: "OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE" };
+const ap = await AirPrompterAgent.start({ organizationId, agentId, target: "prod", apiKey, root: { pinned }, sync: { mode: "resident", pollSeconds: 30 } });
 const r = ap.prompt("support.triage").render({ ticket: userMessage });
 const reply = await ap.observe(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }));
 ap.feedback(r.runRef, { thumbs: "up" });

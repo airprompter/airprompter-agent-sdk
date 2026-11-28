@@ -333,7 +333,7 @@ def test_a_stranded_host_with_an_unobtainable_payload_tries_once_then_returns_to
     start(plane, state_dir).stop()
     del plane.payloads[future["contentHash"]]
     with gaining():
-        ap = start(plane, state_dir, sync=SyncOptions(mode="resident", poll_seconds=3600, edge_pointer_url="https://edge.test/g/token/generation.json"))
+        ap = start(plane, state_dir, sync=SyncOptions(mode="resident", poll_seconds=3600, edge_pointer_url="https://edge.test/g/token/generation.json", root_url="https://edge.test/roots/prod/root.json"))
         try:
             ap.sync_now()
             assert ap.generation == 1

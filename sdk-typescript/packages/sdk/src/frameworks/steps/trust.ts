@@ -3,7 +3,7 @@
  * `fetch` that gives up in time.
  *
  * - **The root.** A manifest verifies against AirPrompter's root public key for the hosted environment; the key is
- *   pinned here, in source, so a change is a visible commit. `HOSTED_ROOTS` is where it goes. A root passed in the
+ *   pinned in source, so a change is a visible commit: `HOSTED_ROOTS` in `core/protocol/hostedRoots.ts`. A root passed in the
  *   options (the local registry's `root.pub.json`) wins.
  * - **The distribution key.** What the platform stores is the sealed `.apbundle` (signed manifest + payloads,
  *   encrypted). It is sealed to an X25519 key DERIVED from the Update key, the agent and the environment (HKDF-SHA256),
@@ -21,20 +21,15 @@
  */
 
 import { createHash, createPrivateKey, createPublicKey, hkdfSync } from "node:crypto";
+import { HOSTED_ROOTS } from "../../core/index.js";
 import type { DistributionKey, FetchLike, HostedEnvironment, P256PublicJwk } from "../../core/index.js";
 
 /**
- * AirPrompter's root public key per hosted environment, exactly as the offline root ceremony wrote it
- * (`infrastructure/trust/agent-root/{environment}/root-public.jwk.json` in the service repository). An environment
- * with no ceremony yet has no entry: a connection to it needs `root` passed in, and `testConnection` says so
- * (`root_not_pinned`). `staging` has none.
+ * AirPrompter's root public key per hosted environment (`core`'s `HOSTED_ROOTS`, the one table both the agent and this
+ * client read). An environment with no ceremony yet has no entry: a connection to it needs `root` passed in, and
+ * `testConnection` says so (`root_not_pinned`). `staging` has none.
  */
-export const HOSTED_ROOTS: Partial<Record<HostedEnvironment, P256PublicJwk>> = {
-  // Ceremony of 2026-09-14 (AIR-1935); key id 86267aa3dc49005a0c1474d5c9c06bd7e1d0e835da715a864c1eca706545df91.
-  dev: { kty: "EC", crv: "P-256", x: "gAQGIbpqvkYwfGnz2yJjAFcMLZm43fsQ6zXF4CjImss", y: "ImPVZkVwb3KC73p9T3EBtGzhm-s-vI6VVu0ovgka6ek" },
-  // Ceremony of 2026-11-27 (AIR-2214); key id 044af6e83353a2ea3758cc3feb3b1b7031c82bda5d6cd9287ba7730363e11793.
-  prod: { kty: "EC", crv: "P-256", x: "hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE", y: "OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE" },
-};
+export { HOSTED_ROOTS };
 
 export function pinnedRootFor(environment: HostedEnvironment, override?: P256PublicJwk): P256PublicJwk | null {
   return override ?? HOSTED_ROOTS[environment] ?? null;

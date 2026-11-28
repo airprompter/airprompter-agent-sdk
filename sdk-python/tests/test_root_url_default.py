@@ -278,3 +278,20 @@ def test_the_refusal_names_a_base_url_back_without_credentials(tmp_path):
     message = refusal(promoted(), str(tmp_path), base_url="https://ops:s3cret@registry.internal.test/")
     assert "s3cret" not in message and "ops:" not in message
     assert message.endswith("that is usually https://registry.internal.test/roots/prod/root.json.")
+
+
+def test_keys_copied_into_examples_and_docs_are_the_hosted_prod_root():
+    """The production key is copied into an example and the n8n credential docs, neither run by CI: a rotation that
+    moves ``HOSTED_ROOTS`` without them fails here."""
+    import ast
+    import re
+
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    prod = dict(HOSTED_ROOTS["prod"])
+    with open(os.path.join(repo, "examples", "python-worker", "worker.py"), encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    copied = [ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "PRODUCTION_ROOT" for t in node.targets)]
+    assert copied == [prod]
+    with open(os.path.join(repo, "integrations", "n8n", "README.md"), encoding="utf-8") as f:
+        blocks = [json.loads(block) for block in re.findall(r"```json\n(\{\"kty\":\"EC\".*?\})\n```", f.read())]
+    assert blocks == [prod]

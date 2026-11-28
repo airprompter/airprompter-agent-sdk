@@ -7,7 +7,13 @@ run_ref.
 Usage::
 
     pip install airprompter-agent[anthropic]
-    AIRPROMPTER_AGENT_KEY=apa_… AIRPROMPTER_ROOT_JWK='{"kty":"EC",…}' ANTHROPIC_API_KEY=… python worker.py
+    AIRPROMPTER_ORG_ID=org_… AIRPROMPTER_AGENT_ID=agt_… AIRPROMPTER_AGENT_KEY=apa_… ANTHROPIC_API_KEY=… python worker.py
+
+It pins AirPrompter's production root, whose root document the SDK reads from
+https://api.airprompter.com/roots/prod/root.json by itself. Pinning another root (your own service, or the local
+registry ``airprompter dev`` prints, or AirPrompter's dev deployment)? Set both ``AIRPROMPTER_ROOT_JWK`` to its key
+and ``AIRPROMPTER_ROOT_URL`` to its root document: a syncing runtime with any other root and no root URL refuses to
+start, so the worker refuses one without the other.
 """
 
 from __future__ import annotations
@@ -21,13 +27,26 @@ import anthropic
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.frameworks.anthropic import instrument
 
+# AirPrompter's production root key (ceremony of 2026-11-27, key id 044af6e8…1793), copied into source: the trust
+# anchor. `sdk-python/tests/test_root_url_default.py` checks it equals the SDK's `HOSTED_ROOTS["prod"]`.
+PRODUCTION_ROOT = {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE",
+    "y": "OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE",
+}
+ROOT_JWK = os.environ.get("AIRPROMPTER_ROOT_JWK")
+ROOT_URL = os.environ.get("AIRPROMPTER_ROOT_URL")
+if bool(ROOT_JWK) != bool(ROOT_URL):
+    raise SystemExit("set AIRPROMPTER_ROOT_JWK and AIRPROMPTER_ROOT_URL together, or neither for AirPrompter's production root")
+
 ap = AirPrompterAgent.start(
     organization_id=os.environ["AIRPROMPTER_ORG_ID"],
     agent_id=os.environ["AIRPROMPTER_AGENT_ID"],
     target="prod",
     api_key=os.environ.get("AIRPROMPTER_AGENT_KEY"),  # absent: serve the last verified release, never call home
-    root={"pinned": json.loads(os.environ["AIRPROMPTER_ROOT_JWK"])},
-    sync={"mode": "resident", "poll_seconds": 30, "edge_pointer_url": os.environ.get("AIRPROMPTER_EDGE_POINTER_URL")},
+    root={"pinned": json.loads(ROOT_JWK) if ROOT_JWK else PRODUCTION_ROOT},
+    sync={"mode": "resident", "poll_seconds": 30, "root_url": ROOT_URL, "edge_pointer_url": os.environ.get("AIRPROMPTER_EDGE_POINTER_URL")},
     apply={"window": "02:00-04:00 Europe/Berlin"},  # releases staged under unlock_required go live on their own at night
     models=["claude-sonnet-5", "claude-haiku-4-5"],  # what this worker can call; promotion refuses a slot whose model is absent
 )

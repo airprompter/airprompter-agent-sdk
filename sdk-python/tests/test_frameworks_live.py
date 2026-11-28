@@ -221,6 +221,35 @@ def test_anthropic_sync_and_async_clients(state_dir):
     ]
 
 
+def test_a_sealed_temperature_never_fails_the_call_on_any_anthropic_release(state_dir):
+    # AIR-2558: anthropic 2.14 dropped `temperature` from `messages.create` and refuses it with a TypeError before
+    # sending. On a release that still takes it the setting is sent; on one that does not it is left off, logged once.
+    import inspect
+
+    anthropic = load("anthropic")
+    takes_temperature = "temperature" in inspect.signature(anthropic.Anthropic(api_key="sk-ant-test").messages.create).parameters
+    handler, seen = recorded(anthropic_routes())
+    plane = FakeControlPlane(SCOPE)
+    plane.promote([{**plane.slot(tag="support.reply", text="Reply politely.", model="claude-haiku-4-5", variables=[]), "inference": {"temperatureMilli": 200, "maxOutputTokens": 50}}])
+    events: list = []
+    ap = start(plane, state_dir, telemetry={"sink": "memory"}, logger=events.append)
+    client = instrument_anthropic(anthropic.Anthropic(api_key="sk-ant-test", http_client=httpx.Client(transport=httpx.MockTransport(handler))), ap, slot="support.reply")
+    with ap.run():
+        for _ in range(2):
+            assert client.messages.create(model="claude-haiku-4-5", max_tokens=64, messages=[{"role": "user", "content": "hi"}]).content[0].text == "Hello there"
+    assert len(seen) == 2, "one request per call, never a retry"
+    assert all(body["max_tokens"] == 50 and body["system"] == "Reply politely." for _, body in seen)
+    refused = [e["settings"] for e in events if e.get("event") == "adapter_inference_unsupported"]
+    if takes_temperature:
+        assert [body["temperature"] for _, body in seen] == [0.2, 0.2] and refused == []
+    else:
+        assert all("temperature" not in body for _, body in seen)
+        assert refused == [[{"setting": "temperatureMilli", "reason": "client"}]]
+    ap.stop()
+    windows = [r for r in ap.drain_memory_sink() if r["type"] == "window"]
+    assert [(r["count"], r["modelCalls"], r["status"]) for r in windows] == [(1, 2, "ok")]
+
+
 def test_litellm_every_call_shape_inside_a_run_is_that_run_and_a_forged_or_stale_reference_attaches_to_nothing(state_dir):
     litellm = load("litellm")
     from airprompter_agent.frameworks.litellm import AirPrompterLiteLLMCallback, litellm_metadata, litellm_params

@@ -17,7 +17,9 @@ placement is ``passthrough``       untouched                                    
 
 The release's model wins or nothing is applied: a call naming another model with no ``model_for`` declines the slot
 (slot mode) or goes out as written and unobserved (scope mode), with one ``model_unresolved`` log. A failure here never
-fails the customer's call: the request goes out as the caller wrote it.
+fails the customer's call: the request goes out as the caller wrote it. A sealed setting whose keyword the installed
+client's method does not take (read from its signature before the call, never by a second request) is left off, with
+one ``adapter_inference_unsupported`` log (reason ``client``), and the call goes out with the rest of the placement.
 
 Example::
 
@@ -29,13 +31,14 @@ Example::
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import threading
 from typing import Any, Callable, Mapping, Optional, Protocol, Sequence
 
 from .adapt import acquire_run, begin_measure, choose_model
 from .attribution import Attribution
 from .events import ADAPTER_EVENTS
-from .inference import apply_inference
+from .inference import _PARAMETER, INFERENCE_KEYS, _value_for, apply_inference
 from .observe import classify_error
 from .proxy import ClientMethod, Pending, is_async, proxy_client, tap_result
 from .run import AgentRuntime, Approved, RunSession
@@ -73,6 +76,42 @@ class _Nothing:
         pass
 
 
+def _accepted_keywords(method: Callable[..., Any]) -> Optional[frozenset[str]]:
+    """The keywords ``method`` takes, or None when it takes any (``**kwargs``) or its signature cannot be read: then
+    nothing is left off. The provider SDKs declare every parameter, so a keyword missing here is one the installed
+    release would refuse with a ``TypeError`` before sending anything. Read before the call rather than retried after a
+    ``TypeError``: one raised while reading the response would make a retry a second request."""
+    try:
+        parameters = list(inspect.signature(method).parameters.values())
+    except Exception:  # noqa: BLE001 — an unreadable signature leaves the placement as it is
+        return None
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return None
+    return frozenset(p.name for p in parameters if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY))
+
+
+def _refused_by_client(kind: str, caller: Mapping[str, Any], params: dict[str, Any], inference: Mapping[str, Any], accepted: Optional[frozenset[str]]) -> list[dict[str, str]]:
+    """The sealed settings this placement put on ``params`` whose keyword the client does not take: removed from
+    ``params`` (the adapter's own copy) and returned as ``{"setting", "reason": "client"}``. A keyword only the caller
+    set is the caller's, and stays."""
+    if accepted is None or not inference:
+        return []
+    skipped = {entry["setting"] for entry in apply_inference(kind, caller, inference).unsupported}
+    refused: list[dict[str, str]] = []
+    for key in INFERENCE_KEYS:
+        parameter = _PARAMETER.get(kind, {}).get(key)
+        if parameter is None or key in skipped or _value_for(key, inference) is None:
+            continue
+        if parameter in params and parameter not in accepted:
+            value = params.pop(parameter)
+            # An openai release older than ``max_completion_tokens`` takes the cap as ``max_tokens``: the same lever.
+            if parameter == "max_completion_tokens" and "max_tokens" in accepted:
+                params["max_tokens"] = value
+                continue
+            refused.append({"setting": key, "reason": "client"})
+    return refused
+
+
 def _model_of(params: Any) -> Optional[str]:
     model = params.get("model") if isinstance(params, Mapping) else None
     return model if isinstance(model, str) else None
@@ -82,6 +121,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
     """``client`` with its model calls placed and measured per the table above. Instrumenting twice is once: the first slot stays."""
     said: set[tuple[Any, ...]] = set()
     lock = threading.Lock()
+    accepted: dict[str, Optional[frozenset[str]]] = {}
 
     def log(event: str, **fields: Any) -> None:
         # A customer logger that raises never reaches the call.
@@ -90,13 +130,22 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
         except Exception:  # noqa: BLE001
             pass
 
-    def once(event: str, **fields: Any) -> None:
-        key = (event, fields.get("method"), fields.get("model"))
+    def once(event: str, key: Optional[tuple[Any, ...]] = None, **fields: Any) -> None:
+        key = (event, *(key if key is not None else (fields.get("method"), fields.get("model"))))
         with lock:
             if key in said:
                 return
             said.add(key)
         log(event, **fields)
+
+    def fit_client(original: Callable[..., Any], kind: str, caller: Mapping[str, Any], params: dict[str, Any], inference: Mapping[str, Any], name: str, tag: Optional[str], model: str) -> None:
+        """Leave off the sealed settings the installed client cannot take: one log per slot, method, model and settings
+        (the installed client does not change while the process runs, so every later call would say the same)."""
+        if name not in accepted:
+            accepted[name] = _accepted_keywords(original)
+        refused = _refused_by_client(kind, caller, params, inference, accepted[name])
+        if refused:
+            once(ADAPTER_EVENTS["inference_unsupported"], key=(tag, name, model, tuple(entry["setting"] for entry in refused)), slot=tag, method=name, settings=refused)
 
     def model_from(release_model_id: str, kwargs: Mapping[str, Any]) -> Optional[str]:
         """The release's model for this call, or None when it runs elsewhere and nothing maps it."""
@@ -104,7 +153,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
         chosen = choose_model(release_model_id=release_model_id, caller_model=caller, caller_model_id=caller, model_for=model_for, resolve=(lambda id: id) if caller is None else None)
         return chosen if isinstance(chosen, str) else None
 
-    def placed_kwargs(run: RunSession, placement: Any, method: ClientMethod, kwargs: dict, name: str) -> Optional[tuple[dict, str]]:
+    def placed_kwargs(run: RunSession, placement: Any, method: ClientMethod, original: Callable[..., Any], kwargs: dict, name: str) -> Optional[tuple[dict, str]]:
         """The keyword arguments to send and the release's model id, or None to send the caller's untouched."""
         if placement.kind != "approved":
             return None
@@ -114,7 +163,9 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
                 once(ADAPTER_EVENTS["model_unresolved"], slot=slot, method=name, model=placement.model)
                 run.decline(slot, "model_unresolved")  # type: ignore[arg-type]
                 return None
-            return apply(kwargs, dataclasses.replace(placement, model=model), method.kind), placement.model
+            params = apply(kwargs, dataclasses.replace(placement, model=model), method.kind)
+            fit_client(original, method.kind, kwargs, params, placement.settings or {}, name, slot, placement.model)
+            return params, placement.model
         except Exception as error:  # noqa: BLE001
             log(ADAPTER_EVENTS["placement_failed"], slot=slot, method=name, reason=str(error))
             # The slot pinned a version this call will not serve: decline it, so no row or feedback names that version.
@@ -129,7 +180,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
             return _EndOnly(run) if owned else _Nothing()
         return begin_measure(run, slot, model=send[1], now=now, on_settled=run.end if owned else None)  # type: ignore[arg-type]
 
-    def place(run: RunSession, method: ClientMethod, args: tuple, kwargs: dict, name: str) -> Optional[tuple[dict, str]]:
+    def place(run: RunSession, method: ClientMethod, original: Callable[..., Any], args: tuple, kwargs: dict, name: str) -> Optional[tuple[dict, str]]:
         # The provider SDKs take keyword arguments only; a positional call is passed through untouched.
         if args:
             return None
@@ -138,9 +189,9 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
         except Exception as error:  # noqa: BLE001
             log(ADAPTER_EVENTS["placement_failed"], slot=slot, method=name, reason=str(error))
             return None
-        return placed_kwargs(run, placement, method, kwargs, name)
+        return placed_kwargs(run, placement, method, original, kwargs, name)
 
-    async def place_async(run: RunSession, method: ClientMethod, args: tuple, kwargs: dict, name: str) -> Optional[tuple[dict, str]]:
+    async def place_async(run: RunSession, method: ClientMethod, original: Callable[..., Any], args: tuple, kwargs: dict, name: str) -> Optional[tuple[dict, str]]:
         if args:
             return None
         try:
@@ -148,7 +199,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
         except Exception as error:  # noqa: BLE001
             log(ADAPTER_EVENTS["placement_failed"], slot=slot, method=name, reason=str(error))
             return None
-        return placed_kwargs(run, placement, method, kwargs, name)
+        return placed_kwargs(run, placement, method, original, kwargs, name)
 
     def slot_call(method: ClientMethod, original: Callable[..., Any], args: tuple, kwargs: dict, name: str) -> Any:
         if is_async(original):
@@ -159,7 +210,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
         except Exception as error:  # noqa: BLE001
             log(ADAPTER_EVENTS["placement_failed"], slot=slot, method=name, reason=str(error))
             return original(*args, **kwargs)
-        send = place(run, method, args, kwargs, name)
+        send = place(run, method, original, args, kwargs, name)
         pending = pending_for(run, owned, send)
         try:
             out = original(*args, **(send[0] if send is not None else kwargs))
@@ -175,7 +226,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
             log(ADAPTER_EVENTS["placement_failed"], slot=slot, method=name, reason=str(error))
             return await original(*args, **kwargs)
         try:
-            send = await place_async(run, method, args, kwargs, name)
+            send = await place_async(run, method, original, args, kwargs, name)
         except BaseException as error:
             # Cancelled while placing: a run this call opened ends here, with the class, rather than at the idle sweep.
             if owned:
@@ -220,6 +271,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
                         log(ADAPTER_EVENTS["inference_overridden"], slot=attribution.tag, method=name, parameters=applied.overridden)
                     if applied.unsupported:
                         log(ADAPTER_EVENTS["inference_unsupported"], slot=attribution.tag, method=name, settings=applied.unsupported)
+                    fit_client(original, method.kind, kwargs, applied.params, attribution.inference or {}, name, attribution.tag, attribution.model)
                     kwargs = applied.params
             except Exception as error:  # noqa: BLE001
                 log(ADAPTER_EVENTS["placement_failed"], slot=attribution.tag, method=name, reason=str(error))

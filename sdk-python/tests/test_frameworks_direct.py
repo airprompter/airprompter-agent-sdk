@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import tempfile
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,7 +19,7 @@ from airprompter_agent.frameworks.openai import apply_placement as openai_placem
 from airprompter_agent.frameworks.openai import instrument as instrument_openai
 
 from .control_plane import FakeControlPlane
-from .fake_clients import FakeAnthropic, FakeAsyncAnthropic, FakeAsyncOpenAI, FakeOpenAI
+from .fake_clients import FakeAnthropic, FakeAsyncAnthropic, FakeAsyncOpenAI, FakeOpenAI, StrictAnthropic, StrictAsyncAnthropic, anthropic_message, chat_completion
 from .test_agent import SCOPE, start
 
 
@@ -250,6 +251,130 @@ def test_anthropic_system_and_settings_one_sampling_parameter_none_beside_thinki
     asyncio.run(go())
     out = by_key(rows())
     assert [(r["status"], r.get("errorClass"), r["modelCalls"]) for r in out] == [("error", "truncated", 1), ("ok", None, 2)]
+
+
+def test_a_sealed_setting_the_installed_client_does_not_take_is_left_off_once_logged_and_the_call_is_recorded(state_dir):
+    # AIR-2558: anthropic 2.14 dropped `temperature` from `messages.create`, and refuses it with a TypeError before sending.
+    events: list = []
+    ap, rows = start_agent(state_dir, sealed, events)
+    client = StrictAnthropic()
+    anthropic = instrument_anthropic(client, ap, slot="support.reply")
+    with ap.run():
+        for _ in range(2):
+            reply = anthropic.messages.create(model="claude-haiku-4-5", max_tokens=100, messages=[{"role": "user", "content": "hi"}])
+            assert reply.content[0].text == "strict reply"
+    assert client.sent == [{"max_tokens": 800, "model": "claude-haiku-4-5", "system": "Reply politely.", "stop_sequences": ["\n\nHuman:"], "thinking": None}] * 2, "one request per call, with the rest of the placement"
+    refused = [e for e in events if e.get("event") == ADAPTER_EVENTS["inference_unsupported"]]
+    assert [(e["adapter"], e["slot"], e["method"], e["settings"]) for e in refused] == [("anthropic", "support.reply", "messages.create", [{"setting": "temperatureMilli", "reason": "client"}])], "logged once, not per call"
+    aclient = StrictAsyncAnthropic()
+    instrumented = instrument_anthropic(aclient, ap, slot="support.reply")
+
+    async def go():
+        async with ap.run():
+            await instrumented.messages.create(model="claude-haiku-4-5", max_tokens=100, messages=[])
+
+    asyncio.run(go())
+    assert aclient.sent == [{"max_tokens": 800, "model": "claude-haiku-4-5", "system": "Reply politely.", "stop_sequences": ["\n\nHuman:"]}]
+    out = by_key(rows())
+    assert [(r["status"], r["count"], r["modelCalls"]) for r in out] == [("ok", 2, 3)], "both runs recorded, every call counted"
+
+
+def test_in_a_scope_a_setting_the_client_refuses_is_left_off_and_logged_once_per_slot(state_dir):
+    events: list = []
+
+    def two(plane):
+        return [{**plane.slot(tag=tag, text="Reply politely.", model="claude-haiku-4-5", variables=[]), "inference": {"temperatureMilli": 200, "maxOutputTokens": 800}} for tag in ("support.reply", "support.other")]
+
+    ap, rows = start_agent(state_dir, two, events)
+    client = StrictAnthropic()
+    anthropic = instrument_anthropic(client, ap)
+    for tag in ("support.reply", "support.other", "support.reply"):
+        rendered = ap.prompt(tag).render()
+        with ap.attribute(rendered):
+            anthropic.messages.create(model="claude-haiku-4-5", max_tokens=100, system=rendered.text, messages=[])
+    assert [sent["max_tokens"] for sent in client.sent] == [800, 800, 800]
+    refused = [(e["slot"], e["settings"]) for e in events if e.get("event") == ADAPTER_EVENTS["inference_unsupported"]]
+    assert refused == [(tag, [{"setting": "temperatureMilli", "reason": "client"}]) for tag in ("support.reply", "support.other")], "once per slot: one client serves every scope"
+    assert sorted((r["tag"], r["count"], r["status"]) for r in rows()) == [("support.other", 1, "ok"), ("support.reply", 2, "ok")]
+
+
+def test_a_keyword_only_the_caller_wrote_is_theirs_even_when_the_client_refuses_it(state_dir):
+    def cap_only(plane):
+        return [{**plane.slot(tag="support.reply", text="Reply politely.", model="claude-haiku-4-5", variables=[]), "inference": {"maxOutputTokens": 50}}]
+
+    events: list = []
+    ap, rows = start_agent(state_dir, cap_only, events)
+    strict = StrictAnthropic()
+    anthropic = instrument_anthropic(strict, ap, slot="support.reply")
+    with ap.run():
+        # The slot seals no temperature: the caller's own is the caller's, and the client refuses it as it would bare.
+        with pytest.raises(TypeError, match="temperature"):
+            anthropic.messages.create(model="claude-haiku-4-5", max_tokens=10, temperature=0.5, messages=[])
+    rows()
+    other_dir = tempfile.mkdtemp(prefix="ap-frameworks-")
+    try:
+        ap2, rows2 = start_agent(other_dir, sealed, events)
+        anthropic2 = instrument_anthropic(strict, ap2, slot="support.reply")
+        with ap2.run():
+            # The sealed temperature is not applied beside `thinking`, so the caller's own is theirs here too.
+            with pytest.raises(TypeError, match="temperature"):
+                anthropic2.messages.create(model="claude-haiku-4-5", max_tokens=10, temperature=1, thinking={"type": "enabled", "budget_tokens": 1024}, messages=[])
+        rows2()
+    finally:
+        shutil.rmtree(other_dir, ignore_errors=True)
+    assert strict.sent == [] and not [e for e in events if e.get("event") == ADAPTER_EVENTS["inference_unsupported"] and any(s["reason"] == "client" for s in e["settings"])]
+
+
+def test_a_signature_that_cannot_be_read_is_read_once_and_leaves_the_placement_whole(state_dir):
+    class Create:
+        reads = 0
+
+        def __init__(self):
+            self.sent: list = []
+
+        @property
+        def __signature__(self):
+            Create.reads += 1
+            raise RuntimeError("no signature here")
+
+        def __call__(self, **params):
+            self.sent.append(params)
+            return anthropic_message("opaque reply")
+
+    create = Create()
+    client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    ap, rows = start_agent(state_dir, sealed)
+    anthropic = instrument_anthropic(client, ap, slot="support.reply")
+    with ap.run():
+        for _ in range(2):
+            anthropic.messages.create(model="claude-haiku-4-5", max_tokens=100, messages=[])
+    assert [sent["temperature"] for sent in create.sent] == [0.2, 0.2], "nothing is left off on a guess"
+    assert Create.reads == 1, "read once per method"
+    assert [(r["count"], r["modelCalls"]) for r in rows()] == [(1, 2)]
+
+
+def test_an_openai_release_without_max_completion_tokens_gets_the_sealed_cap_as_max_tokens(state_dir):
+    class OldCompletions:
+        def __init__(self):
+            self.sent: list = []
+
+        def create(self, *, messages: list, model: str, max_tokens: Any = None, temperature: Any = None, stream: Any = None):
+            self.sent.append({"model": model, "max_tokens": max_tokens, "temperature": temperature})
+            return chat_completion("old answer")
+
+    def capped(plane):
+        return [{**plane.slot(tag="support.reply", text="Reply politely.", model="gpt-4o", variables=[]), "inference": {"maxOutputTokens": 300, "temperatureMilli": 200}}]
+
+    events: list = []
+    ap, rows = start_agent(state_dir, capped, events)
+    completions = OldCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    openai = instrument_openai(client, ap, slot="support.reply")
+    with ap.run():
+        openai.chat.completions.create(model="gpt-4o", max_tokens=900, messages=[{"role": "user", "content": "hi"}])
+    assert completions.sent == [{"model": "gpt-4o", "max_tokens": 300, "temperature": 0.2}], "the release's cap, on the lever this release has"
+    assert not [e for e in events if e.get("event") == ADAPTER_EVENTS["inference_unsupported"]]
+    assert [(r["count"], r["status"]) for r in rows()] == [(1, "ok")]
 
 
 def test_apply_placement_keeps_a_developer_role_and_never_mutates():

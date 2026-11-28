@@ -190,6 +190,45 @@ test("@anthropic-ai/sdk: messages.create (plain and stream: true) and messages.s
   );
 });
 
+// AIR-2558's check of the TypeScript side: a TS client sends its params object as given, so the Python failure (a
+// keyword the installed client refuses before sending) cannot happen here. Whether the provider takes the value on a
+// given model is the API's answer, not the client's; the models below take both settings.
+test("AIR-2558: the real TypeScript clients send every sealed setting in the one request (a params object is never refused before sending)", async (t) => {
+  const openaiMod = await load("openai");
+  const anthropicMod = await load("@anthropic-ai/sdk");
+  if (!openaiMod || !anthropicMod) return t.skip("openai or @anthropic-ai/sdk is not installed");
+  const OpenAI = openaiMod.default as new (options: Record<string, unknown>) => Record<string, any>;
+  const Anthropic = anthropicMod.default as new (options: Record<string, unknown>) => Record<string, any>;
+  const message = { id: "msg_1", type: "message", role: "assistant", model: "claude-haiku-4-5", content: [{ type: "text", text: "Hello there" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 7, output_tokens: 2 } };
+  const completion = { id: "chatcmpl_p", object: "chat.completion", created: 1, model: "gpt-4.1", choices: [{ index: 0, message: { role: "assistant", content: "Regards, us" }, finish_reason: "stop" }], usage: openaiUsage };
+  const { fetchImpl, seen } = recordedFetch({ "/v1/messages": () => json(message), "/v1/chat/completions": () => json(completion) });
+  const events: Record<string, unknown>[] = [];
+  const { startAgent: startWith } = await import("./clients.js");
+  const { ap, rows } = await startWith(
+    (plane) => [
+      { ...plane.slot({ tag: "support.triage", text: "Triage this ticket.", model: "gpt-4.1", variables: [] }), inference: { temperatureMilli: 200, topPBps: 9000, maxOutputTokens: 50 } },
+      { ...plane.slot({ tag: "support.reply", text: "Reply politely.", model: "claude-haiku-4-5", variables: [] }), inference: { temperatureMilli: 200, maxOutputTokens: 50 } },
+    ],
+    events,
+  );
+  const anthropic = instrumentAnthropic(new Anthropic({ apiKey: "sk-ant-test", fetch: fetchImpl }), ap, { slot: "support.reply" });
+  const openai = instrumentOpenAI(new OpenAI({ apiKey: "sk-test", fetch: fetchImpl }), ap, { slot: "support.triage" });
+  await ap.run({}, async () => {
+    assert.equal((await anthropic.messages.create({ model: "claude-haiku-4-5", max_tokens: 64, messages: [{ role: "user", content: "hi" }] })).content[0].text, "Hello there");
+    assert.equal((await openai.chat.completions.create({ model: "gpt-4.1", messages: [{ role: "user", content: "hi" }] })).choices[0].message.content, "Regards, us");
+  });
+  assert.deepEqual(
+    seen.map(({ path, body }) => [path, body.temperature, body.top_p ?? null, body.max_tokens ?? body.max_completion_tokens]),
+    [
+      ["/v1/messages", 0.2, null, 50],
+      ["/v1/chat/completions", 0.2, 0.9, 50],
+    ],
+    "one request per call, every sealed setting on it",
+  );
+  assert.deepEqual(events.filter((e) => e.event === "adapter_inference_unsupported"), []);
+  assert.deepEqual((await rows()).map((r) => [r.tag, r.count, r.status]).sort(), [["support.reply", 1, "ok"], ["support.triage", 1, "ok"]]);
+});
+
 test("ai: wrapLanguageModel({ middleware: airprompterMiddleware(ap, { slot }) }) with generateText and streamText over the AI SDK's own mock model; ai hands the transformed params on as the same object", async (t) => {
   const ai = await load("ai");
   const aiTest = await load("ai/test");

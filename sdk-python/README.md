@@ -7,12 +7,13 @@ content-free telemetry to a local spool. Nothing AirPrompter runs is on
 your request path; with the network gone, the last verified release keeps
 serving.
 
-Python 3.10+, `cryptography` and `httpx`. The same protocol, the same
+Python 3.10+, `cryptography` and `httpx` (behind the SDK's own `Transport`: `transport=` takes any
+callable from `HttpRequest` to `HttpResponse`). The same protocol, the same
 conformance vectors and the same on-disk store as the TypeScript SDK — a
 store one SDK wrote is a store the other (and the `airprompter` CLI) opens.
 
 ```bash
-pip install "airprompter-agent==1.0.0rc5"   # the 1.0 release candidate; extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
+pip install "airprompter-agent==1.0.0rc5"   # extras: [openai] [anthropic] [litellm] [kms] [vault] [keyring]
 ```
 
 ## Packages
@@ -21,15 +22,18 @@ One install. Everything below is in the one distribution; you import the part
 you use. The tree mirrors the TypeScript SDK's subpaths.
 
 ```bash
-# With a satellite, pin each one to the same candidate:
+# With a satellite, pin each one to the same version:
 pip install "airprompter-agent==1.0.0rc5" "airprompter-datastore-s3==1.0.0rc5" "airprompter-agent-otel==1.0.0rc5"
 ```
 
-Pin every distribution exactly. Unpinned, `airprompter-agent` installs 0.5.0,
-which cannot read a 3.0.0 manifest, and an unpinned datastore installs 0.5.0,
-which brings the old split packages in beside this one. An exact pin takes the
-candidate without opening prereleases on every dependency, which `--pre` does,
-and `uv pip install` resolves the same pins with no flag.
+<!-- release-candidate -->
+This is a release candidate for 1.0.0: pin every distribution exactly.
+Unpinned, `airprompter-agent` installs 0.5.0, which cannot read a 3.0.0
+manifest, and an unpinned datastore installs 0.5.0, which brings the old split
+packages in beside this one. An exact pin takes the candidate without opening
+prereleases on every dependency, which `--pre` does, and `uv pip install`
+resolves the same pins with no flag.
+<!-- /release-candidate -->
 
 | Import | Use it when |
 | --- | --- |

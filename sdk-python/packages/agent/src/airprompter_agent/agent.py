@@ -42,8 +42,6 @@ import threading
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Optional, Sequence, TypeVar, Union
 
-import httpx
-
 from airprompter_agent.core import ERROR_CLASSES, instant
 from airprompter_agent.core._util import iso_ms, now_ms, random_id
 from airprompter_agent.sync import UpdateWindow, parse_window, window_state
@@ -64,6 +62,7 @@ from airprompter_agent.sync import HydrationPlan, ReleaseDatastore, ReleaseKey, 
 from airprompter_agent.sync import required_models_missing
 from airprompter_agent.telemetry import GrantDecision, SpoolUploader, UploadGrant, post_segment
 from airprompter_agent.core import SyncClient
+from airprompter_agent.core import HttpRequest, Transport, require_transport, send_once
 from airprompter_agent.sync import jittered_delay_ms, sync_once
 from airprompter_agent.core import evaluate_checks, output_text_of
 from airprompter_agent.core import GoldenInvoke, GoldenReport, golden_reports_meet, manifest_has_golden, parse_golden_set, run_golden_set
@@ -676,7 +675,7 @@ class AirPrompterAgent:
         delimiters: Optional[Delimiters] = None,
         telemetry: Optional[Union[TelemetryOptions, Mapping[str, Any]]] = None,
         now: Optional[Callable[[], float]] = None,
-        transport: Optional[httpx.BaseTransport] = None,
+        transport: Optional[Transport] = None,
         random: Optional[Callable[[], float]] = None,
         logger: Optional[Callable[[dict[str, Any]], None]] = None,
         variables: Optional[Mapping[str, VariableSourceInput]] = None,
@@ -730,7 +729,7 @@ class AirPrompterAgent:
             "delimiters": delimiters,
             "telemetry": _coerce(TelemetryOptions, telemetry),
             "now": now,
-            "transport": transport,
+            "transport": require_transport(transport),
             "random": random,
             "logger": logger,
             "variables": variables,
@@ -1636,12 +1635,11 @@ class AirPrompterAgent:
         try:
             # Conditional: an unchanged root is one 304, and the trusted root stays as it is.
             headers = {"user-agent": _USER_AGENT, **({"if-none-match": self._root_etag} if self._root_etag else {})}
-            with httpx.Client(transport=self._o.get("transport"), timeout=30.0) as http:
-                response = http.get(url, headers=headers)
-            if response.status_code != 200:
+            response = send_once(self._o.get("transport"), HttpRequest("GET", url, headers, timeout=30.0))
+            if response.status != 200:
                 return None
             root = json.loads(response.text)
-            self._root_fetched = (root, response.headers.get("etag"))
+            self._root_fetched = (root, response.header("etag"))
             return root
         except Exception:  # noqa: BLE001
             return None

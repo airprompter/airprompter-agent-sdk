@@ -6,6 +6,23 @@ writes. The puller writes sealed releases through it; every runtime
 hydrates from it
 ([docs/datastore.md](https://github.com/airprompter/airprompter-agent-sdk/blob/main/docs/datastore.md)).
 
+## Install
+
+```bash
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.5 @airprompter/datastore-s3@1.0.0-rc.5 @aws-sdk/client-s3
+```
+
+The SDK is a peer (exactly this version on a release candidate, this version or later within the major
+from 1.0.0), so one copy resolves.
+
+<!-- release-candidate -->
+This is a release candidate for 1.0.0. Pin it exactly, as above: npm's default
+range on a candidate also matches later candidates, and an unpinned install
+takes the `latest` tag, the 0.x line.
+<!-- /release-candidate -->
+
+## Use
+
 ```ts
 import { S3Client } from "@aws-sdk/client-s3";
 import { kvReleaseDatastore } from "@airprompter/agent-sdk/sync";

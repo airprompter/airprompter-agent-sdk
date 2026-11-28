@@ -5,6 +5,23 @@ for `kvReleaseDatastore` (`@airprompter/agent-sdk/sync`). The puller writes
 sealed releases through it; every runtime hydrates from it
 ([docs/datastore.md](https://github.com/airprompter/airprompter-agent-sdk/blob/main/docs/datastore.md)).
 
+## Install
+
+```bash
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.5 @airprompter/datastore-redis@1.0.0-rc.5 redis
+```
+
+The SDK is a peer (exactly this version on a release candidate, this version or later within the major
+from 1.0.0), so one copy resolves.
+
+<!-- release-candidate -->
+This is a release candidate for 1.0.0. Pin it exactly, as above: npm's default
+range on a candidate also matches later candidates, and an unpinned install
+takes the `latest` tag, the 0.x line.
+<!-- /release-candidate -->
+
+## Use
+
 ```ts
 import { createClient } from "redis";
 import { kvReleaseDatastore } from "@airprompter/agent-sdk/sync";

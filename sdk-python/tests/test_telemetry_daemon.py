@@ -36,7 +36,7 @@ from airprompter_agent.telemetry.spool.manifest import MANIFEST_GRACE_MS, manife
 from airprompter_agent.telemetry.spool.writer import DirectorySink, Observation, SpoolWriter, WriterIdentity, epoch_minute, segment_name
 from airprompter_agent.telemetry.uploader import GrantDecision, SpoolUploader, UploadGrant
 
-from .control_plane import FakeControlPlane
+from .control_plane import FakeControlPlane, transport_of
 
 SCOPE = {"organizationId": "org_1", "agentId": "agt_1", "target": "prod"}
 KW = {"organization_id": "org_1", "agent_id": "agt_1", "target": "prod"}
@@ -246,7 +246,7 @@ def test_a_process_hydrated_from_the_datastore_sends_its_telemetry_to_the_daemon
     plane.promote([plane.slot(tag="support.reply", text="From the datastore.", version_id="ver_eu")])
     client = SyncClient(base_url="https://api.test", agent_id=SCOPE["agentId"], target=SCOPE["target"], api_key=plane.api_key, transport=plane.transport())
     trusted_root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=public_jwk_of(plane.root_key))
-    edge = httpx.Client(transport=plane.transport())
+    edge = httpx.Client(transport=plane.httpx_transport())
     now = lambda: datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")  # noqa: E731
     pulled = pull_to_datastore(datastore=datastore, region="eu", client=client, scope=SCOPE, trusted_root=trusted_root, fetch_root=lambda: edge.get("https://edge.test/roots/prod/root.json").json(), now=now, distribution_public_key=fleet.public_raw)
     assert pulled.status == "ok"
@@ -257,7 +257,7 @@ def test_a_process_hydrated_from_the_datastore_sends_its_telemetry_to_the_daemon
     def no_network(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("offline", request=request)
 
-    ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network), distribution_key=DistributionKey(fleet.private_key, fleet.public_raw), datastore={"store": datastore, "region": "eu"})
+    ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(no_network), distribution_key=DistributionKey(fleet.private_key, fleet.public_raw), datastore={"store": datastore, "region": "eu"})
     try:
         assert ap.generation == 1
         assert ap.status().datastore["rows_from"] == "region"
@@ -291,7 +291,7 @@ def test_the_uploader_honours_manifests(dirs):
         shipped.append(re.search(rb'filename="([^"]+)"', request.content).group(1).decode())
         return httpx.Response(204)
 
-    uploader = SpoolUploader(directory=directory, instance_id="i-daemonDDDDDDDD", scope={"agentId": SCOPE["agentId"], "target": SCOPE["target"]}, grant_for=grant_for, transport=httpx.MockTransport(bucket), now_ms=clock, rand=lambda: 0)
+    uploader = SpoolUploader(directory=directory, instance_id="i-daemonDDDDDDDD", scope={"agentId": SCOPE["agentId"], "target": SCOPE["target"]}, grant_for=grant_for, transport=transport_of(bucket), now_ms=clock, rand=lambda: 0)
     report = {"protocol": "4.0.0", "instanceId": "i-writerAAAAAAAA", "sdk": {"name": "agent-sdk-python", "version": "0.3.0"}, "syncMode": "offline", "generation": {"active": 3}, "applyState": "active", "storageProtection": "file_key", "catalog": {"models": []}, "lease": {"expired": False}}
 
     def write(instance_id: str, scope):

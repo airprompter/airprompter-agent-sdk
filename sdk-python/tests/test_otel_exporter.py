@@ -28,7 +28,7 @@ from airprompter_agent.sync.store.slot_store import SlotStore
 from airprompter_agent_otel.exporter import ExportResult, OtlpUploadSink, spool_rows_to_otlp
 from airprompter_agent.telemetry.uploader import SpoolUploader
 
-from .control_plane import FakeControlPlane
+from .control_plane import FakeControlPlane, transport_of
 
 VECTORS = os.path.join(os.path.dirname(__file__), "..", "..", "protocol", "vectors")
 SCOPE = {"organizationId": "org_1", "agentId": "agt_otel", "target": "prod"}
@@ -73,7 +73,7 @@ class Collector:
             status, headers = self.answers.pop(0) if self.answers else (200, {})
             return httpx.Response(status, headers=headers, json={})
 
-        return httpx.MockTransport(handle)
+        return transport_of(handle)
 
 
 WINDOW = {"type": "window", "v": 5, "artifactId": "art_1", "minute": "2026-09-12T14:03:00Z", "instanceId": "i-writer-a", "instanceClass": "resident", "tag": "support.triage", "versionId": "rev-4", "arm": "candidate", "model": "claude-sonnet-5", "status": "ok", "errorClass": None, "usageSource": "reported", "toolsReported": False, "count": 1, "modelCalls": 1, "agentRun": 1, "tools": {"calls": 0, "errors": 0}, "tokensSq": {"input": 0, "cachedInput": 0, "output": 0, "inputOutput": 0, "inputCached": 0, "cachedOutput": 0}, "latencyMs": {"buckets": [0] * 10 + [1] + [0] * 12, "sum": 812}, "tokens": {"input": 3, "output": 4}, "sdk": "agent-sdk-py/0.1.0"}
@@ -102,7 +102,7 @@ def test_sink_exports_with_headers_drops_and_counts_on_failure_holds_on_retry_af
     def down(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")
 
-    unreachable = OtlpUploadSink(endpoint="http://collector.test/v1/metrics", transport=httpx.MockTransport(down))
+    unreachable = OtlpUploadSink(endpoint="http://collector.test/v1/metrics", transport=transport_of(down))
     assert unreachable.ship(segment()).status == "failed", "unanswered is not a decision: kept under backoff"
     raising = OtlpUploadSink(exporter=lambda request: (_ for _ in ()).throw(RuntimeError("boom")))
     assert raising.ship(segment()) == UploadOutcome("dropped", reason="exporter:boom")

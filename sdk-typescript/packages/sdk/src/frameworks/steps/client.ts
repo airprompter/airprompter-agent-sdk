@@ -31,7 +31,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { SyncClient, instant, trustedRootFromPinnedKey } from "../../core/index.js";
+import { SDK_VERSION, SyncClient, instant, trustedRootFromPinnedKey } from "../../core/index.js";
 import type { ManifestPayload, RootMetadata } from "../../core/index.js";
 import { AirPrompterAgent } from "../../index.js";
 import { pullToDatastore, type ReleaseKey } from "../../sync/index.js";
@@ -42,7 +42,7 @@ import { AutomationError, isAutomationError, type AutomationClient, type Automat
 import { runReportOf } from "./usage.js";
 
 const ORGANIZATION_NOTE = "organizationId";
-const USER_AGENT = "airprompter-automation/1.0.0-rc.5";
+const USER_AGENT = `airprompter-automation/${SDK_VERSION}`;
 /** Rows kept per connection: the one serving and the one before it. A rollback is a new generation, so older rows serve nothing. */
 const KEEP_ROWS = 2;
 

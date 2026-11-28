@@ -44,7 +44,7 @@ SATELLITES = ["agent-otel", "datastore-s3", "datastore-postgres", "datastore-red
 PACKAGES = ["agent", *SATELLITES]
 SRC = os.path.join(SDK_PY, "packages", "agent", "src", "airprompter_agent")
 #: Rule 4 of section 3.2: the facade's line count after AIR-2231's deletions. A change that grows it moves this on purpose.
-AGENT_PY_LINES = 2639
+AGENT_PY_LINES = 2637
 #: Modules that import but promise nothing (docs/stability.md, "Outside the promise").
 OUTSIDE = {"airprompter_agent.frameworks.contract"}
 #: The 1.0 promise, module by module (docs/stability.md): each ``__all__``, sorted, one name per line. A name added here is
@@ -101,6 +101,8 @@ PROMISE = {
         "GoldenInvoke",
         "GoldenReport",
         "GoldenSetError",
+        "HttpRequest",
+        "HttpResponse",
         "JudgeResult",
         "JudgeRubric",
         "LATENCY_BUCKET_EDGES_MS",
@@ -123,6 +125,7 @@ PROMISE = {
         "StepTotals",
         "SyncClient",
         "SystemClock",
+        "Transport",
         "USAGE_SOURCES",
         "UnknownVariableError",
         "UploadOutcome",
@@ -137,6 +140,7 @@ PROMISE = {
         "canonical_json",
         "create_encrypted_bundle",
         "create_plaintext_bundle",
+        "default_transport",
         "distribution_key_id",
         "effective_arms",
         "epoch_minute",
@@ -447,9 +451,11 @@ def test_one_version_and_sdk_version_is_it_and_satellites_pin_the_agent_exactly(
     agent = pyproject("agent")
     deps = agent.split("dependencies = [", 1)[1].split("]", 1)[0]
     assert sorted(line.strip().strip('",').split(">")[0] for line in deps.splitlines() if line.strip()) == ["cryptography", "httpx"], "no third-party dependency beyond httpx and cryptography"
-    # httpx's 1.0 prereleases drop `timeout` from Client, and start() needs it: `--pre` must not reach them.
-    for name in ("agent", "agent-otel"):
-        assert '"httpx>=0.27,<1"' in pyproject(name), f"{name} bounds httpx below 1.0"
+    # httpx's 1.0 prereleases are another library, and `--pre` must not reach them. httpx is behind the SDK's `Transport`
+    # (core/http.py), in no public signature; the weekly canary (wrap-latest.yml) says when the bound can move.
+    assert '"httpx>=0.27,<1"' in agent, "the agent bounds httpx below 1.0"
+    for name in SATELLITES:
+        assert "httpx" not in pyproject(name), f"{name} reaches HTTP through the SDK's Transport, never httpx itself"
     for extra in ("kms", "vault", "keyring", "openai", "anthropic", "litellm"):
         assert f"\n{extra} = [" in agent, f"the {extra} extra lives on the one distribution"
     for name in SATELLITES:
@@ -457,11 +463,11 @@ def test_one_version_and_sdk_version_is_it_and_satellites_pin_the_agent_exactly(
         assert f'name = "airprompter-{name}"' in text
         deps = text.split("dependencies = [", 1)[1].split("]", 1)[0]
         ours = [line.strip().strip('",') for line in deps.splitlines() if "airprompter" in line]
-        assert ours == [f"airprompter-agent=={version}"], f"{name} pins the agent exactly, so one copy resolves"
+        assert ours == [f"airprompter-agent{lockstep_pin(version)}"], f"{name} pins the agent (exactly on a candidate, to the major after), so one copy resolves"
     # The datastore adapters never require a database client.
     for name in ("datastore-s3", "datastore-postgres", "datastore-redis"):
         deps = pyproject(name).split("dependencies = [", 1)[1].split("]", 1)[0]
-        assert [line.strip().strip('",') for line in deps.splitlines() if line.strip()] == [f"airprompter-agent=={version}"], f"{name} depends on the agent alone"
+        assert [line.strip().strip('",') for line in deps.splitlines() if line.strip()] == [f"airprompter-agent{lockstep_pin(version)}"], f"{name} depends on the agent alone"
 
 
 @pytest.mark.parametrize("answer", ["raise m.PackageNotFoundError('airprompter-agent')", "return None", "raise OSError('unreadable')"], ids=["no-metadata", "dist-info-with-no-METADATA", "unreadable"])
@@ -582,15 +588,79 @@ def test_each_layer_imports_and_the_exporter_stays_out_of_the_agent():
     assert not os.path.exists(os.path.join(SRC, "telemetry", "otel.py"))
 
 
+def lockstep_pin(version: str) -> str:
+    spec = importlib.util.spec_from_file_location("version_lockstep", os.path.join(SDK_PY, "tools", "version_lockstep.py"))
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    return tool.pin_for(version)
+
+
 def test_every_install_line_in_the_readme_pins_the_current_version():
-    # A version bump fails here until the docs follow: an unpinned line installs the old release.
+    # A version bump fails here until the docs follow: an unpinned line installs the old release. Each PyPI page
+    # (packages/*/README.md) carries its own install line too.
     version = declared_version(pyproject("agent"))
-    with open(os.path.join(SDK_PY, "README.md"), encoding="utf-8") as f:
-        lines = [line for line in f.read().splitlines() if "pip install" in line and "airprompter-" in line]
-    assert any(f'"airprompter-agent=={version}"' in line for line in lines), f"the README installs airprompter-agent=={version}"
+    pages = [os.path.join(SDK_PY, "README.md"), *(os.path.join(SDK_PY, "packages", name, "README.md") for name in PACKAGES)]
+    lines = []
+    for page in pages:
+        with open(page, encoding="utf-8") as f:
+            found = [line for line in f.read().splitlines() if "pip install" in line and "airprompter-" in line]
+        assert any(f'"airprompter-agent=={version}"' in line for line in found), f"{page} installs airprompter-agent=={version}"
+        lines += found
     for line in lines:
         for name, pin in re.findall(r"(airprompter-[a-z0-9-]+(?:\[[a-z,]+\])?)(==[^\"\s`]+)?", line):
             assert pin == f"=={version}", f"{name} is not pinned to {version}: {line}"
+
+
+def test_version_lockstep_set_a_candidate_pins_exactly_and_a_final_version_moves_pins_classifiers_and_readmes(tmp_path):
+    # A copy of what the tool reads and writes, so the test changes nothing here, whatever version this tree is at.
+    shutil.copy(os.path.join(SDK_PY, "README.md"), tmp_path / "README.md")
+    os.makedirs(tmp_path / "tools")
+    shutil.copy(os.path.join(SDK_PY, "tools", "version_lockstep.py"), tmp_path / "tools" / "version_lockstep.py")
+    for name in PACKAGES:
+        os.makedirs(tmp_path / "packages" / name)
+        for file in ("pyproject.toml", "README.md"):
+            shutil.copy(os.path.join(SDK_PY, "packages", name, file), tmp_path / "packages" / name / file)
+    pages = [tmp_path / "README.md", *(tmp_path / "packages" / name / "README.md" for name in PACKAGES)]
+    tool = [sys.executable, str(tmp_path / "tools" / "version_lockstep.py")]
+    blocks = lambda: [page.read_text().count("<!-- release-candidate -->") for page in pages]  # noqa: E731
+    before = blocks()
+    assert subprocess.run([*tool, "--set", "1.0.0rc99"], capture_output=True, text=True).returncode == 0
+    assert blocks() == before, "a candidate keeps the advice it has"
+    with open(tmp_path / "README.md", "a", encoding="utf-8") as f:
+        f.write("\nNeighbours: 1.0.0rc990, 11.0.0rc99, 1.0.0rc99.1\n")
+    if "rc" in declared_version(pyproject("agent")):
+        assert all(before), "every README on a candidate carries the candidate's advice"
+    for name in PACKAGES:
+        text = (tmp_path / "packages" / name / "pyproject.toml").read_text()
+        assert '"Development Status :: 4 - Beta"' in text
+        if name != "agent":
+            assert '"airprompter-agent==1.0.0rc99"' in text, f"{name}: exact on a candidate"
+    done = subprocess.run([*tool, "--set", "1.0.0"], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    for name in PACKAGES:
+        text = (tmp_path / "packages" / name / "pyproject.toml").read_text()
+        assert '"Development Status :: 5 - Production/Stable"' in text and "Beta" not in text, f"{name}: a final version is stable"
+        if name != "agent":
+            assert '"airprompter-agent>=1.0.0,<2"' in text, f"{name}: a 1.1.0 agent installs beside a 1.0.0 {name}"
+    for page in pages:
+        text = page.read_text().replace("Neighbours: 1.0.0rc990, 11.0.0rc99, 1.0.0rc99.1", "")
+        assert "release-candidate" not in text and "rc99" not in text and "==1.0.0" in text, f"{page}: 1.0.0, without the candidate's advice"
+    assert subprocess.run(tool, capture_output=True, text=True).returncode == 0, "the check passes on what --set wrote"
+    assert "Neighbours: 1.0.0rc990, 11.0.0rc99, 1.0.0rc99.1" in (tmp_path / "README.md").read_text(), "--set moves the version as a whole token only"
+    # A page --set missed still says the candidate, and "1.0.0" inside "1.0.0rc99" does not count as naming 1.0.0.
+    page = tmp_path / "packages" / "datastore-s3" / "README.md"
+    good = page.read_text()
+    page.write_text(good.replace("==1.0.0", "==1.0.0rc99"))
+    assert "does not name 1.0.0" in subprocess.run(tool, capture_output=True, text=True).stderr
+    page.write_text(good)
+    # The check holds the classifier and the advice to the version.
+    agent = tmp_path / "packages" / "agent" / "pyproject.toml"
+    agent.write_text(agent.read_text().replace("5 - Production/Stable", "4 - Beta"))
+    assert "the classifier for 1.0.0" in subprocess.run(tool, capture_output=True, text=True).stderr
+    agent.write_text(agent.read_text().replace("4 - Beta", "5 - Production/Stable"))
+    with open(tmp_path / "README.md", "a", encoding="utf-8") as f:
+        f.write("<!-- release-candidate -->x<!-- /release-candidate -->\n")
+    assert "a release-candidate block on 1.0.0" in subprocess.run(tool, capture_output=True, text=True).stderr
 
 
 def test_no_removed_name_is_left_under_sdk_python():

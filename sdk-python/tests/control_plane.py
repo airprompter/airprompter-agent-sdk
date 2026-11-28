@@ -1,6 +1,6 @@
 """A fake control plane for SDK tests: an offline root ceremony, a signing
 key, sealed manifests per generation, payloads by hash, an edge pointer —
-served through an ``httpx.MockTransport`` the SDK takes as an option. Signs
+served through the SDK's ``Transport`` (``transport_of`` turns an httpx-style handler into one). Signs
 exactly as the hosted service does (canonical payload bytes, ES256, P1363).
 """
 
@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 
 import httpx
 
+from airprompter_agent.core import HttpRequest, HttpResponse, Transport
 from airprompter_agent.core._util import instant, iso_ms, now_ms
 from airprompter_agent.core.protocol.canonical_json import canonical_bytes, sha256_prefixed
 from airprompter_agent.core.protocol import PROTOCOL_VERSION
@@ -21,6 +22,25 @@ from airprompter_agent.core.protocol.trust import generate_p256_jwk, key_thumbpr
 PROTOCOL = PROTOCOL_VERSION
 
 new_key = generate_p256_jwk
+
+
+def transport_of(handler: Any) -> Transport:
+    """The SDK's ``Transport`` over a handler the tests write httpx-style (``httpx.Request -> httpx.Response``, or an
+    ``httpx.BaseTransport``): a timeout raises ``TimeoutError``, any other failure ``ConnectionError``. A redirect is
+    returned as it is: the SDK follows it."""
+    inner = handler if isinstance(handler, httpx.BaseTransport) else httpx.MockTransport(handler)
+
+    def send(request: HttpRequest) -> HttpResponse:
+        try:
+            response = inner.handle_request(httpx.Request(request.method, request.url, headers=dict(request.headers), content=request.content))
+            response.read()
+        except httpx.TimeoutException as error:
+            raise TimeoutError(str(error)) from error
+        except httpx.HTTPError as error:
+            raise ConnectionError(str(error)) from error
+        return HttpResponse(response.status_code, dict(response.headers), response.content)
+
+    return send
 
 
 def root_document(*, root_key: dict, signing_keys: list[dict], environment: str, version: int = 1, expires: str = "2027-12-11T00:00:00Z", purpose: str = "platform") -> dict[str, Any]:
@@ -200,8 +220,12 @@ class FakeControlPlane:
     def manifest(self) -> Optional[dict[str, Any]]:
         return self._current["manifest"] if self._current else None
 
-    def transport(self) -> httpx.MockTransport:
+    def transport(self) -> Transport:
         """The transport the SDK sees."""
+        return transport_of(self.httpx_transport())
+
+    def httpx_transport(self) -> httpx.MockTransport:
+        """The same plane for a test's own httpx client (an edge fetch the test makes itself)."""
 
         def handler(request: httpx.Request) -> httpx.Response:
             url = str(request.url)

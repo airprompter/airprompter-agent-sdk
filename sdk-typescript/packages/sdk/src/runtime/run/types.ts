@@ -9,7 +9,7 @@
  * ```ts
  * await ap.run({ subject: userId }, async (run) => {
  *   const placed = await run.place("support.reply");
- *   if (placed.kind === "passthrough") return callModel(ownPrompt, ownModel); // the framework's own prompt runs
+ *   if (placed.kind !== "approved") return callModel(ownPrompt, ownModel); // the framework's own prompt runs; so does a kind a later minor adds
  *   const started = Date.now();
  *   const reply = await callModel(placed.instructions, placed.model);
  *   run.recordModelCall("support.reply", { model: placed.model, latencyMs: Date.now() - started, usage: normalizeUsage(reply) });

@@ -14,6 +14,8 @@
  * ```ts
  * import { AirPrompterAgent } from "@airprompter/agent-sdk";
  *
+ * // PINNED_ROOT_JWK: AirPrompter's production root key, copied into your source from the README's quick start (key id
+ * // 044af6e8…1793). Its root.json is read from https://api.airprompter.com/roots/prod/root.json; any other root needs `sync: { rootUrl }`.
  * const ap = await AirPrompterAgent.start({ organizationId, agentId, target: "prod", apiKey: process.env.AIRPROMPTER_AGENT_KEY, root: { pinned: PINNED_ROOT_JWK } });
  * const r = ap.prompt("support.triage").render({ team: "Billing", ticket: userMessage }); // never touches the network
  * const reply = await ap.observe(r, () => openai.chat.completions.create({ model: r.model, messages: [{ role: "user", content: r.text }] }));

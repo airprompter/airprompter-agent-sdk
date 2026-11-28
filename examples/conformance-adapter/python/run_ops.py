@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import importlib.metadata
 import importlib.util
 import inspect
 import json
@@ -42,7 +43,7 @@ class Clock:
         return self.ms
 
 
-def _start(agent: dict, *, state_dir: str, clock: Clock, log: list, variable_sources: Optional[dict] = None, source_calls: Optional[dict] = None) -> AirPrompterAgent:
+def _start(agent: dict, *, state_dir: str, clock: Clock, log: list, variable_sources: Optional[dict] = None, source_calls: Optional[dict] = None, run_ref_secret: Optional[str] = None, run_ref_previous_secrets: Optional[list] = None) -> AirPrompterAgent:
     variables: dict[str, Any] = {}
     lock = threading.Lock()
     for name, value in (variable_sources or {}).items():
@@ -56,7 +57,8 @@ def _start(agent: dict, *, state_dir: str, clock: Clock, log: list, variable_sou
     return AirPrompterAgent.start(
         organization_id=agent["organizationId"], agent_id=agent["agentId"], target=agent["target"], state_dir=state_dir,
         root={"pinned": agent["rootPublicJwk"]}, telemetry={"sink": "memory"}, now=clock, logger=log.append,
-        run_ref_secret=agent["runRefSecret"], run_idle_timeout_ms=agent["idleTimeoutMs"], **({"variables": variables} if variables else {}),
+        run_ref_secret=run_ref_secret or agent["runRefSecret"], run_idle_timeout_ms=agent["idleTimeoutMs"], **({"variables": variables} if variables else {}),
+        **({"run_ref_previous_secrets": run_ref_previous_secrets} if run_ref_previous_secrets else {}),
     )
 
 
@@ -292,24 +294,48 @@ def drive_run(a: dict) -> dict:
     state_dir = tempfile.mkdtemp(prefix="ap-conformance-drive-")
     out = _new_out()
     ap = _start(agent, state_dir=state_dir, clock=clock, log=log)
+    others: list = []
+
+    class Host:
+        """More agents a fixture asks for (another pod, another store): each on its own store and the same clock, the
+        release applied unless ``release=False``, with its own run-reference secrets. Every one is stopped and drained."""
+
+        def start_agent(self, *, release: bool = True, run_ref_secret: Optional[str] = None, run_ref_previous_secrets: Optional[list] = None) -> AirPrompterAgent:
+            folder = tempfile.mkdtemp(prefix="ap-conformance-drive-")
+            started = _start(agent, state_dir=folder, clock=clock, log=log, run_ref_secret=run_ref_secret, run_ref_previous_secrets=run_ref_previous_secrets)
+            others.append({"ap": started, "dir": folder, "stopped": False})
+            if release and a.get("bundle"):
+                _apply(started, a["bundle"])
+            return started
+
     stopped = False
     try:
         if a.get("bundle"):
             _apply(ap, a["bundle"])
         # Keywords only, and a driver takes ``**_``: a later part adds to the context without breaking one. An async
         # driver (an async-only framework) is run to completion here.
-        driven = driver.drive_run(ap=ap, fixture=fixture, clock=clock)
+        driven = driver.drive_run(ap=ap, fixture=fixture, clock=clock, host=Host())
         if inspect.iscoroutine(driven):
             driven = asyncio.run(driven)
         stopped = True
         _finish(ap, out)
+        for other in others:
+            other["stopped"] = True
+            _finish(other["ap"], out)
         result = {"placements": _placements_of(log), "calls": driven["calls"], "runRefs": driven.get("runRefs", []), **out, "log": _loggable(log)}
-        if "state" in driven:
-            result["state"] = driven["state"]
+        if a.get("package"):
+            result["frameworkVersion"] = importlib.metadata.version(a["package"])
+        for key in ("state", "results"):
+            if key in driven:
+                result[key] = driven[key]
         return result
     finally:
         if not stopped:
             ap.stop()
+        for other in others:
+            if not other["stopped"]:
+                other["ap"].stop()
+            shutil.rmtree(other["dir"], ignore_errors=True)
         shutil.rmtree(state_dir, ignore_errors=True)
 
 

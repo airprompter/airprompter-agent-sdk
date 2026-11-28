@@ -1,0 +1,62 @@
+{
+  "framework": "anthropic",
+  "language": "py",
+  "frameworkVersion": "2.14.0",
+  "kind": "passthrough",
+  "note": "With nothing verified the call passes through untouched as no_verified_release, and writes no window row.",
+  "release": null,
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply"
+      }
+    ],
+    "baseline": true,
+    "steps": [
+      {
+        "client": 0,
+        "model": "claude-haiku-4-5",
+        "system": "The caller's own prompt."
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.reply",
+        "kind": "passthrough",
+        "reason": "no_verified_release"
+      }
+    ],
+    "calls": [
+      {
+        "untouched": true,
+        "system": [
+          "The caller's own prompt."
+        ],
+        "model": "claude-haiku-4-5"
+      }
+    ],
+    "rows": [],
+    "runCounters": {
+      "passthrough": {
+        "no_verified_release": 1
+      }
+    }
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "framework": "anthropic",
+  "language": "py",
+  "frameworkVersion": "2.14.0",
+  "kind": "tool-loop",
+  "note": "Five model calls and four tools in the application's own loop are one run, every call on the release's text and model. A direct client sees the tool loop as model calls only, so the row counts no tools and says so (toolsReported false).",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "claude-sonnet-4-5"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply",
+        "modelFor": {
+          "claude-sonnet-4-5": "claude-sonnet-4-5"
+        }
+      }
+    ],
+    "steps": [
+      {
+        "client": 0,
+        "model": "claude-haiku-4-5",
+        "system": "The caller's own prompt.",
+        "tools": [
+          "lookup"
+        ]
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "toolCalls": [
+          "lookup"
+        ],
+        "usage": {
+          "input": 100,
+          "output": 10
+        }
+      },
+      {
+        "toolCalls": [
+          "lookup"
+        ],
+        "usage": {
+          "input": 110,
+          "output": 10
+        }
+      },
+      {
+        "toolCalls": [
+          "lookup"
+        ],
+        "usage": {
+          "input": 120,
+          "output": 10
+        }
+      },
+      {
+        "toolCalls": [
+          "lookup"
+        ],
+        "usage": {
+          "input": 130,
+          "output": 10
+        }
+      },
+      {
+        "content": "All done.",
+        "usage": {
+          "input": 140,
+          "output": 20
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.reply",
+        "kind": "approved",
+        "versionId": "ver_a",
+        "arm": "none"
+      }
+    ],
+    "calls": [
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "claude-sonnet-4-5"
+      },
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "claude-sonnet-4-5"
+      },
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "claude-sonnet-4-5"
+      },
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "claude-sonnet-4-5"
+      },
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "claude-sonnet-4-5"
+      }
+    ],
+    "runRef": {
+      "entries": 1,
+      "runIdStable": true,
+      "count": 1
+    },
+    "rows": [
+      {
+        "tag": "support.reply",
+        "model": "claude-sonnet-4-5",
+        "versionId": "ver_a",
+        "arm": "none",
+        "count": 1,
+        "agentRun": 1,
+        "modelCalls": 5,
+        "status": "ok",
+        "errorClass": null,
+        "usageSource": "reported",
+        "toolsReported": false,
+        "tools": {
+          "calls": 0,
+          "errors": 0
+        },
+        "tokens": {
+          "input": 600,
+          "output": 60
+        }
+      }
+    ],
+    "runCounters": {
+      "passthrough": {}
+    }
+  }
+}

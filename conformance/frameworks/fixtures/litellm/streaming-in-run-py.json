@@ -1,0 +1,86 @@
+{
+  "framework": "litellm",
+  "language": "py",
+  "frameworkVersion": "1.111.0",
+  "kind": "streaming",
+  "note": "A sync stream=True call inside ap.run, marked with litellm_metadata((run, slot)): LiteLLM logs it after the stream ends, on a worker thread without the caller's context, and the callback finds the run by its reference, so it is that run's one model call. The usage is LiteLLM's own count of the mocked text.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply"
+      }
+    ],
+    "steps": [
+      {
+        "client": 0,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt.",
+        "stream": true
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.reply",
+        "kind": "approved",
+        "versionId": "ver_a",
+        "arm": "none"
+      }
+    ],
+    "calls": [
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "gpt-5",
+        "stream": true
+      }
+    ],
+    "runRef": {
+      "entries": 1,
+      "count": 1
+    },
+    "rows": [
+      {
+        "tag": "support.reply",
+        "model": "gpt-5",
+        "versionId": "ver_a",
+        "count": 1,
+        "agentRun": 1,
+        "modelCalls": 1,
+        "status": "ok",
+        "usageSource": "reported",
+        "tokens": {
+          "input": 20,
+          "output": 5
+        }
+      }
+    ]
+  }
+}

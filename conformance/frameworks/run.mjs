@@ -58,6 +58,8 @@ export function schemaErrors(kind, document) {
 // is added, so a new adapter cannot owe nothing by omission.
 
 export const FRAMEWORK_TRAITS = {
+  // The SDK's own run API, no framework: where a run lives (another store, another invocation), in each language.
+  agent: { stream: false, map: false, state: false, sdk: true },
   openai: { stream: true, map: false, state: false },
   anthropic: { stream: true, map: false, state: false },
   "ai-sdk": { stream: true, map: false, state: false },
@@ -69,20 +71,48 @@ export const FRAMEWORK_TRAITS = {
   "pydantic-ai": { stream: true, map: true, state: true },
 };
 
+/**
+ * The package whose version a framework's `frameworkVersion` pins, per language. The `frameworks` section fails a
+ * fixture whose installed package is another version, unless AIRPROMPTER_FRAMEWORKS_LATEST=1 (the weekly run on each
+ * framework's newest release), which names the version in each case instead. A framework of the SDK's own (`sdk`)
+ * pins nothing.
+ */
+export const FRAMEWORK_PACKAGES = {
+  openai: { ts: "openai", py: "openai" },
+  anthropic: { ts: "@anthropic-ai/sdk", py: "anthropic" },
+  "ai-sdk": { ts: "ai" },
+  litellm: { py: "litellm" },
+  langchain: { ts: "langchain", py: "langchain" },
+  langgraph: { ts: "@langchain/langgraph", py: "langgraph" },
+  "openai-agents": { ts: "@openai/agents", py: "openai-agents" },
+  mastra: { ts: "@mastra/core" },
+  "pydantic-ai": { py: "pydantic-ai" },
+};
+
 const NAMED = (...names) => (framework) => names.includes(framework);
+const ADAPTER = (framework) => !FRAMEWORK_TRAITS[framework].sdk;
 export const REQUIRED_KINDS = {
-  "tool-loop": () => true,
+  "tool-loop": ADAPTER,
   streaming: (framework) => FRAMEWORK_TRAITS[framework].stream,
   "stream-escape": NAMED("openai-agents"),
   handoff: NAMED("openai", "anthropic", "ai-sdk", "langchain", "langgraph", "openai-agents", "mastra", "pydantic-ai"),
   "node-map": NAMED("langchain", "langgraph", "openai-agents", "mastra", "pydantic-ai"),
-  passthrough: () => true,
+  passthrough: ADAPTER,
   interrupted: NAMED("langchain", "langgraph", "pydantic-ai", "openai-agents", "mastra"),
-  model: () => true,
+  model: ADAPTER,
   "late-tag": NAMED("langchain", "langgraph", "openai-agents", "pydantic-ai", "mastra", "ai-sdk"),
   "slot-typo": (framework) => FRAMEWORK_TRAITS[framework].map,
   "canary-checkpoint": (framework) => FRAMEWORK_TRAITS[framework].state,
-  settings: () => true,
+  settings: ADAPTER,
+  // AIR-2558: a sealed setting the installed client refuses is left off, logged once, and the call still goes out.
+  // Required for a framework while a pinned client release refuses a sealed keyword (Python anthropic 2.14 refuses
+  // `temperature`), in both languages: the other language's twin records what its client does with the same release.
+  // When another client starts refusing one, name its framework here and record its case against that release; when
+  // a client takes the keyword again, its case is re-recorded to say so, or the framework leaves this list.
+  "client-refuses-setting": NAMED("anthropic"),
+  // Per language, on the SDK's own run API (the `agent` folder).
+  "two-store": (framework) => FRAMEWORK_TRAITS[framework].sdk === true,
+  "split-invocation": (framework) => FRAMEWORK_TRAITS[framework].sdk === true,
 };
 
 const every = (framework, reason) => Object.fromEntries(Object.keys(REQUIRED_KINDS).filter((kind) => REQUIRED_KINDS[kind](framework)).map((kind) => [kind, reason]));
@@ -95,14 +125,6 @@ const every = (framework, reason) => Object.fromEntries(Object.keys(REQUIRED_KIN
 export const EXEMPTIONS = {
   // S0's middleware: AIR-2234 moves it onto the adapter contract and adds every kind but its tool loop.
   "langchain/ts": Object.fromEntries(Object.entries(every("langchain", "AIR-2234: S0's middleware moves onto the contract there")).filter(([kind]) => kind !== "tool-loop")),
-  // AIR-2233 part 2 adds these fixtures with their drivers, and deletes these lines.
-  "openai/ts": every("openai", "AIR-2233 part 2"),
-  "anthropic/ts": every("anthropic", "AIR-2233 part 2"),
-  "ai-sdk/ts": every("ai-sdk", "AIR-2233 part 2"),
-  "openai/py": every("openai", "AIR-2233 part 2"),
-  "anthropic/py": every("anthropic", "AIR-2233 part 2"),
-  // The ticket's own ruling stays after part 2: LiteLLM owes no streaming until a customer needs it.
-  "litellm/py": { ...every("litellm", "AIR-2233 part 2"), streaming: "AIR-2233: exempt until a customer needs it, by the ticket's ruling" },
 };
 
 /**
@@ -114,6 +136,9 @@ export function shippedAdapters(root = repo) {
   const out = [];
   const ts = join(root, "sdk-typescript", "packages", "sdk", "src", "frameworks");
   const py = join(root, "sdk-python", "packages", "agent", "src", "airprompter_agent", "frameworks");
+  // Each SDK's own run API owes the per-language kinds.
+  if (existsSync(ts)) out.push({ framework: "agent", language: "ts" });
+  if (existsSync(py)) out.push({ framework: "agent", language: "py" });
   if (existsSync(ts)) for (const file of readdirSync(ts)) if (file.endsWith(".ts") && file !== "contract.ts" && !file.startsWith("_")) out.push({ framework: file.slice(0, -3), language: "ts" });
   if (existsSync(py)) for (const file of readdirSync(py)) if (file.endsWith(".py") && !["__init__.py", "contract.py"].includes(file) && !file.startsWith("_")) out.push({ framework: file.slice(0, -3).replaceAll("_", "-"), language: "py" });
   return out;
@@ -265,6 +290,7 @@ export async function runSection(name, ctx) {
       subsetMatches, matchRowSet, sameJson, short, readJson,
       EXEMPTIONS: options.exemptions ?? EXEMPTIONS,
       FIXTURES_DIR: fixturesDir,
+      FRAMEWORK_PACKAGES,
       VECTORS_DIR: options.vectorsDir ?? VECTORS_DIR,
     },
   });

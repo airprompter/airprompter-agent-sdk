@@ -44,7 +44,7 @@ from typing import Any, Awaitable, Callable, Mapping, Optional, Sequence, TypeVa
 
 import httpx
 
-from airprompter_agent.core import instant
+from airprompter_agent.core import ERROR_CLASSES, instant
 from airprompter_agent.core._util import iso_ms, now_ms, random_id
 from airprompter_agent.sync import UpdateWindow, parse_window, window_state
 from airprompter_agent.core import DistributionKey, bundle_payload_bytes, open_bundle
@@ -68,7 +68,7 @@ from airprompter_agent.sync import jittered_delay_ms, sync_once
 from airprompter_agent.core import evaluate_checks, output_text_of
 from airprompter_agent.core import GoldenInvoke, GoldenReport, golden_reports_meet, manifest_has_golden, parse_golden_set, run_golden_set
 from airprompter_agent.core import JUDGE_RUBRICS, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
-from airprompter_agent.runtime import PendingObservation, ObserveTarget, observe_call, observe_call_async
+from airprompter_agent.runtime import PendingObservation, ObserveTarget, classify_error, observe_call, observe_call_async
 from airprompter_agent.core import ReleaseSlot
 from airprompter_agent.runtime import ReleaseResolver, Rendered, Workflow, WorkflowStep, copy_inference, disabled_from
 from airprompter_agent.runtime import DEFAULT_RUN_IDLE_TIMEOUT_MS, Run, RunInput, RunRegistry, RunScope, RunSession, new_subject
@@ -2366,6 +2366,67 @@ class AirPrompterAgent:
         # Feedback rides on each run window: same dimension set, no extra count (the run was already counted).
         for entry in entries:
             self.spool.outcomes(tag=entry["tag"], artifact_id=entry["artifactId"], version_id=entry["versionId"], arm=entry["arm"], model=model or entry["model"], outcomes=normalized.outcomes, at_ms=self._now_ms(), audience_ids=entry.get("audienceIds"), outcome_run_minute=entry["runMinute"])
+        return True
+
+    def report_run(self, run_ref: str, *, input_tokens: Optional[int] = None, cached_input_tokens: Optional[int] = None, output_tokens: Optional[int] = None, error: Any = None, latency_ms: Optional[float] = None, model: Optional[str] = None, slot: Optional[str] = None) -> bool:
+        """What a separate step reports for a prompt rendered earlier, by its ``run_ref``: TypeScript's ``ap.reportRun``,
+        the same rules (AIR-2233 parity). Counts and a class only, no prompt, output or error message is ever written.
+        ``input_tokens`` counts cached ones too, ``cached_input_tokens`` says how many; with ``output_tokens`` as well,
+        the usage is ``reported``. ``error`` is an error class by name, else classified like a thrown error.
+        ``latency_ms`` defaults to the time since the render minute. ``model`` names the provider model that answered
+        when it was another; ``slot``, the entry when the reference names several. One one-call run on the entry's
+        own version, arm and minute; False, with one log, when the report is refused."""
+        def refuse(reason: str) -> bool:
+            self._log({"event": "run_report_rejected", "reason": reason})
+            return False
+
+        fields: dict[str, Any] = {"inputTokens": input_tokens, "cachedInputTokens": cached_input_tokens, "outputTokens": output_tokens, "error": error, "latencyMs": latency_ms, "model": model, "slot": slot}
+        if not isinstance(run_ref, str):
+            return refuse("invalid_input")
+        facts = parse_run_ref(run_ref, self._run_ref_keys)
+        if facts is None or not facts.entries:
+            return refuse("run_ref_invalid")
+        entries = list(facts.entries) if fields.get("slot") is None else [e for e in facts.entries if e["tag"] == fields["slot"]]
+        if not entries:
+            return refuse("slot_not_in_run")
+        # Usage belongs to one model step, and one step ran one slot: it is never split across a reference's entries.
+        if len(entries) > 1:
+            return refuse("slot_required")
+        entry = entries[0]
+        model = fields.get("model") if fields.get("model") is not None else entry["model"]
+        if not isinstance(model, str) or not 1 <= len(model) <= 128 or re.search(r"[\x00-\x1f\x7f]", model):
+            return refuse("invalid_model")
+
+        def is_count(value: Any) -> bool:
+            return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 2**53 - 1
+
+        for name in ("inputTokens", "cachedInputTokens", "outputTokens"):
+            if fields.get(name) is not None and not is_count(fields[name]):
+                return refuse(f"invalid_{name}")
+        latency = fields.get("latencyMs")
+        if latency is not None and not (isinstance(latency, (int, float)) and not isinstance(latency, bool) and math.isfinite(latency) and latency >= 0):
+            return refuse("invalid_latencyMs")
+        cached = fields.get("cachedInputTokens") or 0
+        if fields.get("inputTokens") is not None and cached > fields["inputTokens"]:
+            return refuse("invalid_cachedInputTokens")
+        # ``reported`` needs both sides: half a usage would read as a cheap run on the gate's tokens per run.
+        reported = fields.get("inputTokens") is not None and fields.get("outputTokens") is not None
+        failed = error is not None and error is not False and error != ""
+        error_class = None if not failed else (error if isinstance(error, str) and error in ERROR_CLASSES else classify_error({"message": error} if isinstance(error, str) else error))
+        now = self._now_ms()
+        try:
+            self.spool.observe(Observation(
+                tag=entry["tag"], artifact_id=entry["artifactId"], version_id=entry["versionId"], arm=entry["arm"], model=model,
+                audience_ids=tuple(entry["audienceIds"]) if entry.get("audienceIds") else None, run_minute=entry["runMinute"],
+                status="error" if error_class else "ok", error_class=error_class,
+                # The reference keeps its render minute and no finer time, so with no measured duration this is an upper bound.
+                latency_ms=latency if latency is not None else max(0, now - instant(entry["runMinute"])),
+                tokens={"input": fields["inputTokens"] - cached, "cachedInput": cached, "output": fields["outputTokens"]} if reported else None,
+                usage_source="reported" if reported else "unavailable",
+            ), now)
+        except Exception as error_:  # noqa: BLE001 — telemetry never fails the caller
+            self._log({"event": "observation_dropped", "reason": str(error_)})
+            return False
         return True
 
     def explain(self, run_ref: str) -> Optional[list[Mapping[str, Any]]]:

@@ -21,6 +21,7 @@
     "version:lockstep": "node scripts/version-lockstep.mjs"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.129.0",
     "@aws-sdk/client-s3": "^3.1141.0",
     "@langchain/anthropic": "1.6.0",
     "@langchain/core": "1.3.4",
@@ -33,6 +34,7 @@
     "ajv-formats": "3.0.1",
     "ioredis": "^5.11.1",
     "langchain": "1.6.1",
+    "openai": "7.50.0",
     "pg": "^8.23.0",
     "redis": "^4.7.1",
     "tsx": "^4.20.3",

@@ -101,7 +101,7 @@ test("each failing expectation is reported by name; a right answer passes, judge
   const dir = tree(kinds);
   const options = { fixturesDir: dir, adapters: [{ framework: "openai", language: "ts" }], exemptions: {} };
   try {
-    const right = { calls: [{ system: "Approved.", model: "gpt-5", settings: {} }], rows: [{ type: "window", tag: "support.reply", count: 1, modelCalls: 1, arm: "none" }], runRefs: [], placements: [], runCounters: { passthrough: {} }, state: {} };
+    const right = { calls: [{ system: "Approved.", model: "gpt-5", settings: {} }], rows: [{ type: "window", tag: "support.reply", count: 1, modelCalls: 1, arm: "none" }], runRefs: [], placements: [], runCounters: { passthrough: {} }, state: {}, frameworkVersion: "6.0.0" };
     const good = collector();
     await runSection("frameworks", good.ctx(stub("ts", { driveRun: () => right }), options));
     // No run reference came back, so runRef fails by name on the kinds that need one; everything else passes.
@@ -115,9 +115,44 @@ test("each failing expectation is reported by name; a right answer passes, judge
     assert.ok(labels.includes("openai tool-loop: openai/tool-loop-ts.json › rows"));
     assert.match(wrong.failed().find((c) => c.label.endsWith("tool-loop-ts.json › calls[0]")).detail, /gpt-4\.1/);
 
+    // Another installed version than the fixture's fails by name; the weekly latest run names the version instead.
+    const stale = collector();
+    await runSection("frameworks", stale.ctx(stub("ts", { driveRun: () => ({ ...right, frameworkVersion: "6.1.0" }) }), options));
+    assert.match(stale.failed().find((c) => c.label.endsWith("tool-loop-ts.json › frameworkVersion"))?.detail ?? "", /openai 6\.1\.0 is installed; the fixture was recorded from 6\.0\.0/);
+    process.env.AIRPROMPTER_FRAMEWORKS_LATEST = "1";
+    try {
+      const latest = collector();
+      await runSection("frameworks", latest.ctx(stub("ts", { driveRun: () => ({ ...right, frameworkVersion: "6.1.0" }) }), options));
+      assert.ok(!latest.failed().some((c) => c.label.endsWith("› frameworkVersion")));
+      assert.ok(latest.checks.some((c) => c.label.includes("(openai 6.1.0)")), "the version that ran is in the case's name");
+    } finally {
+      delete process.env.AIRPROMPTER_FRAMEWORKS_LATEST;
+    }
+
     const other = collector();
     await runSection("frameworks", other.ctx(stub("py", { driveRun: () => assert.fail("a TypeScript fixture never reaches a Python adapter") }), options));
     assert.deepEqual(other.failed(), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("events count by name, and with `fields` every one must carry them; no reported log fails even a count of 0", async () => {
+  const want = { count: 1, fields: { setting: [{ setting: "temperatureMilli", reason: "client" }] } };
+  const dir = tree({ "openai/settings-ts.json": fixtureOf({ kind: "settings", expect: { calls: [{ system: "Approved.", model: "gpt-5" }], rows: [], events: { adapter_inference_unsupported: want, adapter_late_record: 0 } } }) });
+  assert.notEqual(schemaErrors("fixture", fixtureOf({ kind: "settings", expect: { calls: [], rows: [], events: { e: { count: 1 } } } })), null, "an object form names its fields");
+  const run = async (log) => {
+    const c = collector();
+    const answer = { calls: [{ system: "Approved.", model: "gpt-5" }], rows: [], frameworkVersion: "6.0.0", ...(log === undefined ? {} : { log }) };
+    await runSection("frameworks", c.ctx(stub("ts", { driveRun: () => answer }), { fixturesDir: dir, adapters: [], exemptions: {} }));
+    return c.failed().filter((f) => f.label.includes("settings-ts.json")).map((f) => f.label.split(" › ")[1]);
+  };
+  try {
+    const event = (setting, reason) => ({ event: "adapter_inference_unsupported", setting: [{ setting, reason }] });
+    assert.deepEqual(await run([event("temperatureMilli", "client")]), []);
+    assert.deepEqual(await run([event("temperatureMilli", "shape")]), ["events.adapter_inference_unsupported"], "the wrong reason fails");
+    assert.deepEqual(await run([event("temperatureMilli", "client"), event("topPBps", "client")]), ["events.adapter_inference_unsupported"], "one too many fails");
+    assert.deepEqual(await run(undefined), ["events"], "an adapter that reports no log cannot pass");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -147,17 +182,12 @@ test("the coverage rule fails a framework missing a required kind, naming both, 
 test("the tree's own coverage holds for both languages, every shipped adapter is counted, and the exemptions are these", () => {
   assert.deepEqual(coverageGaps(loadFixtures()), []);
   const shipped = shippedAdapters().map((a) => `${a.framework}/${a.language}`).sort();
-  assert.deepEqual(shipped, ["ai-sdk/ts", "anthropic/py", "anthropic/ts", "langchain/ts", "litellm/py", "openai/py", "openai/ts"]);
+  assert.deepEqual(shipped, ["agent/py", "agent/ts", "ai-sdk/ts", "anthropic/py", "anthropic/ts", "langchain/ts", "litellm/py", "openai/py", "openai/ts"]);
   // Pinned: an exemption is added or lifted here on purpose, with its ticket.
   assert.deepEqual(Object.fromEntries(Object.entries(EXEMPTIONS).map(([key, kinds]) => [key, Object.keys(kinds).sort()])), {
     "langchain/ts": ["canary-checkpoint", "handoff", "interrupted", "late-tag", "model", "node-map", "passthrough", "settings", "slot-typo", "streaming"],
-    "openai/ts": ["handoff", "model", "passthrough", "settings", "streaming", "tool-loop"],
-    "anthropic/ts": ["handoff", "model", "passthrough", "settings", "streaming", "tool-loop"],
-    "ai-sdk/ts": ["handoff", "late-tag", "model", "passthrough", "settings", "streaming", "tool-loop"],
-    "openai/py": ["handoff", "model", "passthrough", "settings", "streaming", "tool-loop"],
-    "anthropic/py": ["handoff", "model", "passthrough", "settings", "streaming", "tool-loop"],
-    "litellm/py": ["model", "passthrough", "settings", "streaming", "tool-loop"],
   });
+  assert.ok(!Object.values(EXEMPTIONS).some((kinds) => Object.values(kinds).some((reason) => /AIR-2233 part 2/.test(reason))), "part 2 left no exemption of its own");
   for (const kinds of Object.values(EXEMPTIONS)) for (const reason of Object.values(kinds)) assert.match(reason, /\bAIR-\d+\b/);
 });
 
@@ -337,7 +367,11 @@ test("the driver scan refuses an SDK internal however it is spelt, and every dri
   } catch {
     // no Python drivers yet
   }
-  for (const file of pyFiles) assert.deepEqual(pyDriverViolations(readFileSync(join(pyDir, file), "utf8")), [], file);
+  // A known gap, each with the ticket that closes it: LiteLLM's subpath has no measuring helper, so its driver measures
+  // with the contract's `measure_call`, as LiteLLM's own docs tell a developer to (AIR-2545, `instrument(litellm)`).
+  const KNOWN = { "litellm.py": ["airprompter_agent.frameworks.contract"] };
+  for (const file of pyFiles) assert.deepEqual(pyDriverViolations(readFileSync(join(pyDir, file), "utf8")), KNOWN[file] ?? [], file);
+  assert.ok(pyFiles.includes("litellm.py"), "the known gap names a driver that exists: delete it with AIR-2545");
 });
 
 test("the fixture tree's folders are the frameworks named in their fixtures", () => {

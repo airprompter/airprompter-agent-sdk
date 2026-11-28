@@ -1,0 +1,86 @@
+{
+  "framework": "litellm",
+  "language": "py",
+  "frameworkVersion": "1.111.0",
+  "kind": "model",
+  "note": "modelFor declines the release's id: the slot is model_unresolved, the caller's request goes out untouched, and one error row is written against the version.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply",
+        "modelFor": {
+          "gpt-5": null
+        }
+      }
+    ],
+    "baseline": true,
+    "steps": [
+      {
+        "client": 0,
+        "model": "gpt-4.1",
+        "system": "The caller's own prompt."
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.reply",
+        "kind": "passthrough",
+        "reason": "model_unresolved",
+        "versionId": "ver_a",
+        "declined": true
+      }
+    ],
+    "calls": [
+      {
+        "untouched": true,
+        "system": [
+          "The caller's own prompt."
+        ],
+        "model": "gpt-4.1"
+      }
+    ],
+    "rows": [
+      {
+        "tag": "support.reply",
+        "model": "gpt-5",
+        "versionId": "ver_a",
+        "count": 1,
+        "agentRun": 1,
+        "status": "error",
+        "errorClass": "model_unresolved"
+      }
+    ],
+    "runCounters": {
+      "passthrough": {
+        "model_unresolved": 1
+      }
+    }
+  }
+}

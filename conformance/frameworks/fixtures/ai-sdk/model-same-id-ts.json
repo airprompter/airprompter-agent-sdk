@@ -1,0 +1,81 @@
+{
+  "framework": "ai-sdk",
+  "language": "ts",
+  "frameworkVersion": "7.0.162",
+  "packages": {
+    "ai": "7.0.162",
+    "@ai-sdk/provider": "4.0.35",
+    "zod": "4.6.7"
+  },
+  "kind": "model",
+  "note": "The caller names the release's own model: it stays, and the approved text goes with it.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "gpt-5"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply"
+      }
+    ],
+    "steps": [
+      {
+        "client": 0,
+        "model": "gpt-5",
+        "system": "The caller's own prompt."
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.reply",
+        "kind": "approved",
+        "versionId": "ver_a",
+        "arm": "none"
+      }
+    ],
+    "calls": [
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "gpt-5"
+      }
+    ],
+    "rows": [
+      {
+        "tag": "support.reply",
+        "model": "gpt-5",
+        "versionId": "ver_a",
+        "count": 1,
+        "status": "ok"
+      }
+    ],
+    "runCounters": {
+      "passthrough": {}
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "framework": "anthropic",
+  "language": "py",
+  "frameworkVersion": "2.14.0",
+  "kind": "model",
+  "note": "modelFor maps the release's id onto the id the application sends (a gateway alias): the alias goes on the wire, the release's id on the row.",
+  "release": {
+    "slots": [
+      {
+        "tag": "support.reply",
+        "text": "You answer support tickets for Acme.",
+        "versionId": "ver_a",
+        "model": "claude-sonnet-4-5"
+      }
+    ]
+  },
+  "agent": {
+    "clients": [
+      {
+        "slot": "support.reply",
+        "modelFor": {
+          "claude-sonnet-4-5": "gateway-claude-sonnet-4-5"
+        }
+      }
+    ],
+    "steps": [
+      {
+        "client": 0,
+        "model": "claude-haiku-4-5",
+        "system": "The caller's own prompt."
+      }
+    ]
+  },
+  "input": {
+    "subject": "user-1"
+  },
+  "recorded": {
+    "turns": [
+      {
+        "content": "Thanks for writing in.",
+        "usage": {
+          "input": 42,
+          "cachedInput": 12,
+          "output": 8
+        }
+      }
+    ]
+  },
+  "expect": {
+    "placements": [
+      {
+        "slot": "support.reply",
+        "kind": "approved",
+        "versionId": "ver_a",
+        "arm": "none"
+      }
+    ],
+    "calls": [
+      {
+        "system": [
+          "You answer support tickets for Acme."
+        ],
+        "model": "gateway-claude-sonnet-4-5"
+      }
+    ],
+    "rows": [
+      {
+        "tag": "support.reply",
+        "model": "claude-sonnet-4-5",
+        "versionId": "ver_a",
+        "count": 1,
+        "status": "ok"
+      }
+    ],
+    "runCounters": {
+      "passthrough": {}
+    }
+  }
+}

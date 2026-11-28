@@ -46,10 +46,10 @@ Custom auth, with these fields:
 The connection test fetches the signed manifest, verifies it against the pinned root, and
 stores it.
 
-> **Production root:** `HOSTED_ROOTS` in the SDK's Steps core
-> ([`sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`](../../sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts))
-> pins both the hosted `dev` root and the `prod` root (ceremony of 2026-11-27, key id `044af6e8…1793`).
-> The prod pin ships in the first SDK release after `1.0.0-rc.4`. Until this app depends on that release,
+> **Production root:** `HOSTED_ROOTS` in the SDK
+> ([`sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts`](../../sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts),
+> which the Steps core pins from) holds both the hosted `dev` root and the `prod` root (ceremony of 2026-11-27,
+> key id `044af6e8…1793`). The prod pin needs `@airprompter/agent-sdk` `1.0.0-rc.5` or later: on an older pin,
 > every connection to the production API reports `root_not_pinned`, unless the root is pasted into the advanced field.
 
 ## Where the signed copy lives (storage decision)
@@ -156,8 +156,8 @@ npm run validate                                         # zapier-platform valid
 
 None of these steps have been run. They need the owner's Zapier account.
 
-1. Depend on the first SDK release that pins the production root (`HOSTED_ROOTS.prod`
-   in `sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts`, after `1.0.0-rc.4`).
+1. Depend on `@airprompter/agent-sdk` `1.0.0-rc.5` or later, which pins the production root (`HOSTED_ROOTS.prod`
+   in `sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts`).
 2. `npx zapier-platform login`, then `npx zapier-platform register "AirPrompter Agents"`
    (once). This writes `.zapierapprc`, which is gitignored.
 3. `npm run build && npx zapier-platform push`. The SDK comes from npm

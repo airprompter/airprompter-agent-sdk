@@ -19,7 +19,7 @@ export default {
   section: "frameworks",
   operations: ["driveRun"],
   slow: ["driveRun"],
-  async run({ adapter, ok, fail, helpers }) {
+  async run({ adapter, ok, fail, helpers, options }) {
     const { schemaErrors, loadFixtures, coverageGaps, subsetMatches, matchRowSet, sameJson, short } = helpers;
     const language = adapter.language;
     if (!language) return fail("frameworks", "the adapter names no language (capabilities `language`: ts or py), so its fixtures cannot be chosen");
@@ -42,12 +42,18 @@ export default {
     }
 
     const key = runRefKeyFrom(FIXTURE_AGENT.runRefSecret, FIXTURE_AGENT.agentId, FIXTURE_AGENT.target);
-    for (const { file, fixture } of valid.filter((e) => e.fixture.language === language)) {
+    // `--framework <name>`: one framework's cases (the weekly job runs one framework per job).
+    const only = options?.framework ?? null;
+    // A filter that selects nothing in this language is a failure, never a green run that tested nothing.
+    if (only && !valid.some((e) => e.folder === only && e.fixture.language === language)) fail(`frameworks: ${only}`, `no ${language} fixture of that framework`);
+    for (const { file, fixture } of valid.filter((e) => e.fixture.language === language && (!only || e.folder === only))) {
       const label = `${fixture.framework} ${fixture.kind}: ${file}`;
       const sealer = newSealer({ organizationId: FIXTURE_AGENT.organizationId, agentId: FIXTURE_AGENT.agentId, target: FIXTURE_AGENT.target });
       const bundle = fixture.release ? sealer.seal(fixture.release, { nowMs: FIXTURE_AGENT.t0 }) : null;
       const pkg = helpers.FRAMEWORK_PACKAGES[fixture.framework]?.[fixture.language];
-      const answer = await adapter.call("driveRun", { fixture, bundle, agent: { ...FIXTURE_AGENT, rootPublicJwk: sealer.rootPublicJwk }, ...(pkg ? { package: pkg } : {}) });
+      // Every package the fixture was recorded with: the framework's own, and the others it lists.
+      const pinned = { ...(pkg ? { [pkg]: fixture.frameworkVersion } : {}), ...(fixture.packages ?? {}) };
+      const answer = await adapter.call("driveRun", { fixture, bundle, agent: { ...FIXTURE_AGENT, rootPublicJwk: sealer.rootPublicJwk }, ...(pkg ? { package: pkg } : {}), packages: Object.keys(pinned) });
       if (answer.error) {
         fail(label, `driveRun refused: ${answer.error.reason} ${answer.error.message ?? ""}`.trim());
         continue;
@@ -58,6 +64,10 @@ export default {
       // The fixture says what it was recorded from; the run says what ran. On the pinned lanes they are one version.
       const latest = process.env.AIRPROMPTER_FRAMEWORKS_LATEST === "1";
       if (pkg && !latest && r.frameworkVersion !== fixture.frameworkVersion) miss("frameworkVersion", `${pkg} ${r.frameworkVersion ?? "(not reported)"} is installed; the fixture was recorded from ${fixture.frameworkVersion}`);
+      if (!latest) for (const [name, version] of Object.entries(fixture.packages ?? {})) {
+        const installed = r.packageVersions?.[name];
+        if (installed !== version) miss(`packages.${name}`, `${name} ${installed ?? "(not reported)"} is installed; the fixture was recorded with ${version}`);
+      }
       const expect = fixture.expect;
       const ordered = (name, actual, expected) => {
         if (!Array.isArray(actual)) return miss(name, `the adapter reported no ${name}`);

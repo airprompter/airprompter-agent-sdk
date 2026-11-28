@@ -21,8 +21,10 @@ In this repository the harness also runs two framework sections,
 `run-session` (the run session's rules 1 to 11, the same scripts through both
 SDKs, whose rows must be equal) and `frameworks` (every framework adapter's
 recorded fixtures through the framework's real hooks, and the coverage rule):
-[`frameworks/README.md`](frameworks/README.md). `test/frameworks.test.mjs` is
-their runner's suite.
+[`frameworks/README.md`](frameworks/README.md), which also says how to add a
+framework (a driver and recorded fixtures) and what CI runs: the
+`frameworks` lane on every PR, and each framework's newest release weekly.
+`test/frameworks.test.mjs` is their runner's suite.
 
 `npm ci && npm test` here runs, against `../protocol`:
 

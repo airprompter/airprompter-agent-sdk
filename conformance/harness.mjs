@@ -121,6 +121,8 @@ export async function commandAdapter(command, { cwd = process.cwd(), timeoutMs =
     }
   });
   const exited = new Promise((resolve) => child.once("exit", (code) => resolve(code)));
+  // A write to an adapter that has exited is answered `adapter_exited` below; the pipe's own EPIPE must not crash the run.
+  child.stdin.on("error", () => {});
   const call = (fn, args) =>
     new Promise((resolve) => {
       const id = nextId++;
@@ -166,7 +168,7 @@ const short = (value) => {
   return text && text.length > 160 ? `${text.slice(0, 157)}…` : text;
 };
 
-export async function runHarness({ adapter, vectors, only = null, allowSkips = false, compare = null, writeGolden = false, log = console.log }) {
+export async function runHarness({ adapter, vectors, only = null, allowSkips = false, compare = null, writeGolden = false, framework = null, log = console.log }) {
   const readJson = (name) => JSON.parse(readFileSync(join(vectors, "vectors", name), "utf8"));
   const report = { adapter: adapter.kind, sections: [], passed: 0, failed: 0, skipped: [] };
   let current = null;
@@ -363,7 +365,7 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
     },
   };
 
-  for (const name of Object.keys(frameworksRunner?.SECTIONS ?? {})) sections[name] = () => frameworksRunner.runSection(name, { adapter, ok, fail, report, options: { compare, writeGolden } });
+  for (const name of Object.keys(frameworksRunner?.SECTIONS ?? {})) sections[name] = () => frameworksRunner.runSection(name, { adapter, ok, fail, report, options: { compare, writeGolden, framework } });
 
   const wanted = only ? only.split(",").map((s) => s.trim()).filter(Boolean) : Object.keys(sections);
   for (const name of wanted) {
@@ -388,7 +390,7 @@ export async function runHarness({ adapter, vectors, only = null, allowSkips = f
 // The command line.
 
 export async function main(argv = process.argv.slice(2)) {
-  const opts = { adapter: null, command: null, vectors: null, only: null, allowSkips: false, json: false, compare: null, writeGolden: false };
+  const opts = { adapter: null, command: null, vectors: null, only: null, allowSkips: false, json: false, compare: null, writeGolden: false, framework: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => argv[++i];
@@ -399,9 +401,13 @@ export async function main(argv = process.argv.slice(2)) {
     else if (arg === "--allow-skips") opts.allowSkips = true;
     else if (arg === "--compare") opts.compare = next();
     else if (arg === "--write-golden") opts.writeGolden = true;
+    else if (arg === "--framework") {
+      opts.framework = next();
+      if (!opts.framework || opts.framework.startsWith("--")) throw new Error("--framework needs a framework name");
+    }
     else if (arg === "--json") opts.json = true;
     else if (arg === "--help" || arg === "-h") {
-      console.log("usage: airprompter-conformance (--adapter <module.mjs> | --adapter-command \"<cmd>\") [--vectors <protocol dir>] [--only <section,…>] [--allow-skips] [--json] [--compare <report.json>] [--write-golden]\nsections: " + Object.keys(SECTIONS).join(", "));
+      console.log("usage: airprompter-conformance (--adapter <module.mjs> | --adapter-command \"<cmd>\") [--vectors <protocol dir>] [--only <section,…>] [--allow-skips] [--json] [--compare <report.json>] [--write-golden] [--framework <name>]\nsections: " + Object.keys(SECTIONS).join(", "));
       return 0;
     } else throw new Error(`unknown argument ${arg}`);
   }
@@ -411,7 +417,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const adapter = opts.command ? await commandAdapter(opts.command) : await moduleAdapter(opts.adapter);
   try {
-    const report = await runHarness({ adapter, vectors: vectorsDir(opts.vectors), only: opts.only, allowSkips: opts.allowSkips, compare: opts.compare, writeGolden: opts.writeGolden, log: opts.json ? () => {} : console.log });
+    const report = await runHarness({ adapter, vectors: vectorsDir(opts.vectors), only: opts.only, allowSkips: opts.allowSkips, compare: opts.compare, writeGolden: opts.writeGolden, framework: opts.framework, log: opts.json ? () => {} : console.log });
     // The report can pass 64 KiB: written and flushed before the exit, or a pipe reader sees it cut short.
     if (opts.json) await new Promise((resolve) => process.stdout.write(`${JSON.stringify(report)}\n`, resolve));
     return report.ok ? 0 : 1;

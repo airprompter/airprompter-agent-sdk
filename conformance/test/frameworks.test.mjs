@@ -14,7 +14,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { SECTIONS, runHarness, vectorsDir } from "../harness.mjs";
-import { EXEMPTIONS, FIXTURES_DIR, REQUIRED_KINDS, VECTORS_DIR, coverageGaps, loadFixtures, matchRowSet, runSection, schemaErrors, shippedAdapters, subsetMatches } from "../frameworks/run.mjs";
+import { EXEMPTIONS, FIXTURES_DIR, FRAMEWORK_PACKAGES, REQUIRED_KINDS, VECTORS_DIR, coverageGaps, loadFixtures, matchRowSet, runSection, schemaErrors, shippedAdapters, subsetMatches } from "../frameworks/run.mjs";
 import { comparableLines } from "../frameworks/operations/sessionScenario.mjs";
 import { newSealer } from "../frameworks/release.mjs";
 
@@ -376,4 +376,29 @@ test("the driver scan refuses an SDK internal however it is spelt, and every dri
 
 test("the fixture tree's folders are the frameworks named in their fixtures", () => {
   for (const entry of loadFixtures(FIXTURES_DIR)) assert.equal(entry.fixture.framework, entry.folder, entry.file);
+});
+
+test("pins come from the fixtures, one version per package and language; --framework runs one framework", async () => {
+  const { pinsOf } = await import("../frameworks/pins.mjs");
+  // TypeScript's pins are also sdk-typescript's exact devDependencies: one version, wherever it is read.
+  const manifest = JSON.parse(readFileSync(join(repo, "sdk-typescript", "package.json"), "utf8"));
+  const own = new Set(Object.values(FRAMEWORK_PACKAGES).map((p) => p.ts).filter(Boolean));
+  for (const [name, { version, file }] of pinsOf().ts) if (own.has(name)) assert.equal(manifest.devDependencies?.[name], version, `${name} ${version} (${file}) is sdk-typescript's exact devDependency`);
+  const tree1 = tree({ "openai/tool-loop-py.json": fixtureOf({ language: "py", frameworkVersion: "3.60.0" }), "openai/settings-py.json": fixtureOf({ language: "py", kind: "settings", frameworkVersion: "3.60.0", packages: { httpx: "0.28.1" } }), "agent/two-store-py.json": fixtureOf({ framework: "agent", language: "py", kind: "two-store", frameworkVersion: "1.0.0rc5" }) });
+  const tree2 = tree({ "openai/tool-loop-py.json": fixtureOf({ language: "py", frameworkVersion: "3.60.0" }), "openai/settings-py.json": fixtureOf({ language: "py", kind: "settings", frameworkVersion: "3.61.0" }) });
+  const both = tree({ "openai/tool-loop-ts.json": fixtureOf(), "anthropic/tool-loop-ts.json": fixtureOf({ framework: "anthropic" }) });
+  try {
+    const pins = pinsOf(loadFixtures(tree1));
+    assert.deepEqual([...pins.py].map(([name, { version }]) => `${name}==${version}`).sort(), ["httpx==0.28.1", "openai==3.60.0"], "the SDK's own folder pins nothing");
+    assert.throws(() => pinsOf(loadFixtures(tree2)), /openai \(py\) is pinned to 3\.6[01]\.0 in .* and 3\.6[01]\.0 in /);
+    const only = collector();
+    await runSection("frameworks", only.ctx(stub("ts", { driveRun: () => ({}) }), { fixturesDir: both, adapters: [], framework: "anthropic" }));
+    assert.ok(only.checks.every((c) => !c.label.startsWith("openai ")), "another framework's cases do not run");
+    assert.ok(only.checks.some((c) => c.label.startsWith("anthropic tool-loop")));
+    const none = collector();
+    await runSection("frameworks", none.ctx(stub("py", { driveRun: () => ({}) }), { fixturesDir: both, adapters: [], framework: "anthropic" }));
+    assert.ok(none.failed().some((c) => c.label === "frameworks: anthropic"), "a filter that selects nothing fails");
+  } finally {
+    for (const dir of [tree1, tree2, both]) rmSync(dir, { recursive: true, force: true });
+  }
 });

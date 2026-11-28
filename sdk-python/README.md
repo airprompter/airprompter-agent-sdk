@@ -469,9 +469,10 @@ match on rendered text are gone; the [CHANGELOG](../CHANGELOG.md) entry for this
 To keep placing the text yourself, leave out `slot` and call inside `with ap.attribute(rendered):`. An Azure deployment
 or a gateway alias whose id is not the release's needs `model_for`, or nothing is measured.
 
-Tested against clients shaped like the real ones in CI, and against the real `openai`, `anthropic` and `litellm`
-releases weekly (`.github/workflows/wrap-latest.yml`; `WRAP_LIVE=1 python -m pytest tests/test_frameworks_live.py`
-locally). **Writing an adapter:** `airprompter_agent.frameworks.contract` is the contract (`acquire_run`,
+Tested against clients shaped like the real ones in CI, and held to the recorded conformance fixtures
+(`conformance/frameworks`) with the real `openai`, `anthropic` and `litellm` at their pinned versions in CI and at
+their newest releases weekly (`.github/workflows/wrap-latest.yml`; `WRAP_LIVE=1 python -m pytest
+tests/test_frameworks_live.py` locally). **Writing an adapter:** `airprompter_agent.frameworks.contract` is the contract (`acquire_run`,
 `choose_model`, `settings_for`, `measure_call` / `begin_measure`, `ADAPTER_EVENTS`, the run types); it is outside the
 1.0 promise. See [CONTRIBUTING.md › Adding a framework adapter](../CONTRIBUTING.md#adding-a-framework-adapter).
 

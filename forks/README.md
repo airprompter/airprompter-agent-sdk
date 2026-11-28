@@ -95,7 +95,9 @@ that release tested, as `compat/<sdk version>`:
   `sdk-typescript/package-lock.json` at `sdk-typescript/v<version>`.
   - A package that the release did not install gets no tag.
   - A package with no pinned tested version gets no tag either. That is every Python one today, because Python CI
-    installs no framework or provider client. Only the weekly `wrap-latest` run installs them, at `@latest`.
+    reads no pinned framework version. CI's `frameworks` lane installs the conformance fixtures' pins
+    (`conformance/frameworks/pins.mjs py`), which `forks.json` does not read yet; the weekly `wrap-latest` run installs
+    each framework's newest release.
 - **The commit** is the one that the upstream's own tag for that version names on our fork, such as
   `langchain@1.6.1` or `v7.50.0`. If a monorepo released its tested packages from different commits, each package
   gets `compat/<sdk version>/<package>` instead. That is the one departure from the ticket's single name. Git

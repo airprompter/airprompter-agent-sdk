@@ -89,6 +89,15 @@ export const FRAMEWORK_PACKAGES = {
   "pydantic-ai": { py: "pydantic-ai" },
 };
 
+/**
+ * Packages that must move with a framework's newest release in the weekly run (its peer range), beside those a
+ * fixture's `packages` lists: LangChain's own core and providers move together.
+ */
+export const FRAMEWORK_COMPANIONS = {
+  langchain: { ts: ["@langchain/core", "@langchain/openai", "@langchain/anthropic", "@langchain/langgraph"], py: ["langchain-core"] },
+  langgraph: { ts: ["@langchain/core"], py: ["langchain-core"] },
+};
+
 const NAMED = (...names) => (framework) => names.includes(framework);
 const ADAPTER = (framework) => !FRAMEWORK_TRAITS[framework].sdk;
 export const REQUIRED_KINDS = {
@@ -129,8 +138,8 @@ export const EXEMPTIONS = {
 
 /**
  * The framework adapters each SDK ships: a module in `frameworks/` that is not the contract (and not `steps`, the
- * no-code core, held to its own drivers in part 3, nor a `_`-named shared helper). Each owes its kinds whether or not
- * a fixture folder exists.
+ * no-code core, whose drivers (with Zapier's and n8n's) the owner deferred from AIR-2233 to their own ticket, nor a
+ * `_`-named shared helper). Each owes its kinds whether or not a fixture folder exists.
  */
 export function shippedAdapters(root = repo) {
   const out = [];

@@ -81,6 +81,14 @@ export function load(specifier) {
 
 /** The installed version of a package, for the job title and the fixture's `frameworkVersion`. */
 export const versionOf = (name) => JSON.parse(readFileSync(join(packageDir(name), "package.json"), "utf8")).version;
+/** The same, or null for a package that is not installed (the harness reports it as a miss). */
+const safeVersionOf = (name) => {
+  try {
+    return versionOf(name);
+  } catch {
+    return null;
+  }
+};
 
 // The adapter itself (not a driver) reads the run reference key and the reason list. Those are not on the curated
 // `/core` and `/runtime` subpaths (docs/stability.md), so it reads the layers' barrels, as agent-sdk.mjs does.
@@ -299,7 +307,7 @@ export function placementsOf(log) {
   return out;
 }
 
-async function driveRun({ fixture, bundle, agent, package: pkg }) {
+async function driveRun({ fixture, bundle, agent, package: pkg, packages = [] }) {
   const path = join(driversDir, `${fixture.framework}.mjs`);
   if (!existsSync(path)) throw Object.assign(new Error(`no TypeScript driver for ${fixture.framework} (frameworks/drivers/${fixture.framework}.mjs)`), { reason: "no_driver" });
   const driver = await import(pathToFileURL(path).href);
@@ -331,7 +339,7 @@ async function driveRun({ fixture, bundle, agent, package: pkg }) {
       other.stopped = true;
       await finish(other.ap, out);
     }
-    return { placements: placementsOf(log), calls: driven.calls, runRefs: driven.runRefs ?? [], ...out, log, ...(pkg ? { frameworkVersion: versionOf(pkg) } : {}), ...(driven.results !== undefined ? { results: driven.results } : {}), ...(driven.state !== undefined ? { state: driven.state } : {}) };
+    return { placements: placementsOf(log), calls: driven.calls, runRefs: driven.runRefs ?? [], ...out, log, ...(pkg ? { frameworkVersion: versionOf(pkg) } : {}), packageVersions: Object.fromEntries(packages.map((name) => [name, safeVersionOf(name)])), ...(driven.results !== undefined ? { results: driven.results } : {}), ...(driven.state !== undefined ? { state: driven.state } : {}) };
   } finally {
     if (!stopped) await ap.stop().catch(() => {});
     for (const other of others) {

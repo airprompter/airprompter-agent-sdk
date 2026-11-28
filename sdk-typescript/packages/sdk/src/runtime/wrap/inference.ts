@@ -58,7 +58,13 @@ export type InferenceUnsupportedReason =
   /** Anthropic Messages takes one of `temperature` / `top_p`; the slot carries both, and temperature goes. */
   | "one_sampling_parameter"
   /** Anthropic Messages takes no sampling parameter beside a `thinking` block the call site set. */
-  | "thinking";
+  | "thinking"
+  /**
+   * The installed client's method takes no such keyword, so the call goes out without it (Python only: `anthropic`
+   * 2.14 dropped `temperature` and `top_p` and refuses them with a `TypeError` before sending). A TypeScript client
+   * sends its params object as given, so TypeScript never reports it; the name is shared so both SDKs' logs read alike.
+   */
+  | "client";
 
 export interface AppliedInference {
   params: Record<string, unknown>;

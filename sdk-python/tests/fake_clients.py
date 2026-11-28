@@ -211,6 +211,28 @@ class FakeAsyncAnthropic:
         return AsyncManager()
 
 
+class StrictAnthropic:
+    """``anthropic`` 2.14's ``messages.create``: every keyword declared and no ``temperature`` or ``top_p`` among them,
+    so passing one raises ``TypeError`` before any request, as the real one does. ``sent`` is what reached the wire."""
+
+    def __init__(self):
+        self.sent: list = []
+        self.messages = SimpleNamespace(create=self._create)
+
+    def _create(self, *, max_tokens: int, messages: list, model: str, metadata: Any = None, stop_sequences: Any = None, stream: Any = None, system: Any = None, thinking: Any = None, extra_body: Any = None):
+        self.sent.append({"max_tokens": max_tokens, "model": model, "system": system, "stop_sequences": stop_sequences, "thinking": thinking})
+        return anthropic_message("strict reply")
+
+
+class StrictAsyncAnthropic:
+    def __init__(self):
+        self.sent: list = []
+        self.messages = SimpleNamespace(create=self._create)
+
+    async def _create(self, *, max_tokens: int, messages: list, model: str, stop_sequences: Any = None, stream: Any = None, system: Any = None, thinking: Any = None):
+        await asyncio.sleep(0)
+        self.sent.append({"max_tokens": max_tokens, "model": model, "system": system, "stop_sequences": stop_sequences})
+        return anthropic_message("strict async reply")
 
 
 class FakeAsyncOpenAI:

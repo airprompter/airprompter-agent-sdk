@@ -18,6 +18,19 @@ may change a public shape and says so here.
 - **Nothing in the reload stops the server.** If `fs.watch` cannot start (`watch_unavailable`) or fails later (`watch_failed`, for example EPERM on Windows when the folder is deleted), the server keeps serving on re-reads alone. A served folder that is gone is logged once (`read_failed`). A promotion that throws is logged (`promote_failed`). In each case the last generation keeps serving. A file or subfolder that vanishes between the listing and the stat (an editor's temp file) is skipped instead of crashing the server. A prompt file that is a symlink to nothing is reported as a problem.
 - `cli/test/devRescan.test.ts` drives the reload loop with the watcher silenced, hand-fired, failing, and unable to start.
 
+### A sealed setting the installed Python client refuses no longer fails the call (AIR-2558)
+- **`anthropic` 2.14 removed `temperature` and `top_p` from `messages.create` and `messages.stream`** and raises `TypeError` before sending any request when given one. A release sealing `temperatureMilli` made every call through the Python Anthropic adapter fail, against the contract's rule that an adapter never fails the customer's call. The Python direct-client adapters (`frameworks.openai`, `frameworks.anthropic`) now read the client method's own signature, once per method. A sealed setting whose keyword the method does not take is left off, and `adapter_inference_unsupported` is logged once per slot, method and model with `{ setting, reason: "client" }`. The call goes out with the rest of the placement and is recorded into the run: one request, never a retry.
+  - A method that takes `**kwargs`, or whose signature cannot be read, is sent as before.
+  - A keyword only the call site wrote stays the call site's.
+  - An `openai` release older than `max_completion_tokens` gets the sealed cap as `max_tokens`: the same setting, applied, so nothing is logged.
+  - Checked and not affected by this client-side refusal:
+    - Python `openai` 3.60, which declares every sealed setting.
+    - LiteLLM, which takes `**kwargs` and sends a request body, never a provider SDK method's keywords.
+    - The TypeScript `openai` and `@anthropic-ai/sdk` clients, which send their params object as given; a test runs both.
+    - The AI SDK, whose settings travel as a typed call-options object, and whose providers report an unsupported setting as a call warning (the `@ai-sdk/provider` spec).
+  - `"client"` joins TypeScript's `InferenceUnsupportedReason`, so both SDKs share the vocabulary.
+  - Not covered here: a value the provider refuses for a given model. Examples are newer Claude models refusing `temperature` other than 1 with a 400 (per `@anthropic-ai/sdk` 0.129's own docs), OpenAI reasoning models refusing sampling parameters, and LiteLLM's own `UnsupportedParamsError` for the same model rules. That is a separate decision.
+
 ### CLI release checksums name the bare file (AIR-2268)
 - **Each CLI asset's `.sha256` is one line, `<hex>  <asset>`**, so `shasum -a 256 -c airprompter-linux-x64.sha256` (or `sha256sum -c`) works in the folder the asset was downloaded to. It used to name `dist/<asset>`, the path on the build runner, and the check failed with "No such file". `cli/scripts/checksum.mjs` writes it the same way on every platform; `cli/test/checksum.test.ts` checks the format and runs the platform's own checker on it, and the release job checks each `.sha256` beside its asset before uploading. The verify action reads only the digest, so it is unaffected.
 

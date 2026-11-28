@@ -408,7 +408,9 @@ What every adapter does, the same as in TypeScript:
 - **The sealed settings go on the call** under the provider's own names (`temperature`, `top_p`, the output cap, `stop`
   / `stop_sequences`, the reasoning effort); a value the call site set differently is replaced and logged
   (`adapter_inference_overridden`), a setting the call cannot carry is reported, not sent
-  (`adapter_inference_unsupported`).
+  (`adapter_inference_unsupported`). On the `openai` and `anthropic` clients that includes a keyword the installed
+  release no longer takes (`anthropic` 2.14 dropped `temperature` and `top_p`): it is left off with reason `client`,
+  logged once per slot, method and model, and the call goes out. Whether a model takes a value is the provider's answer.
 - **When nothing can be served,** your own prompt and model run, untouched, and nothing is measured.
 - **One request is one run.** Inside `ap.run(...)` every call joins that run; with none open, each call is a one-call
   run that ends when the response or the stream settles. Consume a stream inside the `with` block.

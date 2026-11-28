@@ -31,8 +31,10 @@ _PARAMETER: dict[str, dict[str, Optional[str]]] = {
 }
 
 #: Why a setting was not applied: the request shape has no such parameter; Messages takes one sampling parameter
-#: (temperature goes, top-p does not); Messages takes none beside a ``thinking`` block the call site set.
-UnsupportedReason = Literal["shape", "one_sampling_parameter", "thinking"]
+#: (temperature goes, top-p does not); Messages takes none beside a ``thinking`` block the call site set; the installed
+#: client's method takes no such keyword (``anthropic`` 2.14 dropped ``temperature`` and ``top_p``), so the call goes
+#: out without it rather than failing on the client's ``TypeError``.
+UnsupportedReason = Literal["shape", "one_sampling_parameter", "thinking", "client"]
 
 
 def temperature_of(inference: Mapping[str, Any]) -> Optional[float]:

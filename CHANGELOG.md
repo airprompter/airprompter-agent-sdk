@@ -12,6 +12,9 @@ may change a public shape and says so here.
 
 - **Runnable framework examples** (AIR-2316): `examples/langchain-typescript/`, a LangChain support agent on the approved prompt `examples/prompts/support/reply.md`, run in CI unchanged against `airprompter dev` and a fake provider (`examples/ci/run.mjs`). For a release: `version-lockstep --set` now also moves the SDK pin in every `examples/*/package.json`, and the check fails while an example pins another version.
 
+### CLI release checksums name the bare file (AIR-2268)
+- **Each CLI asset's `.sha256` is one line, `<hex>  <asset>`**, so `shasum -a 256 -c airprompter-linux-x64.sha256` (or `sha256sum -c`) works in the folder the asset was downloaded to. It used to name `dist/<asset>`, the path on the build runner, and the check failed with "No such file". `cli/scripts/checksum.mjs` writes it the same way on every platform; `cli/test/checksum.test.ts` checks the format and runs the platform's own checker on it, and the release job checks each `.sha256` beside its asset before uploading. The verify action reads only the digest, so it is unaffected.
+
 ## 1.0.0-rc.5 — 2026-11-27 (protocol 4.0.0)
 
 The fifth release candidate: one contract for every framework adapter (AIR-2231), the OpenAI, Anthropic, Vercel AI SDK and LiteLLM support rebuilt as adapters on it, and the wrapped clients of rc.4 removed. It is also the first release since rc.4, so it carries **AirPrompter's production trust root pin** (#110): the Steps core can verify a production manifest only from this release on, and so can any agent pointed at the production service. The Zapier and n8n integrations get it with their own move to rc.5 (they still pin rc.4). Protocol unchanged. Python moves in lockstep (`1.0.0rc5`). The CLI's version moves with it (lockstep); `cli/src` uses nothing removed here, so tagging `cli/v1.0.0-rc.5` is the release's call.

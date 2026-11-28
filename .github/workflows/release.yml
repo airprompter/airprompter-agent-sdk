@@ -387,13 +387,20 @@ jobs:
         shell: bash
         run: |
           cosign sign-blob --yes --bundle "dist/${{ matrix.artifact }}.sigstore" "dist/${{ matrix.artifact }}"
-          sha256sum "dist/${{ matrix.artifact }}" > "dist/${{ matrix.artifact }}.sha256" 2>/dev/null || shasum -a 256 "dist/${{ matrix.artifact }}" > "dist/${{ matrix.artifact }}.sha256"
+          # `<hex>  <basename>` (no dist/ prefix), so `shasum -a 256 -c` works beside a downloaded asset (AIR-2268).
+          node cli/scripts/checksum.mjs "dist/${{ matrix.artifact }}"
           {
             echo "artifact=${{ matrix.artifact }}"
             echo "node=$(node --version)"
             echo "size_bytes=$(wc -c < "dist/${{ matrix.artifact }}" | tr -d ' ')"
             echo "platform_signature=${notarized:-${authenticode:-none}}"
           } > "dist/${{ matrix.artifact }}.provenance.txt"
+      - name: The .sha256 checks beside the asset
+        # As a user runs it after a download: in the asset's folder, with the platform's own tool.
+        shell: bash
+        working-directory: dist
+        run: |
+          if command -v sha256sum >/dev/null; then sha256sum -c "${{ matrix.artifact }}.sha256"; else shasum -a 256 -c "${{ matrix.artifact }}.sha256"; fi
       - name: SBOM
         uses: anchore/sbom-action@v0
         with:

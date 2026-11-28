@@ -70,7 +70,7 @@ script of steps on the fake clock, and what must come out. Runs are named
 
 `expect` at the vector's end: `rows` and `steps` (every window and step row,
 each taken by one expected row matched as a deep subset), `rowCount`,
-`agentRuns`, `runCounters` (exactly), `events` (log events by name),
+`agentRuns`, `runCounters` (exactly), `events` (log events by name: a count, or `{ count, fields }` when what each one carries matters),
 `logExcludes`, `sourceCalls` (calls of the vector's `variableSources`).
 
 A vector proves one rule (`rule`, 1 to 11). The rules and the cases each

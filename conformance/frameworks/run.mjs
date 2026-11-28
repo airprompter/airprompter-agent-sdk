@@ -104,6 +104,12 @@ export const REQUIRED_KINDS = {
   "slot-typo": (framework) => FRAMEWORK_TRAITS[framework].map,
   "canary-checkpoint": (framework) => FRAMEWORK_TRAITS[framework].state,
   settings: ADAPTER,
+  // AIR-2558: a sealed setting the installed client refuses is left off, logged once, and the call still goes out.
+  // Required for a framework while a pinned client release refuses a sealed keyword (Python anthropic 2.14 refuses
+  // `temperature`), in both languages: the other language's twin records what its client does with the same release.
+  // When another client starts refusing one, name its framework here and record its case against that release; when
+  // a client takes the keyword again, its case is re-recorded to say so, or the framework leaves this list.
+  "client-refuses-setting": NAMED("anthropic"),
   // Per language, on the SDK's own run API (the `agent` folder).
   "two-store": (framework) => FRAMEWORK_TRAITS[framework].sdk === true,
   "split-invocation": (framework) => FRAMEWORK_TRAITS[framework].sdk === true,

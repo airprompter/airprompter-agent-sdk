@@ -137,6 +137,27 @@ test("each failing expectation is reported by name; a right answer passes, judge
   }
 });
 
+test("events count by name, and with `fields` every one must carry them; no reported log fails even a count of 0", async () => {
+  const want = { count: 1, fields: { setting: [{ setting: "temperatureMilli", reason: "client" }] } };
+  const dir = tree({ "openai/settings-ts.json": fixtureOf({ kind: "settings", expect: { calls: [{ system: "Approved.", model: "gpt-5" }], rows: [], events: { adapter_inference_unsupported: want, adapter_late_record: 0 } } }) });
+  assert.notEqual(schemaErrors("fixture", fixtureOf({ kind: "settings", expect: { calls: [], rows: [], events: { e: { count: 1 } } } })), null, "an object form names its fields");
+  const run = async (log) => {
+    const c = collector();
+    const answer = { calls: [{ system: "Approved.", model: "gpt-5" }], rows: [], frameworkVersion: "6.0.0", ...(log === undefined ? {} : { log }) };
+    await runSection("frameworks", c.ctx(stub("ts", { driveRun: () => answer }), { fixturesDir: dir, adapters: [], exemptions: {} }));
+    return c.failed().filter((f) => f.label.includes("settings-ts.json")).map((f) => f.label.split(" › ")[1]);
+  };
+  try {
+    const event = (setting, reason) => ({ event: "adapter_inference_unsupported", setting: [{ setting, reason }] });
+    assert.deepEqual(await run([event("temperatureMilli", "client")]), []);
+    assert.deepEqual(await run([event("temperatureMilli", "shape")]), ["events.adapter_inference_unsupported"], "the wrong reason fails");
+    assert.deepEqual(await run([event("temperatureMilli", "client"), event("topPBps", "client")]), ["events.adapter_inference_unsupported"], "one too many fails");
+    assert.deepEqual(await run(undefined), ["events"], "an adapter that reports no log cannot pass");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the coverage rule fails a framework missing a required kind, naming both, a shipped adapter with no folder, and an exemption with no ticket or gone stale", () => {
   const dir = tree({ "openai/tool-loop-ts.json": fixtureOf(), "litellm/tool-loop-py.json": fixtureOf({ framework: "litellm", language: "py" }), "newthing/tool-loop-ts.json": fixtureOf({ framework: "newthing" }) });
   try {

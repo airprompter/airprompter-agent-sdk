@@ -3,7 +3,7 @@
   "language": "py",
   "frameworkVersion": "2.14.0",
   "kind": "settings",
-  "note": "The release's sealed inference reaches the call in the provider's own key names, exactly, over the caller's own temperature.",
+  "note": "The release's sealed inference reaches the call in the provider's own key names, exactly: the same sealed block as settings-ts.json. anthropic 2.14 takes no `temperature` keyword (AIR-2558), so the sealed temperature is left off with one adapter_inference_unsupported log naming it, and the rest of the placement goes out. Neither sampling setting is sent: top_p is withheld beside the sealed temperature, which the client refuses. Unlike the TypeScript case, the caller writes no temperature of its own: 2.14 would refuse the caller's keyword, which stays the caller's.",
   "release": {
     "slots": [
       {
@@ -12,7 +12,9 @@
         "versionId": "ver_a",
         "model": "claude-sonnet-4-5",
         "inference": {
+          "temperatureMilli": 200,
           "maxOutputTokens": 800,
+          "topPBps": 9000,
           "stopSequences": [
             "END"
           ]
@@ -83,6 +85,22 @@
         "count": 1,
         "status": "ok"
       }
-    ]
+    ],
+    "events": {
+      "adapter_inference_unsupported": {
+        "count": 1,
+        "fields": {
+          "adapter": "anthropic",
+          "slot": "support.reply",
+          "method": "messages.create",
+          "settings": [
+            {
+              "setting": "temperatureMilli",
+              "reason": "client"
+            }
+          ]
+        }
+      }
+    }
   }
 }

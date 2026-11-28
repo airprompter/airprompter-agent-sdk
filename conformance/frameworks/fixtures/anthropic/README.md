@@ -27,9 +27,12 @@ What these encode, from AIR-2231's contract (decided on AIR-2233):
   include the cached ones and are split; Anthropic's `input_tokens` do not.
   A turn's `usage.input` is the provider's own field.
 
-**Known gap (on AIR-2233).** anthropic 2.14 for Python takes no
-`temperature`, `top_p` or `top_k`. A release that seals one makes the Python
-adapter's call raise `TypeError`, so `settings-py.json` holds the settings that
-client takes (`max_tokens`, `stop_sequences`) until the owner decides what a
-sealed temperature does there. TypeScript 0.129 takes temperature, and its
-case holds it exactly, with no `top_p` beside it.
+- anthropic 2.14 for Python takes no `temperature`, `top_p` or `top_k`
+  keyword and raises `TypeError` before sending. A sealed temperature is left
+  off, with one `adapter_inference_unsupported` log, and the call goes out
+  with the rest of the placement (AIR-2558). `settings-py.json` holds the
+  same sealed block as `settings-ts.json`. `client-refuses-setting-py.json`
+  proves the log is once for two calls and that both calls are counted in
+  the run. TypeScript 0.129 sends its params object as given, so
+  `client-refuses-setting-ts.json` shows the same release's temperature on
+  the wire and nothing logged.

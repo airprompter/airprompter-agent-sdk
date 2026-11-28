@@ -90,9 +90,16 @@ export default {
       }
       if (expect.results && !subsetMatches(r.results, expect.results)) miss("results", `got ${short(r.results)}, expected ${short(expect.results)}`);
       if (expect.runCounters && !sameJson(r.runCounters, expect.runCounters)) miss("runCounters", `got ${short(r.runCounters)}, expected ${short(expect.runCounters)}`);
-      for (const [name, count] of Object.entries(expect.events ?? {})) {
-        const seen = (r.log ?? []).filter((event) => event?.event === name).length;
-        if (seen !== count) miss(`events.${name}`, `${seen} logged, expected ${count}`);
+      // An adapter that reports no log cannot pass an `events` expectation, a count of 0 included.
+      if (expect.events && !Array.isArray(r.log)) miss("events", "the adapter reported no log");
+      else for (const [name, want] of Object.entries(expect.events ?? {})) {
+        const named = r.log.filter((event) => event?.event === name);
+        const count = typeof want === "number" ? want : want.count;
+        if (named.length !== count) miss(`events.${name}`, `${named.length} logged, expected ${count}`);
+        else if (typeof want === "object") {
+          const off = named.find((event) => !subsetMatches(event, want.fields));
+          if (off) miss(`events.${name}`, `got ${short(off)}, expected every one to carry ${short(want.fields)}`);
+        }
       }
       if (expect.stateExcludes) {
         if (r.state === undefined) miss("state", "the adapter reported no framework state");

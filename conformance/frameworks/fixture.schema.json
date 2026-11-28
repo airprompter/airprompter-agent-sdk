@@ -47,6 +47,7 @@
         "slot-typo",
         "canary-checkpoint",
         "settings",
+        "client-refuses-setting",
         "two-store",
         "split-invocation",
         "shadow"
@@ -161,9 +162,31 @@
         },
         "events": {
           "type": "object",
+          "description": "Log events by name: a count, or { count, fields }, where every event of that name must also carry `fields` (a subset match) and there must be `count` of them.",
           "additionalProperties": {
-            "type": "integer",
-            "minimum": 0
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "count",
+                  "fields"
+                ],
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "fields": {
+                    "type": "object"
+                  }
+                }
+              }
+            ]
           }
         },
         "stateExcludes": {

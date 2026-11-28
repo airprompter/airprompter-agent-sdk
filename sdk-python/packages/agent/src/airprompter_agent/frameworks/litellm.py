@@ -57,9 +57,8 @@ except Exception:  # noqa: BLE001
 
 
 METADATA_KEY = "airprompter"
-#: Calls opened by the pre-call hook and not yet logged, by ``litellm_call_id``. Past this many, the calls of ended runs
-#: go first: LiteLLM never logs some (a retry that raised, an abandoned stream), and their runs already said they were
-#: not measured. Only past this many calls in flight at once does a live one go, and its run then reads as not measured.
+#: Calls the pre-call hook opened, by ``litellm_call_id``. Past this many, ended runs' calls go first (LiteLLM never logs
+#: some: a retry that raised, an abandoned stream); a live one goes only past this many in flight, and reads unmeasured.
 OPEN_CALLS_MAX = 1024
 
 

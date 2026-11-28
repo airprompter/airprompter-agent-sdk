@@ -10,7 +10,8 @@ import tempfile
 
 import pytest
 
-from airprompter_agent import GoldenOptions, JUDGE_RUBRICS, GoldenSetError, JudgeRubric, judge_prompt, parse_golden_set, parse_judge_reply, pass_bps_of, rubric_from_prompt, run_golden_set
+from airprompter_agent import GoldenOptions
+from airprompter_agent.core import JUDGE_RUBRICS, GoldenSetError, JudgeRubric, judge_prompt, parse_golden_set, parse_judge_reply, pass_bps_of, rubric_from_prompt, run_golden_set
 from airprompter_agent.core.protocol.canonical_json import canonical_bytes, sha256_prefixed
 from airprompter_agent.core.protocol.trust import release_digest
 

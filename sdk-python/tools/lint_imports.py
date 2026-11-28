@@ -11,10 +11,13 @@
            airprompter_datastore_*
 
 A file reaches another layer only through that layer's package (``from airprompter_agent.core import x``), never one of
-its modules (``from airprompter_agent.core.protocol.trust import x``), so what a layer exports is what another layer can
-depend on. Inside a layer anything goes. The one module named past a layer is ``airprompter_agent.core._util``: small
-shared helpers, internal, on no layer's public list. ``airprompter_agent.core.testing`` is the tests' barrel, and the
-package does not import it.
+its modules (``from airprompter_agent.core.protocol.trust import x``, or ``from airprompter_agent.core import protocol``),
+so what a layer exports is what another layer can depend on. Inside a layer anything goes. The one module named past a
+layer is ``airprompter_agent.core._util``: small shared helpers, internal, on no layer's public list, and named only
+inside this distribution.
+
+A satellite is held to the promise (``docs/stability.md``): it imports a layer's package and, from it, only the names
+in that layer's ``__all__``. Every other name a barrel carries is for the layers above and may move in any release.
 
 Framework adapters (AIR-2231, the rules of section 3.2; the TypeScript twin is ``scripts/lint-imports.mjs``):
 
@@ -164,6 +167,26 @@ def imported_modules(tree: ast.AST, package: tuple[str, ...]) -> list[tuple[int,
     return found
 
 
+def public_names(layer: str) -> set[str]:
+    """A layer's ``__all__``, read from its ``__init__.py``: the names 1.0 promises, and all a satellite may import."""
+    tree = ast.parse((ROOT / "agent" / "src" / PACKAGE / layer / "__init__.py").read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
+            return {element.value for element in node.value.elts}
+    return set()
+
+
+def names_through_barrels(tree: ast.AST, package: tuple[str, ...]) -> list[tuple[int, str, str]]:
+    """``from airprompter_agent.<layer> import name`` as (line, layer, name), relative forms included."""
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            parts = absolute_of(node, package).split(".")
+            if len(parts) == 2 and parts[0] == PACKAGE and parts[1] in LAYERS and parts[1] != "agent":
+                found.extend((node.lineno, parts[1], alias.name) for alias in node.names)
+    return found
+
+
 def main() -> int:
     offenders: list[str] = []
     edges: set[str] = set()
@@ -208,14 +231,31 @@ def main() -> int:
         for path in sorted(root.rglob("*.py")):
             tree = ast.parse(path.read_text(), filename=str(path))
             shown = path.relative_to(ROOT.parent)
-            for line, module in imported_modules(tree, (module_name, *path.relative_to(root).parts[:-1])):
+            package = (module_name, *path.relative_to(root).parts[:-1])
+            for line, module in imported_modules(tree, package):
                 target, whole = target_of(module)
                 if target is None or target == module_name:
                     continue
-                if target == "agent" or not whole or target not in LAYERS:
+                # `core._util` is the distribution's own: a satellite that named it would break at import on a tidy.
+                if target == "agent" or not whole or target not in LAYERS or module in ALLOWED_INTERNAL:
                     offenders.append(f"{shown}:{line}: {module}: a satellite imports only airprompter_agent.{{core,sync,runtime,telemetry}}")
                     continue
                 edges.add(f"{name}→{target}")
+            # A satellite is held to the promise: a name off a layer's `__all__` may move in any release. It names what it
+            # takes (`from airprompter_agent.sync import KvEntry`), so a module bound whole, whose attributes no lint
+            # follows, is refused.
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import) and any(alias.name.split(".")[0] == PACKAGE for alias in node.names):
+                    offenders.append(f"{shown}:{node.lineno}: a satellite imports names from a layer (from airprompter_agent.<layer> import name), never the module whole")
+                elif isinstance(node, ast.Call) and (node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)) in ("import_module", "__import__"):
+                    argument = node.args[0] if node.args else None
+                    if not (isinstance(argument, ast.Constant) and isinstance(argument.value, str)) or argument.value.split(".")[0] == PACKAGE:
+                        offenders.append(f"{shown}:{node.lineno}: a satellite imports names from a layer, never the module whole (here through {getattr(node.func, 'attr', None) or node.func.id})")
+                elif isinstance(node, ast.ImportFrom) and absolute_of(node, package) == PACKAGE:
+                    offenders.append(f"{shown}:{node.lineno}: a satellite imports names from a layer, never the layer itself from airprompter_agent")
+            for line, target, imported in names_through_barrels(tree, package):
+                if imported not in public_names(target):
+                    offenders.append(f"{shown}:{line}: {imported} is not in airprompter_agent.{target}.__all__; a satellite imports only what 1.0 promises")
     if "--json" in sys.argv:
         print(json.dumps({"layers": LAYERS, "satellites": list(SATELLITES), "edges": sorted(edges)}, indent=2))
     if offenders:

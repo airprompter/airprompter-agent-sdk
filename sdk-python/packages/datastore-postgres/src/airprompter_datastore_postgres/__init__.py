@@ -24,9 +24,18 @@ from contextlib import contextmanager
 from typing import Any, Iterator, Optional, Sequence
 
 from airprompter_agent.sync import KvEntry
-from airprompter_agent.core._util import check_condition
 
-__all__ = ["PostgresKvStore", "postgres_kv_schema", "postgres_kv_store"]
+__all__ = [
+    "PostgresKvStore",
+    "postgres_kv_schema",
+    "postgres_kv_store",
+]
+
+
+def _check_condition(if_absent: bool, if_version: Optional[str]) -> None:
+    """Exactly one condition, always: an unconditional write is not part of the ``KvStore`` contract."""
+    if if_absent == (if_version is not None):
+        raise ValueError("put takes exactly one condition: if_absent=True or if_version=<the version read>")
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
@@ -99,7 +108,7 @@ class PostgresKvStore:
         return KvEntry(str(rows[0][0]), str(rows[0][1])) if rows else None
 
     def put(self, key: str, value: str, *, if_absent: bool = False, if_version: Optional[str] = None) -> bool:
-        check_condition(if_absent, if_version)
+        _check_condition(if_absent, if_version)
         if if_absent:
             _, count = self._run(f"INSERT INTO {self._quoted} (key, value, version) VALUES (%s, %s, 1) ON CONFLICT (key) DO NOTHING", (key, value))
             return count == 1

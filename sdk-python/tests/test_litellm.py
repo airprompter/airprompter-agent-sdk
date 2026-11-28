@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+from dataclasses import replace
 import shutil
 import tempfile
 import types
@@ -233,7 +234,9 @@ def test_a_prompt_rendered_inside_a_run_is_marked_as_the_runs_so_a_late_record_i
     with agent.run(variables={"team": "Billing", "ticket": "refund"}):
         inside = agent.prompt("support.triage").render(team="Billing", ticket="refund")
     outside = agent.prompt("support.triage").render(team="Billing", ticket="refund")
-    assert inside.run_bound and not outside.run_bound
+    assert inside._run_bound and not outside._run_bound
+    # Internal: not in the repr, and not in equality (`Rendered` is promised, its `_run_bound` is not).
+    assert "_run_bound" not in repr(inside) and inside == replace(inside, _run_bound=False)
     assert litellm_metadata(inside)["airprompter"].get("run") is True and "run" not in litellm_metadata(outside)["airprompter"]
     _success(callback, litellm_metadata(inside))  # LiteLLM logged it after the run ended
     windows = _windows(agent)
@@ -249,10 +252,10 @@ def test_a_workflow_step_inside_a_run_is_that_runs_in_context_and_a_late_record_
         callback = AirPrompterLiteLLMCallback(ap)
         with ap.run(subject="u1"):
             step = ap.workflow("docs.flow").steps[0]
-            assert step.run_bound
+            assert step._run_bound
             _success(callback, litellm_metadata(step), model=step.model)  # in context: the open run takes it
         _success(callback, litellm_metadata(step), model=step.model)  # late: dropped
-        assert not ap.workflow("docs.flow").steps[0].run_bound
+        assert not ap.workflow("docs.flow").steps[0]._run_bound
         ap.spool.close_windows(ap._now_ms())
         rows = [row for row in ap.drain_memory_sink() if row["type"] == "window"]
         assert (sum(r["count"] for r in rows), sum(r.get("modelCalls", 0) for r in rows)) == (1, 1), "one run with its one in-context call; the late one is no second row"

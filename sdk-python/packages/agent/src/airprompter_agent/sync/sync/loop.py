@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from airprompter_agent.core import servable_experiments, servable_slots
-from airprompter_agent.core import referenced_payloads, verify_manifest, verify_root_metadata
+from airprompter_agent.core import Verdict, referenced_payloads, verify_manifest, verify_root_metadata
 from ..store.slot_store import LoadedSlot, SlotStore
 from airprompter_agent.core import SyncClient
 
@@ -113,7 +113,11 @@ def sync_once(
         if fetch_root:
             candidate = fetch_root()
             if candidate:
-                verdict = verify_root_metadata(candidate=candidate, trusted=root, now=at)
+                # A body that is not a root document at all is refused like a bad signature, and the pass goes on to the manifest.
+                try:
+                    verdict = verify_root_metadata(candidate=candidate, trusted=root, now=at)
+                except Exception:  # noqa: BLE001
+                    verdict = Verdict(ok=False, reason="root_signature_invalid")
                 if verdict.ok:
                     root = candidate
                     store.accept_root(candidate)

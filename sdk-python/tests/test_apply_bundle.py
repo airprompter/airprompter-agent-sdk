@@ -22,7 +22,7 @@ from airprompter_agent.core.control.client import SyncClient
 from airprompter_agent.core.protocol.trust import public_jwk_of, release_digest, trusted_root_from_pinned_key
 from airprompter_agent.sync import next_pull_delay_ms, pull_bundle
 
-from .control_plane import FakeControlPlane
+from .control_plane import FakeControlPlane, transport_of
 
 SCOPE = {"organizationId": "org_1", "agentId": "agt_1", "target": "prod"}
 KW = {"organization_id": "org_1", "agent_id": "agt_1", "target": "prod"}
@@ -44,7 +44,7 @@ class ReleaseTable:
 def puller(plane: FakeControlPlane, table: ReleaseTable, distribution_public_key: bytes, scope: dict = SCOPE):
     client = SyncClient(base_url="https://api.test", agent_id=scope["agentId"], target=scope["target"], api_key=plane.api_key, transport=plane.transport())
     trusted_root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=public_jwk_of(plane.root_key))
-    edge = httpx.Client(transport=plane.transport())
+    edge = httpx.Client(transport=plane.httpx_transport())
 
     def fetch_root():
         return edge.get("https://edge.test/roots/prod/root.json").json()
@@ -76,7 +76,7 @@ def test_puller_store_apply_bundle_dial_refuse_restart():
     dir_a = tempfile.mkdtemp(prefix="ap-apply-a-")
     dir_b = tempfile.mkdtemp(prefix="ap-apply-b-")
     try:
-        boot = lambda d: AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])})
+        boot = lambda d: AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])})
         a = boot(dir_a)
         b = boot(dir_b)
         assert a.generation == 1
@@ -105,7 +105,7 @@ def test_puller_store_apply_bundle_dial_refuse_restart():
         assert relabelled["outcome"] == "refused"
 
         a.stop()
-        again = AirPrompterAgent.start(**KW, state_dir=dir_a, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key)
+        again = AirPrompterAgent.start(**KW, state_dir=dir_a, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(_no_network), distribution_key=key)
         assert again.generation == 2 and again.status().source == "store"
         again.stop()
         b.stop()
@@ -125,7 +125,7 @@ def test_apply_bundle_unlock_required_stages_and_plaintext_off_dev_refused():
     d = tempfile.mkdtemp(prefix="ap-apply-u-")
     try:
         staged: list[int] = []
-        ap = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])}, apply={"on_staged": lambda s: staged.append(s.generation)})
+        ap = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])}, apply={"on_staged": lambda s: staged.append(s.generation)})
         plane.promote([plane.slot(tag="support.reply", text="v2", version_id="ver_2")], apply_policy="unlock_required")
         pull()
         assert ap.apply_bundle(table.newest()["bundle"]) == {"outcome": "staged", "generation": 2}
@@ -160,11 +160,11 @@ def test_compromised_store_cannot_poison_a_runtime():
     d = tempfile.mkdtemp(prefix="ap-poison-")
     try:
         events: list[dict] = []
-        poisoned = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(_forged(plane, fleet.public_raw, 999))}, logger=events.append)
+        poisoned = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(_forged(plane, fleet.public_raw, 999))}, logger=events.append)
         assert poisoned.generation == 0, "nothing verified: it serves nothing rather than the forgery"
         poisoned.stop()
         assert any(e.get("event") == "vendored_bundle_refused" for e in events), events
-        real = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])})
+        real = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])})
         assert real.generation == 1, "the forgery left no generation behind"
         forged = real.apply_bundle(_forged(plane, fleet.public_raw, 2))
         assert forged["outcome"] == "refused" and forged["reason"] in ("signature_invalid", "unknown_signing_key")
@@ -209,7 +209,7 @@ def test_rollback_holds_back_a_row_until_a_newer_generation():
     pull()
     d = tempfile.mkdtemp(prefix="ap-hold-")
     try:
-        ap = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])})
+        ap = AirPrompterAgent.start(**KW, state_dir=d, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(_no_network), distribution_key=key, vendored_bundle={"bundle": json.loads(table.newest()["bundle"])})
         plane.promote([plane.slot(tag="support.reply", text="v2", version_id="ver_2")])
         pull()
         row = table.newest()["bundle"]
@@ -230,7 +230,7 @@ def test_pointer_first_pull_polls_the_cdn_not_the_origin():
     fleet_key = generate_x25519_key_pair()
     client = SyncClient(base_url="https://api.test", agent_id=SCOPE["agentId"], target=SCOPE["target"], api_key=plane.api_key, transport=plane.transport())
     trusted_root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=public_jwk_of(plane.root_key))
-    edge_http = httpx.Client(transport=plane.transport())
+    edge_http = httpx.Client(transport=plane.httpx_transport())
     fetch_root = lambda: edge_http.get("https://edge.test/roots/prod/root.json").json()  # noqa: E731
     origin_calls = lambda: sum(1 for u in plane.requests if "/manifest" in u)  # noqa: E731
     pointer_calls = lambda: sum(1 for u in plane.requests if u.endswith("/generation.json"))  # noqa: E731
@@ -280,7 +280,7 @@ def test_pointer_hides_nothing_for_long():
     fleet_key = generate_x25519_key_pair()
     clock = {"ms": 1789000000000}
     now = lambda: datetime.fromtimestamp(clock["ms"] / 1000, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")  # noqa: E731
-    inner = plane.transport()
+    inner = plane.httpx_transport()
     mode = {"origin_fail": False, "pointer": "ok"}
 
     class Transport(httpx.BaseTransport):
@@ -294,9 +294,9 @@ def test_pointer_hides_nothing_for_long():
                 raise httpx.ConnectError("origin blip")
             return inner.handle_request(request)
 
-    client = SyncClient(base_url="https://api.test", agent_id=SCOPE["agentId"], target=SCOPE["target"], api_key=plane.api_key, transport=Transport())
+    client = SyncClient(base_url="https://api.test", agent_id=SCOPE["agentId"], target=SCOPE["target"], api_key=plane.api_key, transport=transport_of(Transport()))
     trusted_root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=public_jwk_of(plane.root_key))
-    edge_http = httpx.Client(transport=plane.transport())
+    edge_http = httpx.Client(transport=plane.httpx_transport())
     fetch_root = lambda: edge_http.get("https://edge.test/roots/prod/root.json").json()  # noqa: E731
     origin_calls = lambda: sum(1 for u in plane.requests if "/manifest" in u)  # noqa: E731
     base = dict(client=client, scope=SCOPE, trusted_root=trusted_root, fetch_root=fetch_root, now=now, distribution_public_key=fleet_key.public_raw)

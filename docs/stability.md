@@ -84,7 +84,8 @@ What the promise covers, for every name on those lists:
   `ClockPort`, `KeyProvider`, `FetchLike`, `ModelResolver`) never gain a
   required member before a major release.
 - **Its documented behaviour**: what the READMEs and the pages under `docs/`
-  say a listed name does.
+  say a listed name does. Loosening a start-time refusal (starting with a
+  configuration that start used to refuse) is an additive change.
 - **Error identity.** An error is recognised by its `name` and `code`
   (`errorNamed`, `isStoreError`, …), never by `instanceof`, so two copies of
   the SDK in one process agree. In Python an error is a class per name,
@@ -125,3 +126,18 @@ These resolve, and may change in any release:
   contract, and the words may improve.
 - The CLI's internals, and the source tree. The CLI's own commands and flags
   are described in [`cli/README.md`](../cli/README.md).
+
+## Release candidates
+
+The install lines in the READMEs pin exactly on every version (`--save-exact`,
+`==`). The satellites (`@airprompter/agent-otel`, `@airprompter/datastore-*`,
+`airprompter-agent-otel`, `airprompter-datastore-*`) take the SDK by a range
+`version-lockstep --set` writes from the version:
+
+| The release | A satellite's range on the SDK | So it installs beside |
+|---|---|---|
+| A candidate, e.g. `1.0.0-rc.6` (Python `1.0.0rc6`) | exactly `1.0.0-rc.6` (Python `airprompter-agent==1.0.0rc6`) | the SDK of the same candidate, and no other: not rc.5, not 1.0.0 |
+| A final version, e.g. `1.0.0` | `^1.0.0` (Python `airprompter-agent>=1.0.0,<2`) | 1.0.0 and every later 1.x SDK, never a candidate |
+
+So every candidate between now and 1.0.0 installs as a set:
+`npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.6 @airprompter/datastore-s3@1.0.0-rc.6`.

@@ -38,8 +38,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional
 
-import httpx
-
 from airprompter_agent.core import instant
 from airprompter_agent.core._util import iso_ms
 from airprompter_agent.core import FsPort, OsFs, fs_failure_code
@@ -47,6 +45,7 @@ from airprompter_agent.core import valid_audience_ids, valid_audience_minute
 from airprompter_agent.core._util import iso_seconds
 from airprompter_agent.core import SLOT_TAG, STEP_STATUSES, WINDOW_STATUSES, utf16_length, valid_step_name
 from airprompter_agent.core import UploadOutcome, UploadSegment, UploadSink, sink_status
+from airprompter_agent.core import HttpRequest, Transport, require_transport, send_once
 from .spool.manifest import MANIFEST_GRACE_MS, MANIFEST_NAME, manifest_name_of, read_segment_manifest, segment_name_of_manifest, sha256_hex
 from .spool.writer import HOST_SPOOL_BUDGET_BYTES, LATENCY_BUCKET_EDGES_MS, SEGMENT_MAX_BYTES, epoch_minute, segment_name
 
@@ -406,7 +405,7 @@ class PostOutcome:
     reason: Optional[str] = None
 
 
-def post_segment(*, grant: UploadGrant, segment: str, data: bytes, transport: Optional[httpx.BaseTransport] = None, now_ms: Optional[Callable[[], float]] = None, boundary: Optional[str] = None, timeout: float = 30.0) -> PostOutcome:
+def post_segment(*, grant: UploadGrant, segment: str, data: bytes, transport: Optional[Transport] = None, now_ms: Optional[Callable[[], float]] = None, boundary: Optional[str] = None, timeout: float = 30.0) -> PostOutcome:
     """One segment under one grant. S3 PUT is idempotent by key, so a replay after a lost response overwrites identically."""
     if len(data) > grant.max_object_bytes:
         return PostOutcome("too_large", byte_count=len(data))
@@ -420,13 +419,12 @@ def post_segment(*, grant: UploadGrant, segment: str, data: bytes, transport: Op
     bnd = boundary or f"----airprompter{secrets.token_hex(8)}{int(now):x}"
     body = multipart_body(bnd, fields, segment, content_type, data)
     try:
-        with httpx.Client(transport=transport, timeout=timeout) as http:
-            # No ``content-length`` (or any framing header): httpx derives it from ``content``, as fetch does in the TS SDK.
-            response = http.post(grant.url, headers={"content-type": f"multipart/form-data; boundary={bnd}"}, content=body)
-        if 200 <= response.status_code < 300:
+        # No ``content-length`` (or any framing header): the transport derives it from the body, as fetch does in the TS SDK.
+        response = send_once(transport, HttpRequest("POST", grant.url, {"content-type": f"multipart/form-data; boundary={bnd}"}, body, timeout=timeout))
+        if 200 <= response.status < 300:
             return PostOutcome("ok", key=key)
         text = response.text or ""
-        return PostOutcome("refused", http_status=response.status_code, expired=response.status_code == 403 and re.search(r"expired|Policy expired|signature", text, re.IGNORECASE) is not None)
+        return PostOutcome("refused", http_status=response.status, expired=response.status == 403 and re.search(r"expired|Policy expired|signature", text, re.IGNORECASE) is not None)
     except Exception as error:  # noqa: BLE001 — the network is a reason, never an exception on this path
         return PostOutcome("network", reason=str(error))
 
@@ -468,10 +466,10 @@ class AirPrompterUploadSink:
 
     kind = "airprompter"
 
-    def __init__(self, *, grant_for: Callable[..., GrantDecision], transport: Optional[httpx.BaseTransport] = None, now_ms: Optional[Callable[[], float]] = None, on_grant: Optional[Callable[[GrantDecision], None]] = None):
+    def __init__(self, *, grant_for: Callable[..., GrantDecision], transport: Optional[Transport] = None, now_ms: Optional[Callable[[], float]] = None, on_grant: Optional[Callable[[GrantDecision], None]] = None):
         self._grant_for_writer = grant_for
         self._grant_takes_report = _takes_report(grant_for)
-        self._transport = transport
+        self._transport = require_transport(transport)
         self._now_ms = now_ms or (lambda: time.time() * 1000)
         self._on_grant = on_grant
         self.grants: dict[str, UploadGrant] = {}
@@ -518,7 +516,7 @@ class SpoolUploader:
         directory: str,
         instance_id: str,
         grant_for: Optional[Callable[..., GrantDecision]] = None,
-        transport: Optional[httpx.BaseTransport] = None,
+        transport: Optional[Transport] = None,
         now_ms: Optional[Callable[[], float]] = None,
         fs: Optional[FsPort] = None,
         rand: Optional[Callable[[], float]] = None,

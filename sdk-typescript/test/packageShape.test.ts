@@ -19,7 +19,8 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
@@ -309,7 +310,7 @@ test("the tarball carries every declared subpath in both module systems, and spe
   assert.ok(version.includes(`PROTOCOL_VERSION = "${readFileSync(join(root, "..", "protocol", "VERSION"), "utf8").trim()}"`), "the build carries protocol/VERSION");
 });
 
-test("every package carries one version and SDK_VERSION is it; satellites peer on the SDK, exact-pinned; every subpath publishes under its budget", () => {
+test("every package carries one version and SDK_VERSION is it; satellites peer on the SDK (exactly on a candidate, ^ after); every subpath publishes under its budget", () => {
   const manifests = Object.fromEntries(PACKAGES.map((name) => [name, manifestOf(name)]));
   const versions = new Set(PACKAGES.map((name) => manifests[name]!.version));
   assert.equal(versions.size, 1, "one version");
@@ -319,7 +320,9 @@ test("every package carries one version and SDK_VERSION is it; satellites peer o
   assert.equal(SDK_VERSION, version, "SDK_VERSION is written from packages/sdk/package.json");
   assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, version, "the workspace root moves with the packages");
   const cli = JSON.parse(readFileSync(join(root, "..", "cli", "package.json"), "utf8")) as Manifest;
-  assert.equal(cli.version, version, "the CLI is on the release candidate too");
+  // A candidate moves the CLI with it; from 1.0.0 the CLI may ship a patch of its own, so only a candidate pins it.
+  if (version.includes("-")) assert.equal(cli.version, version, "the CLI is on the release candidate too");
+  else assert.ok(!cli.version.includes("-"), "a final SDK leaves no CLI on a candidate (version-lockstep --set moved it)");
   assert.equal(cli.private, true, "the CLI ships as signed executables, never on npm");
   assert.deepEqual(manifests.sdk!.dependencies ?? {}, {}, "the SDK has no runtime dependency");
   const peers = manifests.sdk!.peerDependencies ?? {};
@@ -329,7 +332,7 @@ test("every package carries one version and SDK_VERSION is it; satellites peer o
     const manifest = manifests[name]!;
     assert.equal(manifest.name, `@airprompter/${name}`);
     assert.deepEqual(manifest.dependencies ?? {}, {}, `${name} has no dependency: an app never installs a second SDK copy`);
-    assert.equal(manifest.peerDependencies?.["@airprompter/agent-sdk"], version, `${name} peers on the SDK at the lockstep version`);
+    assert.equal(manifest.peerDependencies?.["@airprompter/agent-sdk"], version.includes("-") ? version : `^${version}`, `${name} peers on the SDK: exactly on a candidate, from the version on after (a 1.1.0 SDK beside a 1.0.0 datastore)`);
     assert.equal(manifest.devDependencies?.["@airprompter/agent-sdk"], version, `${name} builds against the workspace SDK`);
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), name === "datastore-s3" ? ["@airprompter/agent-sdk", "@aws-sdk/client-s3"] : ["@airprompter/agent-sdk"], `${name}: the client library is the application's`);
   }
@@ -349,13 +352,81 @@ test("every package carries one version and SDK_VERSION is it; satellites peer o
   for (const name of ["sdk", "agent-otel"]) assert.ok(dockerfile.includes(`COPY sdk-typescript/packages/${name}/src sdk-typescript/packages/${name}/src`), `deploy/docker/Dockerfile copies packages/${name}/src`);
 });
 
-test("every install line in the README pins the current version, so a version bump fails here until the docs follow", () => {
+test("every install line in the READMEs pins the current version, the npm pages included, so a version bump fails here until the docs follow", () => {
   const version = manifestOf("sdk").version;
-  const lines = readFileSync(join(root, "README.md"), "utf8").split("\n").filter((line) => /\bnpm install\b/.test(line) && line.includes("@airprompter/"));
-  assert.ok(lines.some((line) => line.includes(`@airprompter/agent-sdk@${version}`)), `the README installs @airprompter/agent-sdk@${version}`);
-  for (const line of lines) {
-    assert.match(line, /--save-exact/, `an exact pin: npm's default range matches later candidates: ${line}`);
-    for (const [spec] of line.matchAll(/@airprompter\/[a-z0-9-]+(@[^\s`]*)?/g)) assert.ok(spec.endsWith(`@${version}`), `${spec} is not pinned to ${version}`);
+  for (const page of [join(root, "README.md"), ...PACKAGES.map((name) => join(root, "packages", name, "README.md"))]) {
+    const lines = readFileSync(page, "utf8").split("\n").filter((line) => /\bnpm install\b/.test(line) && line.includes("@airprompter/"));
+    assert.ok(lines.some((line) => line.includes(`@airprompter/agent-sdk@${version}`)), `${page} installs @airprompter/agent-sdk@${version}`);
+    for (const line of lines) {
+      assert.match(line, /--save-exact/, `an exact pin: npm's default range matches later candidates: ${line}`);
+      for (const [spec] of line.matchAll(/@airprompter\/[a-z0-9-]+(@[^\s`]*)?/g)) assert.ok(spec.endsWith(`@${version}`), `${page}: ${spec} is not pinned to ${version}`);
+    }
+  }
+});
+
+test("version-lockstep --set: a candidate pins exactly and keeps its advice; a final version peers with ^, drops the advice, and frees the CLI", () => {
+  // A copy of what the tool reads and writes, so the test changes nothing here, whatever version this tree is at.
+  const scratch = mkdtempSync(join(tmpdir(), "ap-lockstep-"));
+  const copy = (path: string) => {
+    mkdirSync(dirname(join(scratch, path)), { recursive: true });
+    writeFileSync(join(scratch, path), readFileSync(join(root, "..", path)));
+  };
+  try {
+    for (const path of ["README.md", "protocol/VERSION", "cli/package.json", "cli/package-lock.json", "sdk-typescript/package.json", "sdk-typescript/README.md", "sdk-typescript/scripts/version-lockstep.mjs", "sdk-typescript/scripts/build.mjs", "sdk-typescript/packages/sdk/src/core/protocol/version.ts"]) copy(path);
+    for (const name of PACKAGES) for (const file of ["package.json", "README.md"]) copy(`sdk-typescript/packages/${name}/${file}`);
+    for (const example of readdirSync(join(root, "..", "examples"))) if (existsSync(join(root, "..", "examples", example, "package.json"))) copy(`examples/${example}/package.json`);
+    const lockstep = (...args: string[]) => spawnSync(process.execPath, [join(scratch, "sdk-typescript", "scripts", "version-lockstep.mjs"), ...args], { encoding: "utf8" });
+    const at = (path: string) => readFileSync(join(scratch, path), "utf8");
+    const pages = ["README.md", "sdk-typescript/README.md", ...PACKAGES.map((name) => `sdk-typescript/packages/${name}/README.md`)];
+    const peerOf = (name: string) => (JSON.parse(at(`sdk-typescript/packages/${name}/package.json`)) as Manifest).peerDependencies?.["@airprompter/agent-sdk"];
+    const cliVersion = () => (JSON.parse(at("cli/package.json")) as Manifest).version;
+    // From whatever this tree is, to a candidate: the advice stays, the peers are exact, the CLI moves with it.
+    writeFileSync(join(scratch, "cli", "package.json"), JSON.stringify({ ...JSON.parse(at("cli/package.json")), version: manifestOf("sdk").version }));
+    const blocks = (page: string) => at(page).split("<!-- release-candidate -->").length - 1;
+    const before = pages.map(blocks);
+    assert.equal(lockstep("--set", "1.0.0-rc.99").status, 0);
+    // On a candidate tree (every rc) the advice is there and stays; a final tree has none to keep.
+    assert.deepEqual(pages.map(blocks), before, "a candidate keeps the advice it has");
+    writeFileSync(join(scratch, "README.md"), at("README.md") + "\nNeighbours: 1.0.0-rc.990, 11.0.0-rc.99, 1.0.0-rc.99.1\n");
+    if (manifestOf("sdk").version.includes("-")) assert.ok(before.every((count) => count > 0), "every README on a candidate carries the candidate's advice");
+    for (const page of pages) assert.ok(at(page).includes("1.0.0-rc.99"), `${page} names the candidate`);
+    for (const name of SATELLITES) assert.equal(peerOf(name), "1.0.0-rc.99", `${name}: exact on a candidate`);
+    assert.equal(cliVersion(), "1.0.0-rc.99", "the CLI moves with a candidate");
+    // To 1.0.0: what AIR-2245 runs.
+    const set = lockstep("--set", "1.0.0");
+    assert.equal(set.status, 0, set.stderr);
+    for (const name of SATELLITES) {
+      assert.equal(peerOf(name), "^1.0.0", `${name}: a final version peers from itself on`);
+      assert.equal((JSON.parse(at(`sdk-typescript/packages/${name}/package.json`)) as Manifest).devDependencies?.["@airprompter/agent-sdk"], "1.0.0", `${name}: the workspace link stays exact`);
+    }
+    for (const page of pages) {
+      const text = at(page).replace("Neighbours: 1.0.0-rc.990, 11.0.0-rc.99, 1.0.0-rc.99.1", "");
+      assert.ok(!text.includes("release-candidate") && text.includes("1.0.0") && !text.includes("rc.99"), `${page}: 1.0.0, without the candidate's advice`);
+    }
+    assert.equal(cliVersion(), "1.0.0");
+    const lock = JSON.parse(at("cli/package-lock.json")) as { version: string; packages: Record<string, { version?: string }> };
+    assert.deepEqual([lock.version, lock.packages[""]?.version], ["1.0.0", "1.0.0"], "the CLI's lockfile moves with it, both fields");
+    assert.equal(lockstep().status, 0, "the check passes on what --set wrote");
+    assert.ok(at("README.md").includes("Neighbours: 1.0.0-rc.990, 11.0.0-rc.99, 1.0.0-rc.99.1"), "--set moves the version as a whole token only");
+    // A page --set missed still says the candidate, and "1.0.0" inside "1.0.0-rc.99" does not count as naming 1.0.0.
+    const missed = "sdk-typescript/packages/datastore-s3/README.md";
+    const good = at(missed);
+    writeFileSync(join(scratch, missed), good.split("@1.0.0").join("@1.0.0-rc.99"));
+    assert.match(lockstep().stderr, /datastore-s3[\\/]README\.md does not name 1\.0\.0/);
+    writeFileSync(join(scratch, missed), good);
+    // After 1.0.0 the CLI is released on its own: an SDK patch leaves it where it is, even at the same version.
+    assert.equal(lockstep("--set", "1.0.2").status, 0);
+    assert.equal(cliVersion(), "1.0.0", "--set leaves a CLI released on its own");
+    // A CLI patch of its own, then the next candidate: the candidate ties them again.
+    writeFileSync(join(scratch, "cli", "package.json"), JSON.stringify({ ...JSON.parse(at("cli/package.json")), version: "1.0.3" }));
+    assert.equal(lockstep("--set", "1.1.0-rc.0").status, 0);
+    assert.equal(cliVersion(), "1.1.0-rc.0", "a candidate moves the CLI with it");
+    assert.equal(lockstep("--set", "1.0.2").status, 0);
+    assert.equal(peerOf("datastore-s3"), "^1.0.2");
+    writeFileSync(join(scratch, "sdk-typescript", "README.md"), at("sdk-typescript/README.md") + "<!-- release-candidate -->x<!-- /release-candidate -->\n");
+    assert.match(lockstep().stderr, /a release-candidate block on 1\.0\.2/, "a final version refuses a candidate's advice");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 

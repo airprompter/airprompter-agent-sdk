@@ -20,7 +20,7 @@ from airprompter_agent.core.control.client import SyncClient
 from airprompter_agent.core.protocol.trust import public_jwk_of, trusted_root_from_pinned_key, release_digest
 from airprompter_agent.sync import MemoryReleaseDatastore, ReleaseKey, clear_datastore_rollback, pull_to_datastore, resolve_hydration, rollback_datastore
 
-from .control_plane import FakeControlPlane
+from .control_plane import FakeControlPlane, transport_of
 
 SCOPE = {"organizationId": "org_1", "agentId": "agt_1", "target": "prod"}
 KW = {"organization_id": "org_1", "agent_id": "agt_1", "target": "prod"}
@@ -38,7 +38,7 @@ def _no_network(request: httpx.Request) -> httpx.Response:
 def puller(plane: FakeControlPlane, datastore, distribution_public_key: bytes, region=None):
     client = SyncClient(base_url="https://api.test", agent_id=SCOPE["agentId"], target=SCOPE["target"], api_key=plane.api_key, transport=plane.transport())
     trusted_root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=public_jwk_of(plane.root_key))
-    edge = httpx.Client(transport=plane.transport())
+    edge = httpx.Client(transport=plane.httpx_transport())
 
     def pull():
         return pull_to_datastore(datastore=datastore, region=region, client=client, scope=SCOPE, trusted_root=trusted_root, fetch_root=lambda: edge.get("https://edge.test/roots/prod/root.json").json(), now=lambda: _iso(datetime.now(timezone.utc)), distribution_public_key=distribution_public_key)
@@ -53,7 +53,7 @@ def _setup():
 
 
 def _boot(plane, key, datastore, state_dir, region=None):
-    return AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=key, datastore={"store": datastore, "region": region})
+    return AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(_no_network), distribution_key=key, datastore={"store": datastore, "region": region})
 
 
 def test_puller_writes_through_the_dao_and_a_runtime_hydrates_the_ramp_as_signed():

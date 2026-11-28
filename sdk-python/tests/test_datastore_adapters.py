@@ -26,7 +26,7 @@ from airprompter_datastore_postgres import postgres_kv_schema, postgres_kv_store
 from airprompter_datastore_redis import redis_kv_store
 from airprompter_datastore_s3 import s3_kv_store
 
-from .control_plane import FakeControlPlane
+from .control_plane import FakeControlPlane, transport_of
 
 SCOPE = {"organizationId": "org_1", "agentId": "agt_1", "target": "prod"}
 KW = {"organization_id": "org_1", "agent_id": "agt_1", "target": "prod"}
@@ -43,7 +43,7 @@ def _fleet_over(kv, prefix: str) -> None:
     fleet = generate_x25519_key_pair()
     client = SyncClient(base_url="https://api.test", agent_id=SCOPE["agentId"], target=SCOPE["target"], api_key=plane.api_key, transport=plane.transport())
     root = trusted_root_from_pinned_key(purpose="platform", environment="prod", pinned_root=public_jwk_of(plane.root_key))
-    edge = httpx.Client(transport=plane.transport())
+    edge = httpx.Client(transport=plane.httpx_transport())
     for text in ("v1", "v2", "v3"):
         plane.promote([plane.slot(tag="support.reply", text=text, version_id=f"ver_{text}")])
         pulled = pull_to_datastore(datastore=datastore, client=client, scope=SCOPE, trusted_root=root, fetch_root=lambda: edge.get("https://edge.test/roots/prod/root.json").json(), now=lambda: datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"), distribution_public_key=fleet.public_raw)
@@ -53,7 +53,7 @@ def _fleet_over(kv, prefix: str) -> None:
     assert decode_datastore_record(kv.get(keys.latest).value, "latest")["generation"] == 3
     state_dir = tempfile.mkdtemp(prefix="ap-py-adapter-")
     try:
-        ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(_no_network), distribution_key=DistributionKey(fleet.private_key, fleet.public_raw), datastore={"store": datastore})
+        ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(_no_network), distribution_key=DistributionKey(fleet.private_key, fleet.public_raw), datastore={"store": datastore})
         assert ap.generation == 3
         assert rollback_datastore(datastore=datastore, key=key, reason="adapter test").ok
         assert ap.hydrate() == {"outcome": "rolled_back", "generation": 2, "heldBackBelow": 3}

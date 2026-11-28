@@ -29,6 +29,7 @@ from .bundle.apbundle import (
 from .bundle.hpke import X25519KeyPair, generate_x25519_key_pair, x25519_private_key_from_raw, x25519_public_key_from_raw
 from .checks import evaluate_checks, output_text_of
 from .control.client import SyncClient
+from .http import HttpRequest, HttpResponse, Transport, default_transport, require_transport, send_once
 from .golden import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, GoldenCaseResult, GoldenInvocation, GoldenInvoke, GoldenReport, GoldenSetError, golden_reports_meet, manifest_has_golden, parse_golden_set, pass_bps_of, run_golden_set
 from .judge import (
     JUDGE_RUBRICS,
@@ -127,6 +128,8 @@ __all__ = [
     "GoldenInvoke",
     "GoldenReport",
     "GoldenSetError",
+    "HttpRequest",
+    "HttpResponse",
     "JudgeResult",
     "JudgeRubric",
     "LATENCY_BUCKET_EDGES_MS",
@@ -149,6 +152,7 @@ __all__ = [
     "StepTotals",
     "SyncClient",
     "SystemClock",
+    "Transport",
     "USAGE_SOURCES",
     "UnknownVariableError",
     "UploadOutcome",
@@ -163,6 +167,7 @@ __all__ = [
     "canonical_json",
     "create_encrypted_bundle",
     "create_plaintext_bundle",
+    "default_transport",
     "distribution_key_id",
     "effective_arms",
     "epoch_minute",
@@ -198,6 +203,8 @@ __all__ = [
 _FOR_THE_LAYERS_ABOVE = (
     HOSTED_ROOTS,
     hosted_environment_of_root,
+    require_transport,
+    send_once,
     AGENT_ID,
     JUDGE_RUBRICS,
     RUN_REF_MAX_ENTRIES,

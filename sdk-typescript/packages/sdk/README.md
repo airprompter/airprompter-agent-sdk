@@ -5,6 +5,20 @@ restart-safe slot store, offline operation, rendering with trust-aware
 variables, framework adapters for the OpenAI and Anthropic clients, the Vercel
 AI SDK and LangChain, and content-free telemetry.
 
+## Install
+
+```bash
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.5
+```
+
+<!-- release-candidate -->
+This is a release candidate for 1.0.0. Pin it exactly, as above: npm's default
+range on a candidate also matches later candidates, and an unpinned install
+takes the `latest` tag, the 0.x line.
+<!-- /release-candidate -->
+
+## Use
+
 ```ts
 import { AirPrompterAgent } from "@airprompter/agent-sdk";
 

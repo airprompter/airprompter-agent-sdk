@@ -31,7 +31,7 @@ from airprompter_agent.agent import SyncOptions, TelemetryOptions
 from airprompter_agent.core.protocol.trust import public_jwk_of
 from airprompter_agent.sync.store.slot_store import SlotStore
 
-from .control_plane import FakeControlPlane
+from .control_plane import FakeControlPlane, transport_of
 
 SCOPE = {"organizationId": "org_1", "agentId": "agt_stop", "target": "prod"}
 KW = {"organization_id": "org_1", "agent_id": "agt_stop", "target": "prod"}
@@ -51,7 +51,7 @@ class BucketTransport(httpx.BaseTransport):
     """The plane's transport, with the bucket's POSTs routed through ``bucket`` (to delay, hang or count them)."""
 
     def __init__(self, plane: FakeControlPlane, bucket: Callable[[httpx.Request, httpx.BaseTransport], httpx.Response]):
-        self._real = plane.transport()
+        self._real = plane.httpx_transport()
         self._bucket = bucket
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
@@ -76,7 +76,7 @@ def start(p: FakeControlPlane, state_dir: str, *, telemetry: Optional[TelemetryO
         state_dir=state_dir,
         root={"pinned": public_jwk_of(p.root_key)},
         sync=SyncOptions(mode=mode, poll_seconds=3600, root_url="https://edge.test/roots/prod/root.json"),
-        transport=transport or p.transport(),
+        transport=transport_of(transport) if transport else p.transport(),
         now=clock,
         random=lambda: 0.5,
         telemetry=telemetry or TelemetryOptions(),
@@ -219,7 +219,7 @@ def test_a_real_process_whose_bucket_never_answers_exits_soon_after_stop(tmp_pat
     script.write_text(textwrap.dedent(f"""
         import sys, threading, httpx
         sys.path.insert(0, {str(tests.parent)!r})
-        from tests.control_plane import FakeControlPlane
+        from tests.control_plane import FakeControlPlane, transport_of
         from tests.test_stop_upload import BucketTransport, KW, SCOPE, BUCKET
         from airprompter_agent import AirPrompterAgent
         from airprompter_agent.agent import SyncOptions, TelemetryOptions
@@ -228,7 +228,7 @@ def test_a_real_process_whose_bucket_never_answers_exits_soon_after_stop(tmp_pat
         p.grant_base_url = BUCKET
         p.promote([p.slot(tag="support.reply", text="Reply.")])
         never = threading.Event()
-        transport = BucketTransport(p, lambda request, real: (never.wait(), httpx.Response(200))[1])
+        transport = transport_of(BucketTransport(p, lambda request, real: (never.wait(), httpx.Response(200))[1]))
         ap = AirPrompterAgent.start(**KW, api_key=p.api_key, base_url="https://api.test", state_dir={str(tmp_path / "state")!r},
             root={{"pinned": public_jwk_of(p.root_key)}}, sync=SyncOptions(mode="resident", poll_seconds=3600, root_url="https://edge.test/roots/prod/root.json"),
             transport=transport, telemetry=TelemetryOptions(stop_upload_timeout_ms=300))

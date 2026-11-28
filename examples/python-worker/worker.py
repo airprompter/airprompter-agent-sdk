@@ -6,7 +6,7 @@ run_ref.
 
 Usage::
 
-    pip install airprompter-agent[anthropic]
+    pip install "airprompter-agent[anthropic]==<the version in sdk-python/README.md>"   # pinned, as the README says
     AIRPROMPTER_ORG_ID=org_… AIRPROMPTER_AGENT_ID=agt_… AIRPROMPTER_AGENT_KEY=apa_… ANTHROPIC_API_KEY=… python worker.py
 
 It pins AirPrompter's production root, whose root document the SDK reads from

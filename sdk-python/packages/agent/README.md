@@ -5,6 +5,19 @@ restart-safe slot store, offline operation, rendering with trust-aware
 variables, framework adapters for the openai and anthropic clients and LiteLLM
 (`airprompter_agent.frameworks.*`), and content-free telemetry.
 
+## Install
+
+```bash
+pip install "airprompter-agent==1.0.0rc5"
+```
+
+<!-- release-candidate -->
+This is a release candidate for 1.0.0. Pin it exactly, as above: unpinned, pip
+takes the 0.x line, and `--pre` opens prereleases on every dependency.
+<!-- /release-candidate -->
+
+## Use
+
 ```python
 from airprompter_agent import AirPrompterAgent
 

@@ -22,12 +22,12 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import AgentStartError, SyncOptions
-from airprompter_agent.core import HOSTED_ROOTS, create_plaintext_bundle, hosted_environment_of_root, key_thumbprint, trusted_root_from_pinned_key, verify_root_metadata
+from airprompter_agent.core import HOSTED_ROOTS, Transport, create_plaintext_bundle, hosted_environment_of_root, key_thumbprint, trusted_root_from_pinned_key, verify_root_metadata
 from airprompter_agent.core._util import b64url_encode
 from airprompter_agent.core.protocol import hosted_roots
 from airprompter_agent.core.protocol.trust import public_jwk_of
 
-from .control_plane import FakeControlPlane, new_key, root_document
+from .control_plane import FakeControlPlane, new_key, root_document, transport_of
 
 SCOPE = {"organizationId": "org_1", "agentId": "agt_1", "target": "prod"}
 PROD_URL = "https://api.airprompter.com/roots/prod/root.json"
@@ -47,7 +47,7 @@ def promoted(scope: dict = SCOPE, hosted_environment: Optional[str] = None) -> F
     return plane
 
 
-def start(plane: FakeControlPlane, state_dir: str, events: Optional[list] = None, transport: Optional[httpx.BaseTransport] = None, **extra: Any) -> AirPrompterAgent:
+def start(plane: FakeControlPlane, state_dir: str, events: Optional[list] = None, transport: Optional[Transport] = None, **extra: Any) -> AirPrompterAgent:
     options: dict[str, Any] = {
         "organization_id": plane.scope["organizationId"], "agent_id": plane.scope["agentId"], "target": plane.scope["target"],
         "api_key": plane.api_key, "state_dir": state_dir, "root": {"pinned": public_jwk_of(plane.root_key)},
@@ -169,9 +169,9 @@ def test_an_explicit_root_url_wins(tmp_path, monkeypatch):
     assert not any(e.get("event") == "root_url_default" for e in events)
 
 
-def hijacked(plane: FakeControlPlane, serve: Callable[[], Any], seen: Optional[list] = None) -> httpx.MockTransport:
+def hijacked(plane: FakeControlPlane, serve: Callable[[], Any], seen: Optional[list] = None) -> Transport:
     """The default URL answered by someone else: ``serve`` decides what comes back for it; everything else is the plane."""
-    base = plane.transport()
+    base = plane.httpx_transport()
 
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url) == PROD_URL:
@@ -184,7 +184,7 @@ def hijacked(plane: FakeControlPlane, serve: Callable[[], Any], seen: Optional[l
             return httpx.Response(200, content=reply if isinstance(reply, str) else json.dumps(reply), headers={"etag": '"root-1"'})
         return base.handle_request(request)
 
-    return httpx.MockTransport(handler)
+    return transport_of(handler)
 
 
 def test_what_the_default_url_serves_is_trusted_only_if_it_verifies_against_the_pin(tmp_path, monkeypatch):

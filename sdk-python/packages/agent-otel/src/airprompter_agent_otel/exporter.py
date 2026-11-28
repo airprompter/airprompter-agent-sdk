@@ -21,7 +21,7 @@ Rules:
   uploader's backoff and the budget, so a blip does not wipe a backlog.
 - **Nothing here reads a prompt.** The attribute keys are a closed set; the
   rows carry no text.
-- **Exporter-pluggable.** ``endpoint`` uses httpx and the OTLP/HTTP JSON
+- **Exporter-pluggable.** ``endpoint`` goes through the SDK's ``Transport`` (httpx unless ``transport=`` says otherwise) with the OTLP/HTTP JSON
   encoding (no OpenTelemetry dependency); ``exporter`` takes any callable
   ``(request) -> ExportResult | None`` — the OpenTelemetry SDK's own OTLP
   exporter wrapped in a few lines, or the customer's — so the protobuf and
@@ -48,9 +48,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Union
 
-import httpx
-
-from airprompter_agent.core import LATENCY_BUCKET_EDGES_MS, SDK_VERSION, UploadOutcome, UploadSegment
+from airprompter_agent.core import LATENCY_BUCKET_EDGES_MS, SDK_VERSION, HttpRequest, HttpResponse, Transport, UploadOutcome, UploadSegment, default_transport
 
 OTLP_SCOPE_NAME = "airprompter"
 _DELTA = 1  # AGGREGATION_TEMPORALITY_DELTA
@@ -61,6 +59,17 @@ def _iso_ms(epoch_ms: float) -> str:
     """``2026-09-12T14:03:10.123Z``, what ``Date#toISOString`` writes."""
     seconds, millis = divmod(int(epoch_ms), 1000)
     return dt.datetime.fromtimestamp(seconds, tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + f".{millis:03d}Z"
+
+
+def _send(transport: Optional[Transport], request: HttpRequest) -> HttpResponse:
+    """``request`` on the caller's transport, or on a default one opened for it and closed after."""
+    if transport is not None:
+        return transport(request)
+    own = default_transport()
+    try:
+        return own(request)
+    finally:
+        getattr(own, "close", lambda: None)()
 
 
 Attribute = dict[str, Any]
@@ -199,22 +208,25 @@ class ExportResult:
 Exporter = Callable[[dict[str, Any]], Optional[ExportResult]]
 
 
-def http_json_exporter(*, endpoint: str, headers: Optional[Mapping[str, str]] = None, transport: Optional[httpx.BaseTransport] = None, timeout: float = 10.0) -> Exporter:
-    """OTLP/HTTP with the JSON encoding over httpx: the exporter that needs no dependency."""
+def http_json_exporter(*, endpoint: str, headers: Optional[Mapping[str, str]] = None, transport: Optional[Transport] = None, timeout: float = 10.0) -> Exporter:
+    """OTLP/HTTP with the JSON encoding over the SDK's ``Transport``: the exporter that needs no dependency."""
+
+    if transport is not None and not callable(transport):
+        raise TypeError(f"transport= takes a callable HttpRequest -> HttpResponse (airprompter_agent.core.Transport), not {type(transport).__name__}")
 
     def export(request: dict[str, Any]) -> Optional[ExportResult]:
         try:
-            with httpx.Client(transport=transport, timeout=timeout) as http:
-                response = http.post(endpoint, headers={"content-type": "application/json", **dict(headers or {})}, content=json.dumps(request, separators=(",", ":")).encode("utf-8"))
-        except httpx.TimeoutException:
+            # A default transport is opened and closed per export, as the exporter's own client was.
+            response = _send(transport, HttpRequest("POST", endpoint, {"content-type": "application/json", **dict(headers or {})}, json.dumps(request, separators=(",", ":")).encode("utf-8"), timeout=timeout))
+        except TimeoutError:
             return ExportResult(False, "network:timeout")
         except Exception as error:  # noqa: BLE001 — the network is a reason, never an exception on this path
             return ExportResult(False, f"network:{error or 'error'}")
-        if 200 <= response.status_code < 300:
+        if 200 <= response.status < 300:
             return ExportResult(True)
-        retry_after = response.headers.get("retry-after")
-        retry_after_ms = int(retry_after) * 1000 if response.status_code in (429, 503) and retry_after and retry_after.isdigit() else None
-        return ExportResult(False, f"http_{response.status_code}", retry_after_ms)
+        retry_after = response.header("retry-after")
+        retry_after_ms = int(retry_after) * 1000 if response.status in (429, 503) and retry_after and retry_after.isdigit() else None
+        return ExportResult(False, f"http_{response.status}", retry_after_ms)
 
     return export
 
@@ -232,7 +244,7 @@ class OtlpUploadSink:
         resource: Optional[Mapping[str, Union[str, int, float, bool]]] = None,
         sdk_version: str = SDK_VERSION,
         exporter: Optional[Exporter] = None,
-        transport: Optional[httpx.BaseTransport] = None,
+        transport: Optional[Transport] = None,
         timeout: float = 10.0,
         now_ms: Optional[Callable[[], float]] = None,
     ):

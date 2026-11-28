@@ -8,6 +8,23 @@ its dial-up and ramp, the fleet's rollback, the region
 Rows are in the shared format (`protocol/datastore-format.md`), so a Python
 puller and a TypeScript runtime read each other's.
 
+## Install
+
+```bash
+npm install --save-exact @airprompter/agent-sdk@1.0.0-rc.5 @airprompter/datastore-postgres@1.0.0-rc.5 pg
+```
+
+The SDK is a peer (exactly this version on a release candidate, this version or later within the major
+from 1.0.0), so one copy resolves.
+
+<!-- release-candidate -->
+This is a release candidate for 1.0.0. Pin it exactly, as above: npm's default
+range on a candidate also matches later candidates, and an unpinned install
+takes the `latest` tag, the 0.x line.
+<!-- /release-candidate -->
+
+## Use
+
 ```ts
 import pg from "pg";
 import { AirPrompterAgent } from "@airprompter/agent-sdk";

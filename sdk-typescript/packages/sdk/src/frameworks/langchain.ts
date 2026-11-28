@@ -200,7 +200,7 @@ export function airprompter(ap: AgentRuntime, options: AirPrompterMiddlewareOpti
       const { state, runtime, model, modelSettings } = request as unknown as { state: StateLike; runtime?: RuntimeLike; model: ModelLike; modelSettings?: Record<string, unknown> };
       const run = findRun(state, runtime);
       const placed = await run.place(slot);
-      if (placed.kind === "passthrough") return ap.withRun(run, () => handler(request));
+      if (placed.kind !== "approved") return ap.withRun(run, () => handler(request));
       const approvedModel = await modelFor(model, placed, run);
       if (!approvedModel) return ap.withRun(run, () => handler(request));
       const override = { ...(request as object), model: approvedModel, systemMessage: new SystemMessage(placed.instructions), modelSettings: { ...modelSettings, ...callSettings(placed.settings) } };

@@ -5,6 +5,22 @@ The AirPrompter release datastore over an S3 bucket: a `KvStore` for
 writes ([docs/datastore.md](https://github.com/airprompter/airprompter-agent-sdk/blob/main/docs/datastore.md)).
 Object keys match `@airprompter/datastore-s3`, so Python and TypeScript share a bucket.
 
+## Install
+
+```bash
+pip install "airprompter-agent==1.0.0rc5" "airprompter-datastore-s3==1.0.0rc5" boto3
+```
+
+It depends on `airprompter-agent` (exactly this version on a release candidate, this version or later
+within the major from 1.0.0), so one copy resolves.
+
+<!-- release-candidate -->
+This is a release candidate for 1.0.0. Pin it exactly, as above: unpinned, pip
+takes the 0.x line, and `--pre` opens prereleases on every dependency.
+<!-- /release-candidate -->
+
+## Use
+
 ```python
 import boto3
 from airprompter_agent.sync import kv_release_datastore

@@ -32,7 +32,7 @@ from airprompter_agent.sync.store.payload_crypto import encrypt_payload, payload
 from airprompter_agent.sync.store.slot_store import SlotStore, StoreError
 from airprompter_agent.sync.sync.loop import sync_once
 
-from .control_plane import FakeControlPlane, new_key
+from .control_plane import FakeControlPlane, new_key, transport_of
 
 SCOPE = {"organizationId": "org_1", "agentId": "agt_1", "target": "prod"}
 KW = {"organization_id": "org_1", "agent_id": "agt_1", "target": "prod"}
@@ -106,7 +106,7 @@ def test_a_puller_without_the_capability_carries_a_slot_it_cannot_serve_and_a_ru
     contents = open_bundle(pulled.bundle, SCOPE, distribution_key)
     assert sorted(payload["contentHash"] for payload in contents["payloads"]) == sorted([base["contentHash"], future["contentHash"]])
     with gaining():
-        ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network), distribution_key=distribution_key, vendored_bundle=VendoredBundle(pulled.bundle))
+        ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(no_network), distribution_key=distribution_key, vendored_bundle=VendoredBundle(pulled.bundle))
         try:
             assert ap.prompt("support.future").render().text == "From the future."
             assert ap.prompt("support.reply").render().text == "Reply politely."
@@ -212,7 +212,7 @@ def test_a_requires_slot_sharing_a_hash_with_an_ordinary_slot_serves_no_empty_st
     start(plane, state_dir).stop()
     del plane.payloads[step_only["contentHash"]]
     with gaining():
-        ap = start(plane, state_dir, transport=httpx.MockTransport(no_network))
+        ap = start(plane, state_dir, transport=transport_of(no_network))
         try:
             assert ap.generation == 1
             with pytest.raises(KeyError, match="no slot support.flow"):  # the main hash is held; the step is not
@@ -247,7 +247,7 @@ def test_a_requires_slot_with_no_payload_resolves_as_no_slot_and_a_stranded_over
     plane.promote([base, future], experiments=[experiment])
     start(plane, state_dir).stop()  # stored by an SDK without the capability: neither payload is held
     with gaining():
-        ap = start(plane, state_dir, transport=httpx.MockTransport(no_network))
+        ap = start(plane, state_dir, transport=transport_of(no_network))
         try:
             with pytest.raises(KeyError, match="no slot support.future"):
                 ap.prompt("support.future").render()
@@ -271,7 +271,7 @@ def test_the_stranded_host_serves_generation_one_on_restart_then_picks_up_the_sl
     with gaining():
         events: list[dict] = []
         # The first boot has no network: it serves from the store, with no slot to show for what it never stored.
-        offline = start(plane, state_dir, transport=httpx.MockTransport(no_network), logger=events.append)
+        offline = start(plane, state_dir, transport=transport_of(no_network), logger=events.append)
         assert offline.generation == 1, "serving, not generation 0"
         assert offline.prompt("support.reply").render().text == "Reply politely."
         with pytest.raises(KeyError, match="no slot support.future"):
@@ -364,7 +364,7 @@ def test_a_bundle_host_picks_a_stranded_slot_up_at_its_next_generation_not_from_
     following = pull_of(plane, key.public_raw)
     assert following.status == "ok", following
     with gaining():
-        ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network), distribution_key=distribution_key)
+        ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(no_network), distribution_key=distribution_key)
         try:
             assert ap.apply_bundle(whole.bundle)["outcome"] == "unchanged"
             with pytest.raises(KeyError, match="no slot support.future"):
@@ -425,7 +425,7 @@ def test_a_bundle_with_wrong_bytes_for_a_skipped_slot_is_refused_at_stage_and_ga
     distribution_key = DistributionKey(key.private_key, key.public_raw)
     plane.promote([base])
     first = pull_of(plane, key.public_raw)
-    options = dict(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network), distribution_key=distribution_key)
+    options = dict(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(no_network), distribution_key=distribution_key)
     ap = AirPrompterAgent.start(**options, vendored_bundle={"bundle": first.bundle})
     manifest = plane.promote([base, future])
     held = plane.payloads[base["contentHash"]]
@@ -453,7 +453,7 @@ def test_a_capability_refused_bundle_delivers_its_disables_and_a_later_refused_b
     plane.promote([a, b], required_capabilities=[FUTURE], directives=[])
     lifting = pull_of(plane, key.public_raw)
     assert (first.status, disabling.status, lifting.status) == ("ok", "ok", "ok")
-    ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network), distribution_key=DistributionKey(key.private_key, key.public_raw), vendored_bundle={"bundle": first.bundle})
+    ap = AirPrompterAgent.start(**KW, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(no_network), distribution_key=DistributionKey(key.private_key, key.public_raw), vendored_bundle={"bundle": first.bundle})
     try:
         assert ap.prompt("support.a").render().text == "A"
         assert ap.apply_bundle(disabling.bundle)["outcome"] == "refused"
@@ -656,7 +656,7 @@ def test_an_outage_does_not_use_a_stranded_hosts_one_try_only_an_answered_miss_d
     plane.promote([base, future])
     start(plane, state_dir).stop()
     down = {"on": True}
-    real = plane.transport().handler
+    real = plane.httpx_transport().handler
 
     def flaky(request: httpx.Request) -> httpx.Response:
         if down["on"] and future["contentHash"] in str(request.url):
@@ -664,7 +664,7 @@ def test_an_outage_does_not_use_a_stranded_hosts_one_try_only_an_answered_miss_d
         return real(request)
 
     with gaining():
-        ap = start(plane, state_dir, transport=httpx.MockTransport(flaky))
+        ap = start(plane, state_dir, transport=transport_of(flaky))
         try:
             ap.sync_now()
             ap.sync_now()
@@ -779,7 +779,7 @@ def test_arms_of_a_shape_this_reader_cannot_read_do_not_raise_in_the_conflict_ch
 def test_an_agent_id_outside_the_grammar_never_reaches_the_filesystem(state_dir, agent_id):
     plane = FakeControlPlane(SCOPE)
     with pytest.raises(AgentStartError) as refused:
-        AirPrompterAgent.start(organization_id="org_1", agent_id=agent_id, target="prod", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network))
+        AirPrompterAgent.start(organization_id="org_1", agent_id=agent_id, target="prod", state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(no_network))
     assert refused.value.code == "invalid_options"
     assert os.listdir(state_dir) == [], "nothing was written"
 
@@ -788,7 +788,7 @@ def test_an_agent_id_outside_the_grammar_never_reaches_the_filesystem(state_dir,
 def test_a_target_that_is_not_a_slug_never_reaches_the_filesystem(state_dir, target):
     plane = FakeControlPlane(SCOPE)
     with pytest.raises(AgentStartError) as refused:
-        AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target=target, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=httpx.MockTransport(no_network))
+        AirPrompterAgent.start(organization_id="org_1", agent_id="agt_1", target=target, state_dir=state_dir, root={"pinned": public_jwk_of(plane.root_key)}, transport=transport_of(no_network))
     assert refused.value.code == "invalid_options"
     assert os.listdir(state_dir) == [], "nothing was written"
 

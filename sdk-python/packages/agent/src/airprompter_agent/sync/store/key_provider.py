@@ -81,7 +81,7 @@ def custom_key_provider(*, wrap: Callable[[bytes], bytes], unwrap: Callable[[byt
 
 
 def kms(key_id: str, *, client: Optional[object] = None, region_name: Optional[str] = None) -> KeyProvider:
-    """AWS KMS wraps the DEK (``Encrypt``/``Decrypt`` on a symmetric key). Needs ``boto3`` (``pip install airprompter-agent[kms]``)."""
+    """AWS KMS wraps the DEK (``Encrypt``/``Decrypt`` on a symmetric key). Needs ``boto3`` (the ``kms`` extra; the install line is in the README)."""
 
     def get_client():
         if client is not None:
@@ -99,7 +99,7 @@ def kms(key_id: str, *, client: Optional[object] = None, region_name: Optional[s
 
 
 def vault(transit_key: str, *, client: Optional[object] = None, mount_point: str = "transit") -> KeyProvider:
-    """HashiCorp Vault's transit engine wraps the DEK. Needs ``hvac`` (``pip install airprompter-agent[vault]``)."""
+    """HashiCorp Vault's transit engine wraps the DEK. Needs ``hvac`` (the ``vault`` extra; the install line is in the README)."""
 
     def get_client():
         if client is not None:
@@ -120,7 +120,7 @@ def vault(transit_key: str, *, client: Optional[object] = None, mount_point: str
 
 
 def os_keystore(service: str = "airprompter-agent", username: str = "store-kek") -> KeyProvider:
-    """The OS keystore (macOS Keychain, Windows Credential Locker, Secret Service) holds a random KEK. Needs ``keyring`` (``pip install airprompter-agent[keyring]``)."""
+    """The OS keystore (macOS Keychain, Windows Credential Locker, Secret Service) holds a random KEK. Needs ``keyring`` (the ``keyring`` extra; the install line is in the README)."""
 
     def load() -> bytes:
         import keyring  # type: ignore[import-not-found]

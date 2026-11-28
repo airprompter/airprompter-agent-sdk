@@ -82,7 +82,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -e ".[test]" pyflakes
+      # The repository's own installer (every distribution editable, the test extras): `pip install -e ".[test]"` from
+      # sdk-python/ resolved the old workspace and left pytest out.
+      - run: python tools/install_dev.py
         working-directory: sdk-python
       - name: Install the latest provider releases
         run: python -m pip install --upgrade openai anthropic litellm
@@ -91,4 +93,40 @@ jobs:
         run: python -m pip show openai anthropic litellm httpx httpx2 2>/dev/null | grep -E '^(Name|Version)'
       - name: Wrapper suites against the real clients
         run: WRAP_LIVE=1 python -m pytest -rs tests/test_frameworks_live.py tests/test_frameworks_direct.py tests/test_litellm.py
+        working-directory: sdk-python
+
+  httpx-canary:
+    # httpx is the default transport behind the SDK's own `Transport` (core/http.py), in no public signature, and the
+    # SDK bounds it below 1.0. Every week the default transport runs on the newest httpx: the newest release (red here
+    # means the bound must move or the default must change) and, informational, the newest prerelease (httpx 1.0 dev
+    # is another library; it shows how far off it is). Only the suites that drive the default transport run: the test
+    # doubles elsewhere are httpx-shaped and would go red on httpx itself.
+    name: httpx canary (${{ matrix.httpx }})
+    strategy:
+      fail-fast: false
+      matrix:
+        httpx: [newest, prerelease]
+    continue-on-error: ${{ matrix.httpx == 'prerelease' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # test_dev_registry runs `airprompter dev` from source: a real registry over real HTTP.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: sdk-typescript
+      - run: python tools/install_dev.py
+        working-directory: sdk-python
+      - name: Install the newest httpx past the SDK's bound
+        run: python -m pip install --upgrade ${{ matrix.httpx == 'prerelease' && '--pre' || '' }} httpx
+        working-directory: sdk-python
+      - name: Report what was tested
+        run: python -m pip show httpx | grep -E '^(Name|Version)'
+      - name: The default transport, alone and under a real registry
+        run: python -m pytest -rs tests/test_transport.py tests/test_dev_registry.py
         working-directory: sdk-python

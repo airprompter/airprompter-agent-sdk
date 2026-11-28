@@ -19,8 +19,8 @@ The QA test adds what the script cannot see: the agent's Metrics show exactly on
 
 ## What it needs
 
-- **Node 24 or later, and npm.** n8n 2.49.8 itself requires Node 24. The package runs on any Node that n8n
-  supports. It needs network access to `api.airprompter.dev` and `registry.npmjs.org`.
+- **Node 24 or later for n8n, and npm** (npm only for the default, packing run; see "Offline"). n8n 2.49.8 itself
+  requires Node 24. The kit runs on Node 20.1 or later. It needs network access to `api.airprompter.dev`, and to `registry.npmjs.org` except in the offline mode.
 - **n8n 2.49.8.** Install it once and point `N8N_BIN` at it, so a run does not download n8n:
   `npm i n8n@2.49.8` in a cache folder, then `N8N_BIN=<that folder>/node_modules/.bin/n8n`. Without `N8N_BIN`, the
   script uses `npx --yes n8n@2.49.8`. The `n8n.version` check fails on any other version, unless you pass
@@ -38,6 +38,104 @@ The QA test adds what the script cannot see: the agent's Metrics show exactly on
   | 5. Seal a release | `POST /workspace/{ws}/agents/{agent}/releases` `{ "environment": "dev", "pins": [{ "tag": "triage", "versionId": <version>, "model": "gpt-5-mini" }] }`, after a `dryRun: true` preview, acknowledging any warnings it flags |
   | 6. Promote it | `POST /workspace/{ws}/agents/{agent}/environments/dev/promote` `{ "releaseDigest": …, "expectedStateRevision": … }`. Read `board.environments.dev.stateRevision` from `GET /workspace/{ws}/agents/{agent}/board`. |
 
+
+## Offline: a CI image that must not reach npm at test time
+
+The default run builds the package, packs it and runs `npm install`, so it needs the npm registry. A remote run that
+must not reach the registry splits this in two. It saves the ~30 s build and install on every run too.
+
+### At image build time (network allowed)
+
+Prepare the community-nodes folder once, from the commit the test pins:
+
+```bash
+cd integrations/n8n && npm ci --legacy-peer-deps
+AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n.mjs --prepare-nodes-dir /opt/airprompter/n8n-nodes
+```
+
+- **What it writes:**
+  - `node_modules/n8n-nodes-airprompter`, with the SDK under it (about 3.5 MB);
+  - `airprompter-kit.json`: package and SDK versions, the tarball's sha256, a `contentSha256` over all of
+    `node_modules`, the commit, and `preparedAt`.
+- **The target** must be empty or new. The kit installs into a sibling folder and renames it at the end, so a failed
+  build can simply be retried.
+- **The commit is required.** It comes from git when this is a clean checkout of the repository, or from
+  `AIRPROMPTER_KIT_COMMIT` for a copy without `.git`. A Docker build context usually has no `.git`, so pass the sha
+  as `ARG`/`--build-arg` and set the variable.
+  - If both exist, they must agree.
+  - A tree with uncommitted changes to tracked files under `integrations/n8n` is refused. Untracked files are
+    ignored.
+  - `AIRPROMPTER_KIT_COMMIT` must be the full 40-character sha, lowercase, as `git rev-parse` prints it.
+  - `--no-build` is refused: prepare always builds.
+- **Install n8n with Node 24's own npm** (`PATH=/opt/node24/bin:$PATH npm i n8n@2.49.8 --prefix /opt/n8n`), so its
+  native add-ons are built for Node 24.
+- **The N8N_BIN wrapper.** Make `/opt/n8n/n8n` (mode 755) a two-line file:
+
+  ```sh
+  #!/bin/sh
+  PATH=/opt/node24/bin:$PATH exec node /opt/n8n/node_modules/n8n/bin/n8n "$@"
+  ```
+
+  - **Not `node_modules/.bin/n8n`:** its `#!/usr/bin/env node` picks up the image's default Node.
+  - **The `PATH` line** also gives n8n's JS task runner Node 24, because n8n starts it as `node` from `PATH`.
+  - **Keep the environment as it is (no `env -i`):** the stored-copy run passes `NODE_OPTIONS=--require …` through
+    the wrapper.
+
+### At test time (only AirPrompter reachable)
+
+```bash
+cd integrations/n8n
+N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=… AIRPROMPTER_UPDATE_KEY=… \
+  node scripts/live-n8n.mjs --nodes-dir /opt/airprompter/n8n-nodes
+```
+
+- **No npm at all.** The run does no build, pack, install or `npx`, and does not need `npm ci`. The kit uses only
+  Node's built-in modules, so test time needs Node 20.1 or later and the checkout.
+  - **The copy:** the prepared folder is copied into the run's fresh user folder, and n8n runs with
+    `npm_config_offline=true`.
+  - **`N8N_BIN` is required:** without it, the run exits 2 rather than reach the registry through `npx`.
+  - **The folder can also come from `AIRPROMPTER_KIT_NODES_DIR`**, which means the same as `--nodes-dir`. The old
+    name `N8N_NODES_DIR`, or a blank value, exits 2 rather than fall back to npm.
+- **`scripts/` and `qa/workflows/` are read from the checkout the script runs from.** Bake that checkout into the
+  image from the same commit, in the same layer as the prepare step.
+- **The `nodes.prepared` check compares the copy with the prepared folder:**
+  - its content hash (nothing changed after prepare);
+  - the package and SDK versions, and the checkout's `package.json` version;
+  - the commit, exactly, as a full 40-character sha: against `AIRPROMPTER_KIT_COMMIT` and against the checkout's
+    own when it is a git checkout. Each is used when known. With neither, the check fails, so set
+    `AIRPROMPTER_KIT_COMMIT` to your pin.
+- **If `nodes.prepared` fails, the run stops before n8n.** Nothing is sent to AirPrompter.
+- **The summary adds:**
+
+  ```json
+  "nodes": { "mode": "preinstalled", "from": "/opt/airprompter/n8n-nodes", "checkoutCommit": null,
+             "kit": { "package": "n8n-nodes-airprompter", "packageVersion": "0.1.0", "sdkVersion": "1.0.0-rc.4",
+                      "tarballSha256": "…", "contentSha256": "…", "commit": "<sha>", "preparedAt": "…" } }
+  ```
+
+  Assert `nodes.mode === "preinstalled"` and that `nodes.prepared` is `pass`, along with the other checks.
+
+### Offline errors
+
+| What | Exit | Message starts |
+|---|---|---|
+| `--nodes-dir` without `N8N_BIN` | 2 | `--nodes-dir runs offline and needs N8N_BIN` |
+| `--nodes-dir` folder without `airprompter-kit.json`, or never prepared | 2 | `… has no airprompter-kit.json: make it with --prepare-nodes-dir` |
+| A flag without its value, an unknown flag, both modes | 2 | `--nodes-dir needs a folder` / `unknown argument …` |
+| `N8N_BIN` runs n8n on Node below 24 | 1 | `N8N_BIN runs n8n on a Node older than it accepts` |
+| `N8N_BIN` missing, not executable, or no shebang | 1 | `n8n did not start: …` (`ENOENT`, `EACCES`, `ENOEXEC`) |
+| The prepared folder changed, a commit or version differs, or no commit to compare | 1 | check `nodes.prepared` fails, with `detail`; n8n is not started |
+| `AIRPROMPTER_KIT_COMMIT` that is not a full 40-character sha | 2 | `AIRPROMPTER_KIT_COMMIT must be a full 40-character commit sha` |
+
+`--prepare-nodes-dir` prints one JSON line of its own: `{ok, exitCode, nodesDir, kit}`, or `{ok: false, exitCode,
+nodesDir, error}`.
+- **Exit 2:** a folder that is not empty, no commit, a modified tree, `--no-build`, or both commits given and
+  different.
+- **Exit 1:** the npm build, pack or install failed. It is synchronous, so an interrupt also ends it with exit 1.
+
+**Node.** n8n 2.49.8 refuses anything below 24: its launcher checks its `engines` (`>=24.0.0`) and exits. It
+answers `--version` before that check, so the kit probes with `--help` too. The kit itself runs on Node 20.1 or
+later. An image whose default Node is older carries a Node 24 binary for n8n alone, behind the wrapper above.
 
 ## Run it
 
@@ -73,7 +171,7 @@ The JSON fields a test reads:
 }
 ```
 
-Check ids, which are stable: `n8n.version`, `workflow.get_and_report`, `get_prompt.network`,
+Check ids, which are stable: `nodes.prepared` (only with `--nodes-dir`), `n8n.version`, `workflow.get_and_report`, `get_prompt.network`,
 `get_prompt.run_ref`, `report_run.accepted`, `release.stored`, `get_prompt.unreported`, `get_prompt.stored_copy`.
 
 ## What to assert

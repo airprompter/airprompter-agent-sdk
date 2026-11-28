@@ -89,7 +89,7 @@ test("N+1 is refused with store_newer naming the writer — the store, and the r
   assert.equal((JSON.parse(readFileSync(join(dir, "store.json"), "utf8")) as { version: number }).version, 3, "untouched");
   const plane = new FakeControlPlane(scope);
   plane.promote([plane.slot({ tag: "support.reply", text: "Reply." })]);
-  await assert.rejects(AirPrompterAgent.start({ ...scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, fetch: plane.fetch() }), (error: unknown) => error instanceof AgentStartError && error.code === "store_newer" && /airprompterd 0[.]9[.]0/.test(error.message));
+  await assert.rejects(AirPrompterAgent.start({ ...scope, apiKey: plane.apiKey, baseUrl: "https://api.test", stateDir, root: { pinned: publicJwkOf(plane.rootKey) }, sync: { rootUrl: "https://edge.test/roots/prod/root.json" }, fetch: plane.fetch() }), (error: unknown) => error instanceof AgentStartError && error.code === "store_newer" && /airprompterd 0[.]9[.]0/.test(error.message));
   // A file with no writer at all (hand-edited) is still named as unknown, still refused.
   await writeStore(stateDir, { ...v2, version: 3, writer: undefined, active: null, staged: null, generation: 0 });
   await assert.rejects(SlotStore.open({ stateDir, ...scope, keyProvider }), (error: unknown) => isStoreError(error) && error.code === "store_newer" && error.detail === "an unknown writer");

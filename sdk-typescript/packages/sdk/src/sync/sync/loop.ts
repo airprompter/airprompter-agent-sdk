@@ -29,7 +29,7 @@
  */
 
 import { referencedPayloads, servableExperiments, servableSlots, verifyManifest, verifyRootMetadata } from "../../core/index.js";
-import type { Manifest, RefusalCode, RootMetadata, Target } from "../../core/index.js";
+import type { Manifest, RefusalCode, RootMetadata, Target, Verdict } from "../../core/index.js";
 import type { LoadedSlot, SlotStore } from "../store/slotStore.js";
 import type { SyncClient } from "../../core/index.js";
 
@@ -113,6 +113,14 @@ function isStranded(active: LoadedSlot | null): active is LoadedSlot {
   return active !== null && [...referencedPayloads(active.manifest.payload).keys()].some((hash) => !active.payloads.has(hash));
 }
 
+function verifiedRoot(candidate: RootMetadata, trusted: RootMetadata, now: string): Verdict {
+  try {
+    return verifyRootMetadata({ candidate, trusted, now });
+  } catch {
+    return { ok: false, reason: "root_signature_invalid" };
+  }
+}
+
 export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
   const now = input.now();
   let trustedRoot = input.trustedRoot;
@@ -131,7 +139,8 @@ export async function syncOnce(input: SyncPassInput): Promise<SyncPassOutput> {
     if (input.fetchRoot) {
       const candidate = await input.fetchRoot();
       if (candidate) {
-        const verdict = verifyRootMetadata({ candidate, trusted: trustedRoot, now });
+        // A body that is not a root document at all is refused like a bad signature, and the pass goes on to the manifest.
+        const verdict = verifiedRoot(candidate, trustedRoot, now);
         if (verdict.ok) {
           trustedRoot = candidate;
           input.store.acceptRoot(candidate);

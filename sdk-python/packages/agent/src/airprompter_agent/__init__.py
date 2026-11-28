@@ -4,6 +4,9 @@
 
     from airprompter_agent import AirPrompterAgent
 
+    # PINNED_ROOT_JWK: AirPrompter's production root key, copied into your source from the README's quick start (key id
+    # 044af6e8…1793); its root.json is read from https://api.airprompter.com/roots/prod/root.json. Any other root needs
+    # ``sync={"root_url": ...}``.
     ap = AirPrompterAgent.start(organization_id="org_…", agent_id="agt_…", target="prod", api_key=os.environ["AIRPROMPTER_AGENT_KEY"], root={"pinned": PINNED_ROOT_JWK})
     rendered = ap.prompt("support.triage").render(team="Billing", ticket=ticket_text)
     completion = ap.observe(rendered, lambda: client.chat.completions.create(model=rendered.model, messages=[...]))

@@ -421,7 +421,8 @@ def post_segment(*, grant: UploadGrant, segment: str, data: bytes, transport: Op
     body = multipart_body(bnd, fields, segment, content_type, data)
     try:
         with httpx.Client(transport=transport, timeout=timeout) as http:
-            response = http.post(grant.url, headers={"content-type": f"multipart/form-data; boundary={bnd}", "content-length": str(len(body))}, content=body)
+            # No ``content-length`` (or any framing header): httpx derives it from ``content``, as fetch does in the TS SDK.
+            response = http.post(grant.url, headers={"content-type": f"multipart/form-data; boundary={bnd}"}, content=body)
         if 200 <= response.status_code < 300:
             return PostOutcome("ok", key=key)
         text = response.text or ""

@@ -63,8 +63,9 @@ AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n.mjs --prepare-nodes-di
   `AIRPROMPTER_KIT_COMMIT` for a copy without `.git`. A Docker build context usually has no `.git`, so pass the sha
   as `ARG`/`--build-arg` and set the variable.
   - If both exist, they must agree.
-  - A tree with uncommitted changes to tracked files under `integrations/n8n` is refused. Untracked files are
-    ignored.
+  - A tree with uncommitted changes to tracked files under `integrations/n8n` is refused, and so is an untracked
+    build input (`src`, `nodes`, `credentials`, the package files, `tsconfig.json`, `README*`, `LICENSE*`, `LICENCE*`). Other
+    untracked files are ignored.
   - `AIRPROMPTER_KIT_COMMIT` must be the full 40-character sha, lowercase, as `git rev-parse` prints it.
   - `--no-build` is refused: prepare always builds.
 - **Install n8n with Node 24's own npm** (`PATH=/opt/node24/bin:$PATH npm i n8n@2.49.8 --prefix /opt/n8n`), so its
@@ -115,6 +116,41 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=�
 
   Assert `nodes.mode === "preinstalled"` and that `nodes.prepared` is `pass`, along with the other checks.
 
+### Smoke at image build time
+
+`scripts/live-n8n-smoke.mjs` runs the kit against the SDK's fake control plane on loopback, with one promoted slot
+`triage` (`Route this ticket: {{ticket}}`, trust `operator`). It needs no AirPrompter and no network, so a broken
+n8n, wrapper or prepared folder fails the image build instead of a QA run.
+
+```bash
+cd integrations/n8n   # its npm ci --legacy-peer-deps already ran: the fake plane is @airprompter/agent-sdk/testing
+N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> node scripts/live-n8n-smoke.mjs --nodes-dir /opt/airprompter/n8n-nodes
+```
+
+- **Where it runs:** in the same image stage as `npm ci --legacy-peer-deps` and the prepare step, while
+  `integrations/n8n/node_modules` is still there. The fake plane is `@airprompter/agent-sdk/testing`.
+- **Requirements:** it needs `N8N_BIN` and exits 2 without it. With `--nodes-dir` it needs no network; other
+  arguments pass through to the kit.
+- **It passes only when:**
+  - the kit exits 0 with every check `pass` and none skipped, including `get_prompt.rendered`, whose expected
+    sha256 the smoke sets;
+  - with `--nodes-dir`, the prepared folder was used (`nodes.mode`);
+  - Get Prompt served `ver_smoke` from the network;
+  - the fake plane received exactly one `ok` run on `ver_smoke`, with 123 input and 7 output tokens, and one thumbs
+    up.
+- **Output:** one JSON line every time. It is the kit's line with `ok` and `exitCode` set to the smoke's verdict,
+  plus a `smoke` object (`expectedPromptSha256`, `delivered`, `problems`, `kitExitCode`).
+- **Exit codes:** 0 or 1. 2 means bad input: no `N8N_BIN`, a `SMOKE_TIMEOUT_MS` that is not a positive whole
+  number, or the kit's own bad input. 130 or 143 means interrupted, after the kit has stopped.
+- **Stopping it:** signal the smoke process itself, not its process group. The kit runs in a group of its own, and
+  the smoke forwards the signal there and waits for it.
+- **Timeout:** `SMOKE_TIMEOUT_MS` (default 15 minutes) stops the kit's whole process group if it hangs: SIGTERM, then
+  SIGKILL 15 s later.
+- **Trust root:** the fake plane signs with its own root, so this step does not exercise the pinned dev root. The
+  live run does.
+- **Time:** about 30 to 60 s. Peak memory for the whole tree (kit, n8n, task runner) was about 570 MB on
+  2026-11-27.
+
 ### Offline errors
 
 | What | Exit | Message starts |
@@ -126,6 +162,7 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=�
 | `N8N_BIN` missing, not executable, or no shebang | 1 | `n8n did not start: …` (`ENOENT`, `EACCES`, `ENOEXEC`) |
 | The prepared folder changed, a commit or version differs, or no commit to compare | 1 | check `nodes.prepared` fails, with `detail`; n8n is not started |
 | `AIRPROMPTER_KIT_COMMIT` that is not a full 40-character sha | 2 | `AIRPROMPTER_KIT_COMMIT must be a full 40-character commit sha` |
+| `AIRPROMPTER_EXPECTED_PROMPT_SHA256` that is not 64 lowercase hex | 2 | `AIRPROMPTER_EXPECTED_PROMPT_SHA256 must be a sha256 in lowercase hex` |
 
 `--prepare-nodes-dir` prints one JSON line of its own: `{ok, exitCode, nodesDir, kit}`, or `{ok: false, exitCode,
 nodesDir, error}`.
@@ -163,7 +200,7 @@ The JSON fields a test reads:
   "ok": true, "exitCode": 0, "startedAt": "…", "finishedAt": "…",
   "agentId": "agent_…", "environment": "dev", "slot": "triage", "subject": "qa-n8n-subject-1",
   "n8nVersion": "2.49.8", "sdkVersion": "1.0.0-rc.4",
-  "getPrompt": { "versionId": "…", "arm": "none", "generation": 1, "model": "gpt-5-mini", "servedFrom": "network", "leaseExpiresAt": "…" },
+  "getPrompt": { "promptSha256": "…", "promptBytes": 54, "versionId": "…", "arm": "none", "generation": 1, "model": "gpt-5-mini", "servedFrom": "network", "leaseExpiresAt": "…" },
   "reported": { "runRef": "…", "inputTokens": 123, "outputTokens": 7, "thumbs": "up" },
   "expected": { "runs": 1, "inputTokens": 123, "outputTokens": 7, "thumbsUp": 1, "versionId": "…", "arm": "none" },
   "notCounted": ["<runRef of the unreported Get Prompt>", "<runRef of the stored-copy Get Prompt>"],
@@ -171,7 +208,8 @@ The JSON fields a test reads:
 }
 ```
 
-Check ids, which are stable: `nodes.prepared` (only with `--nodes-dir`), `n8n.version`, `workflow.get_and_report`, `get_prompt.network`,
+Check ids, which are stable: `nodes.prepared` (only with `--nodes-dir`), `get_prompt.rendered` (only with
+`AIRPROMPTER_EXPECTED_PROMPT_SHA256`), `n8n.version`, `workflow.get_and_report`, `get_prompt.network`,
 `get_prompt.run_ref`, `report_run.accepted`, `release.stored`, `get_prompt.unreported`, `get_prompt.stored_copy`.
 
 ## What to assert
@@ -179,6 +217,22 @@ Check ids, which are stable: `nodes.prepared` (only with `--nodes-dir`), `n8n.ve
 1. **The script:** exit 0, `ok: true`, and every check `pass`.
 2. **The served version:** `getPrompt.versionId` is the version approved in step 1, and `getPrompt.servedFrom` is
    `network`.
+   - **The served text:**
+     - **`getPrompt.promptSha256`** is the sha256, in lowercase hex, of the exact prompt string the node returned in
+       the counted (network) run, as UTF-8 bytes. It is taken with no trimming and no newline changes.
+     - **`getPrompt.promptBytes`** is that string's length in bytes.
+     - **The text itself** is not in the summary.
+     - **Null:** both are `null` if no prompt was served.
+     - **Stored copy:** the `get_prompt.stored_copy` check also requires the stored-copy run to render the same
+       text.
+   - **Expected value:** start from the approved version's text as AirPrompter holds it, marker included. Read it
+     back from the version rather than reusing the string you imported. Replace each `{{ticket}}`, spaces inside
+     the braces allowed, with its value from `AIRPROMPTER_VARIABLES`, exactly as given. That holds for a variable of
+     trust `operator`, as in step 3 of the fixture.
+     - **An `end_user` variable** is rendered inside a delimiter the SDK adds (`<ticket>…</ticket>`, see
+       `docs/variables.md`), so keep the fixture's variables `operator` for this assertion.
+   - **Let the kit check it:** set `AIRPROMPTER_EXPECTED_PROMPT_SHA256` to that sha256, and the kit adds a
+     `get_prompt.rendered` check. A mismatch is then a failing check with both hashes in its `detail`.
 3. **Metrics:** call `GET /workspace/{ws}/agents/{agent}/metrics?environment=dev&range=24h&tag=triage`
    with the owner's session.
    - **Poll it.** The rollup runs every 5 minutes, so poll every 30 seconds until `tiles.runs >= 1`, for up to 20

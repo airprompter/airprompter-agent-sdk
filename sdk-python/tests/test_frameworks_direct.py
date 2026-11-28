@@ -64,7 +64,7 @@ def by_key(rows):
 def test_the_agent_is_an_instrument_runtime(state_dir):
     ap, rows = start_agent(state_dir, support)
     runtime: InstrumentRuntime = ap  # the type check; at run time, every member is there
-    assert all(callable(getattr(runtime, name)) for name in ("open_run", "current_run", "with_run", "log", "current_attribution", "begin_observation"))
+    assert all(callable(getattr(runtime, name)) for name in ("open_run", "current_run", "with_run", "log", "current_attribution", "_begin_observation"))
     rows()
 
 
@@ -434,13 +434,13 @@ def test_scope_mode_never_fails_the_call_when_observing_fails(state_dir):
     client = FakeOpenAI()
     openai = instrument_openai(client, ap)
     rendered = ap.prompt("support.reply").render()
-    original = ap.begin_observation
-    ap.begin_observation = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("spool exploded"))  # type: ignore[method-assign]
+    original = ap._begin_observation
+    ap._begin_observation = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("spool exploded"))  # type: ignore[method-assign]
     try:
         with ap.attribute(rendered):
             completion = openai.chat.completions.create(model="claude-haiku-4-5", messages=[])
     finally:
-        ap.begin_observation = original  # type: ignore[method-assign]
+        ap._begin_observation = original  # type: ignore[method-assign]
     assert completion.choices[0].message.content == "answer 1 refund guaranteed"
     assert [e["event"] for e in events if e.get("adapter") == "openai"] == [ADAPTER_EVENTS["attribution_failed"]]
     rows()

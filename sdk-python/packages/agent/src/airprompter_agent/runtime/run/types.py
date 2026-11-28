@@ -9,8 +9,8 @@ Example::
 
     with ap.run(subject=user_id) as run:
         placed = run.place("support.reply")
-        if placed.kind == "passthrough":
-            return call_model(own_prompt, own_model)  # the framework's own prompt runs
+        if placed.kind != "approved":
+            return call_model(own_prompt, own_model)  # the framework's own prompt runs; a kind a later minor adds is handled too
         reply = call_model(placed.instructions, placed.model)
         run.record_model_call("support.reply", model=placed.model, latency_ms=300, usage=normalize_usage(reply))
     # one run row per slot the run pinned, ``agentRun`` 1 on the first only

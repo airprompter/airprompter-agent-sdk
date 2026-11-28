@@ -75,7 +75,7 @@ def litellm_metadata(target: Union[Any, tuple[RunSession, str]], *, model: Optio
     else:
         step = getattr(target, "step_id", None)
         fields = {"tag": step.split("#")[0], "step": step, "runRef": target.run_ref} if step else {"tag": target.tag, "runRef": target.run_ref}
-        if getattr(target, "run_bound", False):
+        if getattr(target, "_run_bound", False):
             # Rendered inside ``ap.run``: the call is the run's, so a late record is dropped, never a second row. A
             # workflow step's own reference names no run (``runRefIsRun``): the logger's open run is then the step's.
             fields["run"] = True
@@ -223,4 +223,10 @@ class AirPrompterLiteLLMCallback(_Base):
         self._observe(kwargs, response_obj, start_time, end_time, kwargs.get("exception") or response_obj or RuntimeError("litellm failure"))
 
 
-__all__ = ["METADATA_KEY", "AirPrompterLiteLLMCallback", "LiteLLMRuntime", "litellm_metadata", "litellm_params"]
+__all__ = [
+    "AirPrompterLiteLLMCallback",
+    "LiteLLMRuntime",
+    "METADATA_KEY",
+    "litellm_metadata",
+    "litellm_params",
+]

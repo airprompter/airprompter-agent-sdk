@@ -2014,7 +2014,7 @@ class AirPrompterAgent:
         self._say_stricter(rendered.tag, prepared.resolved.slot, filled)
         # The run's reference, which names every slot the run used, replaces the one-slot ref.
         run = prepared.run
-        return replace(rendered, run_ref=run.run_ref, run_bound=True) if run is not None and not run.is_ended else rendered
+        return replace(rendered, run_ref=run.run_ref, _run_bound=True) if run is not None and not run.is_ended else rendered
 
     def _context(self, prepared: "AirPrompterAgent._Prepared", tag: str, subject: Optional[str]) -> VariableSourceContext:
         return VariableSourceContext(tag=tag, name="", subject=subject, version_id=prepared.resolved.slot["versionId"], arm=prepared.resolved.arm)
@@ -2126,7 +2126,7 @@ class AirPrompterAgent:
             plan = plan_fill(tag=step.step_id, variables=declared, text=step.text, values=values, registry=self.variables)
             return finish(step, await self._fill_observed_async(lambda: fill_async(plan, context(step), self.variables), step.step_id, row))
 
-        steps = tuple(replace(step, run_bound=True) for step in workflow.steps) if _run is not None and not _run.is_ended else workflow.steps
+        steps = tuple(replace(step, _run_bound=True) for step in workflow.steps) if _run is not None and not _run.is_ended else workflow.steps
         return WorkflowHandle(model=workflow.model, arm=workflow.arm, steps=steps, variables=workflow.variables, _render_step=render_step, _render_step_async=render_step_async)
 
     def _variables_status(self) -> dict[str, Any]:
@@ -2257,8 +2257,8 @@ class AirPrompterAgent:
         """The attribution an enclosing ``attribute()`` block set, if any: how an instrumented client with no slot finds its render."""
         return current_attribution()
 
-    def begin_observation(self, attribution: Attribution, model: str) -> PendingObservation:
-        """An observation whose clock starts now and that settles later (``.settle(result)`` / ``.fail(error)``), as a
+    def _begin_observation(self, attribution: Attribution, model: str) -> PendingObservation:
+        """Internal: the adapters reach it through the contract (``runtime.instrument``), and it is in no promise. An observation whose clock starts now and that settles later (``.settle(result)`` / ``.fail(error)``), as a
         stream does. Inside a run that pinned this slot it folds into the run: one request counts once."""
         target = ObserveTarget(attribution.tag, attribution.version_id, attribution.arm, attribution.model, attribution.artifact_id, attribution.audience_ids, attribution.run_minute, attribution.step)
         return PendingObservation(target, self._record_observation(None), model=model, now=self._now_ms, evaluate=self._check_evaluator(target))

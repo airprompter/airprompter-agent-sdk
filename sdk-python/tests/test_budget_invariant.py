@@ -19,7 +19,7 @@ from airprompter_agent.telemetry.spool.writer import SEGMENT_MAX_BYTES, MemorySi
 from airprompter_agent.sync.store.key_provider import file_key
 from airprompter_agent.sync.store.slot_store import SlotStore
 from airprompter_agent.telemetry.uploader import OPEN_SEGMENT_RECLAIM_MS, QUARANTINE_CAP_BYTES, SEGMENT_NAME, GrantDecision, SpoolUploader
-from airprompter_agent.core.testing import MemoryFs
+from airprompter_agent.testing import MemoryFs
 
 from .control_plane import FakeControlPlane
 

@@ -7,7 +7,8 @@
 3. The runtime walks the protocol's ramp vectors over a bundle release with no agent.
 4. The distributions carry one version with ``airprompter-agent`` exact-pinned, the lockstep check says so, and
    ``SDK_VERSION`` is that version. No removed distribution or module name is left under ``sdk-python/``.
-5. Each layer's ``__all__`` is exactly what is pinned here, so a name reaches a layer's public list on purpose.
+5. Every promised module's ``__all__`` is exactly what is pinned here (``docs/stability.md``), one name per line, so a name
+   reaches the promise on purpose; the root is lazy, so a layer never loads the agent.
 6. Framework adapters (AIR-2231): an adapter imports only the contract, its own folder and its framework; the layers
    below import no framework; only the contract reaches ``runtime.adapter``; ``agent.py`` is pinned at its line count and
    no adapter passes 300 lines.
@@ -15,6 +16,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
 import importlib.util
 import json
@@ -43,12 +45,262 @@ PACKAGES = ["agent", *SATELLITES]
 SRC = os.path.join(SDK_PY, "packages", "agent", "src", "airprompter_agent")
 #: Rule 4 of section 3.2: the facade's line count after AIR-2231's deletions. A change that grows it moves this on purpose.
 AGENT_PY_LINES = 2578
-#: Each layer's public list, sorted. A public name is a promise: change this on purpose.
-LAYER_ALL = {
-    "core": ["AGENT_ID", "APBUNDLE_INFO", "ASSIGNMENT_MODULUS", "AUDIENCE_LIMITS", "Assignment", "AssignmentError", "BundleError", "BundleRelease", "BundleReleaseRefused", "CHECK_BOUNDS", "CanonicalJsonError", "ClockPort", "Delimiters", "DistributionKey", "ERROR_CLASSES", "FsPort", "GOLDEN_SET_FORMAT", "GOLDEN_SET_VERSION", "GoldenCaseResult", "GoldenInvocation", "GoldenInvoke", "GoldenReport", "GoldenSetError", "HOSTED_ROOTS", "JUDGE_RUBRICS", "JudgeResult", "JudgeRubric", "LATENCY_BUCKET_EDGES_MS", "LoadedRelease", "MissingVariableError", "NormalizedFeedback", "OS_FS", "Observation", "OsFs", "PROTECTION_CRITERIA", "PROTOCOL_VERSION", "RAMP_MAX_STEPS", "RAMP_MIN_STEP_MS", "RUN_REF_MAX_ENTRIES", "RUN_REF_MAX_TOKEN_LENGTH", "RUN_REF_READ_MAX_ENTRIES", "RUN_REF_READ_MAX_TOKEN_LENGTH", "ReleaseReader", "ReleaseSlot", "RunDimensions", "RunRefFacts", "RunTotals", "SDK_VERSION", "SLOT_TAG", "STEP_BOUNDS", "STEP_STATUSES", "SUPPORTED_CAPABILITIES", "SUPPORTED_PROTOCOL_MAJORS", "SYSTEM_CLOCK", "SpoolRow", "StepError", "StepTotals", "SyncClient", "SystemClock", "TARGET_SLUG", "UNDEFINED", "USAGE_SOURCES", "UnknownVariableError", "UploadOutcome", "UploadSegment", "UploadSink", "Verdict", "WINDOW_STATUSES", "X25519KeyPair", "arm_for_bucket", "assign_arm", "bucket_from_hash", "bundle_payload_bytes", "canonical_bytes", "canonical_json", "capabilities_implemented", "captured_audience_ids", "carried_payloads", "check_refusal", "checks_refusals", "copy_audience_tags", "count_of", "create_encrypted_bundle", "create_plaintext_bundle", "default_of", "distribution_key_id", "effective_arms", "epoch_minute", "estimate_tokens", "evaluate_check", "evaluate_checks", "frozen_experiment", "fs_failure_code", "fs_or_default", "generate_p256_jwk", "generate_x25519_key_pair", "golden_reports_meet", "hosted_environment_of_root", "instant", "judge_prompt", "judge_signals_of", "key_thumbprint", "latency_bucket_index", "manifest_has_golden", "matches_audience", "mint_run_ref", "minute_of", "new_run_id", "normalize_feedback", "open_bundle", "optional_payloads", "ordered_steps", "output_text_of", "parse_golden_set", "parse_judge_reply", "parse_run_ref", "pass_bps_of", "pattern_refusal", "placeholders_of", "project_checks", "public_jwk_of", "ramp_weights_at", "referenced_payloads", "release_digest", "release_digest_input", "render_template", "rubric_from_prompt", "run_golden_set", "run_ref_key_from", "servable_experiments", "servable_overrides", "servable_slots", "sha256_prefixed", "sign_bytes", "sink_status", "slot_hashes", "step_name", "subject_hash", "trusted_root_from_pinned_key", "utf16_length", "valid_audience_ids", "valid_audience_label", "valid_audience_manifest", "valid_audience_minute", "valid_audience_selector", "valid_step_name", "validate_arms", "validate_json_schema", "validate_ramp", "value_at_path", "verify_bytes", "verify_manifest", "verify_root_metadata", "x25519_private_key_from_raw", "x25519_public_key_from_raw", "xml_delimiters"],
-    "sync": ["DATASTORE_FORMAT", "DEFAULT_MAX_POINTER_AGE_MS", "DatastoreKeys", "DatastoreRecordError", "DatastoreRollbackResult", "FileKvStore", "HydrationPlan", "KeyProvider", "KvEntry", "KvReleaseDatastore", "KvStore", "KvStoreReport", "LoadedSlot", "MemoryKvStore", "MemoryReleaseDatastore", "PayloadDecryptError", "PullBundleResult", "PullEdgeState", "PullToDatastoreResult", "ReleaseControl", "ReleaseDatastore", "ReleaseKey", "SlotStore", "StoreError", "StoreHooks", "StoredReleaseRow", "SyncPassOutput", "UpdateWindow", "WindowState", "check_kv_store", "clear_datastore_rollback", "custom_key_provider", "datastore_keys", "decode_datastore_record", "decrypt_payload", "encode_datastore_record", "encode_key_segment", "encrypt_payload", "file_key", "generation_of_release_key", "is_known_time_zone", "jittered_delay_ms", "kms", "kv_release_datastore", "next_pull_delay_ms", "os_keystore", "parse_window", "payload_aad", "prune_datastore", "pull_bundle", "pull_to_datastore", "required_models_missing", "resolve_hydration", "rollback_datastore", "rollout_of", "sync_once", "unwrap_with_raw_key", "validate_window", "vault", "window_state", "wrap_with_raw_key"],
-    "runtime": ["AgentRuntime", "AppliedInference", "Approved", "Attribution", "DEFAULT_RUN_IDLE_TIMEOUT_MS", "DEFAULT_SOURCE_MAX_BYTES", "DEFAULT_SOURCE_TIMEOUT_SECONDS", "Disabled", "FillPlan", "Filled", "FilledRender", "INFERENCE_KEYS", "MAX_OPEN_RUNS", "ModelResolver", "ObserveTarget", "Passthrough", "PendingObservation", "Placement", "RegisteredSource", "ReleaseResolver", "RenderValues", "Rendered", "ResolveOutcome", "Run", "RunHost", "RunInput", "RunRecorder", "RunRegistry", "RunScope", "RunSession", "UsageNormalized", "VariableSource", "VariableSourceContext", "VariableSourceError", "VariableSourceInput", "VariableSourceRegistry", "VariableSourceRequiredError", "Workflow", "WorkflowStep", "apply_inference", "attribution_scope", "classify_error", "classify_result", "copy_inference", "current_attribution", "disabled_from", "fill_async", "fill_sync", "is_variable_source_error", "is_variable_source_required_error", "new_subject", "normalize_usage", "observe_call", "observe_call_async", "plan_fill", "supplied", "temperature_of", "top_p_of", "unsourced"],
-    "telemetry": ["AirPrompterUploadSink", "DAEMON_DISCOVERY_FILE", "DAEMON_DISCOVERY_FORMAT", "DAEMON_DISCOVERY_MAX_AGE_MS", "DAEMON_DISCOVERY_REFRESH_MS", "DirectorySink", "ERROR_CLASSES", "GrantDecision", "HOST_SPOOL_BUDGET_BYTES", "LATENCY_BUCKET_EDGES_MS", "MANIFEST_GRACE_MS", "MANIFEST_NAME", "MANIFEST_SUFFIX", "MemorySink", "Observation", "PassResult", "RunDimensions", "RunTotals", "SEGMENT_MAX_BYTES", "SERVERLESS_BUFFER_BYTES", "SPOOL_MANIFEST_FORMAT", "SegmentPlanner", "SpoolRow", "SpoolSink", "SpoolUploader", "SpoolWriter", "StepTotals", "UploadGrant", "WriterIdentity", "backoff_delay_ms", "daemon_discovery_path", "epoch_minute", "inspect_segment", "latency_bucket_index", "manifest_name_of", "minute_of", "post_segment", "read_daemon_discovery", "read_segment_manifest", "remove_daemon_discovery", "segment_name", "segment_name_of_manifest", "sha256_hex", "validate_spool_row", "write_daemon_discovery", "write_segment_manifest"],
+#: Modules that import but promise nothing (docs/stability.md, "Outside the promise").
+OUTSIDE = {"airprompter_agent.frameworks.contract"}
+#: The 1.0 promise, module by module (docs/stability.md): each ``__all__``, sorted, one name per line. A name added here is
+#: a promise made on purpose, in a minor release; a name removed is a major release.
+PROMISE = {
+    "airprompter_agent": [
+        "AgentRuntime",
+        "AgentStartError",
+        "AgentStatus",
+        "AirPrompterAgent",
+        "ApplyOptions",
+        "Approved",
+        "DatastoreOptions",
+        "GoldenOptions",
+        "ModelResolver",
+        "PROTOCOL_VERSION",
+        "Passthrough",
+        "Placement",
+        "PromptHandle",
+        "ReleaseChange",
+        "RenderRefusedError",
+        "Rendered",
+        "RunInput",
+        "RunSession",
+        "SDK_NAME",
+        "SDK_VERSION",
+        "StagedRelease",
+        "SyncOptions",
+        "TelemetryOptions",
+        "VENDORED_BUNDLE_EXPIRY_WARNING_DAYS",
+        "VendoredBundle",
+        "Workflow",
+        "WorkflowHandle",
+        "WorkflowStep",
+        "healthz_of",
+        "healthz_response",
+    ],
+    "airprompter_agent.core": [
+        "ASSIGNMENT_MODULUS",
+        "AssignmentError",
+        "BundleError",
+        "BundleRelease",
+        "BundleReleaseRefused",
+        "CanonicalJsonError",
+        "ClockPort",
+        "Delimiters",
+        "DistributionKey",
+        "ERROR_CLASSES",
+        "FsPort",
+        "GOLDEN_SET_FORMAT",
+        "GOLDEN_SET_VERSION",
+        "GoldenCaseResult",
+        "GoldenInvocation",
+        "GoldenInvoke",
+        "GoldenReport",
+        "GoldenSetError",
+        "JudgeResult",
+        "JudgeRubric",
+        "LATENCY_BUCKET_EDGES_MS",
+        "LoadedRelease",
+        "MissingVariableError",
+        "NormalizedFeedback",
+        "OS_FS",
+        "Observation",
+        "OsFs",
+        "PROTOCOL_VERSION",
+        "ReleaseReader",
+        "ReleaseSlot",
+        "RunDimensions",
+        "RunTotals",
+        "SDK_VERSION",
+        "STEP_BOUNDS",
+        "SUPPORTED_CAPABILITIES",
+        "SYSTEM_CLOCK",
+        "SpoolRow",
+        "StepTotals",
+        "SyncClient",
+        "SystemClock",
+        "USAGE_SOURCES",
+        "UnknownVariableError",
+        "UploadOutcome",
+        "UploadSegment",
+        "UploadSink",
+        "Verdict",
+        "X25519KeyPair",
+        "arm_for_bucket",
+        "assign_arm",
+        "bucket_from_hash",
+        "canonical_bytes",
+        "canonical_json",
+        "create_encrypted_bundle",
+        "create_plaintext_bundle",
+        "distribution_key_id",
+        "effective_arms",
+        "epoch_minute",
+        "evaluate_checks",
+        "generate_x25519_key_pair",
+        "golden_reports_meet",
+        "key_thumbprint",
+        "latency_bucket_index",
+        "minute_of",
+        "normalize_feedback",
+        "open_bundle",
+        "parse_golden_set",
+        "placeholders_of",
+        "public_jwk_of",
+        "ramp_weights_at",
+        "release_digest",
+        "render_template",
+        "run_golden_set",
+        "sha256_prefixed",
+        "subject_hash",
+        "trusted_root_from_pinned_key",
+        "validate_arms",
+        "validate_ramp",
+        "verify_manifest",
+        "verify_root_metadata",
+        "x25519_private_key_from_raw",
+        "x25519_public_key_from_raw",
+        "xml_delimiters",
+    ],
+    "airprompter_agent.sync": [
+        "DatastoreRollbackResult",
+        "FileKvStore",
+        "KeyProvider",
+        "KvEntry",
+        "KvReleaseDatastore",
+        "KvStore",
+        "KvStoreReport",
+        "LoadedSlot",
+        "MemoryKvStore",
+        "MemoryReleaseDatastore",
+        "PayloadDecryptError",
+        "PullBundleResult",
+        "PullEdgeState",
+        "PullToDatastoreResult",
+        "ReleaseControl",
+        "ReleaseDatastore",
+        "ReleaseKey",
+        "SlotStore",
+        "StoreError",
+        "StoreHooks",
+        "StoredReleaseRow",
+        "SyncPassOutput",
+        "UpdateWindow",
+        "WindowState",
+        "check_kv_store",
+        "clear_datastore_rollback",
+        "custom_key_provider",
+        "file_key",
+        "is_known_time_zone",
+        "kms",
+        "kv_release_datastore",
+        "next_pull_delay_ms",
+        "os_keystore",
+        "parse_window",
+        "prune_datastore",
+        "pull_bundle",
+        "pull_to_datastore",
+        "rollback_datastore",
+        "sync_once",
+        "validate_window",
+        "vault",
+        "window_state",
+    ],
+    "airprompter_agent.runtime": [
+        "AgentRuntime",
+        "AppliedInference",
+        "Approved",
+        "Attribution",
+        "Disabled",
+        "ModelResolver",
+        "ObserveTarget",
+        "Passthrough",
+        "Placement",
+        "RegisteredSource",
+        "ReleaseResolver",
+        "RenderValues",
+        "Rendered",
+        "ResolveOutcome",
+        "RunInput",
+        "RunSession",
+        "UsageNormalized",
+        "VariableSource",
+        "VariableSourceContext",
+        "VariableSourceError",
+        "VariableSourceInput",
+        "VariableSourceRegistry",
+        "VariableSourceRequiredError",
+        "apply_inference",
+        "attribution_scope",
+        "current_attribution",
+        "is_variable_source_error",
+        "is_variable_source_required_error",
+        "new_subject",
+        "normalize_usage",
+        "observe_call",
+        "observe_call_async",
+    ],
+    "airprompter_agent.telemetry": [
+        "AirPrompterUploadSink",
+        "DirectorySink",
+        "GrantDecision",
+        "HOST_SPOOL_BUDGET_BYTES",
+        "MemorySink",
+        "PassResult",
+        "SEGMENT_MAX_BYTES",
+        "SERVERLESS_BUFFER_BYTES",
+        "SpoolSink",
+        "SpoolUploader",
+        "SpoolWriter",
+        "UploadGrant",
+        "WriterIdentity",
+        "inspect_segment",
+    ],
+    "airprompter_agent.testing": [
+        "FakeClock",
+        "MemoryFs",
+    ],
+    "airprompter_agent.frameworks.openai": [
+        "apply_placement",
+        "instrument",
+    ],
+    "airprompter_agent.frameworks.anthropic": [
+        "apply_placement",
+        "instrument",
+    ],
+    "airprompter_agent.frameworks.litellm": [
+        "AirPrompterLiteLLMCallback",
+        "LiteLLMRuntime",
+        "METADATA_KEY",
+        "litellm_metadata",
+        "litellm_params",
+    ],
+    "airprompter_agent_otel.exporter": [
+        "ExportResult",
+        "Exporter",
+        "OTLP_SCOPE_NAME",
+        "OtlpUploadSink",
+        "http_json_exporter",
+        "otlp_attribute",
+        "spool_rows_to_otlp",
+    ],
+    "airprompter_datastore_s3": [
+        "S3KvStore",
+        "s3_kv_store",
+    ],
+    "airprompter_datastore_postgres": [
+        "PostgresKvStore",
+        "postgres_kv_schema",
+        "postgres_kv_store",
+    ],
+    "airprompter_datastore_redis": [
+        "RedisKvStore",
+        "redis_kv_store",
+    ],
 }
 
 
@@ -77,7 +329,7 @@ def test_direction_is_pinned_and_a_planted_upward_or_deep_import_fails_the_lint(
     clean = lint("--json")
     assert clean.returncode == 0, clean.stderr
     edges = json.loads(clean.stdout[: clean.stdout.rindex("}") + 1])["edges"]
-    assert edges == ["agent-otel→core", "agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "datastore-postgres→core", "datastore-postgres→sync", "datastore-redis→core", "datastore-redis→sync", "datastore-s3→core", "datastore-s3→sync", "frameworks→core", "frameworks→runtime", "runtime→core", "sync→core", "telemetry→core"]
+    assert edges == ["agent-otel→core", "agent→core", "agent→runtime", "agent→sync", "agent→telemetry", "datastore-postgres→sync", "datastore-redis→sync", "datastore-s3→sync", "frameworks→core", "frameworks→runtime", "runtime→core", "sync→core", "telemetry→core"]
     upward = planted(os.path.join(SRC, "telemetry", "_lint_probe.py"), "from airprompter_agent.sync import SlotStore\nPROBE = SlotStore\n")
     assert upward.returncode == 1
     assert "telemetry (layer 1) may not import sync (layer 1)" in upward.stderr
@@ -91,6 +343,20 @@ def test_direction_is_pinned_and_a_planted_upward_or_deep_import_fails_the_lint(
     assert agent.returncode == 1, "a layer never imports the agent"
     satellite = planted(os.path.join(SDK_PY, "packages", "agent-otel", "src", "airprompter_agent_otel", "_lint_probe.py"), "from airprompter_agent.telemetry.uploader import SpoolUploader\nPROBE = SpoolUploader\n")
     assert satellite.returncode == 1, "a satellite imports a layer's package, never a module inside it"
+    otel = os.path.join(SDK_PY, "packages", "agent-otel", "src", "airprompter_agent_otel", "_lint_probe.py")
+    util = planted(otel, "from airprompter_agent.core._util import iso_ms\nPROBE = iso_ms\n")
+    assert util.returncode == 1, "core._util is the distribution's own: a satellite that names it breaks on a private tidy"
+    internal = planted(otel, "from airprompter_agent.sync import resolve_hydration\nPROBE = resolve_hydration\n")
+    assert internal.returncode == 1 and "resolve_hydration is not in airprompter_agent.sync.__all__" in internal.stderr, "a satellite imports only what 1.0 promises"
+    assert planted(otel, "from airprompter_agent.core import SDK_VERSION\nPROBE = SDK_VERSION\n").returncode == 0, "a promised name is fine"
+    whole = planted(otel, "import airprompter_agent.sync as s\nPROBE = s.resolve_hydration\n")
+    assert whole.returncode == 1 and "never the module whole" in whole.stderr, "a layer bound whole would hide which names a satellite uses"
+    layer = planted(otel, "from airprompter_agent import sync\nPROBE = sync.resolve_hydration\n")
+    assert layer.returncode == 1 and "never the layer itself" in layer.stderr
+    dynamic = planted(otel, "import importlib\nPROBE = importlib.import_module(\"airprompter_agent.sync\").resolve_hydration\n")
+    assert dynamic.returncode == 1 and "never the module whole (here through import_module)" in dynamic.stderr
+    module = planted(os.path.join(SRC, "sync", "_lint_probe.py"), "from airprompter_agent.core import protocol\nPROBE = protocol\n")
+    assert module.returncode == 1 and "reaches into core by path (airprompter_agent.core.protocol)" in module.stderr, "a module is not reached through its layer's package"
 
 
 def test_runtime_renders_and_assigns_over_a_bundle_and_refuses_what_the_chain_refuses():
@@ -218,19 +484,92 @@ def test_each_distribution_ships_one_top_level_package():
         assert f'packages = ["src/{top_level}"]' in pyproject(name), f"{name} ships {top_level} and nothing else"
 
 
-def test_each_layer_public_list_is_pinned():
-    for layer, expected in LAYER_ALL.items():
-        module = importlib.import_module(f"airprompter_agent.{layer}")
-        assert sorted(module.__all__) == expected, f"airprompter_agent.{layer}.__all__ moved: a public name is a promise, so change this list on purpose"
-        assert not [name for name in expected if not hasattr(module, name)], f"{layer} lists a name it does not have"
-    # Small helpers stay internal: `core._util` is the one module the lint lets another layer name.
+def all_of(path: str) -> list[str]:
+    """A module's ``__all__`` as written: one list literal, each name on its own line."""
+    with open(path, encoding="utf-8") as f:
+        source = f.read()
+    lists = [node for node in ast.parse(source).body if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)) and "__all__" in {getattr(t, "id", None) for t in (node.targets if isinstance(node, ast.Assign) else [node.target])}]
+    assert len(lists) == 1 and isinstance(lists[0], ast.Assign), f"{path}: one `__all__ = [...]`, never extended"
+    names = [element.value for element in lists[0].value.elts]
+    lines = [element.lineno for element in lists[0].value.elts]
+    assert len(set(lines)) == len(lines), f"{path}: one name per line in `__all__`"
+    return names
+
+
+def source_of(module: str) -> str:
+    spec = importlib.util.find_spec(module)
+    assert spec and spec.origin, module
+    return spec.origin
+
+
+def test_each_promised_module_lists_exactly_its_pinned_names_one_per_line():
+    for name, expected in PROMISE.items():
+        assert expected == sorted(expected), f"{name}: the pin is sorted"
+        listed = all_of(source_of(name))
+        assert listed == sorted(listed), f"{name}.__all__ is sorted"
+        assert listed == expected, f"{name}.__all__ moved: a public name is a promise, so change PROMISE on purpose"
+        module = importlib.import_module(name)
+        assert list(module.__all__) == expected, f"{name}.__all__ at run time is the list as written (nothing appends to it)"
+        assert not [n for n in expected if not hasattr(module, n)], f"{name} lists a name it does not have"
+    # Small helpers stay internal: `core._util` is the distribution's own, and no satellite names it.
     helpers = {"b64url_decode", "b64url_encode", "fsync_dir", "iso_ms", "iso_seconds", "now_ms", "random_id", "check_condition"}
+    for name in PROMISE:
+        assert not helpers & set(importlib.import_module(name).__all__), f"{name} lists an internal helper"
+
+
+def test_the_stability_page_promises_each_pinned_module_and_puts_the_contract_outside():
+    with open(os.path.join(SDK_PY, "..", "docs", "stability.md"), encoding="utf-8") as f:
+        page = f.read()
+    inside = page[page.index("\n## What 1.0 promises\n") : page.index("\n## Outside the promise\n")]
+    outside = page[page.index("\n## Outside the promise\n") :]
+    for name in PROMISE:
+        assert f"| `{name}` |" in inside, f"docs/stability.md promises {name}"
+    # An adapter is a module or a folder (the lint's rule 1); each is inside the promise or in OUTSIDE, on purpose.
+    frameworks = os.path.join(SRC, "frameworks")
+    modules = {f"airprompter_agent.frameworks.{path[:-3] if path.endswith('.py') else path}" for path in os.listdir(frameworks) if (path.endswith(".py") and path != "__init__.py") or os.path.isfile(os.path.join(frameworks, path, "__init__.py"))}
+    assert modules - set(PROMISE) == OUTSIDE, "a new adapter is placed inside the promise or in OUTSIDE, on purpose"
+    for name in OUTSIDE:
+        assert f"`{name}`" in outside and name not in inside, f"docs/stability.md puts {name} outside the promise"
+
+
+def test_a_layer_names_every_other_import_as_internal_and_never_as_both():
+    # A layer's barrel imports more than it promises: the layers above use those names. Each one is named once in
+    # `_FOR_THE_LAYERS_ABOVE`, so a reader (and pyflakes) sees it is on purpose, and none of them is in `__all__`.
+    for layer in ("core", "sync", "runtime", "telemetry"):
+        module = importlib.import_module(f"airprompter_agent.{layer}")
+        with open(module.__file__, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        imported = {alias.asname or alias.name for node in tree.body if isinstance(node, ast.ImportFrom) and node.level for alias in node.names}
+        internal = {element.id for node in tree.body if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "_FOR_THE_LAYERS_ABOVE" for element in node.value.elts}
+        assert not internal & set(module.__all__), f"{layer}: a name is both promised and internal"
+        assert imported - set(module.__all__) == internal, f"{layer}: every import is promised or named internal: {sorted(imported - set(module.__all__) ^ internal)}"
+
+
+def test_the_root_is_lazy_so_a_layer_or_a_datastore_never_loads_the_agent():
+    code = "import sys, airprompter_agent.core, airprompter_agent.sync, airprompter_datastore_s3; loaded = [m for m in ('airprompter_agent.agent', 'airprompter_agent.runtime', 'airprompter_agent.telemetry') if m in sys.modules]; assert not loaded, loaded"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    code = "import airprompter_agent as ap; from airprompter_agent import *; assert AirPrompterAgent is ap.AirPrompterAgent and RunSession is ap.RunSession; assert ap.__version__ == ap.SDK_VERSION; assert 'AirPrompterAgent' in dir(ap)"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    result = subprocess.run([sys.executable, "-c", "import airprompter_agent; airprompter_agent.SlotStore"], capture_output=True, text=True)
+    assert result.returncode != 0 and "has no attribute 'SlotStore'" in result.stderr, "a layer's name has one home, and it is not the root"
+    # A layer is an attribute whatever was imported first, as it was when the root loaded everything.
+    result = subprocess.run([sys.executable, "-c", "import airprompter_agent as ap; assert ap.core.SDK_VERSION and ap.sync.SlotStore and ap.testing.MemoryFs; assert 'sync' in dir(ap)"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    # The root's names live in three places, which must agree: the lazy map, `__all__`, and what type checkers read.
     import airprompter_agent
 
-    for module in [airprompter_agent, *(importlib.import_module(f"airprompter_agent.{layer}") for layer in LAYER_ALL)]:
-        assert not helpers & set(module.__all__), f"{module.__name__} lists an internal helper"
-    # `from airprompter_agent import *` raises AttributeError on a listed name that is not there.
-    assert not [name for name in airprompter_agent.__all__ if not hasattr(airprompter_agent, name)], "the root lists a name it does not have"
+    with open(source_of("airprompter_agent"), encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    checked = {alias.asname or alias.name for node in tree.body if isinstance(node, ast.If) and getattr(node.test, "id", "") == "TYPE_CHECKING" for statement in node.body if isinstance(statement, ast.ImportFrom) for alias in statement.names}
+    assert checked == set(airprompter_agent._HOME) == set(airprompter_agent.__all__), "TYPE_CHECKING imports, _HOME and __all__ name the same root"
+
+
+def test_each_distribution_ships_py_typed():
+    # The annotations are part of the promise only if type checkers read them (PEP 561).
+    for name, top_level in (("agent", "airprompter_agent"), ("agent-otel", "airprompter_agent_otel"), ("datastore-s3", "airprompter_datastore_s3"), ("datastore-postgres", "airprompter_datastore_postgres"), ("datastore-redis", "airprompter_datastore_redis")):
+        assert os.path.isfile(os.path.join(SDK_PY, "packages", name, "src", top_level, "py.typed")), f"{name} ships py.typed"
 
 
 def test_each_layer_imports_and_the_exporter_stays_out_of_the_agent():
@@ -256,7 +595,7 @@ def test_every_install_line_in_the_readme_pins_the_current_version():
 
 def test_no_removed_name_is_left_under_sdk_python():
     # Assembled here so this file does not match itself.
-    removed = re.compile("|".join(["airprompter_agent_(core|sync|runtime|telemetry)", "airprompter-agent-(core|sync|runtime|telemetry)", "otel" + "_bridge", "otel" + "-bridge"]))
+    removed = re.compile("|".join(["airprompter_agent_(core|sync|runtime|telemetry)", "airprompter-agent-(core|sync|runtime|telemetry)", "otel" + "_bridge", "otel" + "-bridge", r"airprompter_agent\.core\." + "testing"]))
     offenders = []
     for folder, dirs, files in os.walk(SDK_PY):
         dirs[:] = [d for d in dirs if d not in (".venv", "__pycache__", "dist", ".pytest_cache")]

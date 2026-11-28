@@ -9,7 +9,7 @@ Situation                          Placement                                    
                                    async client), applied to a copy
 ``slot``, no run                   ``ap.open_run()``, ended when the call settles  same
 ``slot``, a ``.stream()`` helper   untouched                                       not measured; one log
-no ``slot``, in ``ap.attribute``   the scope's settings, on the release's model    ``ap.begin_observation``
+no ``slot``, in ``ap.attribute``   the scope's settings, on the release's model    ``ap._begin_observation``
                                                                                    (not on another model)
 no ``slot``, no scope              untouched                                       not observed; one log
 placement is ``passthrough``       untouched                                       not measured
@@ -52,7 +52,7 @@ class InstrumentRuntime(AgentRuntime, Protocol):
 
     def current_attribution(self) -> Optional[Attribution]: ...
 
-    def begin_observation(self, attribution: Attribution, model: str) -> Pending: ...
+    def _begin_observation(self, attribution: Attribution, model: str) -> Pending: ...
 
 
 class _EndOnly:
@@ -282,7 +282,7 @@ def instrument_client(client: Any, ap: InstrumentRuntime, *, adapter: str, metho
             return original(*args, **kwargs)
         try:
             # Under the release's id, as every adapter measures, whatever id ``model_for`` sent the call under.
-            pending = ap.begin_observation(attribution, attribution.model)
+            pending = ap._begin_observation(attribution, attribution.model)
         except Exception as error:  # noqa: BLE001
             log(ADAPTER_EVENTS["attribution_failed"], slot=attribution.tag, method=name, reason=str(error))
             return original(*args, **kwargs)

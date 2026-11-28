@@ -33,13 +33,18 @@ and `uv pip install` resolves the same pins with no flag.
 
 | Import | Use it when |
 | --- | --- |
-| `airprompter_agent` | `AirPrompterAgent`, its options and results, and the names the layers below export. |
+| `airprompter_agent` | `AirPrompterAgent`, its options and results, and the run's types (`RunSession`, `Placement`, `AgentRuntime`, `RunInput`). Everything else is reached through a layer, and `import airprompter_agent.core` loads no agent. |
 | `airprompter_agent.frameworks.openai`, `.anthropic`, `.litellm` | The openai and anthropic clients (sync and async) and LiteLLM as adapters: the approved text, model and settings go on every call, measured into the run ([Use with your framework](#use-with-your-framework)). The frameworks are extras, imported by nothing else. |
 | `airprompter_agent.frameworks.contract` | The contract every adapter follows, for writing your own. Outside the 1.0 promise: a minor may change it. |
-| `airprompter_agent.core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane client, the port protocols. The CI kit is `airprompter_agent.core.testing`. |
+| `airprompter_agent.core` | You need the protocol without any I/O: verify a manifest or a key set, canonical JSON, arm assignment and the ramp walk, render a template, run output checks or a golden set, open a bundle, the telemetry row schemas, the control-plane client, the port protocols. |
 | `airprompter_agent.sync` | Your CI pulls and verifies releases (`sync_once`), or a host holds them in the encrypted slot store and decides when they apply (`SlotStore`, the apply policy and its windows, the customer's datastore). Key providers are extras: `[kms]`, `[vault]`, `[keyring]`. |
 | `airprompter_agent.runtime` | Your application renders and assigns over a release **it already holds**: a bundle you loaded, a release from the store or a datastore row, with no store or network of its own (`BundleRelease` from `.core` + `ReleaseResolver`); the run session, `observe_call` and the `ap.attribute` scope. |
 | `airprompter_agent.telemetry` | Your own instrumentation writes the content-free spool (`SpoolWriter`, `DirectorySink` / `MemorySink`) and ships it under a grant (`SpoolUploader`, or to any `UploadSink`). |
+| `airprompter_agent.testing` | The kit a customer's CI imports: `MemoryFs`, `FakeClock`. Never loaded by the runtime. |
+
+Each layer's `__all__` is what 1.0 promises: [docs/stability.md](../docs/stability.md)
+says what is inside the promise and what is not, and
+`tests/test_package_shape.py` pins every name.
 
 Everything runs on your systems.
 
@@ -166,7 +171,7 @@ inside one run, so the request counts once and each slot stays on one version:
 ```python
 with ap.run(subject=user_id) as run:                # or `async with`; an exception ends the run with its class
     placed = run.place("support.reply")             # `await run.place_async(...)` awaits coroutine sources too
-    if placed.kind == "passthrough":                # never raises: your own prompt and model run unchanged
+    if placed.kind != "approved":                   # never raises: your own prompt and model run unchanged
         reply = call_model(own_prompt, own_model)
     else:
         reply = call_model(placed.instructions, placed.model)
@@ -451,7 +456,7 @@ not verify, or names no entry for that tag, files nothing; a call sent under ano
 pass `metadata=litellm_metadata((run, slot))` inside a run, a record that reaches the live run is recorded into it and
 one that arrives after the run ended is dropped with one `adapter_late_record` log: the run is counted once, and that
 call's tokens and latency are not measured. Use `measure_call` or the run's metadata for a call, never both. A prompt
-rendered inside `ap.run` is marked as that run's (`rendered.run_bound`), so `litellm_metadata(rendered)` there behaves
+rendered inside `ap.run` carries that run's reference, so `litellm_metadata(rendered)` there behaves
 as `(run, slot)` does. A call you send under another id for the release's model (a deployment, a Bedrock id, a Router
 model group) names it: `litellm_metadata((run, slot), model=sent_id)`; LiteLLM's stripped provider prefix still matches.
 

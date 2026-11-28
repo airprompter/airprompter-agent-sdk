@@ -58,8 +58,8 @@ class Rendered:
     inference: Optional[Mapping[str, Any]] = None
     audience_ids: Optional[tuple[str, ...]] = None
     run_minute: Optional[str] = None
-    #: True when rendered inside an open run: ``run_ref`` is that run's, so a call measured later belongs to it.
-    run_bound: bool = False
+    #: Internal (the LiteLLM adapter reads it; in no promise): rendered inside an open run, so ``run_ref`` is that run's.
+    _run_bound: bool = field(default=False, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -78,7 +78,7 @@ class WorkflowStep:
     run_minute: Optional[str] = None
     #: True when the workflow was resolved inside an open run: a call measured later for this step belongs to that run,
     #: although ``run_ref`` (each step keeps its own) does not name it.
-    run_bound: bool = False
+    _run_bound: bool = field(default=False, repr=False, compare=False)
 
 
 @dataclass(frozen=True)

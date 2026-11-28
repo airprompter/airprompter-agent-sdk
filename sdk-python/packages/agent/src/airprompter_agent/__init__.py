@@ -14,365 +14,147 @@
 
 Same protocol, same conformance vectors and the same on-disk store as the
 TypeScript SDK; see the README for the parity matrix.
+
+The root is the agent, its options and results, and the run's types: the Python counterpart of the TypeScript root (the
+names differ where the languages do: option classes, handles, ``Approved`` and ``Passthrough``); everything
+else has one home on a layer (``airprompter_agent.core``, ``.sync``, ``.runtime``, ``.telemetry``) or on
+``airprompter_agent.testing``. The names load on first use (PEP 562), so ``import airprompter_agent.core`` or a
+datastore package never loads the agent, its HTTP client or the other layers.
 """
 
-from .agent import (
-    PROTOCOL_VERSION,
-    SDK_NAME,
-    SDK_VERSION,
-    AgentStartError,
-    AgentStatus,
-    AirPrompterAgent,
-    ApplyOptions,
-    DatastoreOptions,
-    GoldenOptions,
-    PromptHandle,
-    ReleaseChange,
-    Rendered,
-    RenderRefusedError,
-    StagedRelease,
-    SyncOptions,
-    TelemetryOptions,
-    VendoredBundle,
-    Workflow,
-    WorkflowHandle,
-    WorkflowStep,
-    default_state_dir,
-    healthz_of,
-    healthz_response,
-)
-from airprompter_agent.sync import UpdateWindow, WindowState, is_known_time_zone, parse_window, validate_window, window_state
-from airprompter_agent.core import GOLDEN_SET_FORMAT, GOLDEN_SET_VERSION, GoldenCaseResult, GoldenInvocation, GoldenReport, GoldenSetError, golden_reports_meet, parse_golden_set, pass_bps_of, run_golden_set
-from airprompter_agent.core import JUDGE_RUBRICS, PROTECTION_CRITERIA, JudgeResult, JudgeRubric, judge_prompt, judge_signals_of, parse_judge_reply, rubric_from_prompt
-from airprompter_agent.core import APBUNDLE_INFO, BundleError, DistributionKey, bundle_payload_bytes, create_encrypted_bundle, create_plaintext_bundle, distribution_key_id, open_bundle
-from airprompter_agent.core import X25519KeyPair, generate_x25519_key_pair, x25519_private_key_from_raw, x25519_public_key_from_raw
-# The run: what an adapter and ``ap.run`` see.
-from airprompter_agent.runtime import AgentRuntime, Approved, ModelResolver, Passthrough, Placement, RunInput, RunSession
-from airprompter_agent.core import (
-    ASSIGNMENT_MODULUS,
-    UNDEFINED,
-    Assignment,
-    AssignmentError,
-    CanonicalJsonError,
-    StepError,
-    Verdict,
-    arm_for_bucket,
-    assign_arm,
-    bucket_from_hash,
-    canonical_bytes,
-    canonical_json,
-    generate_p256_jwk,
-    key_thumbprint,
-    ordered_steps,
-    public_jwk_of,
-    referenced_payloads,
-    release_digest,
-    release_digest_input,
-    sha256_prefixed,
-    sign_bytes,
-    subject_hash,
-    trusted_root_from_pinned_key,
-    validate_arms,
-    verify_bytes,
-    verify_manifest,
-    verify_root_metadata,
-)
-from airprompter_agent.core import RunRefFacts, mint_run_ref, new_run_id, parse_run_ref, run_ref_key_from
-from airprompter_agent.core import Delimiters, MissingVariableError, UnknownVariableError, default_of, placeholders_of, render_template, xml_delimiters
-from airprompter_agent.core import NormalizedFeedback, normalize_feedback
-from airprompter_agent.telemetry import (
-    ERROR_CLASSES,
-    HOST_SPOOL_BUDGET_BYTES,
-    LATENCY_BUCKET_EDGES_MS,
-    SEGMENT_MAX_BYTES,
-    SERVERLESS_BUFFER_BYTES,
-    DirectorySink,
-    MemorySink,
-    Observation,
-    SegmentPlanner,
-    SpoolSink,
-    SpoolWriter,
-    WriterIdentity,
-    epoch_minute,
-    latency_bucket_index,
-    minute_of,
-    segment_name,
-)
-from airprompter_agent.sync import KeyProvider, custom_key_provider, file_key, kms, os_keystore, unwrap_with_raw_key, vault, wrap_with_raw_key
-from airprompter_agent.sync import PayloadDecryptError, decrypt_payload, encrypt_payload, payload_aad
-from airprompter_agent.sync import LoadedSlot, SlotStore, StoreError, StoreHooks
-from airprompter_agent.sync import DatastoreRollbackResult, HydrationPlan, KvReleaseDatastore, MemoryReleaseDatastore, ReleaseControl, ReleaseDatastore, ReleaseKey, StoredReleaseRow, clear_datastore_rollback, kv_release_datastore, prune_datastore, resolve_hydration, rollback_datastore, rollout_of
-from airprompter_agent.sync import FileKvStore, KvEntry, KvStore, KvStoreReport, MemoryKvStore, check_kv_store
-from airprompter_agent.sync import DATASTORE_FORMAT, DatastoreRecordError, datastore_keys, decode_datastore_record, encode_datastore_record
-from airprompter_agent.sync import PullToDatastoreResult, pull_to_datastore
-from airprompter_agent.core import SyncClient
-from airprompter_agent.sync import SyncPassOutput, jittered_delay_ms, sync_once
-from airprompter_agent.core import CHECK_BOUNDS, check_refusal, checks_refusals, estimate_tokens, evaluate_check, evaluate_checks, output_text_of, pattern_refusal, project_checks, validate_json_schema, value_at_path
-from airprompter_agent.runtime import INFERENCE_KEYS, AppliedInference, apply_inference, temperature_of, top_p_of
-from airprompter_agent.runtime import ObserveTarget, UsageNormalized, classify_error, classify_result, normalize_usage, observe_call, observe_call_async
-from airprompter_agent.runtime import (
-    DEFAULT_SOURCE_MAX_BYTES,
-    DEFAULT_SOURCE_TIMEOUT_SECONDS,
-    Filled,
-    FilledRender,
-    FillPlan,
-    RegisteredSource,
-    RenderValues,
-    VariableSource,
-    VariableSourceContext,
-    VariableSourceError,
-    VariableSourceInput,
-    VariableSourceRegistry,
-    VariableSourceRequiredError,
-    fill_async,
-    fill_sync,
-    is_variable_source_error,
-    is_variable_source_required_error,
-    plan_fill,
-    supplied,
-    unsourced,
-)
-from airprompter_agent.telemetry import GrantDecision, PassResult, SpoolUploader, UploadGrant, backoff_delay_ms, inspect_segment, post_segment, validate_spool_row
+from __future__ import annotations
 
-# S10: the seam between the layers and the runtime over it, for a customer who holds a release and wants no store.
-from airprompter_agent.core import BundleRelease, BundleReleaseRefused
-from airprompter_agent.core import LoadedRelease, ReleaseReader, ReleaseSlot
-from airprompter_agent.runtime import Disabled, ReleaseResolver, ResolveOutcome, disabled_from
+import importlib
+from typing import TYPE_CHECKING, Any
 
-__version__ = SDK_VERSION
+if TYPE_CHECKING:
+    from .agent import (
+        PROTOCOL_VERSION,
+        SDK_NAME,
+        SDK_VERSION,
+        VENDORED_BUNDLE_EXPIRY_WARNING_DAYS,
+        AgentStartError,
+        AgentStatus,
+        AirPrompterAgent,
+        ApplyOptions,
+        DatastoreOptions,
+        GoldenOptions,
+        PromptHandle,
+        ReleaseChange,
+        Rendered,
+        RenderRefusedError,
+        StagedRelease,
+        SyncOptions,
+        TelemetryOptions,
+        VendoredBundle,
+        Workflow,
+        WorkflowHandle,
+        WorkflowStep,
+        healthz_of,
+        healthz_response,
+    )
+    from .runtime import AgentRuntime, Approved, ModelResolver, Passthrough, Placement, RunInput, RunSession
 
+    __version__: str
+
+#: Where each root name lives. The run's types are the runtime's; everything else is the agent's.
+_HOME = {
+    **dict.fromkeys(["AgentRuntime", "Approved", "ModelResolver", "Passthrough", "Placement", "RunInput", "RunSession"], ".runtime"),
+    **dict.fromkeys(
+        [
+            "PROTOCOL_VERSION",
+            "SDK_NAME",
+            "SDK_VERSION",
+            "VENDORED_BUNDLE_EXPIRY_WARNING_DAYS",
+            "AgentStartError",
+            "AgentStatus",
+            "AirPrompterAgent",
+            "ApplyOptions",
+            "DatastoreOptions",
+            "GoldenOptions",
+            "PromptHandle",
+            "ReleaseChange",
+            "Rendered",
+            "RenderRefusedError",
+            "StagedRelease",
+            "SyncOptions",
+            "TelemetryOptions",
+            "VendoredBundle",
+            "Workflow",
+            "WorkflowHandle",
+            "WorkflowStep",
+            "healthz_of",
+            "healthz_response",
+        ],
+        ".agent",
+    ),
+}
+#: The promised modules under the root, reachable as attributes whatever was imported first. ``agent`` is the
+#: implementation and the adapters are reached by their full path, so neither is listed (both still work once imported).
+_LAYERS = ("core", "runtime", "sync", "telemetry", "testing")
+
+
+def __getattr__(name: str) -> Any:
+    # Each module is named in full, so tools/lint_imports.py checks it like any other import. `import_module`, not
+    # `from . import x`: that form asks this very function for `x` first, and would recurse.
+    # A layer is an attribute whether or not something imported it first, as it was when the root loaded everything.
+    if name == "core":
+        value: Any = importlib.import_module("airprompter_agent.core")
+    elif name == "runtime":
+        value = importlib.import_module("airprompter_agent.runtime")
+    elif name == "sync":
+        value = importlib.import_module("airprompter_agent.sync")
+    elif name == "telemetry":
+        value = importlib.import_module("airprompter_agent.telemetry")
+    elif name == "testing":
+        value = importlib.import_module("airprompter_agent.testing")
+    else:
+        home = _HOME.get("SDK_VERSION" if name == "__version__" else name)
+        if home == ".agent":
+            module = importlib.import_module("airprompter_agent.agent")
+        elif home == ".runtime":
+            module = importlib.import_module("airprompter_agent.runtime")
+        else:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        value = getattr(module, "SDK_VERSION" if name == "__version__" else name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_HOME, *_LAYERS, "__version__"})
+
+
+# The names 1.0 promises (docs/stability.md), one per line: tests/test_package_shape.py pins them.
 __all__ = [
-    "DatastoreOptions",
-    "DATASTORE_FORMAT",
-    "DatastoreRecordError",
-    "FileKvStore",
-    "KvEntry",
-    "KvReleaseDatastore",
-    "KvStore",
-    "KvStoreReport",
-    "MemoryKvStore",
-    "check_kv_store",
-    "datastore_keys",
-    "decode_datastore_record",
-    "encode_datastore_record",
-    "kv_release_datastore",
-    "prune_datastore",
-    "DatastoreRollbackResult",
-    "HydrationPlan",
-    "MemoryReleaseDatastore",
-    "PullToDatastoreResult",
-    "ReleaseControl",
-    "ReleaseDatastore",
-    "ReleaseKey",
-    "StoredReleaseRow",
-    "clear_datastore_rollback",
-    "pull_to_datastore",
-    "resolve_hydration",
-    "rollback_datastore",
-    "rollout_of",
-    "APBUNDLE_INFO",
-    "AppliedInference",
-    "INFERENCE_KEYS",
-    "apply_inference",
-    "temperature_of",
-    "top_p_of",
-    "ASSIGNMENT_MODULUS",
+    "AgentRuntime",
     "AgentStartError",
     "AgentStatus",
     "AirPrompterAgent",
     "ApplyOptions",
-    "Assignment",
-    "AssignmentError",
-    "BundleError",
-    "BundleRelease",
-    "BundleReleaseRefused",
-    "CHECK_BOUNDS",
-    "CanonicalJsonError",
-    "Delimiters",
-    "DirectorySink",
-    "Disabled",
-    "DistributionKey",
-    "ERROR_CLASSES",
-    "GOLDEN_SET_FORMAT",
-    "GOLDEN_SET_VERSION",
-    "GoldenCaseResult",
-    "GoldenInvocation",
-    "GoldenOptions",
-    "GoldenReport",
-    "GoldenSetError",
-    "GrantDecision",
-    "HOST_SPOOL_BUDGET_BYTES",
-    "JUDGE_RUBRICS",
-    "JudgeResult",
-    "JudgeRubric",
-    "KeyProvider",
-    "LATENCY_BUCKET_EDGES_MS",
-    "LoadedRelease",
-    "LoadedSlot",
-    "AgentRuntime",
     "Approved",
+    "DatastoreOptions",
+    "GoldenOptions",
     "ModelResolver",
+    "PROTOCOL_VERSION",
     "Passthrough",
     "Placement",
-    "RunInput",
-    "RunSession",
-    "MemorySink",
-    "MissingVariableError",
-    "NormalizedFeedback",
-    "Observation",
-    "ObserveTarget",
-    "PROTECTION_CRITERIA",
-    "PROTOCOL_VERSION",
-    "PassResult",
-    "PayloadDecryptError",
     "PromptHandle",
     "ReleaseChange",
-    "ReleaseReader",
-    "ReleaseResolver",
-    "ReleaseSlot",
     "RenderRefusedError",
     "Rendered",
-    "ResolveOutcome",
-    "RunRefFacts",
+    "RunInput",
+    "RunSession",
     "SDK_NAME",
     "SDK_VERSION",
-    "SEGMENT_MAX_BYTES",
-    "SERVERLESS_BUFFER_BYTES",
-    "SegmentPlanner",
-    "SlotStore",
-    "SpoolSink",
-    "SpoolUploader",
-    "SpoolWriter",
     "StagedRelease",
-    "StepError",
-    "StoreError",
-    "StoreHooks",
-    "SyncClient",
     "SyncOptions",
-    "SyncPassOutput",
     "TelemetryOptions",
-    "UNDEFINED",
-    "UnknownVariableError",
-    "UpdateWindow",
-    "UploadGrant",
-    "UsageNormalized",
+    "VENDORED_BUNDLE_EXPIRY_WARNING_DAYS",
     "VendoredBundle",
-    "Verdict",
-    "WindowState",
     "Workflow",
     "WorkflowHandle",
     "WorkflowStep",
-    "DEFAULT_SOURCE_MAX_BYTES",
-    "DEFAULT_SOURCE_TIMEOUT_SECONDS",
-    "Filled",
-    "FilledRender",
-    "FillPlan",
-    "RegisteredSource",
-    "RenderValues",
-    "VariableSource",
-    "VariableSourceContext",
-    "VariableSourceError",
-    "VariableSourceInput",
-    "VariableSourceRegistry",
-    "VariableSourceRequiredError",
-    "fill_async",
-    "fill_sync",
-    "is_variable_source_error",
-    "is_variable_source_required_error",
-    "plan_fill",
-    "supplied",
-    "unsourced",
-    "WriterIdentity",
-    "X25519KeyPair",
-    "agent",
-    "arm_for_bucket",
-    "assign_arm",
-    "backoff_delay_ms",
-    "bucket_from_hash",
-    "bundle_payload_bytes",
-    "canonical_bytes",
-    "canonical_json",
-    "check_refusal",
-    "checks_refusals",
-    "classify_error",
-    "classify_result",
-    "create_encrypted_bundle",
-    "create_plaintext_bundle",
-    "custom_key_provider",
-    "decrypt_payload",
-    "default_of",
-    "default_state_dir",
-    "disabled_from",
-    "distribution_key_id",
-    "encrypt_payload",
-    "epoch_minute",
-    "estimate_tokens",
-    "evaluate_check",
-    "evaluate_checks",
-    "file_key",
-    "generate_p256_jwk",
-    "generate_x25519_key_pair",
-    "golden_reports_meet",
     "healthz_of",
     "healthz_response",
-    "inspect_segment",
-    "is_known_time_zone",
-    "jittered_delay_ms",
-    "judge_prompt",
-    "judge_signals_of",
-    "key_thumbprint",
-    "kms",
-    "latency_bucket_index",
-    "mint_run_ref",
-    "new_run_id",
-    "minute_of",
-    "normalize_feedback",
-    "normalize_usage",
-    "observe_call",
-    "observe_call_async",
-    "open_bundle",
-    "ordered_steps",
-    "os_keystore",
-    "output_text_of",
-    "parse_golden_set",
-    "parse_judge_reply",
-    "parse_run_ref",
-    "run_ref_key_from",
-    "parse_window",
-    "pass_bps_of",
-    "pattern_refusal",
-    "placeholders_of",
-    "payload_aad",
-    "post_segment",
-    "project_checks",
-    "public_jwk_of",
-    "referenced_payloads",
-    "release_digest",
-    "release_digest_input",
-    "render_template",
-    "rubric_from_prompt",
-    "run_golden_set",
-    "segment_name",
-    "sha256_prefixed",
-    "sign_bytes",
-    "subject_hash",
-    "sync",
-    "sync_once",
-    "telemetry",
-    "trusted_root_from_pinned_key",
-    "unwrap_with_raw_key",
-    "validate_arms",
-    "validate_json_schema",
-    "validate_spool_row",
-    "validate_window",
-    "value_at_path",
-    "vault",
-    "verify_bytes",
-    "verify_manifest",
-    "verify_root_metadata",
-    "window_state",
-    "wrap_with_raw_key",
-    "x25519_private_key_from_raw",
-    "x25519_public_key_from_raw",
-    "xml_delimiters",
 ]

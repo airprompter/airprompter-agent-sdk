@@ -33,7 +33,7 @@
  *   AIRPROMPTER_UPDATE_KEY    required   an Update key bound to that agent and AIRPROMPTER_ENVIRONMENT
  *   AIRPROMPTER_ENVIRONMENT   dev        the agent environment the key and the promoted release are bound to
  *   AIRPROMPTER_API_URL       https://api.airprompter.dev
- *   AIRPROMPTER_DEPLOYMENT    dev        the deployment that signs releases (this version pins the dev root)
+ *   AIRPROMPTER_DEPLOYMENT    dev        the deployment that signs releases (this version pins the dev and prod roots)
  *   AIRPROMPTER_ROOT_KEY      empty      the root JWK, for a deployment this version does not pin (prod, a local registry)
  *   AIRPROMPTER_SLOT          triage     the slot tag
  *   AIRPROMPTER_VARIABLES     {"ticket":"Refund for order 1042 has not arrived"}   the slot's variables, a JSON object

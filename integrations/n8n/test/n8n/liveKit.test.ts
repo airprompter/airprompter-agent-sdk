@@ -36,7 +36,7 @@ function preparedFolder(t: TestContext, commit = "c0ffee000000000000000000000000
   mkdirSync(join(pkg, "node_modules", "@airprompter", "agent-sdk"), { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "installed-nodes", private: true }));
   writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "n8n-nodes-airprompter", version: require(join(PACKAGE, "package.json")).version }));
-  writeFileSync(join(pkg, "node_modules", "@airprompter", "agent-sdk", "package.json"), JSON.stringify({ name: "@airprompter/agent-sdk", version: "1.0.0-rc.4" }));
+  writeFileSync(join(pkg, "node_modules", "@airprompter", "agent-sdk", "package.json"), JSON.stringify({ name: "@airprompter/agent-sdk", version: "1.0.0-rc.5" }));
   return { dir, pkg, commit };
 }
 
@@ -86,7 +86,7 @@ function fakeTools(t: TestContext) {
 }
 
 const PIN = "c0ffee0000000000000000000000000000000000";
-const manifest = (dir: string, commit: string) => writeFileSync(join(dir, "airprompter-kit.json"), JSON.stringify({ package: "n8n-nodes-airprompter", packageVersion: require(join(PACKAGE, "package.json")).version, sdkVersion: "1.0.0-rc.4", contentSha256: contentSha256(join(dir, "node_modules")), commit }));
+const manifest = (dir: string, commit: string) => writeFileSync(join(dir, "airprompter-kit.json"), JSON.stringify({ package: "n8n-nodes-airprompter", packageVersion: require(join(PACKAGE, "package.json")).version, sdkVersion: "1.0.0-rc.5", contentSha256: contentSha256(join(dir, "node_modules")), commit }));
 const preparedCheck = (json: { checks: Array<{ id: string; state: string; detail?: Record<string, unknown> }> }) => json.checks.find((entry) => entry.id === "nodes.prepared");
 
 test("nodes.prepared passes only for an intact folder and the exact pinned commit; otherwise n8n is never started", (t) => {
@@ -132,7 +132,7 @@ test("an offline run copies the prepared folder and calls neither npm nor npx", 
   // A stand-in n8n: answers --version and --help, then fails at import:credentials, which ends the run there.
   writeFileSync(join(bin, "n8n"), '#!/bin/sh\ncase "$1" in --version) echo 2.49.8;; --help) echo usage;; *) echo "stand-in n8n" >&2; exit 1;; esac\n');
   chmodSync(join(bin, "n8n"), 0o755);
-  writeFileSync(join(dir, "airprompter-kit.json"), JSON.stringify({ package: "n8n-nodes-airprompter", packageVersion: require(join(PACKAGE, "package.json")).version, sdkVersion: "1.0.0-rc.4", contentSha256: "set below", commit: "c0ffee0000000000000000000000000000000000" }));
+  writeFileSync(join(dir, "airprompter-kit.json"), JSON.stringify({ package: "n8n-nodes-airprompter", packageVersion: require(join(PACKAGE, "package.json")).version, sdkVersion: "1.0.0-rc.5", contentSha256: "set below", commit: "c0ffee0000000000000000000000000000000000" }));
   const env = { N8N_BIN: join(bin, "n8n"), PATH: `${bin}:${process.env.PATH}`, AIRPROMPTER_KIT_COMMIT: "c0ffee0000000000000000000000000000000000" };
   const result = run(["--nodes-dir", dir], env);
   assert.equal(result.json.nodes?.mode, "preinstalled", result.stderr);

@@ -76,7 +76,7 @@ export class AirPrompterAgentApi implements ICredentialType {
       typeOptions: { rows: 4 },
       default: "",
       placeholder: '{"kty":"EC","crv":"P-256","x":"…","y":"…"}',
-      description: "Required for Production in this version of the node: paste AirPrompter's Production root key from the node's README. Leave empty for Dev, whose root this version pins. For a local airprompter dev registry, paste its root.pub.json. Every release is checked against the root before it is used or stored, and the credential test says when a root is missing.",
+      description: "Leave empty for AirPrompter Production and Dev: this version pins both roots. Only for Staging (ask AirPrompter for its root key; none is pinned) or a local airprompter dev registry (its root.pub.json): paste that root public key. A credential that holds the Production key from an earlier version keeps working; it is the same key. Every release is checked against the root before it is used or stored, and the credential test says when a root is missing.",
     },
     {
       displayName: "API Base URL",

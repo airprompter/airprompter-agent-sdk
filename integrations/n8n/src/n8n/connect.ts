@@ -18,8 +18,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { AutomationError, createAutomationClient, fsKvStore, kvAutomationDatastore, seedDatastoreFromBundle, timedFetch } from "@airprompter/agent-sdk/frameworks/steps";
-import type { AutomationClient, AutomationClientOptions, AutomationDatastore, Bundle, FetchLike, HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/frameworks/steps";
+import { AutomationError, createAutomationClient, fsKvStore, kvAutomationDatastore, seedDatastoreFromBundle } from "@airprompter/agent-sdk/frameworks/steps";
+import type { AutomationClient, AutomationClientOptions, AutomationDatastore, Bundle, HostedEnvironment, P256PublicJwk } from "@airprompter/agent-sdk/frameworks/steps";
 import { staticDataKvStore } from "./staticDataKvStore";
 
 export type StorageMode = "userFolder" | "workflowStaticData";
@@ -79,28 +79,12 @@ export function datastoreFor(credentials: AirPrompterCredentials, context: N8nSt
 }
 
 /**
- * The per-request limit. The node owns this one number and hands it to the core twice: as `requestTimeoutMs`
- * (which also bounds the telemetry upload at stop) and as the timeout of the `fetch` below, so the two never drift.
- * 8 s is the core's own default.
+ * The per-request limit, handed to the core as `requestTimeoutMs`: the core's own fetch uses it for each request and
+ * for the telemetry upload at stop. 8 s is the core's own default. (Until SDK 1.0.0-rc.5 the node also passed its own
+ * fetch, to drop a `content-length` header n8n's undici refused; rc.5 no longer sets it, and
+ * `test/n8n/dispatcher.test.ts` keeps Report Run under n8n's undici covered.)
  */
 export const REQUEST_TIMEOUT_MS = 8000;
-
-/**
- * `fetch` for requests made inside n8n. n8n installs its own `undici` (8.12 in n8n 2.49) as the global dispatcher.
- * Any undici other than the one built into Node refuses a request whose `content-length` the caller set as well as
- * `fetch` (`invalid content-length header`). The SDK's telemetry upload sets one (`@airprompter/agent-sdk`
- * 1.0.0-rc.4, `telemetry/uploader.ts`), so every Report Run failed in a real n8n with `network:fetch failed` and
- * nothing recorded. `fetch` computes the length from the body itself, so dropping the header changes nothing on the
- * wire. Remove it once the SDK stops setting the header: `test/n8n/dispatcher.test.ts` says when.
- */
-export function withoutContentLength(base: typeof globalThis.fetch): typeof globalThis.fetch {
-  return (input, init) => {
-    if (!init?.headers) return base(input, init);
-    const headers = new Headers(init.headers);
-    headers.delete("content-length");
-    return base(input, { ...init, headers });
-  };
-}
 
 export function clientOptions(credentials: AirPrompterCredentials, datastore: AutomationDatastore, extra: Partial<AutomationClientOptions> = {}): AutomationClientOptions {
   if (!credentials.agentId?.trim()) throw new AutomationError("invalid_input", "Agent ID is required.", false);
@@ -119,7 +103,6 @@ export function clientOptions(credentials: AirPrompterCredentials, datastore: Au
     ...(credentials.organizationId?.trim() ? { organizationId: credentials.organizationId.trim() } : {}),
     ...extra,
     requestTimeoutMs: timeoutMs,
-    fetch: extra.fetch ?? (timedFetch(withoutContentLength((input, init) => globalThis.fetch(input, init)), timeoutMs) as FetchLike),
   };
 }
 

@@ -21,7 +21,7 @@ const DESCRIPTIONS: Record<string, string> = {
   unreachable: "AirPrompter could not be reached. Steps serve from the stored copy once one was fetched; a report is not recorded until AirPrompter answers — turn on Retry On Fail for Report Run.",
   refused: "The release did not verify, or the slot is disabled in AirPrompter. Nothing unverified is ever served.",
   lease_expired: "AirPrompter has been unreachable for longer than the release's lease, so the stored copy is no longer served. Check the network from n8n to AirPrompter.",
-  root_not_pinned: "Paste AirPrompter's root public key into the credential (Root Public Key).",
+  root_not_pinned: "This version pins the Production and Dev roots only. For Staging, ask AirPrompter for its root key and paste it into the credential (Root Public Key).",
   storage_unavailable: "The stored copy could not be read or written (the n8n user folder, or workflow static data).",
 };
 

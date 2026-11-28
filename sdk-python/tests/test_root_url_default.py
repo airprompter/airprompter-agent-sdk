@@ -281,8 +281,9 @@ def test_the_refusal_names_a_base_url_back_without_credentials(tmp_path):
 
 
 def test_keys_copied_into_examples_and_docs_are_the_hosted_prod_root():
-    """The production key is copied into an example and the n8n credential docs, neither run by CI: a rotation that
-    moves ``HOSTED_ROOTS`` without them fails here."""
+    """The production key is copied into one example that CI does not run: a rotation that moves ``HOSTED_ROOTS``
+    without it fails here. The Zapier and n8n docs copy no key at all: the SDK they depend on (``1.0.0-rc.5`` on) pins
+    prod, so a pasted copy could only go stale. One that comes back fails here too."""
     import ast
     import re
 
@@ -292,6 +293,10 @@ def test_keys_copied_into_examples_and_docs_are_the_hosted_prod_root():
         tree = ast.parse(f.read())
     copied = [ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "PRODUCTION_ROOT" for t in node.targets)]
     assert copied == [prod]
-    with open(os.path.join(repo, "integrations", "n8n", "README.md"), encoding="utf-8") as f:
-        blocks = [json.loads(block) for block in re.findall(r"```json\n(\{\"kty\":\"EC\".*?\})\n```", f.read())]
-    assert blocks == [prod]
+    for integration in ("n8n", "zapier"):
+        with open(os.path.join(repo, "integrations", integration, "README.md"), encoding="utf-8") as f:
+            text = f.read()
+        # Any P-256 JWK, the prod key or another, and the prod key's coordinates in any shape (inline, split, escaped).
+        assert re.findall(r"\"kty\"\s*:\s*\"EC\"", text) == [], f"{integration}/README.md pastes a root key"
+        for coordinate in (prod["x"], prod["y"]):
+            assert coordinate not in text, f"{integration}/README.md carries the prod root's {coordinate[:8]}…"

@@ -111,7 +111,7 @@ export const authentication = {
     { key: "updateKey", label: "Update key", required: true, type: "password" as const, helpText: "An Update key for that agent, from Agents › Keys. It is bound to one agent and one environment and can only read approved releases." },
     { key: "environment", label: "Environment", required: false, type: "string" as const, default: "prod", helpText: "The environment the Update key is bound to (usually `prod`)." },
     { key: "baseUrl", label: "API base URL", required: false, type: "string" as const, default: PRODUCTION_API, helpText: "Leave as is. Change it only to test against a development registry." },
-    { key: "rootKey", label: "Root key (advanced)", required: false, type: "text" as const, helpText: "Only for a development registry: the JSON of its root public key (`root.pub.json`). Leave empty for AirPrompter." },
+    { key: "rootKey", label: "Root key (advanced)", required: false, type: "text" as const, helpText: "Leave empty for AirPrompter Production and Dev: this app pins their roots. Only for Staging (ask AirPrompter for its root key; none is pinned) or a development registry (`root.pub.json`): the JSON of that root public key." },
   ],
   test: async (z: ZObject, bundle: Bundle) => {
     const result = await withClient(z, bundle, (client) => client.testConnection());

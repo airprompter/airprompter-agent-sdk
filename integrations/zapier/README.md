@@ -41,16 +41,19 @@ Custom auth, with these fields:
 - **Environment**: default `prod`.
 - **API base URL**: default `https://api.airprompter.com`. Must be an https origin. Only
   a registry on this machine may use http.
-- **Root key (advanced)**: only for a development registry.
+- **Root key (advanced)**: leave empty for AirPrompter Production and Dev. Only for Staging (ask AirPrompter for
+  its root key; the SDK pins none) or a development registry (its `root.pub.json`).
 
 The connection test fetches the signed manifest, verifies it against the pinned root, and
 stores it.
 
 > **Production root:** `HOSTED_ROOTS` in the SDK
 > ([`sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts`](../../sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts),
-> which the Steps core pins from) holds both the hosted `dev` root and the `prod` root (ceremony of 2026-11-27,
-> key id `044af6e8…1793`). The prod pin needs `@airprompter/agent-sdk` `1.0.0-rc.5` or later: on an older pin,
-> every connection to the production API reports `root_not_pinned`, unless the root is pasted into the advanced field.
+> which the Steps core pins from) pins both the hosted `dev` root and the `prod` root (ceremony of 2026-11-27, key id `044af6e8…1793`). This app
+> depends on an SDK release that carries the prod pin (`1.0.0-rc.5` was the first), so a connection to the
+> production API needs no root key. Production must be serving protocol 4.0.0 manifests, which this SDK reads; until
+> it does, the connection test reports `protocol_unsupported`. Staging has no pinned root: ask AirPrompter for its
+> root key and paste it into the advanced field.
 
 ## Where the signed copy lives (storage decision)
 
@@ -156,8 +159,9 @@ npm run validate                                         # zapier-platform valid
 
 None of these steps have been run. They need the owner's Zapier account.
 
-1. Depend on `@airprompter/agent-sdk` `1.0.0-rc.5` or later, which pins the production root (`HOSTED_ROOTS.prod`
-   in `sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts`).
+1. Check that the SDK pin still carries the production root (`HOSTED_ROOTS.prod` in
+   `sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts`; every release since `1.0.0-rc.5` does), and that
+   production serves protocol 4.0.0 manifests.
 2. `npx zapier-platform login`, then `npx zapier-platform register "AirPrompter Agents"`
    (once). This writes `.zapierapprc`, which is gitignored.
 3. `npm run build && npx zapier-platform push`. The SDK comes from npm

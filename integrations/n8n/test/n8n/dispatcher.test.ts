@@ -1,8 +1,8 @@
 /**
  * n8n installs its own undici (8.12 in n8n 2.49) as the global `fetch` dispatcher. That undici refuses a request whose
- * `content-length` the caller set as well (`invalid content-length header`), which the SDK's telemetry upload does
- * in 1.0.0-rc.4, so Report Run failed in a real n8n while passing under Node's own dispatcher. These tests run under
- * such a dispatcher, as n8n does, and say when the SDK has stopped setting the header.
+ * `content-length` the caller set as well (`invalid content-length header`). The SDK's telemetry upload set one up to
+ * 1.0.0-rc.4, so Report Run failed in a real n8n while passing under Node's own dispatcher; rc.5 leaves the header to
+ * the HTTP client. These tests run Report Run under such a dispatcher, as n8n does, and check the SDK keeps it so.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -28,7 +28,7 @@ function fixture() {
 
 const credentialsOf = (h: ReturnType<typeof harness>, baseUrl: string): IDataObject => ({ agentId: h.plane.scope.agentId, updateKey: h.plane.apiKey, environment: "prod", apiBaseUrl: baseUrl, hostedEnvironment: "prod", rootKey: JSON.stringify(publicJwkOf(h.plane.rootKey)), rootUrl: "", organizationId: "", storage: "workflowStaticData", bundlePath: "" });
 
-test("Report Run is recorded under n8n's undici as the global dispatcher", async () => {
+test("Report Run is recorded under n8n's undici as the global dispatcher (no workaround in the node)", async () => {
   const previous = getGlobalDispatcher();
   const agent = new Agent();
   const h = fixture();
@@ -51,7 +51,7 @@ test("Report Run is recorded under n8n's undici as the global dispatcher", async
   }
 });
 
-test("the SDK still sets content-length on its telemetry upload (when this fails, remove withoutContentLength)", async () => {
+test("the SDK leaves content-length to the HTTP client on its telemetry upload (rc.5 and later)", async () => {
   // Independent of any undici version: record what the core hands to fetch, through the plane's in-process fetch.
   const h = fixture();
   h.plane.grantBaseUrl = "https://bucket.test";
@@ -61,18 +61,17 @@ test("the SDK still sets content-length on its telemetry upload (when this fails
     if (String(url).startsWith("https://bucket.test")) uploads.push(Object.fromEntries(new Headers(init?.headers as HeadersInit).entries()));
     return inner(url, init);
   };
-  const { fetch: _ours, ...rest } = clientOptions(credentialsOf(h, "https://api.test") as never, kvAutomationDatastore(new MemoryKvStore()));
-  const core = createAutomationClient({ ...rest, fetch: recording });
+  const core = createAutomationClient({ ...clientOptions(credentialsOf(h, "https://api.test") as never, kvAutomationDatastore(new MemoryKvStore())), fetch: recording });
   const served = await core.getPrompt({ slot: "support.triage", variables: { ticket: "t" } });
   await core.reportRun({ runRef: served.runRef, inputTokens: 1 });
   assert.ok(uploads.length > 0, "the report went out as a telemetry upload");
-  assert.ok(uploads.every((headers) => "content-length" in headers), "the SDK sets content-length itself; if it no longer does, the n8n workaround can go");
+  assert.ok(uploads.every((headers) => !("content-length" in headers)), "the SDK must not set content-length itself: n8n's undici refuses it");
 });
 
-test("the node hands the core one timeout, for its requests and for the upload at stop", () => {
+test("the node hands the core one timeout and uses the core's own fetch", () => {
   const h = fixture();
   const defaults = clientOptions(credentialsOf(h, "https://api.test") as never, kvAutomationDatastore(new MemoryKvStore()));
   assert.equal(defaults.requestTimeoutMs, REQUEST_TIMEOUT_MS);
-  assert.equal(typeof defaults.fetch, "function");
+  assert.equal(defaults.fetch, undefined, "no fetch of the node's own: the core's timedFetch over globalThis.fetch");
   assert.equal(clientOptions(credentialsOf(h, "https://api.test") as never, kvAutomationDatastore(new MemoryKvStore()), { requestTimeoutMs: 500 }).requestTimeoutMs, 500);
 });

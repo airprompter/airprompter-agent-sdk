@@ -8,7 +8,7 @@
 //
 //   const spool = new SpoolWriter({ dir: `${stateDir}/airprompter/${agentId}/${target}/spool/telemetry`, instanceId, sdk: "acme-logger/1.0" });
 //   spool.observe({ tag, artifactId, versionId, arm, model, status: "ok", latencyMs: 812, tokens: { input: 400, output: 90 } }); // a one-call run
-//   spool.recordRun({ dimensions, status: "ok", errorClass: null, usageSource: "reported", toolsReported: true, agentRun: 1, modelCalls: 5, latencyMs: 4200, tokens, tools });
+//   spool.recordRun({ dimensions, status: "ok", errorClass: null, usageSource: "reported", toolsReported: true, callsReported: true, agentRun: 1, modelCalls: 5, latencyMs: 4200, tokens, tools });
 //   spool.feedback({ tag, artifactId, versionId, arm, model, outcomes: { accepted: true } });
 //   process.on("beforeExit", () => spool.close());
 
@@ -53,11 +53,14 @@ export class SpoolWriter {
   }
 
   /** One run's totals: the only place `count` rises. Moments are over the run's totals, never per model call. */
-  recordRun({ dimensions, status, errorClass = null, usageSource = "reported", toolsReported = false, agentRun, modelCalls, latencyMs, tokens, tools, checks = null }, at = this.now()) {
+  // `callsReported` (required): every model call of the run gave you its usage, or it made none. Unsure is false.
+  recordRun({ dimensions, status, errorClass = null, usageSource = "reported", toolsReported = false, callsReported, agentRun, modelCalls, latencyMs, tokens, tools, checks = null }, at = this.now()) {
     const row = this.window(at, { ...dimensions, status, errorClass, usageSource, toolsReported });
     if (row.outcomeRunMinute === row.minute) delete row.outcomeRunMinute;
     row.count += 1;
     row.agentRun += agentRun;
+    if (typeof callsReported !== "boolean") throw new TypeError("callsReported is required");
+    if (callsReported) row.callsReportedRuns += 1; // a measure, never in the key
     row.modelCalls += countOf(modelCalls);
     row.tools.calls += countOf(tools.calls);
     row.tools.errors += countOf(tools.errors);
@@ -118,7 +121,7 @@ export class SpoolWriter {
     const totals = { input: tokens.input ?? 0, cachedInput: tokens.cachedInput ?? 0, output: tokens.output ?? 0 };
     const tools = { calls: toolCalls?.calls ?? 0, errors: toolCalls?.errors ?? 0 };
     const toolsReported = toolCalls !== undefined; // tool calls handed in were seen: zero means none ran
-    const row = this.recordRun({ dimensions, status, errorClass, usageSource, toolsReported, agentRun: 1, modelCalls: 1, latencyMs, tokens: totals, tools, ...(checks ? { checks: { passed: checks.passed ?? 0, failed: checks.failed ?? 0 } } : {}) }, at);
+    const row = this.recordRun({ dimensions, status, errorClass, usageSource, toolsReported, callsReported: usageSource !== "unavailable", agentRun: 1, modelCalls: 1, latencyMs, tokens: totals, tools, ...(checks ? { checks: { passed: checks.passed ?? 0, failed: checks.failed ?? 0 } } : {}) }, at);
     if (outcomes) mergeOutcomes(row, outcomes);
     if (step !== undefined) {
       const buckets = new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0);
@@ -176,6 +179,7 @@ export class SpoolWriter {
         count: 0,
         modelCalls: 0,
         agentRun: 0,
+        callsReportedRuns: 0,
         tools: { calls: 0, errors: 0 },
         latencyMs: { buckets: new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0), sum: 0 },
         tokens: { input: 0, output: 0 },

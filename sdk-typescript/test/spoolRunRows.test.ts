@@ -17,7 +17,7 @@ import { inspectSegment, validateSpoolRow } from "../packages/sdk/src/telemetry/
 const T0 = Date.parse("2026-09-12T14:03:10Z");
 const identity = { instanceId: "i-testinstance", instanceClass: "resident" as const, sdk: "t/0" };
 const dimensions = { tag: "support.reply", artifactId: "prm_1", versionId: "ver_1", arm: "none", model: "gpt-5" };
-const run = (patch: Partial<RunTotals> = {}): RunTotals => ({ dimensions, status: "ok", errorClass: null, usageSource: "reported", toolsReported: false, agentRun: 1, modelCalls: 1, latencyMs: 100, tokens: { input: 10, cachedInput: 0, output: 5 }, tools: { calls: 0, errors: 0 }, ...patch });
+const run = (patch: Partial<RunTotals> = {}): RunTotals => ({ dimensions, status: "ok", errorClass: null, usageSource: "reported", toolsReported: false, callsReported: true, agentRun: 1, modelCalls: 1, latencyMs: 100, tokens: { input: 10, cachedInput: 0, output: 5 }, tools: { calls: 0, errors: 0 }, ...patch });
 const histogram = (...latencies: number[]) => {
   const buckets = new Array<number>(LATENCY_BUCKET_EDGES_MS.length).fill(0);
   for (const ms of latencies) buckets[latencyBucketIndex(ms)]! += 1;
@@ -126,6 +126,11 @@ test("the validator takes each form and refuses a crossed one", () => {
     assert.deepEqual(validateSpoolRow({ ...row, toolsReported: "yes" }), { ok: false, reason: "toolsReported" }, `${row.type}: toolsReported is a boolean`);
   }
   assert.deepEqual(validateSpoolRow({ ...runRow, agentRun: 2 }), { ok: false, reason: "agentRun" });
+  // Protocol 4.1.0: a count of the row's runs, absent on an earlier writer's row.
+  const { callsReportedRuns: _calls, ...earlier } = runRow;
+  assert.equal(validateSpoolRow(earlier).ok, true, "a row from a writer before 4.1.0 passes");
+  for (const bad of [2, -1, 0.5, true, "1"]) assert.deepEqual(validateSpoolRow({ ...runRow, callsReportedRuns: bad }), { ok: false, reason: "callsReportedRuns" }, String(bad));
+  assert.deepEqual(validateSpoolRow({ ...feedback, callsReportedRuns: 1 }), { ok: false, reason: "callsReportedRuns" });
   const { tokensSq: _tokensSq, ...withoutMoments } = runRow;
   assert.deepEqual(validateSpoolRow(withoutMoments), { ok: false, reason: "tokensSq" });
   assert.deepEqual(validateSpoolRow({ ...runRow, tokensSq: { ...runRow.tokensSq, inputOutput: -1 } }), { ok: false, reason: "tokensSq" });

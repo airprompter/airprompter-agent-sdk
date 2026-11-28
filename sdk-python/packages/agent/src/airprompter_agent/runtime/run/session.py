@@ -17,6 +17,10 @@ Example::
     run.record_model_call("support.reply", step="agent", model="gpt-5", latency_ms=300, usage=usage)
     run.record_tool_call("support.reply", step="tools", ok=True)
     run.end()  # one run row with count 1, however many calls; one step row per step
+
+A row cannot change once written, so a record that arrives after ``end`` is dropped with one log. What the row can say is
+that a call began and had not settled: ``begin_measure`` opens the call here (``_call_begun``), and a slot with a call
+still open at the end writes ``callsReported`` false and ``usageSource`` ``unavailable``.
 """
 
 from __future__ import annotations
@@ -99,6 +103,14 @@ class _SlotState(_Counts):
         self.dims = dims
         self.checks: Optional[dict[str, int]] = None
         self.steps: dict[tuple[str, str, str], _StepCounts] = {}
+        #: Model calls begun through ``_call_begun`` and not yet recorded. One still open at the end is a call the row lacks.
+        self.in_flight = 0
+
+    @property
+    def calls_reported(self) -> bool:
+        """Every call of the slot measured, a slot with none included: nothing recorded without usage, nothing open. A slot
+        that declined or failed to render served nothing."""
+        return self.all_reported and self.in_flight == 0 and not self.pin.row_error
 
     def add_checks(self, passed: int, failed: int) -> None:
         self.checks = {"passed": (self.checks or {}).get("passed", 0) + passed, "failed": (self.checks or {}).get("failed", 0) + failed}
@@ -266,10 +278,36 @@ class Session:
         """``output_text`` is read once for the slot's declared checks, then dropped: never kept, never recorded.
         ``tools_observed=True`` says the adapter sees this run's tool calls, so a run with none writes ``toolsReported``
         true and ``tools.calls`` 0."""
+        self._add_model_call(slot, None, model=model, latency_ms=latency_ms, step=step, usage=usage, error_class=error_class, output_text=output_text, tools_observed=tools_observed)
+
+    def _call_begun(self, slot: str) -> Callable[..., bool]:
+        """Internal, AIR-2547, for ``begin_measure`` and the LiteLLM pre-call hook only: a model call on this slot has
+        begun and settles later. The answer takes ``record_model_call``'s keywords and records the call, once, closing it
+        under the same lock, so the run's end never sees it both recorded and open; it answers False when the run had
+        already ended. A run that ends first writes
+        ``callsReported`` false for the slot: the record can only arrive after the row was written, and is dropped as
+        late. With no pinned slot, or after the end, it opens nothing and records as ``record_model_call`` does. Kept in
+        step with the TypeScript twin (``callBegun``)."""
+        with self._lock:
+            state = None if self._ended else self._states.get(slot)
+            if state is not None:
+                state.in_flight += 1
+        token = [state is not None]
+
+        def record(**call: Any) -> bool:
+            return self._add_model_call(slot, token, **call)
+
+        return record
+
+    def _add_model_call(self, slot: str, begun: Optional[list[bool]], *, model: str, latency_ms: float, step: Optional[str] = None, usage: Any = None, error_class: Optional[str] = None, output_text: Optional[str] = None, tools_observed: bool = False) -> bool:
+        """False when the call was not taken: the run had ended (logged as late) or the slot is not pinned."""
         with self._lock:
             state = self._recordable(slot)
             if state is None:
-                return
+                return False
+            if begun is not None and begun[0]:
+                begun[0] = False
+                state.in_flight -= 1
             self._last_error_class = error_class
             tokens, reported = _tokens_of(usage)
             state.add_call(tokens, reported)
@@ -287,6 +325,7 @@ class Session:
                 outcome = evaluate_checks(declared, output_text, tokens[2] if reported else None)
                 with self._lock:
                     state.add_checks(outcome["passed"], outcome["failed"])
+        return True
 
     def record_tool_call(self, slot: str, *, ok: bool, step: Optional[str] = None) -> None:
         with self._lock:
@@ -543,7 +582,7 @@ class Session:
                 row_error = state.pin.row_error
                 rows.append(
                     (
-                        RunTotals(dimensions=state.dims, status="error" if row_error else result[0], error_class=row_error or result[1], usage_source=state.usage_source, tools_reported=state.tools_reported, agent_run=1, model_calls=state.model_calls, latency_ms=latency_ms, tokens=state.tokens, tools=state.tools, checks=dict(state.checks) if state.checks else None),
+                        RunTotals(dimensions=state.dims, status="error" if row_error else result[0], error_class=row_error or result[1], usage_source=state.usage_source if state.calls_reported else "unavailable", tools_reported=state.tools_reported, calls_reported=state.calls_reported, agent_run=1, model_calls=state.model_calls, latency_ms=latency_ms, tokens=state.tokens, tools=state.tools, checks=dict(state.checks) if state.checks else None),
                         [StepTotals(dimensions=state.dims, step=step.step, status=step.status, error_class=step.error_class, usage_source=step.usage_source, tools_reported=state.tools_reported, model_calls=step.model_calls, latency={"buckets": list(step.buckets), "sum": step.latency_sum}, tokens=step.tokens, tools=step.tools) for step in state.steps.values()],
                     )
                 )

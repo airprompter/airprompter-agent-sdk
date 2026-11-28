@@ -120,6 +120,9 @@ class RunTotals:
     usage_source: str
     #: True when the writer saw this run's tool calls, so ``tools.calls == 0`` means none ran rather than not reported.
     tools_reported: bool
+    #: True when every model call of this run on the slot was measured: none recorded without usage, none begun and
+    #: still open when the run ended. A run that made no model call is true. Adds 1 to the row's ``callsReportedRuns``.
+    calls_reported: bool
     #: 1 when this is the first slot of its run, so an agent-wide total counts a two-slot run once.
     agent_run: int
     model_calls: int
@@ -131,7 +134,7 @@ class RunTotals:
 
     @classmethod
     def from_wire(cls, row: Mapping[str, Any]) -> "RunTotals":
-        return cls(dimensions=RunDimensions.from_wire(row["dimensions"]), status=row["status"], error_class=row.get("errorClass"), usage_source=row["usageSource"], tools_reported=row["toolsReported"], agent_run=row["agentRun"], model_calls=row["modelCalls"], latency_ms=row["latencyMs"], tokens=row["tokens"], tools=row["tools"], checks=row.get("checks"))
+        return cls(dimensions=RunDimensions.from_wire(row["dimensions"]), status=row["status"], error_class=row.get("errorClass"), usage_source=row["usageSource"], tools_reported=row["toolsReported"], calls_reported=row["callsReported"], agent_run=row["agentRun"], model_calls=row["modelCalls"], latency_ms=row["latencyMs"], tokens=row["tokens"], tools=row["tools"], checks=row.get("checks"))
 
 
 @dataclass

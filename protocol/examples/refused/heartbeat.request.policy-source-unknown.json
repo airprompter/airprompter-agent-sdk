@@ -2,7 +2,7 @@
   "schema": "heartbeat-request",
   "reason": "the apply policy's source is a closed set (S4)",
   "document": {
-    "protocol": "4.0.0",
+    "protocol": "4.1.0",
     "capabilities": [],
     "registration": {
       "tagKeys": [

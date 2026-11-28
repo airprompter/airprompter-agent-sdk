@@ -103,6 +103,28 @@ def apply_settings(kind: str, params: Mapping[str, Any], settings: Mapping[str, 
     return apply_inference(kind, params, settings or {})
 
 
+def _begin_call(run: RunSession, slot: str) -> Callable[..., bool]:
+    """The recorder for one call that has begun, taking ``record_model_call``'s keywords and answering False when the run
+    had already ended (the record dropped as late). A run session opens the call now, so a run that ends before the call
+    settles says its calls were not all measured (``callsReported`` false); any other ``RunSession`` just records. Never
+    raises."""
+    begun = getattr(run, "_call_begun", None)
+    if callable(begun):
+        try:
+            record = begun(slot)
+        except Exception:  # noqa: BLE001 — measuring never fails the customer's call
+            pass
+        else:
+            # Only an explicit False is a late drop: a recorder that answers nothing took the call.
+            return lambda **call: record(**call) is not False
+
+    def recorded(**call: Any) -> bool:
+        run.record_model_call(slot, **call)
+        return True  # a session of the caller's own says nothing about a late drop
+
+    return recorded
+
+
 class Measure:
     """One model call timed into a run, under the release's model id (``placement.model``), settling later: when the response arrives, a stream has gone by, or a stream
     helper's context closes. Settles once; never raises. ``on_settled`` runs after the record (an owned run's end)."""
@@ -116,6 +138,7 @@ class Measure:
         self._read = read
         self._tools_observed = tools_observed
         self._on_settled = on_settled
+        self._record = _begin_call(run, slot)
         self._started = self._now()
         self._settled = False
         self._lock = threading.Lock()
@@ -142,13 +165,13 @@ class Measure:
                 # Only when set: a session written to the RunSession Protocol need not take it.
                 base["tools_observed"] = True
             if error is not None:
-                self._run.record_model_call(self._slot, **base, error_class=classify_error(error))
+                self._record(**base, error_class=classify_error(error))
             else:
                 try:
                     shaped = self._read(result) if self._read else result
-                    self._run.record_model_call(self._slot, **base, usage=normalize_usage(shaped), error_class=classify_result(shaped), output_text=output_text_of(shaped))
+                    self._record(**base, usage=normalize_usage(shaped), error_class=classify_result(shaped), output_text=output_text_of(shaped))
                 except Exception:  # noqa: BLE001 — an unreadable result still counts as a call, with no usage
-                    self._run.record_model_call(self._slot, **base)
+                    self._record(**base)
         except Exception:  # noqa: BLE001 — measuring never fails the customer's call
             pass
         finally:

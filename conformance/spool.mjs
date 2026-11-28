@@ -136,6 +136,7 @@ export class WindowAggregator {
         count: 0,
         modelCalls: 0,
         agentRun: 0,
+        callsReportedRuns: 0,
         tools: { calls: 0, errors: 0 },
         latencyMs: { buckets: new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0), sum: 0 },
         tokens: { input: 0, output: 0 },
@@ -154,6 +155,8 @@ export class WindowAggregator {
     if (row.outcomeRunMinute === row.minute) delete row.outcomeRunMinute;
     row.count += 1;
     row.agentRun += totals.agentRun;
+    // 4.1.0: a measure, never in the key.
+    if (totals.callsReported) row.callsReportedRuns += 1;
     row.modelCalls += countOf(totals.modelCalls);
     row.tools.calls += countOf(totals.tools.calls);
     row.tools.errors += countOf(totals.tools.errors);
@@ -216,7 +219,7 @@ export class WindowAggregator {
     const usageSource = o.usageSource ?? "reported";
     const toolsReported = o.toolCalls !== undefined;
     const errorClass = o.errorClass ?? null;
-    const row = this.recordRun(at, { dimensions, status: o.status, errorClass, usageSource, toolsReported, agentRun: 1, modelCalls: 1, latencyMs: o.latencyMs, tokens, tools, ...(o.checks ? { checks: { passed: o.checks.passed ?? 0, failed: o.checks.failed ?? 0 } } : {}) });
+    const row = this.recordRun(at, { dimensions, status: o.status, errorClass, usageSource, toolsReported, callsReported: usageSource !== "unavailable", agentRun: 1, modelCalls: 1, latencyMs: o.latencyMs, tokens, tools, ...(o.checks ? { checks: { passed: o.checks.passed ?? 0, failed: o.checks.failed ?? 0 } } : {}) });
     if (o.outcomes) mergeOutcomes(row, o.outcomes);
     if (step !== undefined) {
       const buckets = new Array(LATENCY_BUCKET_EDGES_MS.length).fill(0);
@@ -255,7 +258,7 @@ export class WindowAggregator {
 // ---------------------------------------------------------------------------
 
 const WINDOW_NESTED = { latencyMs: ["buckets", "sum"], tokens: ["input", "cachedInput", "output"], tools: ["calls", "errors"], tokensSq: ["input", "cachedInput", "output", "inputOutput", "inputCached", "cachedOutput"], checks: ["passed", "failed"] };
-const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "toolsReported", "count", "modelCalls", "agentRun", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"];
+const WINDOW_FIELDS = ["type", "v", "artifactId", "audienceIds", "outcomeRunMinute", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "status", "errorClass", "usageSource", "toolsReported", "count", "modelCalls", "agentRun", "callsReportedRuns", "tools", "latencyMs", "tokens", "tokensSq", "checks", "outcomes", "sdk"];
 const STEP_FIELDS = ["type", "v", "artifactId", "audienceIds", "minute", "instanceId", "instanceClass", "tag", "versionId", "arm", "model", "step", "status", "errorClass", "usageSource", "toolsReported", "modelCalls", "latencyMs", "tokens", "tools", "sdk"];
 const ROW_FIELDS = { window: { v: 5, fields: WINDOW_FIELDS }, step: { v: 2, fields: STEP_FIELDS }, refusal: { v: 1, fields: ["type", "v", "at", "instanceId", "reason", "generation", "tag"] }, dropped: { v: 1, fields: ["type", "v", "at", "instanceId", "segments", "bytes"] } };
 
@@ -291,6 +294,11 @@ export function inspectLines({ instanceId, lines, nowMs }) {
     }
     if (value.instanceId !== instanceId) {
       invalid.push({ line: index + 1, reason: "instance_mismatch" });
+      return;
+    }
+    // 4.1.0: absent on an earlier writer's row; present, a count of this row's runs.
+    if (value.type === "window" && value.callsReportedRuns !== undefined && !(Number.isSafeInteger(value.callsReportedRuns) && value.callsReportedRuns >= 0 && value.callsReportedRuns <= value.count)) {
+      invalid.push({ line: index + 1, reason: "callsReportedRuns" });
       return;
     }
     const row = {};

@@ -3,7 +3,7 @@
   "reason": "a default belongs to an optional variable ",
   "document": {
     "payload": {
-      "protocol": "4.0.0",
+      "protocol": "4.1.0",
       "organizationId": "org_7d3f9a2b",
       "agentId": "agt_4e8c1b6d",
       "target": "prod",

@@ -138,7 +138,7 @@ class Aggregator:
                 "instanceId": self.identity[0], "instanceClass": self.identity[1],
                 "tag": tag, "versionId": version_id, "arm": arm, "model": model, "status": status,
                 "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "count": 0,
-                "modelCalls": 0, "agentRun": 0, "tools": {"calls": 0, "errors": 0},
+                "modelCalls": 0, "agentRun": 0, "callsReportedRuns": 0, "tools": {"calls": 0, "errors": 0},
                 "latencyMs": {"buckets": [0] * len(EDGES), "sum": 0}, "tokens": {"input": 0, "output": 0},
                 "sdk": self.identity[2],
             }
@@ -155,6 +155,8 @@ class Aggregator:
             row.pop("outcomeRunMinute")
         row["count"] += 1
         row["agentRun"] += r["agentRun"]
+        # A measure, never a dimension (4.1.0): the run counts when every model call it made was measured.
+        row["callsReportedRuns"] += 1 if r["callsReported"] else 0
         row["modelCalls"] += count_of(r["modelCalls"])
         row["tools"]["calls"] += count_of(r["tools"]["calls"])
         row["tools"]["errors"] += count_of(r["tools"]["errors"])
@@ -225,7 +227,7 @@ class Aggregator:
         slot_tag = o["tag"]
         step = o.get("step")
         dimensions = {**{k: o[k] for k in ("artifactId", "versionId", "arm", "model", "audienceIds") if k in o}, "tag": slot_tag}
-        run = {"dimensions": dimensions, "status": o["status"], "errorClass": o.get("errorClass"), "usageSource": o.get("usageSource"), "toolsReported": tools_reported, "agentRun": 1, "modelCalls": 1, "latencyMs": o["latencyMs"], "tokens": tokens, "tools": tools}
+        run = {"dimensions": dimensions, "status": o["status"], "errorClass": o.get("errorClass"), "usageSource": o.get("usageSource"), "toolsReported": tools_reported, "callsReported": (o.get("usageSource") or "reported") != "unavailable", "agentRun": 1, "modelCalls": 1, "latencyMs": o["latencyMs"], "tokens": tokens, "tools": tools}
         if "checks" in o:
             run["checks"] = {"passed": o["checks"].get("passed", 0), "failed": o["checks"].get("failed", 0)}
         row = self.record_run(at, run)
@@ -414,8 +416,10 @@ def spool_vectors():
     # What a run session hands the writer at `end`: one run's totals, however many calls it made.
     dims = {k: triage[k] for k in ("tag", "artifactId", "versionId", "arm", "model")}
     reply = {"tag": "support.reply", "artifactId": "prm_support_reply", "versionId": "ver_reply_3", "arm": "candidate", "model": "gpt-5"}
-    def run(dimensions=dims, *, status="ok", error_class=None, usage="reported", tools_reported=False, agent_run=1, model_calls=1, latency=1000, tokens=(0, 0, 0), tools=(0, 0)):
-        return {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage, "toolsReported": tools_reported or tools != (0, 0), "agentRun": agent_run, "modelCalls": model_calls, "latencyMs": latency, "tokens": {"input": tokens[0], "cachedInput": tokens[1], "output": tokens[2]}, "tools": {"calls": tools[0], "errors": tools[1]}}
+    def run(dimensions=dims, *, status="ok", error_class=None, usage="reported", tools_reported=False, calls_reported=None, agent_run=1, model_calls=1, latency=1000, tokens=(0, 0, 0), tools=(0, 0)):
+        # What a session writes unless a case says otherwise: measured when its usage was, or when it made no call.
+        measured = usage != "unavailable" or model_calls == 0 if calls_reported is None else calls_reported
+        return {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage, "toolsReported": tools_reported or tools != (0, 0), "callsReported": measured, "agentRun": agent_run, "modelCalls": model_calls, "latencyMs": latency, "tokens": {"input": tokens[0], "cachedInput": tokens[1], "output": tokens[2]}, "tools": {"calls": tools[0], "errors": tools[1]}}
     def step(name, dimensions=dims, *, status="ok", error_class=None, usage="reported", tools_reported=False, latencies=(100,), tokens=(0, 0, 0), tools=(0, 0)):
         histogram = [0] * len(EDGES)
         for ms in latencies:
@@ -569,7 +573,7 @@ def spool_vectors():
             {"kind": "close", "at": T0 + 1},
         ]),
         windows("model_unresolved is an error run", "a release whose model cannot run here is an error row a gate can see", [
-            {"kind": "recordRun", "at": T0, "run": run(status="error", error_class="model_unresolved", model_calls=0, latency=0, usage="unavailable")},
+            {"kind": "recordRun", "at": T0, "run": run(status="error", error_class="model_unresolved", model_calls=0, latency=0, usage="unavailable", calls_reported=False)},
             {"kind": "close", "at": T0 + 1},
         ]),
         windows("whatever a caller hands in, a writer writes counts", "tool and token counts clamp to non-negative integers, so a row always passes the validator", [
@@ -612,6 +616,24 @@ def spool_vectors():
             {"kind": "feedback", "at": T0 + 3, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"rating": 4}}},
             {"kind": "close", "at": T0 + 4},
         ]),
+        windows("calls reported: a run with no model call and a run whose call was not measured", "callsReportedRuns is a measure, not a dimension (4.1.0): a run that made no model call counts, and a run whose call was begun and never settled before its row was written (its record dropped as late) does not, so the two share one unavailable row with count 2 and callsReportedRuns 1", [
+            {"kind": "recordRun", "at": T0, "run": run(usage="unavailable", model_calls=0, latency=40)},
+            {"kind": "recordRun", "at": T0 + 1, "run": run(usage="unavailable", model_calls=0, latency=60, calls_reported=False)},
+            {"kind": "close", "at": T0 + 2},
+        ]),
+        windows("calls reported: a provider that returns no usage", "a run whose call reported no usage is unavailable and does not count; a reported run beside it counts on its own row, where callsReportedRuns equals count", [
+            {"kind": "recordRun", "at": T0, "run": run(usage="unavailable", model_calls=1, latency=300)},
+            {"kind": "recordRun", "at": T0 + 1, "run": run(usage="reported", model_calls=3, latency=900, tokens=(300, 0, 60))},
+            {"kind": "recordRun", "at": T0 + 2, "run": run(usage="reported", model_calls=1, latency=200, tokens=(100, 0, 20))},
+            {"kind": "close", "at": T0 + 3},
+        ]),
+        windows("calls reported: one-call rows follow their usage source", "an observation counts when its usageSource is not unavailable; a feedback-only row carries callsReportedRuns 0", [
+            {"kind": "observe", "at": T0 + 60000, "observation": ok(latencyMs=10, tokens={"input": 50, "output": 5})},
+            {"kind": "observe", "at": T0 + 60001, "observation": ok(latencyMs=20, usageSource="estimated", tokens={"input": 40, "output": 4})},
+            {"kind": "observe", "at": T0 + 60002, "observation": ok(latencyMs=30, usageSource="unavailable")},
+            {"kind": "feedback", "at": T0 + 60003, "feedback": {**triage, "outcomeRunMinute": minute_of(T0), "outcomes": {"thumbs": True}}},
+            {"kind": "close", "at": T0 + 60004},
+        ]),
         windows("a long run stays below the last bucket", "a 200-second run lands in the 262,144 ms bucket, so p95 does not saturate", [
             {"kind": "recordRun", "at": T0, "run": run(latency=200000)},
             {"kind": "close", "at": T0 + 1},
@@ -646,6 +668,7 @@ def tolerance_cases():
     text = lambda row: json.dumps(row, separators=(",", ":"), ensure_ascii=False)
     later_type = {"type": "trace", "v": 1, "instanceId": INSTANCE, "body": "from a later minor"}
     later_v = {**run, "v": 6, "somethingNew": 1}
+    earlier = {key: value for key, value in run.items() if key != "callsReportedRuns"}
     with_fields = {**run, "laterField": "gone", "tokens": {**run["tokens"], "laterToken": 3}, "tools": {**run["tools"], "names": ["never"]}}
     at = "2026-09-12T14:03:10Z"
     dropped = lambda *lines: {"type": "dropped", "v": 1, "at": at, "instanceId": INSTANCE, "segments": 0, "lines": len(lines), "bytes": sum(len(line.encode("utf-8")) + 1 for line in lines)}
@@ -657,6 +680,8 @@ def tolerance_cases():
         case("an unknown version is skipped and counted", [text(later_v), text(run)], [run, dropped(text(later_v))], skipped=[{"line": 1, "reason": "v"}]),
         case("a later error class is taken", [text({**run, "status": "error", "errorClass": "guardrail_tripped"})], [{**run, "status": "error", "errorClass": "guardrail_tripped"}]),
         case("a later status is skipped and counted: a closed list per row type", [text({**run, "status": "paused"}), text(run)], [run, dropped(text({**run, "status": "paused"}))], skipped=[{"line": 1, "reason": "status"}]),
+        case("a window row from a writer before 4.1.0 passes without callsReportedRuns", [text(earlier)], [earlier]),
+        case("callsReportedRuns above count is corruption", [text({**run, "callsReportedRuns": 2})], [], invalid=[{"line": 1, "reason": "callsReportedRuns"}]),
         case("a step member on a window row is a crossed row", [text({**run, "step": "a"})], [], invalid=[{"line": 1, "reason": "unknown_field:step"}]),
         case("a line that is not JSON is corruption", [text(run), "{not json"], [run], invalid=[{"line": 2, "reason": "not_json"}]),
         case("a row from another instance is corruption", [text({**run, "instanceId": "i-someone-else"})], [], invalid=[{"line": 1, "reason": "instance_mismatch"}]),

@@ -1,0 +1,48 @@
+{
+  "description": "Run-session vectors for `callsReportedRuns` (protocol 4.1.0, spool-format.md), in the step format of AIR-2233's `vectors/run-session.json` so its `sessionScenario` can run them unchanged. Hand-written. Ops: `open`; `place` a slot; `beginModelCall` opens a call under an `id` through the adapter contract's `beginMeasure` / `begin_measure`; `settleModelCall` settles it with a provider-shaped `response` (OpenAI chat usage, or none); `failModelCall` fails it; `decline` the slot (`model_unresolved`); `end` the run. A `settleModelCall` after `end` is a record delivered late: it is dropped with `run_late_record`, never a second row. `expect.rows` are the window rows with a count, matched on the named fields; `tokens` names `input` and `output`. `logs` are events the run logs. Today `sdk-typescript/test/runSession.test.ts` and `sdk-python/tests/test_run_session.py` read this file.",
+  "vectors": [
+    {
+      "name": "a run that made no model call is measured",
+      "release": { "tag": "support.reply", "text": "You answer support tickets.", "versionId": "ver_a", "model": "gpt-5" },
+      "steps": [{ "op": "open", "input": { "subject": "user-1" } }, { "op": "place", "slot": "support.reply" }, { "op": "end" }],
+      "expect": { "rows": [{ "tag": "support.reply", "count": 1, "modelCalls": 0, "usageSource": "unavailable", "callsReportedRuns": 1, "tokens": { "input": 0, "output": 0 } }] }
+    },
+    {
+      "name": "a provider that returns no usage is not measured",
+      "release": { "tag": "support.reply", "text": "You answer support tickets.", "versionId": "ver_a", "model": "gpt-5" },
+      "steps": [{ "op": "open", "input": { "subject": "user-1" } }, { "op": "place", "slot": "support.reply" }, { "op": "beginModelCall", "slot": "support.reply", "id": "a" }, { "op": "settleModelCall", "id": "a", "response": { "choices": [{ "message": { "content": "Hi" }, "finish_reason": "stop" }] } }, { "op": "end" }],
+      "expect": { "rows": [{ "tag": "support.reply", "count": 1, "modelCalls": 1, "usageSource": "unavailable", "callsReportedRuns": 0, "tokens": { "input": 0, "output": 0 } }] }
+    },
+    {
+      "name": "a call whose record arrives after the run ended is not measured, and is dropped",
+      "release": { "tag": "support.reply", "text": "You answer support tickets.", "versionId": "ver_a", "model": "gpt-5" },
+      "steps": [{ "op": "open", "input": { "subject": "user-1" } }, { "op": "place", "slot": "support.reply" }, { "op": "beginModelCall", "slot": "support.reply", "id": "a" }, { "op": "end" }, { "op": "settleModelCall", "id": "a", "response": { "usage": { "prompt_tokens": 120, "completion_tokens": 30 } } }],
+      "expect": { "rows": [{ "tag": "support.reply", "count": 1, "modelCalls": 0, "usageSource": "unavailable", "callsReportedRuns": 0, "tokens": { "input": 0, "output": 0 } }] },
+      "logs": ["run_late_record"]
+    },
+    {
+      "name": "a reported call beside one still open at the end: unavailable, not measured",
+      "release": { "tag": "support.reply", "text": "You answer support tickets.", "versionId": "ver_a", "model": "gpt-5" },
+      "steps": [{ "op": "open", "input": { "subject": "user-1" } }, { "op": "place", "slot": "support.reply" }, { "op": "beginModelCall", "slot": "support.reply", "id": "a" }, { "op": "settleModelCall", "id": "a", "response": { "usage": { "prompt_tokens": 100, "completion_tokens": 20 } } }, { "op": "beginModelCall", "slot": "support.reply", "id": "b" }, { "op": "end" }],
+      "expect": { "rows": [{ "tag": "support.reply", "count": 1, "modelCalls": 1, "usageSource": "unavailable", "callsReportedRuns": 0, "tokens": { "input": 100, "output": 20 } }] }
+    },
+    {
+      "name": "every call reported, settled out of order: measured",
+      "release": { "tag": "support.reply", "text": "You answer support tickets.", "versionId": "ver_a", "model": "gpt-5" },
+      "steps": [{ "op": "open", "input": { "subject": "user-1" } }, { "op": "place", "slot": "support.reply" }, { "op": "beginModelCall", "slot": "support.reply", "id": "a" }, { "op": "beginModelCall", "slot": "support.reply", "id": "b" }, { "op": "settleModelCall", "id": "b", "response": { "usage": { "prompt_tokens": 50, "completion_tokens": 10 } } }, { "op": "settleModelCall", "id": "a", "response": { "usage": { "prompt_tokens": 70, "completion_tokens": 5 } } }, { "op": "end" }],
+      "expect": { "rows": [{ "tag": "support.reply", "count": 1, "modelCalls": 2, "usageSource": "reported", "callsReportedRuns": 1, "tokens": { "input": 120, "output": 15 } }] }
+    },
+    {
+      "name": "a failed call has no usage: not measured",
+      "release": { "tag": "support.reply", "text": "You answer support tickets.", "versionId": "ver_a", "model": "gpt-5" },
+      "steps": [{ "op": "open", "input": { "subject": "user-1" } }, { "op": "place", "slot": "support.reply" }, { "op": "beginModelCall", "slot": "support.reply", "id": "a" }, { "op": "failModelCall", "id": "a" }, { "op": "end" }],
+      "expect": { "rows": [{ "tag": "support.reply", "count": 1, "modelCalls": 1, "usageSource": "unavailable", "callsReportedRuns": 0, "tokens": { "input": 0, "output": 0 } }] }
+    },
+    {
+      "name": "a declined slot is not measured: the caller's own call went out unmeasured",
+      "release": { "tag": "support.reply", "text": "You answer support tickets.", "versionId": "ver_a", "model": "gpt-5" },
+      "steps": [{ "op": "open", "input": { "subject": "user-1" } }, { "op": "place", "slot": "support.reply" }, { "op": "decline", "slot": "support.reply" }, { "op": "end" }],
+      "expect": { "rows": [{ "tag": "support.reply", "count": 1, "status": "error", "errorClass": "model_unresolved", "modelCalls": 0, "usageSource": "unavailable", "callsReportedRuns": 0, "tokens": { "input": 0, "output": 0 } }] }
+    }
+  ]
+}

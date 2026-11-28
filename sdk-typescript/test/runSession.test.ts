@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,12 +17,13 @@ import type { Directive, Experiment, ManifestSlot } from "../packages/sdk/src/co
 import type { ErrorClass } from "../packages/sdk/src/core/telemetry/rows.js";
 import { mintRunRef } from "../packages/sdk/src/core/render/runRef.js";
 import { DEFAULT_RUN_IDLE_TIMEOUT_MS } from "../packages/sdk/src/runtime/run/registry.js";
+import { beginMeasure, type Measurement } from "../packages/sdk/src/frameworks/contract.js";
 
 const scope = { organizationId: "org_1", agentId: "agt_run", target: "prod" as const };
 const TAG = "support.reply";
 const T0 = 1_789_300_800_000;
 
-type WindowRow = { type: string; tag: string; arm: string; versionId: string; count: number; modelCalls: number; agentRun: number; tools: { calls: number; errors: number }; checks?: { passed: number; failed: number }; step?: string; status: string; errorClass: string | null; usageSource: string; toolsReported: boolean; minute: string; tokens: { input: number; output: number; cachedInput?: number }; latencyMs: { sum: number } };
+type WindowRow = { type: string; tag: string; arm: string; versionId: string; count: number; modelCalls: number; agentRun: number; tools: { calls: number; errors: number }; checks?: { passed: number; failed: number }; step?: string; status: string; errorClass: string | null; usageSource: string; toolsReported: boolean; callsReportedRuns?: number; minute: string; tokens: { input: number; output: number; cachedInput?: number }; latencyMs: { sum: number } };
 
 function fixture() {
   const plane = new FakeControlPlane(scope);
@@ -312,6 +313,65 @@ test("toolsReported: a tool record makes it true, a slot with no tool hook is fa
   assert.deepEqual(windows, [[CLASSIFY, false, 0, 1], [CLASSIFY, true, 0, 1], [TAG, true, 1, 1]]);
   const steps = written.filter((row) => row.type === "step").map((row) => [row.tag, row.step, row.toolsReported]).sort();
   assert.deepEqual(steps, [[CLASSIFY, "classify", false], [TAG, "plan", true]], "a step row takes its slot's value");
+  await ap.stop();
+});
+
+// ---------------------------------------------------------------------------------------------- protocol 4.1.0: callsReportedRuns
+
+/** Session vectors both SDKs run, in AIR-2233's run-session step format, so the two sessions answer the same cases. */
+const callsReported = JSON.parse(readFileSync(new URL("../../conformance/frameworks/vectors/calls-reported.json", import.meta.url), "utf8")) as {
+  vectors: Array<{
+    name: string;
+    release: { tag: string; text: string; versionId: string; model: string };
+    steps: Array<{ op: string; slot?: string; id?: string; input?: { subject?: string }; response?: unknown }>;
+    expect: { rows: Array<Record<string, unknown>> };
+    logs?: string[];
+  }>;
+};
+
+for (const vector of callsReported.vectors) {
+  test(`callsReported (vector): ${vector.name}`, async () => {
+    const { plane, start, rows, events } = fixture();
+    const { tag, text, versionId, model } = vector.release;
+    plane.promote([plane.slot({ tag, text, versionId, model, variables: [] })]);
+    const ap = await start();
+    let run: ReturnType<typeof ap.openRun> | undefined;
+    const open = new Map<string, Measurement>();
+    for (const step of vector.steps) {
+      if (step.op === "open") run = ap.openRun(step.input ?? {});
+      else if (step.op === "place") await run!.place(step.slot!);
+      else if (step.op === "beginModelCall") open.set(step.id!, beginMeasure(run!, step.slot!, { model }));
+      else if (step.op === "settleModelCall") open.get(step.id!)!.settle(step.response);
+      else if (step.op === "failModelCall") open.get(step.id!)!.fail(new Error("provider down"));
+      else if (step.op === "decline") run!.decline(step.slot!, "model_unresolved");
+      else if (step.op === "end") run!.end();
+      else assert.fail(`unknown op ${step.op}`);
+    }
+    const written = rows(ap).filter((r) => r.count > 0);
+    assert.equal(written.length, vector.expect.rows.length, "one run row per slot, never a second for a late record");
+    written.forEach((row, i) => {
+      const expected = vector.expect.rows[i]!;
+      const got = Object.fromEntries(Object.keys(expected).map((key) => [key, key === "tokens" ? { input: row.tokens.input, output: row.tokens.output } : (row as unknown as Record<string, unknown>)[key]]));
+      assert.deepEqual(got, expected);
+    });
+    for (const event of vector.logs ?? []) assert.ok(events.some((e) => e.event === event), `logs ${event}`);
+    await ap.stop();
+  });
+}
+
+test("callsReported: one-call rows follow their usage source, and a session without the hook still records through beginMeasure", async () => {
+  const { plane, start, slotOf, rows } = fixture();
+  plane.promote([slotOf("Version A", "ver_a")]);
+  const ap = await start();
+  await ap.observe(ap.prompt(TAG).render(), async () => ({ usage: { input_tokens: 4, output_tokens: 2 } }));
+  await ap.observe(ap.prompt(TAG).render(), async () => ({ text: "no usage" }));
+  const written = rows(ap).filter((row) => row.count > 0).map((row) => [row.usageSource, row.count, row.callsReportedRuns]).sort();
+  assert.deepEqual(written, [["reported", 1, 1], ["unavailable", 1, 0]]);
+  // A RunSession of the caller's own (no `callBegun`) is only recorded into, as before.
+  const calls: unknown[] = [];
+  const own = { recordModelCall: (_slot: string, call: unknown) => calls.push(call) } as unknown as Parameters<typeof beginMeasure>[0];
+  beginMeasure(own, TAG, { model: "gpt-5" }).settle({ usage: { input_tokens: 1, output_tokens: 1 } });
+  assert.equal(calls.length, 1);
   await ap.stop();
 });
 

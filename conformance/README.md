@@ -26,6 +26,12 @@ framework (a driver and recorded fixtures) and what CI runs: the
 `frameworks` lane on every PR, and each framework's newest release weekly.
 `test/frameworks.test.mjs` is their runner's suite.
 
+`frameworks/vectors/calls-reported.json` holds session vectors for
+`callsReportedRuns` (protocol 4.1.0): the calls a session begins, settles, fails
+or receives after its end, and a decline, with the run row each SDK must write.
+Both SDKs' session tests run them through `beginMeasure` / `begin_measure`; the
+`run-session` section has no begin/settle op yet.
+
 `npm ci && npm test` here runs, against `../protocol`:
 
 1. every `schemas/*.schema.json` compiles as JSON Schema 2020-12 (strict);

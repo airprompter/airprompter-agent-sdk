@@ -47,7 +47,7 @@ Example::
         return measure_call(run, "support.reply", lambda: request.next(system=placed.instructions, model=model, **mapped.values), model=placed.model)
 """
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from airprompter_agent.core import output_text_of
 from airprompter_agent.runtime import AgentRuntime, AppliedInference, Approved, Attribution, ModelResolver, Passthrough, Placement, RunInput, RunSession, UsageNormalized, classify_error, classify_result, normalize_usage
@@ -63,6 +63,7 @@ from airprompter_agent.runtime.adapter import (
     StreamAccumulator,
     acquire_run,
     apply_settings,
+    _begin_call,
     begin_measure,
     choose_model,
     instrument_client,
@@ -82,6 +83,14 @@ def _find_run(ap: Any, run_ref: str) -> Optional[RunSession]:
         return find(run_ref)
     except Exception:  # noqa: BLE001 — a lookup never fails the customer's call
         return None
+
+
+def _open_call(run: RunSession, slot: str) -> Callable[..., bool]:
+    """Internal, for adapters whose start and end hooks are not one ``begin_measure`` (LiteLLM's pre-call hook and its
+    logger): open one model call on the run now, and answer the recorder that settles it with ``record_model_call``'s
+    keywords and answers False when the run had already ended (the record is dropped as late). A run that ends first
+    writes ``callsReported`` false for the slot. A session without the hook just records. Never raises."""
+    return _begin_call(run, slot)
 
 
 __all__ = [

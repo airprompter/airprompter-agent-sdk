@@ -332,3 +332,37 @@ def test_litellm_every_call_shape_inside_a_run_is_that_run_and_a_forged_or_stale
     assert {(r["tag"], r["model"]) for r in rows} == {("support.triage", "gpt-5")}, rows
     assert (sum(r["count"] for r in rows), sum(r["agentRun"] for r in rows)) == (2, 2), rows
     assert sum(r["modelCalls"] for r in rows) in (4, 5), rows
+    # Protocol 4.1.0: the pre-call hook opened each call, so the first run is measured, and the second only when its log
+    # beat the end of the block. Never a run whose call was dropped and still reads as measured.
+    assert sum(r["callsReportedRuns"] for r in rows) == sum(r["modelCalls"] for r in rows) - 3, rows
+
+
+def test_litellm_a_log_that_lands_after_the_run_ended_writes_the_run_as_not_measured(state_dir):
+    """LiteLLM 1.111 logs a sync call on a thread pool after the call returns. Held until the run has ended, the log is
+    dropped, and the run's row says its call was not measured (``callsReportedRuns`` 0), never that it made none."""
+    litellm = load("litellm")
+    from airprompter_agent.frameworks.litellm import AirPrompterLiteLLMCallback, litellm_metadata, litellm_params
+
+    ap, windows = start_agent(state_dir)
+    release = threading.Event()
+    seen = threading.Semaphore(0)
+
+    class Held(AirPrompterLiteLLMCallback):
+        def _observe(self, *args, **kwargs):
+            release.wait(10)
+            try:
+                super()._observe(*args, **kwargs)
+            finally:
+                seen.release()
+
+    litellm.callbacks = [Held(ap)]
+    try:
+        with ap.run(subject="sync") as run:
+            placed = run.place("support.triage")
+            litellm.completion(messages=[{"role": "user", "content": "hi"}], mock_response="Regards", metadata=litellm_metadata((run, "support.triage")), **litellm_params(placed))
+        release.set()
+        assert seen.acquire(timeout=10), "the logger hook fired"
+    finally:
+        litellm.callbacks = []
+    rows = windows()
+    assert [(r["count"], r["modelCalls"], r["usageSource"], r["callsReportedRuns"]) for r in rows] == [(1, 0, "unavailable", 0)], rows

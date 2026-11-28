@@ -1,5 +1,18 @@
 # Protocol changelog
 
+## 4.1.0 · A row says how many of its runs were measured (AIR-2547)
+
+Additive. Window rows stay v5 and gain one measure, so a 4.0 reader strips it and reads the row as before.
+
+- `callsReportedRuns`: how many of the row's runs had every model call measured. None was recorded without its usage, and none had begun and not settled when the run's row was written. A run that made no model call counts. It lies between 0 and `count`. It equals `count` when `usageSource` is not `unavailable`. In an `unavailable` row it counts the runs that made no model call, so a reader can tell a run that made no call from a run whose call was not measured. Before 4.1.0 both arrived as `modelCalls: 0`, `usageSource: "unavailable"`. A one-call observation counts when its `usageSource` is not `unavailable`. A feedback-only row carries 0. Required of a 4.1.0 writer. A row without it comes from an earlier writer and says nothing about its calls.
+- It is a measure, not a dimension: the window key is unchanged. A field in the key bumps `v` (spool-format.md › Readers). A 4.0 reader strips an unknown field, so with the flag in the key it would fold a measured row and an unmeasured row into one, under SET semantics.
+- A run session writes `usageSource: "reported"` only when no call it began was still open at the run's end, as well as every recorded call reporting usage. A declined or unrendered slot's error row (`model_unresolved`, `render_missing_variable`) is not counted: its version served nothing.
+- Readers take a row's measured runs as `count` when `usageSource` is not `unavailable`, else `callsReportedRuns`, and its measured tokens from the rows that are not `unavailable`. A row without the field reads as measured when not `unavailable`, else not (spool-format.md › `window`).
+- A record that arrives after its run's row was written is still dropped with a log, never a second row. The row says so through the call that was begun and not settled. An example is a LiteLLM log that fires after `ap.run` ended.
+- Vectors: `vectors/spool.json` gains three window cases for the three run shapes, a `model_unresolved` error run that is not counted, and two tolerance cases: a row without the field passes, and a value above `count` is corruption. Session vectors for the SDKs are in `conformance/frameworks/vectors/calls-reported.json`, outside `protocol/`.
+- No capability: a capability names a feature a reader of a manifest must understand (capabilities.md), and nothing a manifest asks for changes. A row reader that does not know the field strips it, as 3.1.0's row change needed none.
+- Vectors and examples carry `4.1.0`.
+
 ## 4.0.0 · Hosted execution leaves the wire (AIR-2317)
 
 Breaking. Agents run only on the customer's systems (owner ruling of 2026-11-06), so the hosted routes, their schemas and the `agent.run` scope leave the protocol. Removing routes, schemas and a scope is a breaking change, and a breaking change is a major (README › Versioning), so this is 4.0.0. The owner chose the major over a 3.x minor exception.

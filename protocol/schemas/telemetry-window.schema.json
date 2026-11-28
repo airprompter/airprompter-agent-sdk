@@ -22,6 +22,7 @@
     "count",
     "modelCalls",
     "agentRun",
+    "callsReportedRuns",
     "tools",
     "latencyMs",
     "tokens"
@@ -133,6 +134,11 @@
       "type": "integer",
       "minimum": 0,
       "description": "How many of this row's runs are the first slot of their run, so an agent-wide total counts a two-slot run once."
+    },
+    "callsReportedRuns": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Added in 4.1.0. How many of this row's runs had every model call measured: none recorded without usage, none begun and unsettled when the run's row was written, and the slot served (an error row for a declined or unrendered slot does not count). A run that made no model call counts. At most `count`; equal to `count` when `usageSource` is not `unavailable`. A measure, never a dimension of the window key. 0 on a feedback-only row. A reader takes a row without it as written before 4.1.0, saying nothing about its calls."
     },
     "tools": {
       "type": "object",
@@ -334,6 +340,9 @@
             "const": 0
           },
           "agentRun": {
+            "const": 0
+          },
+          "callsReportedRuns": {
             "const": 0
           },
           "tools": {

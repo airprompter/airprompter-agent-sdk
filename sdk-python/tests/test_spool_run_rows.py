@@ -22,7 +22,7 @@ KEYS = {"tag": "support.reply", "artifact_id": "prm_1", "version_id": "ver_1", "
 
 
 def run(**patch) -> RunTotals:
-    fields = {"dimensions": DIMENSIONS, "status": "ok", "error_class": None, "usage_source": "reported", "tools_reported": False, "agent_run": 1, "model_calls": 1, "latency_ms": 100, "tokens": {"input": 10, "cachedInput": 0, "output": 5}, "tools": {"calls": 0, "errors": 0}}
+    fields = {"dimensions": DIMENSIONS, "status": "ok", "error_class": None, "usage_source": "reported", "tools_reported": False, "calls_reported": True, "agent_run": 1, "model_calls": 1, "latency_ms": 100, "tokens": {"input": 10, "cachedInput": 0, "output": 5}, "tools": {"calls": 0, "errors": 0}}
     return RunTotals(**{**fields, **patch})
 
 
@@ -394,5 +394,10 @@ def test_the_validator_refuses_a_missing_tools_reported_and_a_feedback_row_that_
     [row] = windows(rows())
     refused({key: value for key, value in row.items() if key != "toolsReported"}, "toolsReported")
     refused({**row, "toolsReported": 1}, "toolsReported")
-    feedback = {**{key: value for key, value in row.items() if key != "tokensSq"}, "count": 0, "modelCalls": 0, "agentRun": 0, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "outcomeRunMinute": row["minute"], "outcomes": {"thumbs": {"n": 1, "sum": 1, "sumSq": 1}}, "toolsReported": True}
+    feedback = {**{key: value for key, value in row.items() if key != "tokensSq"}, "count": 0, "modelCalls": 0, "agentRun": 0, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "outcomeRunMinute": row["minute"], "outcomes": {"thumbs": {"n": 1, "sum": 1, "sumSq": 1}}, "toolsReported": True, "callsReportedRuns": 0}
     refused(feedback, "feedback_measurements")
+    # Protocol 4.1.0: a count of the row's runs, absent on an earlier writer's row.
+    assert validate_spool_row({key: value for key, value in row.items() if key != "callsReportedRuns"}).ok, "a row from a writer before 4.1.0 passes"
+    for bad in (2, -1, 0.5, True, "1"):
+        refused({**row, "callsReportedRuns": bad}, "callsReportedRuns")
+    refused({**feedback, "callsReportedRuns": 1}, "callsReportedRuns")

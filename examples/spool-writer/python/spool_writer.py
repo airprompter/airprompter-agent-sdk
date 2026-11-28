@@ -10,7 +10,7 @@ latency buckets, segment naming, ``.open`` → fsync → rename, and rotation on
 
     spool = SpoolWriter(dir=f"{state_dir}/airprompter/{agent_id}/{target}/spool/telemetry", instance_id=instance_id, sdk="acme-logger/1.0")
     spool.observe(tag=tag, artifact_id=artifact_id, version_id=version_id, arm=arm, model=model, status="ok", latency_ms=812, tokens={"input": 400, "output": 90})
-    spool.record_run({"dimensions": dimensions, "status": "ok", "errorClass": None, "usageSource": "reported", "toolsReported": True, "agentRun": 1, "modelCalls": 5, "latencyMs": 4200, "tokens": tokens, "tools": tools})
+    spool.record_run({"dimensions": dimensions, "status": "ok", "errorClass": None, "usageSource": "reported", "toolsReported": True, "callsReported": True, "agentRun": 1, "modelCalls": 5, "latencyMs": 4200, "tokens": tokens, "tools": tools})
     spool.feedback(tag=tag, artifact_id=artifact_id, version_id=version_id, arm=arm, model=model, outcomes={"accepted": True})
     atexit.register(spool.close)
 """
@@ -91,6 +91,10 @@ class SpoolWriter:
             del row["outcomeRunMinute"]
         row["count"] += 1
         row["agentRun"] += run["agentRun"]
+        # ``callsReported`` (required): every model call of the run gave you its usage, or it made none. Unsure is false.
+        # A measure, never in the key.
+        if run["callsReported"]:
+            row["callsReportedRuns"] += 1
         row["modelCalls"] += _count_of(run["modelCalls"])
         row["tools"]["calls"] += _count_of(run["tools"]["calls"])
         row["tools"]["errors"] += _count_of(run["tools"]["errors"])
@@ -159,7 +163,7 @@ class SpoolWriter:
         totals = {"input": given.get("input", 0), "cachedInput": given.get("cachedInput", 0), "output": given.get("output", 0)}
         tools = {"calls": (tool_calls or {}).get("calls", 0), "errors": (tool_calls or {}).get("errors", 0)}
         tools_reported = tool_calls is not None  # tool calls handed in were seen: zero means none ran
-        run: dict[str, Any] = {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "agentRun": 1, "modelCalls": 1, "latencyMs": latency_ms, "tokens": totals, "tools": tools}
+        run: dict[str, Any] = {"dimensions": dimensions, "status": status, "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "callsReported": usage_source != "unavailable", "agentRun": 1, "modelCalls": 1, "latencyMs": latency_ms, "tokens": totals, "tools": tools}
         if checks:
             run["checks"] = {"passed": checks.get("passed", 0), "failed": checks.get("failed", 0)}
         row = self.record_run(run, at)
@@ -205,7 +209,7 @@ class SpoolWriter:
         key = json.dumps([tag, artifact_id, version_id, arm, model, status, error_class, usage_source, tools_reported, audience_ids, outcome_key])
         row = self.open.get(key)
         if row is None:
-            row = {"type": "window", "v": 5, "artifactId": artifact_id, "minute": minute, "instanceId": self.instance_id, "instanceClass": self.instance_class, "tag": tag, "versionId": version_id, "arm": arm, "model": model, "status": status, "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "count": 0, "modelCalls": 0, "agentRun": 0, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "sdk": self.sdk}
+            row = {"type": "window", "v": 5, "artifactId": artifact_id, "minute": minute, "instanceId": self.instance_id, "instanceClass": self.instance_class, "tag": tag, "versionId": version_id, "arm": arm, "model": model, "status": status, "errorClass": error_class, "usageSource": usage_source, "toolsReported": tools_reported, "count": 0, "modelCalls": 0, "agentRun": 0, "callsReportedRuns": 0, "tools": {"calls": 0, "errors": 0}, "latencyMs": {"buckets": [0] * len(LATENCY_BUCKET_EDGES_MS), "sum": 0}, "tokens": {"input": 0, "output": 0}, "sdk": self.sdk}
             if audience_ids is not None:
                 row["audienceIds"] = list(audience_ids)
             if outcome_run_minute is not None:

@@ -37,7 +37,7 @@ release: every process loads its own.
 | Segments | `seg-<instanceId>-<epochMinute>-<n>.ndjson`, `.open` until fsync + rename; rotate at the minute, at 1 MiB, or on an oversize line | [Segment files](../protocol/spool-format.md#segment-files); `vectors/spool.json` rotation cases |
 | Rows | `window` (one minute of one dimension set; `count` means runs), `step` (one step of a run, a row of its own), `refusal` (a control-plane refusal), `dropped` (segments evicted by the disk budget) — each validated against `spool-rows.schema.json` | [Row types](../protocol/spool-format.md#row-types) |
 | Latency | 23 fixed bucket edges every writer uses, up to one hour | `schemas/latency-buckets.json`; `vectors/spool.json` |
-| Runs | v5 window rows: `count` is runs, `modelCalls` the calls across them, `agentRun` the runs this slot opened, `tools` the tool counts with no names and `toolsReported` whether they were seen, `tokensSq` the second moments of each run's token totals | [Row types](../protocol/spool-format.md#row-types); `vectors/spool.json` |
+| Runs | v5 window rows: `count` is runs, `modelCalls` the calls across them, `agentRun` the runs this slot opened, `tools` the tool counts with no names and `toolsReported` whether they were seen, `callsReportedRuns` how many runs had every model call measured (4.1.0), `tokensSq` the second moments of each run's token totals | [Row types](../protocol/spool-format.md#row-types); `vectors/spool.json` |
 | Feedback | `outcomes[signal] = {n, sum, sumSq}` from the declared catalogue only; `goldenPass` is the runtime's own | `schemas/feedback-signals.schema.json`; `vectors/feedback.json` |
 | Never in the spool | prompt text, model output, end-user identifiers, stack traces, application error messages — no field exists for them; unknown fields are stripped, unknown rows are skipped and counted, and only corruption quarantines a segment at ingest | [What must never be in the spool](../protocol/spool-format.md#what-must-never-be-in-the-spool) |
 | Upload | heartbeat → presigned S3 POST grant (≤ 15 min, ≤ 1 MiB, the instance's own prefix); backoff with full jitter; acknowledged segments deleted (S6); a refused grant is the throttle | [Upload](../protocol/spool-format.md#upload-for-reference-implemented-by-the-telemetry-daemon); `sdk-typescript/test/uploader.test.ts` |
@@ -67,7 +67,17 @@ pinned but never called still writes a run row with `modelCalls: 0`. A
 slot the adapter declined (`model_unresolved`) or whose variables could
 not be filled (`render_missing_variable`) writes one error row against the
 version it could not serve, however many calls tried it. `usageSource` is
-`reported` only when every model call reported its usage.
+`reported` only when every model call reported its usage and none was still
+open when the run ended.
+
+From protocol 4.1.0 a run row also carries `callsReportedRuns`: 1 when every
+model call of the slot was measured, a slot that made none included, and 0
+when a call reported no usage, was begun (`beginMeasure`, LiteLLM's
+pre-call hook) and had not settled when the run ended, or the slot wrote an
+error row because it declined or could not render. A record that arrives
+after the end is dropped with a log, never a second row, so the call it
+began is what the row can say. A reader therefore tells a run that made no
+model call (`modelCalls: 0`, counted) from one whose call was not measured.
 
 `ap.report` and `ap.observe` outside a run stay one-call runs. Inside a
 run, `ap.observe` on a slot the run pinned folds into that run.

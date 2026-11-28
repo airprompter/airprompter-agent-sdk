@@ -110,7 +110,7 @@ N8N_BIN=/opt/n8n/n8n AIRPROMPTER_KIT_COMMIT=<pinned sha> AIRPROMPTER_AGENT_ID=�
 
   ```json
   "nodes": { "mode": "preinstalled", "from": "/opt/airprompter/n8n-nodes", "checkoutCommit": null,
-             "kit": { "package": "n8n-nodes-airprompter", "packageVersion": "0.1.0", "sdkVersion": "1.0.0-rc.4",
+             "kit": { "package": "n8n-nodes-airprompter", "packageVersion": "0.1.0", "sdkVersion": "1.0.0-rc.5",
                       "tarballSha256": "…", "contentSha256": "…", "commit": "<sha>", "preparedAt": "…" } }
   ```
 
@@ -199,7 +199,7 @@ The JSON fields a test reads:
 {
   "ok": true, "exitCode": 0, "startedAt": "…", "finishedAt": "…",
   "agentId": "agent_…", "environment": "dev", "slot": "triage", "subject": "qa-n8n-subject-1",
-  "n8nVersion": "2.49.8", "sdkVersion": "1.0.0-rc.4",
+  "n8nVersion": "2.49.8", "sdkVersion": "1.0.0-rc.5",
   "getPrompt": { "promptSha256": "…", "promptBytes": 54, "versionId": "…", "arm": "none", "generation": 1, "model": "gpt-5-mini", "servedFrom": "network", "leaseExpiresAt": "…" },
   "reported": { "runRef": "…", "inputTokens": 123, "outputTokens": 7, "thumbs": "up" },
   "expected": { "runs": 1, "inputTokens": 123, "outputTokens": 7, "thumbsUp": 1, "versionId": "…", "arm": "none" },

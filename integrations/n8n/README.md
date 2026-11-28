@@ -18,9 +18,8 @@ can name a **Subject**.
 > **Self-hosted n8n only at launch.** This package does not run on n8n Cloud: n8n Cloud installs only community
 > nodes that n8n has verified, and this one cannot be verified as built (see [n8n verification](#n8n-verification)).
 >
-> **Not yet published to npm.** Publishing waits for the first `@airprompter/agent-sdk` release after
-> `1.0.0-rc.4`, which pins AirPrompter's Production root. Until then, a Production credential needs the root key
-> (see [Credentials](#credentials)).
+> **Not yet published to npm.** Publishing waits for the remote QA run to execute this node in a real n8n
+> (AIR-2546).
 
 ## Install (self-hosted)
 
@@ -44,22 +43,13 @@ Create an **AirPrompter Agent API** credential:
 | Agent ID | The agent in AirPrompter that holds the slots. |
 | Update Key | The agent's Update key (key kind "agent", bound to one agent and one environment). It reads approved releases and nothing more. |
 | Environment | The environment the key is bound to, such as `prod`. |
-| Root Public Key | AirPrompter's root public key (a JSON Web Key) for the deployment. Every release is verified against it before it is stored or used. Leave it empty for **Dev**: this version pins Dev's root. **Production needs it in this version**, because the SDK it depends on (`1.0.0-rc.4`) does not pin the Production root yet. Use the key below. The next SDK release pins it, and then the field can be left empty for Production too. |
+| Root Public Key | Leave it empty for **Production** and **Dev**: the SDK this version depends on (`1.0.0-rc.5`) pins both roots (`HOSTED_ROOTS`). Only for a deployment it does not pin, such as Staging, or a local `airprompter dev` registry: that root's public key (a JSON Web Key, `root.pub.json`). Every release is verified against the root before it is stored or used. |
 | API Base URL | `https://api.airprompter.com` by default. For testing, use a dev URL or a local `airprompter dev` registry. |
 | AirPrompter Deployment | The deployment that signs the releases: `prod`, `staging` or `dev`. This is not the agent's environment. |
 | Root Document URL | Optional. Defaults to *API Base URL*`/roots/<deployment>/root.json`. |
 | Organization ID | Optional. It is learned from the first verified release. |
 | Keep the Stored Copy In | **n8n User Folder** or **Workflow Static Data**. See [Where the release is kept](#where-the-release-is-kept). |
 | Starting Bundle Path | Optional, user folder only. A `.apbundle` to serve from before AirPrompter has ever been reached. |
-
-AirPrompter's Production root public key (ceremony of 2026-11-27, key id
-`044af6e83353a2ea3758cc3feb3b1b7031c82bda5d6cd9287ba7730363e11793`). It is the same key the SDK pins in source,
-`HOSTED_ROOTS.prod` in
-[`core/protocol/hostedRoots.ts`](https://github.com/airprompter/airprompter-agent-sdk/blob/main/sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts):
-
-```json
-{"kty":"EC","crv":"P-256","x":"hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE","y":"OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE"}
-```
 
 The credential test fetches the signed manifest and **verifies** it. A wrong key, the wrong environment, a missing
 root or the wrong
@@ -197,10 +187,11 @@ Report Run is the run's one count: the Steps core calls the SDK's `ap.reportRun`
 run and writes no run row.
 
 **Requests inside n8n.** n8n installs its own `undici` as the global `fetch` dispatcher, and that undici refuses a
-request whose `content-length` the caller also set. The SDK's telemetry upload sets one (1.0.0-rc.4), which made
-every Report Run fail in real n8n. `src/n8n/connect.ts` therefore hands the core a `fetch` that drops the header,
-since `fetch` computes it from the body anyway. `test/n8n/dispatcher.test.ts` runs under such a dispatcher and will
-fail once the SDK stops setting the header. When it does, remove the workaround.
+request whose `content-length` the caller also set. The SDK's telemetry upload set one up to 1.0.0-rc.4, so every
+Report Run failed in real n8n. Until rc.5, `src/n8n/connect.ts` gave the core a `fetch` that dropped the header.
+SDK 1.0.0-rc.5 leaves the header to the HTTP client, so the node now uses the core's own `fetch`.
+`test/n8n/dispatcher.test.ts` still runs Report Run under such a dispatcher, and checks that the SDK no longer sets
+the header.
 
 ## Develop
 

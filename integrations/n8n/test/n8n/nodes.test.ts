@@ -9,6 +9,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { publicJwkOf } from "@airprompter/agent-sdk/core";
+import { HOSTED_ROOTS } from "@airprompter/agent-sdk/frameworks/steps";
 import { FakeControlPlane, serveOverHttp } from "@airprompter/agent-sdk/testing";
 import type { IDataObject } from "n8n-workflow";
 
@@ -51,11 +52,13 @@ test("the credential declares the fields the nodes read, and its test verifies t
     const unpinned = await node.methods.credentialTest.airPrompterAgentApiTest.call({} as never, { id: "c", name: "c", type: "airPrompterAgentApi", data: { ...credentialsFor(h.plane, server.baseUrl), rootKey: "", hostedEnvironment: "staging" } } as never);
     assert.equal(unpinned.status, "Error");
     assert.match(unpinned.message, /root key is pinned/i);
-    // The credential text says Production needs the key in this version: true while the SDK it depends on (1.0.0-rc.4)
-    // pins only Dev. When the SDK pins Production, this fails: update the Root Public Key description and README.
-    const prodUnpinned = await node.methods.credentialTest.airPrompterAgentApiTest.call({} as never, { id: "c", name: "c", type: "airPrompterAgentApi", data: { ...credentialsFor(h.plane, server.baseUrl), rootKey: "", hostedEnvironment: "prod" } } as never);
-    assert.equal(prodUnpinned.status, "Error");
-    assert.match(prodUnpinned.message, /root key is pinned for the prod/i);
+    // The credential text says Production and Dev need no key: the SDK this node depends on (1.0.0-rc.5) pins both, and
+    // not Staging. A prod credential with no key uses the pinned prod root, so against this fake plane (signed by its
+    // own root) the test fails on verification, never on a missing root.
+    assert.ok(HOSTED_ROOTS.prod && HOSTED_ROOTS.dev && !HOSTED_ROOTS.staging, "the SDK pins prod and dev, not staging, as the credential text says");
+    const prodPinned = await node.methods.credentialTest.airPrompterAgentApiTest.call({} as never, { id: "c", name: "c", type: "airPrompterAgentApi", data: { ...credentialsFor(h.plane, server.baseUrl), rootKey: "", hostedEnvironment: "prod" } } as never);
+    assert.equal(prodPinned.status, "Error", "the fake plane's releases do not verify under AirPrompter's real prod root");
+    assert.doesNotMatch(prodPinned.message, /root key is pinned|root_not_pinned/i, prodPinned.message);
   } finally {
     await server.close();
   }

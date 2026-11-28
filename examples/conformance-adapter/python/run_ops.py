@@ -286,6 +286,14 @@ def _driver(framework: str) -> Any:
     return module
 
 
+def _version_of(name: str) -> Optional[str]:
+    """The installed distribution's version, or None when it is not installed (the harness reports it as a miss)."""
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def drive_run(a: dict) -> dict:
     fixture, agent = a["fixture"], a["agent"]
     driver = _driver(fixture["framework"])
@@ -324,7 +332,8 @@ def drive_run(a: dict) -> dict:
             _finish(other["ap"], out)
         result = {"placements": _placements_of(log), "calls": driven["calls"], "runRefs": driven.get("runRefs", []), **out, "log": _loggable(log)}
         if a.get("package"):
-            result["frameworkVersion"] = importlib.metadata.version(a["package"])
+            result["frameworkVersion"] = _version_of(a["package"])
+        result["packageVersions"] = {name: _version_of(name) for name in a.get("packages") or []}
         for key in ("state", "results"):
             if key in driven:
                 result[key] = driven[key]

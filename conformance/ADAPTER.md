@@ -15,7 +15,8 @@ Exit `0` only when every section that ran passed and none was skipped;
 `--allow-skips` accepts a partial adapter (a section skipped is reported,
 never counted as passed); `1` on any failure; `2` on a usage error.
 `--json` prints the report as one document; `--compare <report.json>` holds the
-run-session rows to another adapter's report. The vectors are bundled with
+run-session rows to another adapter's report; `--framework <name>` runs one
+framework's fixtures. The vectors are bundled with
 the package; `--vectors <dir>` points at another `protocol/` checkout.
 
 ## Two transports

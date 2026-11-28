@@ -471,9 +471,10 @@ adapter. To keep placing the text yourself, leave out `slot` and call inside
 is not the release's needs `modelFor`, or nothing is measured.
 
 Tested against clients shaped like the real ones and the real `ai` in CI,
-and against the latest `openai`, `@anthropic-ai/sdk` and `ai` releases
-weekly (`.github/workflows/wrap-latest.yml`, `npm run test:wrap-live`); the
-supported ranges are the package's `peerDependencies`.
+and held to the recorded conformance fixtures (`conformance/frameworks`)
+on the pinned versions in CI and on each framework's newest release weekly
+(`.github/workflows/wrap-latest.yml`; `npm run test:wrap-live` runs the live
+tests locally); the supported ranges are the package's `peerDependencies`.
 
 **Writing an adapter.** `@airprompter/agent-sdk/frameworks/contract` is the
 contract every adapter here follows: `acquireRun`, `chooseModel`,

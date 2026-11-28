@@ -124,6 +124,60 @@ anything else of the SDK at run time). If a driver needs an SDK internal, the
 adapter is missing something; `../test/frameworks.test.mjs` also scans every
 driver (Python by its syntax tree) and fails on one.
 
+## Adding a framework
+
+What AIR-2234 to AIR-2237 do, and nothing else: a driver, fixtures, and the
+lines in `run.mjs` that name the framework.
+
+1. **Name it.** Add the framework to `FRAMEWORK_TRAITS` (does it stream, take a
+   node map, keep state?) and its package to `FRAMEWORK_PACKAGES`, per
+   language. `REQUIRED_KINDS` then says what it owes; the coverage rule fails
+   until each kind has a fixture or an `EXEMPTIONS` entry with its ticket.
+2. **Write the driver.** `drivers/<framework>.mjs` exports `driveRun({ ap,
+   fixture, clock, load, host })`; `examples/conformance-adapter/python/drivers/<framework>.py`
+   defines `drive_run(*, ap, fixture, clock, host, **_)`, sync or async.
+   Build the framework as its docs and the adapter's docs say, with the
+   adapter in place, over the provider transport in `recorded.mjs` /
+   `recorded.py` (or a fake model of the framework's real base class), so
+   nothing reaches a provider. Pass `clock` as the adapter's `now`, so a
+   latency replays the same. Return what the provider saw (`calls`), every run
+   reference the framework handed back (`runRefs`), and `results` /
+   `state` when the kind needs them. Import only what a developer's code
+   imports; `test/frameworks.test.mjs` scans for anything else.
+3. **Record the fixtures.** For each kind: the release (the same shape as the
+   run-session vectors'), the agent's options in your driver's terms, the run
+   input, the provider's turns in order, and what must come out. Run the
+   framework once against the real client and recorded transport, read what
+   the provider saw and what was written, check each field against what the
+   kind proves (the ticket's table), and write the expectations down by hand.
+   Name the version you recorded from in `frameworkVersion` (the installed
+   one; `packages` for the others the run depended on): the `frameworks`
+   section fails a fixture whose installed version differs. Exact-match only
+   what the kind is about: a call's `settings` named in a fixture must be the
+   call's settings exactly, so leave them out where a framework sends
+   defaults of its own that the kind does not judge.
+4. **Run it.** `node harness.mjs --adapter adapters/agent-sdk.mjs --only
+   frameworks --framework <name>`, and the Python adapter the same way. Prove
+   a case can fail: break the adapter's text or model insertion by hand and
+   watch the case fail by name, then put it back.
+5. **Pin it.** Python pins come from the fixtures (`pins.mjs py`), so CI
+   installs what you recorded from. TypeScript pins are `sdk-typescript`'s
+   exact devDependencies at the same versions. A version bump re-records:
+   rerun, check, change `frameworkVersion` across the folder.
+
+## CI
+
+- **`frameworks` lane** (`.github/workflows/ci.yml`, every PR): both
+  sections for both SDKs, the Python frameworks at their pins, Python's
+  session rows compared with TypeScript's report, and the telemetry upload
+  under a host's userland undici as the global dispatcher.
+- **Weekly** (`.github/workflows/wrap-latest.yml`): `pins.mjs --matrix` reads
+  each framework's newest release from npm or PyPI, and one job per
+  framework and language installs exactly that version and runs its
+  fixtures with `AIRPROMPTER_FRAMEWORKS_LATEST=1`. The job is named
+  `<framework>@<version> (<language>)`, and each case names the version it
+  ran.
+
 ## Adding an operation
 
 Each file in [`operations/`](operations) is one section: `export default {

@@ -1,9 +1,9 @@
 """The framework adapters (``frameworks/openai``, ``frameworks/anthropic``, ``frameworks/litellm``) against the REAL
 ``openai``, ``anthropic`` and ``litellm`` packages, sync and async, with recorded responses served through each client's
 own ``http_client`` option (an ``httpx.MockTransport`` — the public extension point) or LiteLLM's ``mock_response``, so
-nothing here reaches the network. The packages are not dependencies of this SDK: the suite skips when they are absent and runs in
-the weekly ``wrap-latest`` workflow, which installs their latest releases (``WRAP_LIVE=1`` turns a skip into a
-failure there).
+nothing here reaches the network. The packages are not dependencies of this SDK: the suite skips when they are absent,
+and ``WRAP_LIVE=1`` turns a skip into a failure. The newest releases are held weekly by the conformance fixtures
+(``conformance/frameworks``, ``wrap-latest.yml``).
 
     pip install openai anthropic litellm && WRAP_LIVE=1 python -m pytest tests/test_frameworks_live.py
 """

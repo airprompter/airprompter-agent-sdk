@@ -2,10 +2,11 @@
  * The OpenAI, Anthropic and AI SDK adapters against the REAL provider
  * packages (`openai`, `@anthropic-ai/sdk`, `ai`) with recorded responses
  * served through each client's own `fetch` option — the public extension
- * point, so nothing here reaches the network. The packages are not
- * dependencies of this SDK: the suite skips when they are absent and runs
- * in the weekly `wrap-latest` workflow, which installs their latest
- * releases (`WRAP_LIVE=1` turns a skip into a failure there).
+ * point, so nothing here reaches the network. The packages are exact
+ * devDependencies, so the suite runs in CI; it skips when they are absent,
+ * and `WRAP_LIVE=1` turns a skip into a failure. The newest releases are
+ * held weekly by the conformance fixtures (`conformance/frameworks`,
+ * `wrap-latest.yml`).
  *
  *   npm i --no-save openai @anthropic-ai/sdk ai && WRAP_LIVE=1 npx tsx --test test/frameworks/live.test.ts
  */

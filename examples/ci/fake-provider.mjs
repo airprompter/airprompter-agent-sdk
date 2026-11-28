@@ -3,7 +3,7 @@
  * A local model provider for the examples: it plays one recorded tool loop in the OpenAI wire format, so an example
  * runs unchanged with no provider key and no network. Point the framework at it with `OPENAI_BASE_URL`.
  *
- * The turns are the LangChain conformance fixture's (`conformance/frameworks/fixtures/langchain/tool-loop.json`):
+ * The turns are the LangChain conformance fixture's (`conformance/frameworks/fixtures/langchain/tool-loop-ts.json`):
  * four tool calls, then an answer, with the usage each turn reports. The fixture's tool is a stand-in, so each tool
  * call here names the examples' shared tool, `lookup_order`, with recorded arguments. The turn is read from the
  * request (how many tool calls the conversation already holds), so each conversation replays the loop from its
@@ -33,7 +33,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
-const FIXTURE = new URL("../../conformance/frameworks/fixtures/langchain/tool-loop.json", import.meta.url);
+const FIXTURE = new URL("../../conformance/frameworks/fixtures/langchain/tool-loop-ts.json", import.meta.url);
 
 /** The examples' one tool, as every example declares it, and the arguments the recording calls it with. */
 export const TOOL = { name: "lookup_order", arguments: { order_id: "A-1001" } };

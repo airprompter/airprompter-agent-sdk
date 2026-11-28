@@ -12,5 +12,6 @@
 
 export { RunRegistry, DEFAULT_RUN_IDLE_TIMEOUT_MS, MAX_OPEN_RUNS } from "./registry.js";
 export { pinVerdict, type PinVerdict } from "./pin.js";
+export { UNAVAILABLE_REASONS } from "./types.js";
 export type { RunHost, RunRecorder } from "./ports.js";
 export type { AgentRuntime, ModelCallRecord, ModelResolver, Placement, RunInput, RunSession, TokenUsage, ToolCallRecord, UnavailableReason } from "./types.js";

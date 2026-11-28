@@ -25,7 +25,7 @@
 
 export { ReleaseResolver, disabledFrom, newSubject } from "./release/resolver.js";
 export { RunRegistry, DEFAULT_RUN_IDLE_TIMEOUT_MS } from "./run/index.js";
-export { MAX_OPEN_RUNS, pinVerdict, type PinVerdict } from "./run/index.js";
+export { MAX_OPEN_RUNS, pinVerdict, UNAVAILABLE_REASONS, type PinVerdict } from "./run/index.js";
 export type { AgentRuntime, ModelCallRecord, ModelResolver, Placement, RunHost, RunInput, RunRecorder, RunSession, TokenUsage, ToolCallRecord, UnavailableReason } from "./run/index.js";
 export { VariableSourceRegistry, VariableSourceError, VariableSourceRequiredError, isVariableSourceError, isVariableSourceRequiredError, DEFAULT_SOURCE_TIMEOUT_MS, DEFAULT_SOURCE_MAX_BYTES } from "./variables/sources.js";
 export type { VariableSource, VariableSourceInput, VariableSourceContext, RegisteredSource } from "./variables/sources.js";

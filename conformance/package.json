@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node run.mjs && node --test test/harness.test.mjs",
+    "test": "node run.mjs && node --test test/harness.test.mjs test/frameworks.test.mjs",
     "harness": "node harness.mjs",
     "lint:openapi": "redocly lint ../protocol/openapi.yaml",
     "prepack": "node -e \"const fs=require('fs');fs.rmSync('protocol',{recursive:true,force:true});fs.mkdirSync('protocol');for(const d of ['vectors','schemas'])fs.cpSync('../protocol/'+d,'protocol/'+d,{recursive:true});fs.copyFileSync('../protocol/VERSION','protocol/VERSION')\"",

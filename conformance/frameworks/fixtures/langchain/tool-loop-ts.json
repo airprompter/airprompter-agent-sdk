@@ -1,0 +1,31 @@
+{
+  "framework": "langchain",
+  "language": "ts",
+  "frameworkVersion": "1.6.1",
+  "kind": "tool-loop",
+  "note": "S0's fixture on this schema. createAgent over ChatOpenAI and a recorded fetch: five model calls and four tools are one run with the release's text and model on every request.",
+  "release": { "slots": [{ "tag": "support-reply", "text": "You answer support tickets for Acme.", "versionId": "ver_a", "model": "gpt-5" }] },
+  "agent": { "slots": "support-reply", "model": "gpt-5", "systemPrompt": "The caller's own prompt.", "tools": ["lookup"] },
+  "input": { "subject": "user-1" },
+  "recorded": {
+    "turns": [
+      { "toolCalls": ["lookup"], "usage": { "prompt_tokens": 100, "completion_tokens": 10 } },
+      { "toolCalls": ["lookup"], "usage": { "prompt_tokens": 110, "completion_tokens": 10 } },
+      { "toolCalls": ["lookup"], "usage": { "prompt_tokens": 120, "completion_tokens": 10 } },
+      { "toolCalls": ["lookup"], "usage": { "prompt_tokens": 130, "completion_tokens": 10 } },
+      { "content": "All done.", "usage": { "prompt_tokens": 140, "completion_tokens": 20 } }
+    ]
+  },
+  "expect": {
+    "placements": [{ "slot": "support-reply", "kind": "approved", "versionId": "ver_a", "arm": "none" }],
+    "calls": [
+      { "system": ["You answer support tickets for Acme."], "model": "gpt-5" },
+      { "system": ["You answer support tickets for Acme."], "model": "gpt-5" },
+      { "system": ["You answer support tickets for Acme."], "model": "gpt-5" },
+      { "system": ["You answer support tickets for Acme."], "model": "gpt-5" },
+      { "system": ["You answer support tickets for Acme."], "model": "gpt-5" }
+    ],
+    "runRef": { "entries": 1, "runIdStable": true },
+    "rows": [{ "tag": "support-reply", "versionId": "ver_a", "arm": "none", "model": "gpt-5", "count": 1, "agentRun": 1, "modelCalls": 5, "tools": { "calls": 4, "errors": 0 }, "status": "ok", "tokens": { "input": 600, "output": 60 } }]
+  }
+}

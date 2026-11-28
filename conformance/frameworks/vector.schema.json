@@ -1,0 +1,857 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airprompter.dev/conformance/frameworks/vector.schema.json",
+  "title": "Run-session vectors",
+  "description": "vectors/run-session.json: scripts of run-session steps both SDKs run through `sessionScenario` (README.md › Run-session vectors). `release` here is also the release a framework fixture carries.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "description",
+    "agent",
+    "releases",
+    "vectors"
+  ],
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "agent": {
+      "$ref": "#/$defs/agent"
+    },
+    "releases": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/release"
+      }
+    },
+    "vectors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/vector"
+      }
+    }
+  },
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organizationId",
+        "agentId",
+        "target",
+        "runRefSecret",
+        "t0",
+        "idleTimeoutMs"
+      ],
+      "properties": {
+        "organizationId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "runRefSecret": {
+          "type": "string",
+          "minLength": 16
+        },
+        "t0": {
+          "type": "integer",
+          "description": "The fake clock's start, epoch ms."
+        },
+        "idleTimeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag",
+        "text"
+      ],
+      "properties": {
+        "tag": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*(\\.[a-z0-9][a-z0-9_-]*)*$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "artifactId": {
+          "type": "string"
+        },
+        "versionId": {
+          "type": "string"
+        },
+        "versionOrdinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "model": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "required",
+              "trust"
+            ]
+          }
+        },
+        "inference": {
+          "type": "object"
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "versionId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "release": {
+      "description": "A release as the harness seals it (release.mjs): slots, and optionally experiments whose arms list override slots, observations, directives and an apply policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slots"
+      ],
+      "properties": {
+        "slots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/slot"
+          }
+        },
+        "applyPolicy": {
+          "enum": [
+            "auto",
+            "unlock_required"
+          ]
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "directives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "experiments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "experimentId",
+              "tag",
+              "salt",
+              "arms"
+            ],
+            "properties": {
+              "experimentId": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "salt": {
+                "type": "string"
+              },
+              "subjectKey": {
+                "enum": [
+                  "request",
+                  "instance"
+                ]
+              },
+              "audience": {
+                "type": "object"
+              },
+              "ramp": {
+                "type": "array"
+              },
+              "arms": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "arm",
+                    "weightBps"
+                  ],
+                  "properties": {
+                    "arm": {
+                      "type": "string"
+                    },
+                    "weightBps": {
+                      "type": "integer"
+                    },
+                    "overrides": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/slot"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "releaseRef": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "A name in `releases`."
+        },
+        {
+          "$ref": "#/$defs/release"
+        },
+        {
+          "type": "null",
+          "description": "No release: the agent starts at generation 0."
+        }
+      ]
+    },
+    "runName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "runIdOf"
+              ],
+              "properties": {
+                "runIdOf": {
+                  "$ref": "#/$defs/runName"
+                }
+              }
+            }
+          ]
+        },
+        "conversationId": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "variables": {
+          "type": "object"
+        },
+        "resume": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "maxProperties": 1,
+              "properties": {
+                "ref": {
+                  "$ref": "#/$defs/runName"
+                },
+                "forged": {
+                  "$ref": "#/$defs/runName"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "placementExpect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "approved",
+            "passthrough"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "settings": {
+          "type": "object"
+        },
+        "sameAs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The placement equals the one step `sameAs` (0-based) answered."
+        }
+      }
+    },
+    "refExpect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "The decoded entries, each matched as a subset, in order; null: the reference does not verify."
+        },
+        "entryCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runIdOf": {
+          "$ref": "#/$defs/runName"
+        },
+        "runIdNotOf": {
+          "$ref": "#/$defs/runName"
+        },
+        "excludes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Strings that must not appear anywhere in the decoded reference."
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "op"
+      ],
+      "properties": {
+        "op": {
+          "enum": [
+            "open",
+            "place",
+            "setTags",
+            "slotFor",
+            "recordModelCall",
+            "recordToolCall",
+            "decline",
+            "end",
+            "advance",
+            "sweep",
+            "swapRelease",
+            "applyDirective",
+            "feedback",
+            "explain",
+            "restart",
+            "ref",
+            "sample"
+          ]
+        },
+        "run": {
+          "$ref": "#/$defs/runName"
+        },
+        "input": {
+          "$ref": "#/$defs/input"
+        },
+        "scope": {
+          "const": "run",
+          "description": "open: the run is inside `ap.run` until its `end` step, so the sweep must skip it."
+        },
+        "slot": {
+          "type": "string"
+        },
+        "slots": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "call": {
+          "type": "object"
+        },
+        "concurrent": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 16
+        },
+        "errorClass": {
+          "type": "string"
+        },
+        "interrupted": {
+          "type": "boolean"
+        },
+        "ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release": {
+          "$ref": "#/$defs/releaseRef"
+        },
+        "directives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "signals": {
+          "type": "object"
+        },
+        "model": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "forged": {
+          "$ref": "#/$defs/runName"
+        },
+        "runs": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 200
+        },
+        "expect": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "place",
+                  "decline",
+                  "recordModelCall",
+                  "recordToolCall"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "run",
+              "slot"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "place"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "expect": {
+                "$ref": "#/$defs/placementExpect"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "decline"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "expect": {
+                "$ref": "#/$defs/placementExpect"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "open"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "run",
+              "input"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "setTags"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "run",
+              "tags"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "slotFor"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "run",
+              "slots",
+              "expect"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "recordModelCall",
+                  "recordToolCall"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "call"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "end"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "run"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "advance"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ms"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "swapRelease"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "release"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "applyDirective"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "directives"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "feedback"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "signals",
+              "expect"
+            ],
+            "oneOf": [
+              {
+                "required": [
+                  "run"
+                ]
+              },
+              {
+                "required": [
+                  "token"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "explain"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "expect"
+            ],
+            "oneOf": [
+              {
+                "required": [
+                  "run"
+                ]
+              },
+              {
+                "required": [
+                  "token"
+                ]
+              },
+              {
+                "required": [
+                  "forged"
+                ]
+              }
+            ],
+            "properties": {
+              "expect": {
+                "$ref": "#/$defs/refExpect"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "ref"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "run",
+              "expect"
+            ],
+            "properties": {
+              "expect": {
+                "$ref": "#/$defs/refExpect"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "sample"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "runs",
+              "input",
+              "slot",
+              "expect"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "vector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "rule",
+        "release",
+        "steps"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rule": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 11,
+          "description": "The run-session rule (11a) the vector proves."
+        },
+        "release": {
+          "$ref": "#/$defs/releaseRef"
+        },
+        "variableSources": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Variable sources the agent starts with: each answers its value and counts its calls (`sourceCalls`)."
+        },
+        "deterministic": {
+          "type": "boolean",
+          "description": "false: rows depend on a fresh run id or instance id, so they are not compared across languages."
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        },
+        "expect": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Every window row, each matched by one expected row as a deep subset; no row left over."
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Every step row, the same way."
+            },
+            "rowCount": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Window rows with count > 0."
+            },
+            "agentRuns": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The sum of agentRun over the window rows: runs counted."
+            },
+            "runCounters": {
+              "type": "object",
+              "description": "The heartbeat's runCounters, exactly."
+            },
+            "events": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "description": "How many log events of each name."
+            },
+            "logExcludes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Strings no log event may contain."
+            },
+            "sourceCalls": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

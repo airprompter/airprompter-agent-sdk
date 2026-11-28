@@ -135,7 +135,10 @@ jobs:
         shell: bash
         run: node scripts/install-alone.mjs
         working-directory: sdk-typescript
-      - name: The built packages pass the conformance harness through the published adapter contract (S14)
+      # AIR-2233: the framework sections validate fixtures and vectors with the runner's own deps.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: conformance
+      - name: The built packages pass the conformance harness through the published adapter contract (S14), the run-session vectors and the framework fixtures (AIR-2233)
         run: node harness.mjs --adapter adapters/agent-sdk.mjs
         working-directory: conformance
 
@@ -177,7 +180,9 @@ jobs:
       - name: The interop test ran (not skipped)
         run: python -m pytest tests/test_interop.py -rs 2>&1 | tee /tmp/interop.log && ! grep -q SKIPPED /tmp/interop.log
         working-directory: sdk-python
-      - name: The Python SDK passes the conformance harness over JSON lines (S14)
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: conformance
+      - name: The Python SDK passes the conformance harness over JSON lines (S14), the run-session vectors and the framework fixtures (AIR-2233)
         run: node harness.mjs --adapter-command "python ../examples/conformance-adapter/python/adapter.py"
         working-directory: conformance
 

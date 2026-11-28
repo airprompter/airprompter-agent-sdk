@@ -31,6 +31,7 @@ from airprompter_agent.runtime.release.resolver import disabled_from
 from airprompter_agent_otel.exporter import spool_rows_to_otlp
 from airprompter_agent.telemetry.spool.writer import MemorySink, Observation, SegmentPlanner, SpoolWriter, WriterIdentity, segment_name
 from airprompter_agent.telemetry.uploader import inspect_segment
+from run_ops import RUN_OPS
 
 
 class _Refused(Exception):
@@ -251,13 +252,16 @@ OPS: dict[str, Callable[[dict], dict]] = {
     "checksRefusals": op_checks_refusals,
     "projectChecks": op_project_checks,
     "spoolRowsToOtlp": op_spool_rows_to_otlp,
+    # AIR-2233: the run-session and framework sections (run_ops.py).
+    **RUN_OPS,
 }
 
 
 def answer(message: dict) -> dict:
     fn = message.get("fn")
     if fn == "capabilities":
-        return {"id": message.get("id"), "result": {"ops": sorted(OPS)}}
+        # ``language``: the framework sections run this adapter's Python fixtures.
+        return {"id": message.get("id"), "result": {"ops": sorted(OPS), "language": "py"}}
     op = OPS.get(fn or "")
     if op is None:
         return {"id": message.get("id"), "error": {"reason": "unsupported", "message": f"{fn} is not implemented"}}
@@ -277,7 +281,12 @@ def main() -> int:
             message = json.loads(line)
         except json.JSONDecodeError:
             continue
-        sys.stdout.write(json.dumps(answer(message), separators=(",", ":")) + "\n")
+        reply = answer(message)
+        try:
+            line = json.dumps(reply, separators=(",", ":"))
+        except (TypeError, ValueError) as error:  # an answer JSON cannot carry is the SDK's fault, reported as such
+            line = json.dumps({"id": message.get("id"), "error": {"reason": "not_json", "message": str(error)}})
+        sys.stdout.write(line + "\n")
         sys.stdout.flush()
     return 0
 

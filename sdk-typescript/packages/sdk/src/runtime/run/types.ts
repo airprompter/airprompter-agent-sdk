@@ -30,6 +30,10 @@ export interface RunInput {
   resume?: string;
 }
 
+/**
+ * Why a slot passes through: the framework's own prompt and model run unchanged. A closed list; a new reason is a
+ * contract change, made in both SDKs and in conformance/frameworks/vectors/placement-reasons.json together.
+ */
 export type UnavailableReason =
   | "no_verified_release"
   | "awaiting_unlock"
@@ -38,6 +42,15 @@ export type UnavailableReason =
   | "slot_kind_unsupported"
   | "model_unresolved"
   | "variables_unfilled";
+
+/**
+ * The same list as a value, frozen, as Python's `UNAVAILABLE_REASONS` (internal: the conformance adapter reads it from
+ * the runtime barrel). The two type checks below fail the build if the list and the union ever differ.
+ */
+export const UNAVAILABLE_REASONS = Object.freeze(["no_verified_release", "awaiting_unlock", "slot_disabled", "no_slot", "slot_kind_unsupported", "model_unresolved", "variables_unfilled"] as const) satisfies readonly UnavailableReason[];
+type Exhaustive<T extends true> = T;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- a compile-time check, never used
+type UnavailableReasonsCoverTheUnion = Exhaustive<UnavailableReason extends (typeof UNAVAILABLE_REASONS)[number] ? true : false>;
 
 export type Placement =
   | { kind: "approved"; slot: string; instructions: string; model: string; settings: Readonly<SlotInference> }

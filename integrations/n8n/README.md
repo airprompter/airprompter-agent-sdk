@@ -55,7 +55,7 @@ Create an **AirPrompter Agent API** credential:
 AirPrompter's Production root public key (ceremony of 2026-11-27, key id
 `044af6e83353a2ea3758cc3feb3b1b7031c82bda5d6cd9287ba7730363e11793`). It is the same key the SDK pins in source,
 `HOSTED_ROOTS.prod` in
-[`frameworks/steps/trust.ts`](https://github.com/airprompter/airprompter-agent-sdk/blob/main/sdk-typescript/packages/sdk/src/frameworks/steps/trust.ts):
+[`core/protocol/hostedRoots.ts`](https://github.com/airprompter/airprompter-agent-sdk/blob/main/sdk-typescript/packages/sdk/src/core/protocol/hostedRoots.ts):
 
 ```json
 {"kty":"EC","crv":"P-256","x":"hYhEFO-xyNoWyt5x0BgshEmNXPN1_mzDLISlT4nTDzE","y":"OTbj5sdj8qKiIPzCsrdD297_vlNqahPTZWGgoa9cOtE"}

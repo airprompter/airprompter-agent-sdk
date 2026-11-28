@@ -9,8 +9,9 @@
  *      sink from copy A are recognised by copy B (S1's discriminant rule).
  *   3. `/runtime` alone renders and assigns over a bundle the customer loads:
  *      no store, no daemon, no network.
- *   4. The exports map and the root's names are exactly what is pinned here,
- *      and the tarball carries each declared subpath and nothing past it.
+ *   4. The exports map is exactly what is pinned here, each layer's subpath is
+ *      its curated entry (the names: `test/publicSurface.test.ts`), and the
+ *      tarball carries each declared subpath and nothing past it.
  *   5. Every package publishes under its size budget, the packages carry one
  *      version with the SDK as an exact-pinned peer, and `SDK_VERSION` is that
  *      version. No removed package name is left anywhere in the repository.
@@ -40,11 +41,12 @@ const PACKAGES = ["sdk", ...SATELLITES] as const;
 const SUBPATHS = [".", "./core", "./sync", "./runtime", "./telemetry", "./testing", "./frameworks/contract", "./frameworks/openai", "./frameworks/anthropic", "./frameworks/ai-sdk", "./frameworks/langchain", "./frameworks/steps"];
 /** Rule 4 of section 3.2: the facade's line count after AIR-2231's deletions. A change that grows it moves this number on purpose. */
 const AGENT_TS_LINES = 2498;
-type Manifest = { name: string; version: string; private?: boolean; dependencies?: Record<string, string>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }>; devDependencies?: Record<string, string>; exports: Record<string, { types: string; import: string; require: string }>; typesVersions: Record<string, Record<string, string[]>>; airprompter: { sizeBudgetBytes: number | Record<string, number> } };
+type Manifest = { name: string; version: string; private?: boolean; dependencies?: Record<string, string>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }>; devDependencies?: Record<string, string>; exports: Record<string, { import: { types: string; default: string }; require: { types: string; default: string } }>; typesVersions: Record<string, Record<string, string[]>>; airprompter: { sizeBudgetBytes: number | Record<string, number> } };
 const manifestOf = (name: string): Manifest => JSON.parse(readFileSync(join(root, "packages", name, "package.json"), "utf8")) as Manifest;
 
 function ensureBuilt(): void {
-  if (!existsSync(join(root, "packages", "sdk", "dist", "esm", "index.js"))) execFileSync(process.execPath, [join(root, "scripts", "build.mjs")], { stdio: "ignore" });
+  // The last file the build writes, the same sentinel as test/publicSurface.test.ts: a half-built dist rebuilds.
+  if (!existsSync(join(root, "packages", "datastore-redis", "dist", "cjs", "index.d.ts"))) execFileSync(process.execPath, [join(root, "scripts", "build.mjs")], { stdio: "ignore" });
 }
 
 function lint(args: string[] = []): { status: number | null; stdout: string; stderr: string } {
@@ -272,29 +274,25 @@ test("the runtime walks the protocol's ramp vectors over a bundle release — ev
   }
 });
 
-test("the exports map, the type map and the root's names are exactly these; nothing past a subpath resolves", async () => {
+test("the exports map and the type map are exactly these, each layer's subpath is its curated entry, and nothing past a subpath resolves", () => {
   const sdk = manifestOf("sdk");
   assert.deepEqual(Object.keys(sdk.exports), SUBPATHS, "the SDK's exports map");
   for (const [subpath, entry] of Object.entries(sdk.exports)) {
-    assert.deepEqual(Object.keys(entry), ["types", "import", "require"], `${subpath}: types first, then both module systems`);
-    if (subpath !== ".") assert.deepEqual(sdk.typesVersions["*"]![subpath.slice(2)], [entry.types.slice(2)], `${subpath}: a consumer that reads no exports map still finds the types`);
+    assert.deepEqual(Object.keys(entry), ["import", "require"], `${subpath}: one entry per module system`);
+    for (const condition of [entry.import, entry.require]) assert.deepEqual(Object.keys(condition), ["types", "default"], `${subpath}: types first, then the module`);
+    if (subpath !== ".") assert.deepEqual(sdk.typesVersions["*"]![subpath.slice(2)], [entry.import.types.slice(2)], `${subpath}: a consumer that reads no exports map still finds the types`);
   }
   assert.deepEqual(Object.keys(sdk.typesVersions["*"]!).sort(), SUBPATHS.slice(1).map((subpath) => subpath.slice(2)).sort());
+  // A layer's subpath is its curated entry, never the barrel the other layers import (test/publicSurface.test.ts pins the names).
+  for (const layer of ["core", "sync", "runtime", "telemetry"]) assert.equal(sdk.exports[`./${layer}`]!.import.default, `./dist/esm/${layer}/public.js`, `./${layer} is the curated entry`);
   assert.deepEqual(Object.keys(manifestOf("agent-otel").exports), ["./exporter"], "the exporter is the first subpath; a processor or baggage subpath adds to it");
-  const surface = (await import("../packages/sdk/src/index.js")) as Record<string, unknown>;
-  assert.deepEqual(Object.keys(surface).sort(), ["AgentStartError", "AirPrompterAgent", "PROTOCOL_VERSION", "RenderRefusedError", "SDK_NAME", "SDK_VERSION", "VENDORED_BUNDLE_EXPIRY_WARNING_DAYS", "healthzOf", "healthzResponse", "isAgentStartError"], "the root is the agent and its results; everything else is a subpath");
-  const index = readFileSync(join(root, "packages", "sdk", "src", "index.ts"), "utf8");
-  assert.doesNotMatch(index, /^export \*/m, "no star export: a layer's new name is not public by accident");
-  assert.doesNotMatch(index, /^export \{[^}]*\btype\s/m, "no inline `export { type X }`: the type pin below reads `export type { … }` only");
-  const typeNames = [...index.matchAll(/^export type \{([^}]*)\}/gm)].flatMap((match) => match[1]!.split(",").map((name) => name.trim())).filter(Boolean).sort();
-  // The run types are on the root too (AIR-2242): an adapter and `ap.run` need them beside the agent.
-  assert.deepEqual(typeNames, ["AgentRampStatus", "AgentRuntime", "AgentStatus", "BundleOutcome", "DatastoreStatus", "Healthz", "HeartbeatSdkName", "HydrateOutcome", "ModelCallRecord", "ModelResolver", "Placement", "ReleaseChange", "ReleaseSource", "Rendered", "RunInput", "RunRefEntry", "RunReport", "RunSession", "SpoolReport", "StartOptions", "SyncMode", "TelemetryPlacement", "TokenUsage", "ToolCallRecord", "UnavailableReason"], "the root's type names are a promise too");
   ensureBuilt();
   const resolve = (spec: string) => spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(spec)});`], { cwd: root, encoding: "utf8" });
   assert.equal(resolve("@airprompter/agent-sdk/core").status, 0, "a declared subpath resolves");
   const past = resolve("@airprompter/agent-sdk/dist/esm/core/protocol/trust.js");
   assert.notEqual(past.status, 0, "a path past the exports map does not resolve");
   assert.match(past.stderr, /ERR_PACKAGE_PATH_NOT_EXPORTED/);
+  assert.match(resolve("@airprompter/agent-sdk/core/index.js").stderr, /ERR_PACKAGE_PATH_NOT_EXPORTED/, "the layer's barrel is no subpath");
 });
 
 test("the tarball carries every declared subpath in both module systems, and speaks the protocol this repository is at", () => {
@@ -303,7 +301,7 @@ test("the tarball carries every declared subpath in both module systems, and spe
   const packed = JSON.parse(execFileSync(npm, ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: join(root, "packages", "sdk"), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], shell: process.platform === "win32" })) as Record<string, { files: Array<{ path: string }> }>;
   // npm 11 prints an array of one; npm 12 prints an object keyed by package name.
   const files = new Set(Object.values(packed)[0]!.files.map((file) => file.path));
-  for (const [subpath, entry] of Object.entries(manifestOf("sdk").exports)) for (const target of Object.values(entry)) assert.ok(files.has(target.slice(2)), `${subpath}: the tarball carries ${target}`);
+  for (const [subpath, entry] of Object.entries(manifestOf("sdk").exports)) for (const target of [entry.import.types, entry.import.default, entry.require.types, entry.require.default]) assert.ok(files.has(target.slice(2)), `${subpath}: the tarball carries ${target}`);
   assert.ok(files.has("LICENSE") && files.has("README.md"), "the tarball carries its licence and README");
   const stray = [...files].filter((path) => !/^(dist\/|LICENSE$|README\.md$|package\.json$)/.test(path));
   assert.deepEqual(stray, [], "only the build, the licence and the README");

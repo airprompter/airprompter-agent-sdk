@@ -41,6 +41,10 @@ candidate?* below).
 
 Everything runs on your systems.
 
+Each subpath exports a curated list, and that list is what 1.0 promises:
+[docs/stability.md](../docs/stability.md) says what is inside the promise and
+what is not, and `test/publicSurface.test.ts` pins every name.
+
 Beside it, separate packages only where a dependency footprint earns one. Each
 takes `@airprompter/agent-sdk` as a peer at the same version, so an application
 never holds a second copy:
@@ -54,7 +58,8 @@ The direction is fixed and linted: `core` imports nothing of ours; `sync`,
 `runtime` and `telemetry` import `core` and never each other; `agent.ts` and
 `frameworks/` import those; the `airprompter` binary is built from the sources.
 `scripts/lint-imports.mjs` refuses an upward import or a path past a layer's
-barrel (`../core/index.js`), and `test/packageShape.test.ts` pins the edge set
+barrel (`../core/index.js`; a barrel is internal, and the subpath is the
+curated `public.ts` beside it), and `test/packageShape.test.ts` pins the edge set
 and the exports map, proves two copies in one lockfile agree (an error, a
 release and a sink from one copy are recognised by the other, never
 `instanceof`), and holds each subpath under its size budget

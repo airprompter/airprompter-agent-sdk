@@ -1,5 +1,5 @@
 /**
- * `@airprompter/agent-sdk/sync`: pulling and holding releases: the encrypted
+ * The sync layer's barrel, what the layers above import (the subpath `@airprompter/agent-sdk/sync` is the curated `./public.ts`): pulling and holding releases: the encrypted
  * restart-safe slot store, the key providers, the sync pass and its loop,
  * the apply policy and its windows, and the customer's datastore. What the
  * store loads is a `LoadedRelease` (`@airprompter/agent-sdk/core`) for

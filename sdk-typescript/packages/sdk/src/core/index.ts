@@ -1,5 +1,5 @@
 /**
- * `@airprompter/agent-sdk/core`: the pure half of the SDK: the protocol
+ * The core layer's barrel, what the layers above import (the subpath `@airprompter/agent-sdk/core` is the curated `./public.ts`): the pure half of the SDK: the protocol
  * (types, trust chain, canonical JSON, arm assignment and the ramp walk),
  * rendering, output checks, golden sets, the judge, bundle reading, the
  * telemetry row schemas, the control-plane HTTP client, the port
@@ -32,6 +32,8 @@ export { assignArm, subjectHash, bucketFromHash, armForBucket, validateArms, val
 export { keyThumbprint, publicJwkOf, signBytes, verifyBytes, trustedRootFromPinnedKey, verifyRootMetadata, verifyManifest, referencedPayloads, slotHashes, optionalPayloads, carriedPayloads, releaseDigest, releaseDigestInput, instant } from "./protocol/trust.js";
 export type { Verdict, VerifyManifestInput } from "./protocol/trust.js";
 export { HOSTED_ROOTS, hostedEnvironmentOfRoot } from "./protocol/hostedRoots.js";
+export type { AssignmentRefusal } from "./protocol/assignment.js";
+export type { CanonicalJsonRefusal } from "./protocol/canonicalJson.js";
 
 export { renderTemplate, placeholdersOf, defaultOf, xmlDelimiters, MissingVariableError, UnknownVariableError } from "./render/template.js";
 export type { Delimiters, RenderInput } from "./render/template.js";

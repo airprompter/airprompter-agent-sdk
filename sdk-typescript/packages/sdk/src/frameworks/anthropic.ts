@@ -64,7 +64,7 @@ function messagesAccumulator(): StreamAccumulator {
 }
 
 /** The Anthropic client's model-call methods. Anything else on the client is its own. */
-export const ANTHROPIC_METHODS: ClientMethods = [
+const ANTHROPIC_METHODS: ClientMethods = [
   { path: ["messages", "create"], kind: "messages", accumulate: messagesAccumulator },
   { path: ["messages", "stream"], kind: "messages", accumulate: messagesAccumulator, helper: true },
   { path: ["beta", "messages", "create"], kind: "messages", accumulate: messagesAccumulator },

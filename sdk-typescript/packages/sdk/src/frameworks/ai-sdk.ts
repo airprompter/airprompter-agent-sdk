@@ -80,7 +80,7 @@ const shape = (finish: unknown, text: string, usage: unknown) => {
 };
 
 /** A `doGenerate` result (v5+ `content` parts, v4 `text`) in the OpenAI chat shape the run reads. */
-export function generateResultShape(result: unknown): unknown {
+function generateResultShape(result: unknown): unknown {
   const record = obj(result);
   const parts = Array.isArray(record?.content) ? (record!.content as unknown[]) : [];
   const text = typeof record?.text === "string" ? record.text : parts.map((part) => (obj(part)?.type === "text" && typeof obj(part)?.text === "string" ? (obj(part)!.text as string) : "")).join("");

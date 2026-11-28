@@ -8,7 +8,7 @@
  * `/frameworks/<name>` is an adapter with its framework as an optional peer.
  *
  * Every name is listed: a star export here would make every addition to a layer
- * public by accident. `test/packageShape.test.ts` pins this list and the exports map.
+ * public by accident. `test/publicSurface.test.ts` pins this list (`docs/stability.md`).
  *
  * @example
  * ```ts
@@ -25,6 +25,7 @@
 
 export { AirPrompterAgent, AgentStartError, isAgentStartError, RenderRefusedError, SDK_NAME, SDK_VERSION, PROTOCOL_VERSION, VENDORED_BUNDLE_EXPIRY_WARNING_DAYS, healthzOf, healthzResponse } from "./agent.js";
 export type { AgentRampStatus, AgentStatus, Healthz, Rendered, RunReport, StartOptions, SyncMode, ReleaseSource, ReleaseChange, SpoolReport, TelemetryPlacement, HeartbeatSdkName, BundleOutcome, HydrateOutcome, DatastoreStatus } from "./agent.js";
+export type { FlushOutcome, HeartbeatReporterName, SpoolDirSource } from "./agent.js";
 
 // The run: what an adapter and `ap.run` see.
 export type { AgentRuntime, ModelCallRecord, ModelResolver, Placement, RunInput, RunSession, TokenUsage, ToolCallRecord, UnavailableReason } from "./runtime/index.js";

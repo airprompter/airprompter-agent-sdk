@@ -157,6 +157,7 @@ function replaceFileAtomically(fs: FsPort, path: string, bytes: Uint8Array, hook
 
 /** Test seams: a crash between fsync and rename is the case the layout exists for. */
 export interface StoreHooks {
+  /** @internal Crash-test hook, called before the atomic rename; not in the promise. */
   beforeRename?: (path: string) => void;
   /** S8: the writer this runtime records in store.json (the SDK's or the daemon's name and version). */
   writer?: { name: string; version: string };
@@ -241,6 +242,7 @@ export class SlotStore {
     return new SlotStore(dir, file, dek, input.hooks, fs);
   }
 
+  /** @internal The file's shape is `protocol/store-format.md`'s, versioned apart from the SDK; read the store through its methods. */
   get state(): Readonly<StoreFile> {
     return this.file;
   }

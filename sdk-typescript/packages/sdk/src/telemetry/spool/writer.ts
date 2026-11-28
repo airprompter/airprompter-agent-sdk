@@ -148,7 +148,7 @@ export interface SinkFaults {
 export type SegmentManifestSource = () => { organizationId: string; agentId: string; target: string; report: Record<string, unknown> } | null;
 
 export interface DirectorySinkOptions {
-  /** Add a manifest beside every segment this sink closes (0.3.0; the telemetry daemon reads it). */
+  /** @internal Add a manifest beside every segment this sink closes (0.3.0; the telemetry daemon reads it): the agent's plumbing, not in the promise. */
   manifest?: SegmentManifestSource;
   now?: () => number;
 }
@@ -392,7 +392,7 @@ function isoSeconds(ms: number): string {
 
 type WindowKey = string;
 type WindowDimensions = Pick<RunDimensions, "tag" | "artifactId" | "versionId" | "arm" | "model" | "audienceIds"> & { status: WindowRow["status"]; errorClass?: WindowRow["errorClass"]; usageSource?: WindowRow["usageSource"]; toolsReported?: boolean; outcomeRunMinute?: string };
-type OutcomeDimensions = Pick<Observation, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute"> & { artifactId?: string };
+export type OutcomeDimensions = Pick<Observation, "tag" | "versionId" | "arm" | "model" | "audienceIds" | "outcomeRunMinute"> & { artifactId?: string };
 
 const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const emptyHistogram = (): number[] => new Array<number>(LATENCY_BUCKET_EDGES_MS.length).fill(0);

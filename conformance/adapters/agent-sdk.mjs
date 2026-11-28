@@ -1,9 +1,11 @@
 // The TypeScript SDK through the harness's adapter contract (ADAPTER.md):
-// `@airprompter/agent-sdk/core` for the protocol, `/telemetry` for the spool,
+// the core and telemetry layers' barrels (`dist/esm/<layer>/index.js`, the
+// SDK's internals: the protocol operations the vectors exercise are not all
+// on the curated `/core` and `/telemetry` subpaths, docs/stability.md) and
 // `@airprompter/agent-otel/exporter` for the OTLP mapping — from the built
 // dist, so this adapter runs on plain Node after `node
 // sdk-typescript/scripts/build.mjs`. What `run.mjs` proves for the reference,
-// this proves for the packages a customer installs.
+// this proves for the code a customer installs.
 //
 //   $ node sdk-typescript/scripts/build.mjs
 //   $ node conformance/harness.mjs --adapter conformance/adapters/agent-sdk.mjs

@@ -70,7 +70,7 @@ copying the folder.
 ## How CI runs them
 
 The [`examples` CI job](../.github/workflows/ci.yml) runs every example
-unchanged with [`ci/run.mjs`](ci/run.mjs), on Node 20 and 22. It serves
+unchanged with [`ci/run.mjs`](ci/run.mjs), on Node 22 and 24. It serves
 `prompts/` with `airprompter dev` built from the same commit, installs the
 SDK packed from that commit in place of the pin, and points the framework
 at a fake provider ([`ci/fake-provider.mjs`](ci/fake-provider.mjs)) that

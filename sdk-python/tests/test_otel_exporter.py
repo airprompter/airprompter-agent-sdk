@@ -20,6 +20,7 @@ import pytest
 
 from airprompter_agent import AirPrompterAgent
 from airprompter_agent.agent import SyncOptions, TelemetryOptions
+from airprompter_agent.core import Transport
 from airprompter_agent.core._util import b64url_encode, instant, iso_ms
 from airprompter_agent.core.bundle.apbundle import create_plaintext_bundle
 from airprompter_agent.core.protocol.trust import public_jwk_of
@@ -67,7 +68,7 @@ class Collector:
         self.requests: list[dict] = []
         self.answers = list(answers or [])
 
-    def transport(self) -> httpx.BaseTransport:
+    def transport(self) -> Transport:
         def handle(request: httpx.Request) -> httpx.Response:
             self.requests.append({"url": str(request.url), "headers": dict(request.headers), "body": json.loads(request.content)})
             status, headers = self.answers.pop(0) if self.answers else (200, {})

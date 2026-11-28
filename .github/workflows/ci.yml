@@ -149,7 +149,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.12"]
+        python: ["3.11", "3.13"]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -324,8 +324,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The floor the example READMEs state, and the version the other jobs use.
-        node: [20, 22]
+        # The floor the packages and the example READMEs state (Node 22), and the current LTS.
+        node: [22, 24]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

@@ -26,10 +26,10 @@ what a change needs to land.
 git clone https://github.com/airprompter/airprompter-agent-sdk
 cd airprompter-agent-sdk
 
-# TypeScript (Node 20+)
+# TypeScript (Node 22+)
 cd sdk-typescript && npm ci && npm run typecheck && npm test && cd ..
 
-# Python (3.10+): a venv with every distribution installed editable
+# Python (3.11+): a venv with every distribution installed editable
 cd sdk-python && python -m venv .venv && .venv/bin/python tools/install_dev.py && .venv/bin/python -m pytest -q && cd ..
 
 # The protocol gate (schemas, examples, vectors, OpenAPI)
@@ -39,7 +39,7 @@ cd conformance && npm ci && npm test && npm run lint:openapi && cd ..
 cd cli && npm ci && npm test && cd ..
 ```
 
-CI runs the same commands on Ubuntu and Windows, Python 3.10 and 3.12, and
+CI runs the same commands on Ubuntu and Windows, Python 3.11 and 3.13, and
 builds the CLI on three operating systems. A green local run is what CI
 expects.
 

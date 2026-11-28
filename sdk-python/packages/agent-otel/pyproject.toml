@@ -8,14 +8,13 @@ version = "1.0.0rc5"
 description = "The AirPrompter agent SDK's telemetry spool as an OpenTelemetry exporter: minute windows become OTLP metrics (gen_ai.client.operation.duration, tokens, checks, feedback, refusals) shipped to the collector you already run, with no AirPrompter grant at all. An UploadSink for the uploader in airprompter_agent.telemetry."
 readme = "README.md"
 license = "BSD-3-Clause"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "AirPrompter" }]
 keywords = ["airprompter", "prompts", "llm", "agent", "opentelemetry", "otlp", "metrics"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",

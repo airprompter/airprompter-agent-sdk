@@ -78,7 +78,7 @@ export class SyncClient {
 
   constructor(private readonly options: SyncClientOptions) {
     this.fetchImpl = options.fetch ?? (globalThis.fetch as unknown as FetchLike);
-    if (!this.fetchImpl) throw new Error("no fetch available: Node 20+ or pass options.fetch");
+    if (!this.fetchImpl) throw new Error("no fetch available: Node 22+ or pass options.fetch");
   }
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {

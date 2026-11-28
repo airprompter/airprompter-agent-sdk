@@ -7,7 +7,7 @@ content-free telemetry to a local spool. Nothing AirPrompter runs is on
 your request path; with the network gone, the last verified release keeps
 serving.
 
-Node 20+, ESM and CJS, no runtime dependencies beyond `node:crypto`.
+Node 22+, ESM and CJS, no runtime dependencies beyond `node:crypto`.
 
 ## Packages
 
@@ -28,7 +28,8 @@ may still change before 1.0.0. rc.5 removes the wrapped clients of rc.4 (see
 *Coming from an earlier candidate?* below).
 <!-- /release-candidate -->
 
-[docs/stability.md](../docs/stability.md) says what 1.0 promises.
+[docs/stability.md](../docs/stability.md) says what 1.0 promises and the
+support floors.
 
 | Import | Use it when |
 | --- | --- |
